@@ -38,6 +38,8 @@ It must feel like an actual phone call with an AI — low-latency full-duplex au
 - [ ] AI-generated audio is saved by default; user mic audio is off by default; both are togglable
 - [ ] Three services run independently and connect over LAN: Web UI host, AI backend (STT/TTS/VAD), LLM server
 - [ ] AI backend is optimized for an NVIDIA RTX 3060 (12 GB VRAM)
+- [ ] UI follows the existing "Ethereal Core / True Dark" design system in `docs/stitch/`
+- [ ] Screen inventory at minimum matches the Stitch canonical set: Home, Voice Lab, Character Gallery, Character Editor, Voice Call, Settings
 
 ### Out of Scope
 
@@ -59,6 +61,7 @@ It must feel like an actual phone call with an AI — low-latency full-duplex au
 - Characters will often come from the SillyTavern ecosystem, so compatibility with v2 and v3 character cards matters more than inventing a new format.
 - The "phone call" framing is load-bearing — it drives duplex audio, VAD/barge-in, live captions, and mobile browser support. If any of those slip, the core value erodes.
 - F5-TTS and XTTS v2 are both zero-shot voice cloning systems; F5 specifically requires a transcript of the reference audio, which the Voice Lab will generate automatically via STT (and let the user edit).
+- A design package already exists in `docs/stitch/`: an "Ethereal Core / True Dark" design system (DESIGN.md) and a canonical Stitch screen set (Home, Voice Lab, Character Gallery, Character Editor, Voice Call, Settings) with HTML exports and screenshots. The UI should follow this as a strong reference, deviating only when functional requirements demand it.
 
 ## Constraints
 
@@ -69,6 +72,7 @@ It must feel like an actual phone call with an AI — low-latency full-duplex au
 - **Browsers**: Must work on modern mobile Safari and Chrome, including mic capture, output routing, and full-duplex streaming — not just desktop.
 - **Language**: English only for STT and TTS in v1.
 - **Tech stack**: No strong a-priori preference — research picks the stack.
+- **Design**: UI aligns with the "Ethereal Core / True Dark" design system and the canonical Stitch screen set in `docs/stitch/` as a strong reference; deviations allowed only when functional needs demand.
 
 ## Key Decisions
 
@@ -88,6 +92,7 @@ It must feel like an actual phone call with an AI — low-latency full-duplex au
 | TTS engines in v1: F5-TTS and XTTS v2 | Both zero-shot clone from short samples; trade-offs between them handled via per-voice selection | — Pending |
 | 3060 (12 GB) as the backend GPU target | Constrains model size choices across STT, TTS, and VAD | — Pending |
 | Text chat and calls share one chat thread | "Continue a conversation" is the story, regardless of modality | — Pending |
+| UI honors the existing Stitch "Ethereal Core / True Dark" design system as a strong reference | Visual language and screen set are already designed; rebuilding without it wastes prior work | — Pending |
 
 ## Evolution
 
