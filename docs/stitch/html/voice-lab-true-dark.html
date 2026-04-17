@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+
+<html class="light dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Voice Lab - RayMe AI</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">tailwind.config = {darkMode: "class", theme: {extend: {colors: {"primary-dim": "#0073e1", "on-surface-variant": "#9eaad5", "surface-container": "#051642", surface: "#000b2f", "tertiary-dim": "#e190f0", "surface-container-high": "#091c4c", "on-tertiary-fixed-variant": "#681f7a", "on-primary-container": "#00224b", "secondary-container": "#133fa1", "secondary-fixed": "#c4d0ff", "inverse-on-surface": "#48547a", "on-secondary-fixed-variant": "#2349ac", "primary-fixed": "#65a1ff", "outline-variant": "#3b466c", "surface-tint": "#7faeff", primary: "#7faeff", "surface-container-low": "#011038", "on-secondary": "#001b56", error: "#ff716c", "on-secondary-container": "#c2cfff", "secondary-dim": "#7999ff", "primary-fixed-dim": "#4693ff", "error-dim": "#d7383b", tertiary: "#f5b2ff", secondary: "#7999ff", "on-tertiary": "#68207b", "surface-dim": "#000b2f", "surface-container-highest": "#0e2256", "on-primary-fixed": "#000000", "error-container": "#9f0519", "inverse-primary": "#005db9", "on-error-container": "#ffa8a3", "primary-container": "#65a1ff", "on-primary": "#002e60", background: "#000b2f", "tertiary-container": "#f09dff", "surface-bright": "#132860", "on-tertiary-fixed": "#400050", "on-error": "#490006", "secondary-fixed-dim": "#b1c2ff", "surface-container-lowest": "#000000", "surface-variant": "#0e2256", "tertiary-fixed-dim": "#e190f0", "on-tertiary-container": "#5e1470", "on-primary-fixed-variant": "#002b5c", "tertiary-fixed": "#f09dff", "on-secondary-fixed": "#002c82", "on-background": "#dfe4ff", outline: "#69749d", "inverse-surface": "#faf8ff", "on-surface": "#dfe4ff"}, borderRadius: {DEFAULT: "0.25rem", lg: "0.5rem", xl: "0.75rem", full: "9999px"}, fontFamily: {headline: ["Inter"], body: ["Inter"], label: ["Inter"], display: "Inter"}}}};</script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-background text-on-background min-h-screen flex">
+<!-- SideNavBar -->
+<nav class="hidden md:flex flex-col h-screen w-64 fixed left-0 top-0 bg-slate-950/80 backdrop-blur-2xl border-r border-white/10 overflow-hidden z-50">
+<!-- Background Shapes -->
+<div class="absolute inset-0 pointer-events-none z-0">
+<div class="absolute -top-24 -left-24 w-64 h-64 bg-blue-600/30 rounded-full blur-3xl"></div>
+<div class="absolute top-1/2 -right-24 w-64 h-64 bg-violet-600/20 rounded-full blur-3xl"></div>
+<div class="absolute -bottom-24 -left-12 w-64 h-64 bg-blue-600/20 rounded-full blur-3xl"></div>
+</div>
+<!-- Content -->
+<div class="relative z-10 flex flex-col h-full overflow-y-auto">
+<div class="text-2xl font-black px-4 py-6 text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-violet-400">
+            RayMe AI
+        </div>
+<div class="flex-1 flex flex-col gap-1 px-3">
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">home</span>
+<span class="font-inter text-sm font-medium">Home</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">grid_view</span>
+<span class="font-inter text-sm font-medium">Gallery</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-white shadow-[inset_0_0_20px_rgba(139,92,246,0.1)] bg-gradient-to-r from-blue-600/10 to-violet-600/20 relative overflow-hidden transition-all duration-200 ease-in-out" href="#">
+<div class="absolute right-0 top-0 bottom-0 w-1 bg-gradient-to-b from-blue-400 to-violet-400"></div>
+<span class="material-symbols-outlined bg-gradient-to-br from-blue-400 to-violet-400 text-transparent bg-clip-text">mic_none</span>
+<span class="font-inter text-sm font-medium">Voice Lab</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">edit_note</span>
+<span class="font-inter text-sm font-medium">Editor</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span class="font-inter text-sm font-medium">Settings</span>
+</a>
+</div>
+<div class="mt-auto p-4 border-t border-white/10 flex flex-col gap-1">
+<a class="flex items-center gap-3 px-4 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined text-sm">help</span>
+<span class="font-inter text-sm">Help</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-2 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out" href="#">
+<span class="material-symbols-outlined text-sm">logout</span>
+<span class="font-inter text-sm">Logout</span>
+</a>
+</div>
+</div>
+</nav>
+<!-- Main Content Canvas -->
+<main class="flex-1 md:ml-64 flex flex-col min-h-screen">
+<!-- TopNavBar for Mobile (and responsive top area) -->
+<header class="md:hidden flex items-center justify-between px-6 py-3 w-full top-0 sticky bg-slate-950/80 backdrop-blur-md shadow-sm border-b border-white/10 z-50">
+<div class="text-xl font-bold tracking-tight text-blue-400">RayMe AI</div>
+<div class="flex gap-4">
+<button class="text-slate-400 hover:text-white hover:bg-white/5 transition-colors p-2 rounded-full cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="text-slate-400 hover:text-white hover:bg-white/5 transition-colors p-2 rounded-full cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined">account_circle</span>
+</button>
+</div>
+</header>
+<!-- TopNavBar for Web (just actions if sidenav takes branding) -->
+<header class="hidden md:flex items-center justify-end px-6 py-3 w-full top-0 sticky bg-slate-950/80 backdrop-blur-md border-b border-white/10 shadow-sm z-40 h-[72px]">
+<div class="flex gap-2">
+<button class="text-slate-400 hover:text-white hover:bg-white/5 transition-colors p-2 rounded-full cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="text-slate-400 hover:text-white hover:bg-white/5 transition-colors p-2 rounded-full cursor-pointer active:opacity-80 flex items-center gap-2">
+<img alt="User Profile" class="w-8 h-8 rounded-full object-cover" data-alt="Portrait of a young man with a neutral expression, wearing a casual shirt, against a light background." src="https://lh3.googleusercontent.com/aida-public/AB6AXuDiPp2VHOhcdShHNrqkXPes2ejWX4Gz4MuggnduxbaZEgGkplWd26Om2jatjQx1wJYRzHwDUQu3V6bXlkq3e1dRIkvxxCdNqeEKCh4sbWJyH6RyZgIXYJ3fsYmH5xxjWzlWKZZdUj9w7TsPo4WZb34T37KgjKsaBd1AEDP-SNbAFdf7T40OZxUyqarEtu9ot7eOF0HzXMmMtR7zAz68k0l7ucp7FzJHqke7Y1p4ztnmxv_19mBzm4m1nrLNF-3jADOp11ALGr2vcA"/>
+</button>
+</div>
+</header>
+<div class="p-6 md:p-10 max-w-7xl mx-auto w-full space-y-8">
+<div class="flex flex-col gap-2">
+<h1 class="text-3xl md:text-4xl font-headline font-bold text-on-surface">Voice Lab</h1>
+<p class="text-on-surface-variant font-body">Clone and configure custom AI voices for your projects.</p>
+</div>
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+<!-- Left Column: Clone & Configure -->
+<div class="lg:col-span-2 space-y-8">
+<!-- Drag & Drop Zone -->
+<section class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm p-6 flex flex-col gap-4">
+<h2 class="text-lg font-headline font-semibold text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">upload_file</span>
+                            Upload Audio Samples
+                        </h2>
+<p class="text-sm text-on-surface-variant font-body">Upload clean, high-quality audio recordings of the voice you want to clone. MP3 or WAV format, max 50MB.</p>
+<div class="border-2 border-dashed border-outline-variant rounded-lg p-10 flex flex-col items-center justify-center bg-surface hover:bg-surface-container-low transition-colors cursor-pointer group">
+<div class="w-16 h-16 rounded-full bg-secondary-container flex items-center justify-center mb-4 group-hover:scale-105 transition-transform">
+<span class="material-symbols-outlined text-3xl text-on-secondary-container">cloud_upload</span>
+</div>
+<p class="font-headline font-medium text-on-surface">Drag &amp; drop audio files here</p>
+<p class="text-sm text-on-surface-variant mt-1">or click to browse from your computer</p>
+</div>
+</section>
+<!-- Voice Configuration -->
+<section class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm p-6 flex flex-col gap-6">
+<h2 class="text-lg font-headline font-semibold text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">tune</span>
+                            Voice Configuration
+                        </h2>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+<div class="flex flex-col gap-2">
+<label class="font-label text-sm font-medium text-on-surface" for="voice-name">Voice Name</label>
+<input class="rounded-lg border-outline-variant focus:border-primary focus:ring focus:ring-primary-container/50 bg-surface-bright text-on-surface px-4 py-2 font-body w-full" id="voice-name" placeholder="e.g. My Custom Narrator" type="text"/>
+</div>
+<div class="flex flex-col gap-2">
+<label class="font-label text-sm font-medium text-on-surface" for="tts-engine">Synthesis Engine (TTS)</label>
+<select class="rounded-lg border-outline-variant focus:border-primary focus:ring focus:ring-primary-container/50 bg-surface-bright text-on-surface px-4 py-2 font-body w-full appearance-none" id="tts-engine">
+<option>RayMe Standard V1</option>
+<option>RayMe Premium (High-Fidelity)</option>
+<option>Experimental V2 (Beta)</option>
+</select>
+</div>
+</div>
+<div class="flex flex-col gap-2">
+<label class="font-label text-sm font-medium text-on-surface">Voice Style Tags (Optional)</label>
+<div class="flex flex-wrap gap-2">
+<span class="px-3 py-1 rounded-full bg-surface-container text-on-surface text-xs font-medium cursor-pointer hover:bg-surface-container-high border border-outline-variant">Warm</span>
+<span class="px-3 py-1 rounded-full bg-surface-container text-on-surface text-xs font-medium cursor-pointer hover:bg-surface-container-high border border-outline-variant">Professional</span>
+<span class="px-3 py-1 rounded-full bg-surface-container text-on-surface text-xs font-medium cursor-pointer hover:bg-surface-container-high border border-outline-variant">Energetic</span>
+<span class="px-3 py-1 rounded-full bg-surface-container text-on-surface text-xs font-medium cursor-pointer hover:bg-surface-container-high border border-outline-variant">Calm</span>
+<button class="px-3 py-1 rounded-full bg-transparent text-primary text-xs font-medium border border-dashed border-primary hover:bg-primary-container/20 flex items-center gap-1">
+<span class="material-symbols-outlined text-[14px]">add</span> Add Tag
+                                </button>
+</div>
+</div>
+<div class="pt-4 border-t border-surface-variant flex justify-end">
+<button class="bg-primary text-on-primary px-6 py-2 rounded-lg font-headline font-semibold hover:bg-primary-dim transition-colors shadow-sm flex items-center gap-2">
+<span class="material-symbols-outlined text-[18px]">memory</span>
+                                Start Cloning Process
+                            </button>
+</div>
+</section>
+</div>
+<!-- Right Column: My Cloned Voices -->
+<div class="lg:col-span-1">
+<section class="bg-surface-container-lowest rounded-xl border border-surface-variant shadow-sm flex flex-col h-full overflow-hidden">
+<div class="p-5 border-b border-surface-variant bg-surface-container-lowest sticky top-0">
+<h2 class="text-lg font-headline font-semibold text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary">record_voice_over</span>
+                                My Cloned Voices
+                            </h2>
+</div>
+<div class="flex flex-col flex-1 overflow-y-auto p-2 gap-2">
+<!-- Voice Card 1 -->
+<div class="bg-surface p-4 rounded-lg border border-surface-variant hover:border-primary-fixed transition-colors group cursor-pointer">
+<div class="flex items-center justify-between mb-2">
+<h3 class="font-headline font-semibold text-on-surface">Narrator Alpha</h3>
+<span class="w-2 h-2 rounded-full bg-green-500"></span>
+</div>
+<p class="text-xs text-on-surface-variant mb-3">Premium Engine • Warm, Professional</p>
+<div class="flex gap-2">
+<button class="flex-1 bg-surface-container text-on-surface text-xs py-1.5 rounded-md font-medium hover:bg-surface-container-high transition-colors flex items-center justify-center gap-1">
+<span class="material-symbols-outlined text-[14px]">play_arrow</span> Test
+                                    </button>
+<button class="p-1.5 rounded-md text-on-surface-variant hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-[18px]">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Voice Card 2 -->
+<div class="bg-surface p-4 rounded-lg border border-surface-variant hover:border-primary-fixed transition-colors group cursor-pointer">
+<div class="flex items-center justify-between mb-2">
+<h3 class="font-headline font-semibold text-on-surface">Podcast Host</h3>
+<span class="w-2 h-2 rounded-full bg-green-500"></span>
+</div>
+<p class="text-xs text-on-surface-variant mb-3">Standard Engine • Energetic</p>
+<div class="flex gap-2">
+<button class="flex-1 bg-surface-container text-on-surface text-xs py-1.5 rounded-md font-medium hover:bg-surface-container-high transition-colors flex items-center justify-center gap-1">
+<span class="material-symbols-outlined text-[14px]">play_arrow</span> Test
+                                    </button>
+<button class="p-1.5 rounded-md text-on-surface-variant hover:bg-surface-container transition-colors">
+<span class="material-symbols-outlined text-[18px]">more_vert</span>
+</button>
+</div>
+</div>
+<!-- Voice Card Processing -->
+<div class="bg-surface p-4 rounded-lg border border-surface-variant relative overflow-hidden">
+<div class="absolute inset-0 bg-gradient-to-r from-transparent via-surface-container/50 to-transparent animate-pulse"></div>
+<div class="flex items-center justify-between mb-2 relative z-10">
+<h3 class="font-headline font-semibold text-on-surface">Client Voice 01</h3>
+<span class="material-symbols-outlined text-primary animate-spin text-[16px]">sync</span>
+</div>
+<p class="text-xs text-on-surface-variant mb-2 relative z-10">Processing audio samples...</p>
+<div class="w-full bg-surface-container rounded-full h-1.5 mb-1 relative z-10">
+<div class="bg-primary h-1.5 rounded-full w-[45%]"></div>
+</div>
+</div>
+</div>
+</section>
+</div>
+</div>
+</div>
+</main>
+</body></html>

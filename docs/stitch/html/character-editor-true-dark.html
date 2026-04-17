@@ -1,0 +1,307 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Character Editor - RayMe AI</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+      tailwind.config = {
+        darkMode: "class",
+        theme: {
+          extend: {
+            "colors": {
+                    "primary-dim": "#1d4ed8",
+                    "on-surface-variant": "#94a3b8",
+                    "surface-container": "#111c35",
+                    "surface": "#050b14",
+                    "tertiary-dim": "#a21caf",
+                    "surface-container-high": "#1e2d4a",
+                    "on-tertiary-fixed-variant": "#f0abfc",
+                    "on-primary-container": "#dbeafe",
+                    "secondary-container": "#1e1b4b",
+                    "secondary-fixed": "#4c1d95",
+                    "inverse-on-surface": "#0f172a",
+                    "on-secondary-fixed-variant": "#ddd6fe",
+                    "primary-fixed": "#3b82f6",
+                    "outline-variant": "#1e2d4a",
+                    "surface-tint": "#3b82f6",
+                    "primary": "#3b82f6",
+                    "surface-container-low": "#0a1428",
+                    "on-secondary": "#ffffff",
+                    "error": "#ef4444",
+                    "on-secondary-container": "#ddd6fe",
+                    "secondary-dim": "#7c3aed",
+                    "primary-fixed-dim": "#60a5fa",
+                    "error-dim": "#dc2626",
+                    "tertiary": "#d946ef",
+                    "secondary": "#8b5cf6",
+                    "on-tertiary": "#ffffff",
+                    "surface-dim": "#0a1428",
+                    "surface-container-highest": "#1e2d4a",
+                    "on-primary-fixed": "#ffffff",
+                    "error-container": "#7f1d1d",
+                    "inverse-primary": "#1d4ed8",
+                    "on-error-container": "#fecaca",
+                    "primary-container": "#1e3a8a",
+                    "on-primary": "#ffffff",
+                    "background": "#050b14",
+                    "tertiary-container": "#4a044e",
+                    "surface-bright": "#0f172a",
+                    "on-tertiary-fixed": "#fdf4ff",
+                    "on-error": "#ffffff",
+                    "secondary-fixed-dim": "#6d28d9",
+                    "surface-container-lowest": "#0a1428",
+                    "surface-variant": "#1e2d4a",
+                    "tertiary-fixed-dim": "#c026d3",
+                    "on-tertiary-container": "#fbcfe8",
+                    "on-primary-fixed-variant": "#eff6ff",
+                    "tertiary-fixed": "#e879f9",
+                    "on-secondary-fixed": "#ffffff",
+                    "on-background": "#f8fafc",
+                    "outline": "#334155",
+                    "inverse-surface": "#f8fafc",
+                    "on-surface": "#f8fafc"
+            },
+            "borderRadius": {
+                    "DEFAULT": "0.25rem",
+                    "lg": "0.5rem",
+                    "xl": "0.75rem",
+                    "full": "9999px"
+            },
+            "spacing": {},
+            "fontFamily": {
+                    "headline": [
+                            "Inter"
+                    ],
+                    "body": [
+                            "Inter"
+                    ],
+                    "label": [
+                            "Inter"
+                    ]
+            }
+    },
+        },
+      }
+    </script>
+<style>
+        body { font-family: 'Inter', sans-serif; }
+    </style>
+</head>
+<body class="bg-background text-on-background min-h-screen flex font-body">
+<!-- SideNavBar -->
+<nav class="hidden md:flex flex-col h-screen w-64 fixed left-0 top-0 bg-slate-950 border-r border-white/10 z-50 overflow-hidden relative">
+<div class="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+<div class="absolute -top-24 -left-24 w-64 h-64 bg-blue-600/30 rounded-full blur-3xl opacity-50 mix-blend-screen"></div>
+<div class="absolute top-1/2 -right-32 w-80 h-80 bg-violet-600/20 rounded-full blur-3xl opacity-50 mix-blend-screen transform -translate-y-1/2"></div>
+<div class="absolute -bottom-24 -left-12 w-72 h-72 bg-indigo-600/20 rounded-full blur-3xl opacity-50 mix-blend-screen"></div>
+</div>
+<div class="relative z-10 flex flex-col h-full">
+<div class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 via-indigo-400 to-violet-500 px-4 py-6 font-headline tracking-tight">RayMe AI</div>
+<div class="px-4 pb-4">
+<div class="flex items-center gap-3 p-3 rounded-xl bg-white/5 border border-white/10 shadow-[0_8px_32px_0_rgba(31,38,135,0.07)] backdrop-blur-md">
+<img alt="User Profile" class="w-10 h-10 rounded-full object-cover ring-2 ring-white/10" data-alt="close up portrait of young man with neutral expression on solid grey background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBNX-1EbodRWEcaRdY_CGnd5705RtxWBJtny2pMLS8GDBfK2T0rgdWYzklhsU8vNLtjMzihQjcoVdfDQhNZkBy8Hrq6TUI_AqFM2K_qYmA2lGsbRQO7XABIMbkpLfmZRbA1Kx1-SHwoNc6YLUYKcoNI3nUfogPwmREVyliYOfLUqdcacjlmKiIUIQqyEKFUQoblnTNykiZfkLwZ5FdC128frXmrVwduJXWw6EnspvVCQi_8hvm0QQEJngbJux3f4OhhtP9T3kWkmA"/>
+<div>
+<div class="font-semibold text-sm text-white">Alex Mercer</div>
+<div class="text-xs text-slate-400">Creator Plan</div>
+</div>
+</div>
+</div>
+<ul class="flex flex-col h-full overflow-y-auto px-2 space-y-1 mt-2">
+<li>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out font-inter text-sm hover:backdrop-blur-sm" href="#">
+<span class="material-symbols-outlined" data-icon="home">home</span>
+                    Home
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out font-inter text-sm hover:backdrop-blur-sm" href="#">
+<span class="material-symbols-outlined" data-icon="grid_view">grid_view</span>
+                    Gallery
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out font-inter text-sm hover:backdrop-blur-sm" href="#">
+<span class="material-symbols-outlined" data-icon="mic_none">mic_none</span>
+                    Voice Lab
+                </a>
+</li>
+<li>
+<a class="relative flex items-center gap-3 px-3 py-2.5 rounded-lg text-white bg-white/10 backdrop-blur-md shadow-[0_4px_30px_rgba(0,0,0,0.1)] transition-all duration-200 ease-in-out font-inter text-sm font-semibold overflow-hidden group border border-white/5" href="#">
+<div class="absolute right-0 top-0 w-1 h-full bg-gradient-to-b from-blue-400 to-violet-500"></div>
+<span class="material-symbols-outlined drop-shadow-md text-blue-400" data-icon="edit_note" data-weight="fill" style="font-variation-settings: 'FILL' 1;">edit_note</span>
+                    Editor
+                </a>
+</li>
+<li>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out font-inter text-sm hover:backdrop-blur-sm" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+                    Settings
+                </a>
+</li>
+</ul>
+<div class="mt-auto px-2 pb-4 pt-4 border-t border-white/10 space-y-1">
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out font-inter text-sm hover:backdrop-blur-sm" href="#">
+<span class="material-symbols-outlined" data-icon="help">help</span>
+                Help
+            </a>
+<a class="flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out font-inter text-sm hover:backdrop-blur-sm" href="#">
+<span class="material-symbols-outlined" data-icon="logout">logout</span>
+                Logout
+            </a>
+</div>
+</div>
+</nav>
+<!-- Main Content Wrapper -->
+<main class="flex-1 md:ml-64 flex flex-col min-h-screen">
+<!-- TopNavBar (Mobile Only) -->
+<header class="md:hidden w-full top-0 sticky bg-slate-950/80 backdrop-blur-md border-b border-slate-800 shadow-sm z-40">
+<div class="flex items-center justify-between px-6 py-3 w-full ml-auto">
+<div class="text-xl font-bold tracking-tight text-blue-400 font-headline">RayMe AI</div>
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-slate-400 cursor-pointer active:opacity-80 hover:bg-slate-800 rounded-full p-1 transition-colors" data-icon="notifications">notifications</span>
+<span class="material-symbols-outlined text-slate-400 cursor-pointer active:opacity-80 hover:bg-slate-800 rounded-full p-1 transition-colors" data-icon="account_circle">account_circle</span>
+</div>
+</div>
+</header>
+<!-- Page Header -->
+<div class="px-6 py-8 md:py-10 max-w-5xl mx-auto w-full">
+<div class="flex flex-col md:flex-row md:items-end justify-between gap-4 mb-8">
+<div>
+<h1 class="text-3xl md:text-4xl font-headline font-black text-on-surface tracking-tight mb-2">Character Editor</h1>
+<p class="text-on-surface-variant font-body">Craft the persona, voice, and initial behavior of your new AI entity.</p>
+</div>
+<div class="flex items-center gap-3">
+<button class="px-5 py-2.5 rounded-lg border border-outline-variant text-on-surface font-label font-semibold hover:bg-surface-container-high transition-colors" type="button">Discard</button>
+<button class="px-5 py-2.5 rounded-lg bg-primary text-on-primary font-label font-semibold hover:bg-primary-dim transition-colors shadow-sm flex items-center gap-2" form="character-form" type="submit">
+<span class="material-symbols-outlined text-sm">save</span>
+                        Save Character
+                    </button>
+</div>
+</div>
+<!-- Editor Form -->
+<form class="space-y-6 md:space-y-8" id="character-form">
+<div class="grid grid-cols-1 lg:grid-cols-12 gap-6 lg:gap-8">
+<!-- Left Column: Identity & Voice -->
+<div class="lg:col-span-5 space-y-6 lg:space-y-8">
+<!-- Visual Identity Card -->
+<div class="bg-surface-container-lowest rounded-2xl p-6 shadow-sm border border-outline-variant/20">
+<h2 class="text-lg font-headline font-bold text-on-surface mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-primary">face</span>
+                                Visual Identity
+                            </h2>
+<div class="flex flex-col items-center gap-5">
+<div class="relative group cursor-pointer">
+<div class="w-32 h-32 rounded-full border-2 border-dashed border-outline-variant flex items-center justify-center bg-surface overflow-hidden transition-all group-hover:border-primary group-hover:bg-primary/20">
+<!-- Placeholder for empty state -->
+<div class="flex flex-col items-center text-on-surface-variant group-hover:text-primary">
+<span class="material-symbols-outlined text-3xl mb-1">add_a_photo</span>
+<span class="text-xs font-medium">Upload Avatar</span>
+</div>
+<!-- Image tag would normally go here when filled -->
+</div>
+<div class="absolute bottom-0 right-0 bg-primary text-on-primary w-8 h-8 rounded-full flex items-center justify-center shadow-md transform translate-x-1/4 translate-y-1/4">
+<span class="material-symbols-outlined text-sm">edit</span>
+</div>
+</div>
+<div class="w-full">
+<label class="block text-sm font-label font-semibold text-on-surface mb-1.5" for="char-name">Character Name</label>
+<input class="w-full px-4 py-2.5 rounded-lg border border-outline-variant bg-surface focus:ring-2 focus:ring-primary focus:border-primary transition-shadow text-on-surface font-body placeholder-on-surface-variant/50" id="char-name" name="char-name" placeholder="e.g., Orion, Lyra, Professor X" type="text"/>
+</div>
+</div>
+</div>
+<!-- Voice Matrix Card -->
+<div class="bg-surface-container-lowest rounded-2xl p-6 shadow-sm border border-outline-variant/20">
+<h2 class="text-lg font-headline font-bold text-on-surface mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary">record_voice_over</span>
+                                Voice Matrix
+                            </h2>
+<p class="text-sm text-on-surface-variant mb-4">Select a voice model to define how your character sounds during interactions.</p>
+<div class="space-y-3">
+<!-- Voice Option 1 -->
+<label class="flex items-center p-3 rounded-xl border border-outline-variant/50 hover:bg-surface-container cursor-pointer transition-colors relative overflow-hidden group has-[:checked]:border-secondary has-[:checked]:bg-secondary-container/30">
+<input checked="" class="sr-only" name="voice_model" type="radio" value="nova"/>
+<div class="w-10 h-10 rounded-full bg-secondary-container text-on-secondary-container flex items-center justify-center mr-3 flex-shrink-0 group-has-[:checked]:bg-secondary group-has-[:checked]:text-on-secondary">
+<span class="material-symbols-outlined">graphic_eq</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="text-sm font-semibold text-on-surface truncate">Nova (Neutral)</div>
+<div class="text-xs text-on-surface-variant truncate">Clear, professional, versatile</div>
+</div>
+<button aria-label="Play sample" class="w-8 h-8 rounded-full flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-colors ml-2" type="button">
+<span class="material-symbols-outlined">play_arrow</span>
+</button>
+</label>
+<!-- Voice Option 2 -->
+<label class="flex items-center p-3 rounded-xl border border-outline-variant/50 hover:bg-surface-container cursor-pointer transition-colors relative overflow-hidden group has-[:checked]:border-secondary has-[:checked]:bg-secondary-container/30">
+<input class="sr-only" name="voice_model" type="radio" value="echo"/>
+<div class="w-10 h-10 rounded-full bg-surface-variant text-on-surface-variant flex items-center justify-center mr-3 flex-shrink-0 group-has-[:checked]:bg-secondary group-has-[:checked]:text-on-secondary">
+<span class="material-symbols-outlined">graphic_eq</span>
+</div>
+<div class="flex-1 min-w-0">
+<div class="text-sm font-semibold text-on-surface truncate">Echo (Deep)</div>
+<div class="text-xs text-on-surface-variant truncate">Warm, resonant, confident</div>
+</div>
+<button aria-label="Play sample" class="w-8 h-8 rounded-full flex items-center justify-center text-on-surface-variant hover:text-primary hover:bg-surface-container-high transition-colors ml-2" type="button">
+<span class="material-symbols-outlined">play_arrow</span>
+</button>
+</label>
+<button class="w-full py-2.5 border border-dashed border-outline-variant text-primary font-semibold text-sm rounded-xl hover:bg-surface-container transition-colors flex items-center justify-center gap-2 mt-2" type="button">
+<span class="material-symbols-outlined text-sm">tune</span>
+                                    Advanced Voice Settings
+                                </button>
+</div>
+</div>
+</div>
+<!-- Right Column: Prompt & Logic -->
+<div class="lg:col-span-7 space-y-6 lg:space-y-8">
+<!-- System Prompt Card -->
+<div class="bg-surface-container-lowest rounded-2xl p-6 shadow-sm border border-outline-variant/20 flex flex-col h-full">
+<div class="flex items-center justify-between mb-4">
+<h2 class="text-lg font-headline font-bold text-on-surface flex items-center gap-2">
+<span class="material-symbols-outlined text-tertiary">code_blocks</span>
+                                    System Prompt
+                                </h2>
+<span class="text-xs font-semibold px-2 py-1 bg-tertiary-container text-on-tertiary-container rounded-md">Silly Tavern Compatible</span>
+</div>
+<p class="text-sm text-on-surface-variant mb-4">Define the core persona, world rules, and behavioral boundaries using W++ or standard narrative formatting.</p>
+<div class="flex-1 flex flex-col">
+<textarea class="w-full flex-1 px-4 py-3 rounded-xl border border-outline-variant bg-surface font-mono text-sm focus:ring-2 focus:ring-primary focus:border-primary transition-shadow text-on-surface placeholder-on-surface-variant/50 resize-y" id="system-prompt" name="system-prompt" placeholder="Write {{char}}'s persona here...
+
+Example:
+{{char}} is a cynical but brilliant detective in a cyberpunk metropolis. They speak in short, sharp sentences and often use noir-style metaphors..." rows="12"></textarea>
+<div class="flex items-center justify-between mt-3 text-xs text-on-surface-variant">
+<div class="flex gap-4">
+<button class="hover:text-primary transition-colors flex items-center gap-1" type="button"><span class="material-symbols-outlined text-[14px]">library_books</span> Templates</button>
+<button class="hover:text-primary transition-colors flex items-center gap-1" type="button"><span class="material-symbols-outlined text-[14px]">auto_awesome</span> Optimize</button>
+</div>
+<span>Tokens: ~450</span>
+</div>
+</div>
+</div>
+<!-- First Message Card -->
+<div class="bg-surface-container-lowest rounded-2xl p-6 shadow-sm border border-outline-variant/20">
+<h2 class="text-lg font-headline font-bold text-on-surface mb-4 flex items-center gap-2">
+<span class="material-symbols-outlined text-primary-fixed-dim">chat_bubble</span>
+                                First Message
+                            </h2>
+<p class="text-sm text-on-surface-variant mb-4">The initial greeting or scenario setup sent by the character when a new chat begins.</p>
+<textarea class="w-full px-4 py-3 rounded-xl border border-outline-variant bg-surface text-sm focus:ring-2 focus:ring-primary focus:border-primary transition-shadow text-on-surface placeholder-on-surface-variant/50 resize-y" id="first-message" name="first-message" placeholder="*The neon lights flicker outside the rain-streaked window as I look up from my desk.* 
+
+Didn't hear you come in. What's the job?" rows="4"></textarea>
+<div class="flex justify-end mt-2">
+<button class="text-xs font-semibold text-primary hover:text-primary-dim transition-colors flex items-center gap-1" type="button">
+<span class="material-symbols-outlined text-[14px]">add_circle</span> Add Alternate Greeting
+                                </button>
+</div>
+</div>
+</div>
+</div>
+</form>
+</div>
+</main>
+</body></html>

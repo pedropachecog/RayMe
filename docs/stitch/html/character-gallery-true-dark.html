@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+
+<html class="light dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Character Gallery - RayMe AI</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">tailwind.config = {darkMode: "class", theme: {extend: {colors: {"primary-dim": "#0073e1", "on-surface-variant": "#9eaad5", "surface-container": "#051642", surface: "#000b2f", "tertiary-dim": "#e190f0", "surface-container-high": "#091c4c", "on-tertiary-fixed-variant": "#681f7a", "on-primary-container": "#00224b", "secondary-container": "#133fa1", "secondary-fixed": "#c4d0ff", "inverse-on-surface": "#48547a", "on-secondary-fixed-variant": "#2349ac", "primary-fixed": "#65a1ff", "outline-variant": "#3b466c", "surface-tint": "#7faeff", primary: "#7faeff", "surface-container-low": "#011038", "on-secondary": "#001b56", error: "#ff716c", "on-secondary-container": "#c2cfff", "secondary-dim": "#7999ff", "primary-fixed-dim": "#4693ff", "error-dim": "#d7383b", tertiary: "#f5b2ff", secondary: "#7999ff", "on-tertiary": "#68207b", "surface-dim": "#000b2f", "surface-container-highest": "#0e2256", "on-primary-fixed": "#000000", "error-container": "#9f0519", "inverse-primary": "#005db9", "on-error-container": "#ffa8a3", "primary-container": "#65a1ff", "on-primary": "#002e60", background: "#000b2f", "tertiary-container": "#f09dff", "surface-bright": "#132860", "on-tertiary-fixed": "#400050", "on-error": "#490006", "secondary-fixed-dim": "#b1c2ff", "surface-container-lowest": "#000000", "surface-variant": "#0e2256", "tertiary-fixed-dim": "#e190f0", "on-tertiary-container": "#5e1470", "on-primary-fixed-variant": "#002b5c", "tertiary-fixed": "#f09dff", "on-secondary-fixed": "#002c82", "on-background": "#dfe4ff", outline: "#69749d", "inverse-surface": "#faf8ff", "on-surface": "#dfe4ff"}, borderRadius: {DEFAULT: "0.25rem", lg: "0.5rem", xl: "0.75rem", full: "9999px"}, fontFamily: {headline: ["Inter"], body: ["Inter"], label: ["Inter"], display: "Inter"}}}};</script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body antialiased flex h-screen overflow-hidden">
+<!-- SideNavBar -->
+<nav class="hidden md:flex flex-col h-screen w-64 fixed left-0 top-0 bg-[#020617]/80 backdrop-blur-2xl border-r border-white/5 z-50 overflow-y-auto relative">
+<div class="absolute top-0 left-0 w-full h-full overflow-hidden -z-10 pointer-events-none">
+<div class="absolute -top-24 -left-24 w-64 h-64 bg-blue-600/20 rounded-full blur-3xl mix-blend-screen"></div>
+<div class="absolute top-1/2 -right-20 w-48 h-48 bg-violet-600/20 rounded-full blur-3xl mix-blend-screen"></div>
+<div class="absolute -bottom-10 -left-10 w-56 h-56 bg-blue-500/10 rounded-full blur-3xl mix-blend-screen"></div>
+</div>
+<div class="px-4 py-6">
+<h1 class="text-2xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-violet-400 font-headline tracking-tight">RayMe AI</h1>
+<p class="text-xs text-slate-400 mt-1 font-label">AI Voice Assistant</p>
+</div>
+<div class="flex-1 flex flex-col gap-1 px-3 mt-4">
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out font-inter text-sm" href="#">
+<span class="material-symbols-outlined text-[20px]">home</span>
+                Home
+            </a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-white border-r-4 border-violet-400 bg-gradient-to-r from-blue-500/20 to-violet-500/20 transition-all duration-200 ease-in-out font-inter text-sm font-medium" href="#">
+<span class="material-symbols-outlined text-[20px]" style="font-variation-settings: 'FILL' 1;">grid_view</span>
+                Gallery
+            </a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out font-inter text-sm" href="#">
+<span class="material-symbols-outlined text-[20px]">mic_none</span>
+                Voice Lab
+            </a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out font-inter text-sm" href="#">
+<span class="material-symbols-outlined text-[20px]">edit_note</span>
+                Editor
+            </a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out font-inter text-sm" href="#">
+<span class="material-symbols-outlined text-[20px]">settings</span>
+                Settings
+            </a>
+</div>
+<div class="mt-auto px-3 py-4 border-t border-white/10 flex flex-col gap-1">
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out font-inter text-sm" href="#">
+<span class="material-symbols-outlined text-[20px]">help</span>
+                Help
+            </a>
+<a class="flex items-center gap-3 px-4 py-3 rounded-lg text-slate-400 hover:text-white hover:bg-white/5 transition-all duration-200 ease-in-out font-inter text-sm" href="#">
+<span class="material-symbols-outlined text-[20px]">logout</span>
+                Logout
+            </a>
+<div class="flex items-center gap-3 px-4 py-3 mt-2">
+<img alt="User Profile" class="w-8 h-8 rounded-full object-cover border border-white/10" data-alt="Close up portrait of a young woman with natural makeup and soft lighting against a neutral background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuACoUaZ8mcN8ECT_UeOD4sD41xmoCxZX2CqbYL3MgtFob3NkeQy_yhHRTgnl14d4ElGByJSJ3eLtxVbkoSvCga1UYPTtd_1BwDbve4aXSBWCYx1q18VthiTbynnviLHpfsbh3hEajH0S0M64UxxU7JxaQFhD_H-6QIYb6ysJrRJuW1FTjRHj68J9emz1in7D90Nmqv9-WhHj1ncCMz24TNExjmTYzpFuMewcj36IaR4AvgheJ988VvCXfy1lZatgiNPYIPQEEdNGw"/>
+<div class="flex flex-col">
+<span class="text-sm font-medium text-white">Jane Doe</span>
+<span class="text-xs text-slate-400">Pro Plan</span>
+</div>
+</div>
+</div>
+</nav>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col md:ml-64 relative bg-background overflow-hidden">
+<!-- TopNavBar (Mobile Only) -->
+<header class="md:hidden w-full top-0 sticky bg-[#020617]/80 backdrop-blur-md border-b border-white/5 shadow-sm z-40">
+<div class="flex items-center justify-between px-4 py-3 w-full">
+<h1 class="text-xl font-bold tracking-tight text-blue-400 font-headline">RayMe AI</h1>
+<div class="flex items-center gap-2">
+<button class="p-2 text-slate-400 hover:bg-white/5 rounded-full transition-colors cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<button class="p-2 text-slate-400 hover:bg-white/5 rounded-full transition-colors cursor-pointer active:opacity-80">
+<span class="material-symbols-outlined">account_circle</span>
+</button>
+</div>
+</div>
+</header>
+<!-- Gallery Header & Actions -->
+<div class="px-6 py-8 md:px-10 lg:px-12 flex flex-col sm:flex-row sm:items-end justify-between gap-6 shrink-0 z-10 relative">
+<div>
+<h2 class="text-3xl md:text-4xl font-bold text-on-background font-headline tracking-tight">Character Gallery</h2>
+<p class="text-on-surface-variant mt-2 font-body max-w-xl">Manage your AI personas, assign custom voices, or discover new companions.</p>
+</div>
+<div class="flex items-center gap-3">
+<button class="flex items-center gap-2 px-4 py-2.5 bg-surface-container-high text-on-surface-variant hover:bg-surface-variant rounded-lg font-label text-sm font-medium transition-colors border border-outline-variant shadow-sm">
+<span class="material-symbols-outlined text-[18px]">upload</span>
+                    Import Silly Tavern
+                </button>
+</div>
+</div>
+<!-- Scrollable Grid Area -->
+<div class="flex-1 overflow-y-auto px-6 md:px-10 lg:px-12 pb-24 md:pb-12 custom-scrollbar">
+<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+<!-- Create New Card -->
+<div class="group relative flex flex-col items-center justify-center h-[320px] rounded-2xl border-2 border-dashed border-outline-variant bg-surface hover:bg-surface-container-low hover:border-primary-fixed transition-all duration-300 cursor-pointer overflow-hidden shadow-sm hover:shadow-md">
+<div class="absolute inset-0 bg-gradient-to-br from-primary-fixed/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
+<div class="w-16 h-16 rounded-full bg-primary-container text-on-primary-container flex items-center justify-center mb-4 group-hover:scale-110 transition-transform duration-300 shadow-sm">
+<span class="material-symbols-outlined text-3xl">add</span>
+</div>
+<h3 class="font-headline font-semibold text-lg text-on-surface">Create New</h3>
+<p class="text-on-surface-variant text-sm font-body mt-1 text-center px-6">Design a unique persona from scratch</p>
+</div>
+<!-- Character Card 1 -->
+<div class="group relative flex flex-col h-[320px] rounded-2xl bg-surface-container-lowest border border-outline-variant shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden cursor-pointer">
+<div class="h-40 relative overflow-hidden bg-surface-variant">
+<img alt="Character Portrait" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="Portrait of a young woman with curly hair looking thoughtfully off-camera, soft natural lighting, warm tones" src="https://lh3.googleusercontent.com/aida-public/AB6AXuCk0zdlyocBbAvXLs5xfL_6R6jtTTKnSiGjnYZa65Xq-zBxMD7k00-lRepRAUPJ46ugGz-3tN1aMK3ReLgcAdBMC-tm10d_OUD6EIXevni6iie7LuFZES1sc0QLHar0jIoosMBOeTqiq7Y0nnZd_gJWEwtTY3cKQ4btP-wSBjkuIm4gPFb6I2kAKOXpgptO_laDIFwsDcIaiCKSa-e6UY7GNP4cCfVGXkvZ0raGuAkKd82c6scTweKCPReBqTfgRoE8Qx6egujD_Q"/>
+<div class="absolute top-3 right-3 bg-background/80 backdrop-blur-sm p-1.5 rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-[18px] text-on-surface">more_vert</span>
+</div>
+</div>
+<div class="p-5 flex-1 flex flex-col justify-between bg-surface-container-lowest relative">
+<div class="absolute -top-6 right-5 bg-tertiary-container text-on-tertiary-container px-3 py-1 rounded-full text-xs font-label font-semibold shadow-sm flex items-center gap-1 border border-surface-container-lowest">
+<span class="material-symbols-outlined text-[14px]">psychology</span>
+                            Mentor
+                        </div>
+<div>
+<h3 class="font-headline font-semibold text-xl text-on-surface truncate">Elara Vance</h3>
+<p class="text-on-surface-variant text-sm font-body line-clamp-2 mt-1">Wise and patient, always ready with a philosophical insight.</p>
+</div>
+<div class="flex items-center gap-2 mt-4 pt-4 border-t border-surface-variant">
+<div class="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center text-on-secondary-container shrink-0">
+<span class="material-symbols-outlined text-[16px]">record_voice_over</span>
+</div>
+<div class="flex-1 min-w-0">
+<p class="text-xs text-on-surface-variant font-label uppercase tracking-wider">Assigned Voice</p>
+<p class="text-sm font-medium text-on-surface truncate">Calm British Female</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Character Card 2 -->
+<div class="group relative flex flex-col h-[320px] rounded-2xl bg-surface-container-lowest border border-outline-variant shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden cursor-pointer">
+<div class="h-40 relative overflow-hidden bg-surface-variant">
+<img alt="Character Portrait" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" data-alt="Portrait of a young man with a slight beard looking directly at the camera, studio lighting, neutral grey background" src="https://lh3.googleusercontent.com/aida-public/AB6AXuBv4n3yzr2YP0xa5LlDZOLJTfhJj4cF3hz58WQN47tBNFIb9k9UjM5MUhqB8BaariJBh4uHKT7rlKJ50wgGvrKdCKzJ72rjeKHU6P0Q0Pb2b3A0YGUElW11Xhk0BV_r8nE1GcoUgPPgedqGYRpiROCtk8iJHWWw9j6hl5_nWdIvQfwoxsaW7szPs4pcwuTz-Tc71FQNwptg1CqPDaf1mRjX95H4a2WFAj6PgcpWv-rODuEGxboF9rwZMzyD5c4Ksoc44RuGpBECEw"/>
+<div class="absolute top-3 right-3 bg-background/80 backdrop-blur-sm p-1.5 rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-[18px] text-on-surface">more_vert</span>
+</div>
+</div>
+<div class="p-5 flex-1 flex flex-col justify-between bg-surface-container-lowest relative">
+<div class="absolute -top-6 right-5 bg-primary-container text-on-primary-container px-3 py-1 rounded-full text-xs font-label font-semibold shadow-sm flex items-center gap-1 border border-surface-container-lowest">
+<span class="material-symbols-outlined text-[14px]">sports_esports</span>
+                            Gamer
+                        </div>
+<div>
+<h3 class="font-headline font-semibold text-xl text-on-surface truncate">Jax Ryder</h3>
+<p class="text-on-surface-variant text-sm font-body line-clamp-2 mt-1">High-energy tech enthusiast who speaks in gaming metaphors.</p>
+</div>
+<div class="flex items-center gap-2 mt-4 pt-4 border-t border-surface-variant">
+<div class="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center text-on-secondary-container shrink-0">
+<span class="material-symbols-outlined text-[16px]">record_voice_over</span>
+</div>
+<div class="flex-1 min-w-0">
+<p class="text-xs text-on-surface-variant font-label uppercase tracking-wider">Assigned Voice</p>
+<p class="text-sm font-medium text-on-surface truncate">Energetic American Male</p>
+</div>
+</div>
+</div>
+</div>
+<!-- Character Card 3 -->
+<div class="group relative flex flex-col h-[320px] rounded-2xl bg-surface-container-lowest border border-outline-variant shadow-sm hover:shadow-lg transition-all duration-300 overflow-hidden cursor-pointer">
+<div class="h-40 relative overflow-hidden bg-surface-variant">
+<div class="w-full h-full bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center group-hover:scale-105 transition-transform duration-500">
+<span class="material-symbols-outlined text-white text-6xl opacity-50">smart_toy</span>
+</div>
+<div class="absolute top-3 right-3 bg-background/80 backdrop-blur-sm p-1.5 rounded-full shadow-sm opacity-0 group-hover:opacity-100 transition-opacity">
+<span class="material-symbols-outlined text-[18px] text-on-surface">more_vert</span>
+</div>
+</div>
+<div class="p-5 flex-1 flex flex-col justify-between bg-surface-container-lowest relative">
+<div class="absolute -top-6 right-5 bg-secondary-container text-on-secondary-container px-3 py-1 rounded-full text-xs font-label font-semibold shadow-sm flex items-center gap-1 border border-surface-container-lowest">
+<span class="material-symbols-outlined text-[14px]">code</span>
+                            Assistant
+                        </div>
+<div>
+<h3 class="font-headline font-semibold text-xl text-on-surface truncate">Unit-04</h3>
+<p class="text-on-surface-variant text-sm font-body line-clamp-2 mt-1">Cold, logical, highly efficient data processor.</p>
+</div>
+<div class="flex items-center gap-2 mt-4 pt-4 border-t border-surface-variant">
+<div class="w-8 h-8 rounded-full bg-secondary-container flex items-center justify-center text-on-secondary-container shrink-0">
+<span class="material-symbols-outlined text-[16px]">record_voice_over</span>
+</div>
+<div class="flex-1 min-w-0">
+<p class="text-xs text-on-surface-variant font-label uppercase tracking-wider">Assigned Voice</p>
+<p class="text-sm font-medium text-on-surface truncate">Robotic Synth</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- BottomNavBar (Mobile Only) -->
+<nav class="md:hidden fixed bottom-0 left-0 w-full bg-[#020617]/90 backdrop-blur-md shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-50 pb-safe border-t border-white/5">
+<div class="flex items-center justify-around px-2 py-2">
+<a class="flex flex-col items-center gap-1 p-2 min-w-[64px] text-slate-400" href="#">
+<span class="material-symbols-outlined text-2xl">home</span>
+<span class="text-[10px] font-medium font-inter">Home</span>
+</a>
+<a class="flex flex-col items-center gap-1 p-2 min-w-[64px] text-blue-400" href="#">
+<div class="bg-blue-500/20 rounded-full px-4 py-1">
+<span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">grid_view</span>
+</div>
+<span class="text-[10px] font-semibold font-inter">Gallery</span>
+</a>
+<a class="flex flex-col items-center gap-1 p-2 min-w-[64px] text-slate-400" href="#">
+<span class="material-symbols-outlined text-2xl">mic_none</span>
+<span class="text-[10px] font-medium font-inter">Voice Lab</span>
+</a>
+<a class="flex flex-col items-center gap-1 p-2 min-w-[64px] text-slate-400" href="#">
+<span class="material-symbols-outlined text-2xl">settings</span>
+<span class="text-[10px] font-medium font-inter">Settings</span>
+</a>
+</div>
+</nav>
+</body></html>
