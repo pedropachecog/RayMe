@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-RayMe ships in **seven phases**: one measurement spike (Phase 0) followed by six delivery phases that culminate in a full-duplex, barge-in-capable voice-call app usable from a mobile browser on LAN. The load-bearing core value — "call feel" — is validated **twice**: first as an MVP call in Phase 3 (flat, one-sentence reply, no streaming) and then as a tuned duplex experience in Phase 4 (sentence-streamed TTS, VAD barge-in with LLM cancel, live bidirectional captions). Everything after Phase 4 exists to broaden (second TTS engine, unified thread polish) and harden (mobile hardening, ship polish) what Phase 4 proves works.
+RayMe ships in **seven phases**: one measurement spike (Phase 0) followed by six delivery phases that culminate in a full-duplex, barge-in-capable voice-call app usable from a mobile browser on LAN. The load-bearing core value — "call feel" — is validated **twice**: first as an MVP call in Phase 3 (flat, one-sentence reply, no streaming) and then as a tuned duplex experience in Phase 4 (sentence-streamed TTS, VAD barge-in with LLM cancel, live bidirectional captions). Everything after Phase 4 exists to broaden (up to three TTS engines — F5-TTS, XTTS v2, and Qwen3-TTS — with cold-swap UX, unified thread polish) and harden (mobile hardening, ship polish) what Phase 4 proves works.
 
 ## v1 Milestone Definition
 
@@ -20,7 +20,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 - Three-service topology (Web UI host, AI backend, LLM endpoint), independently configurable over LAN.
 - Mobile-browser support over HTTPS with a trusted cert workflow (iOS Safari + Android Chrome).
 - Full SillyTavern character management: v2/v3 import (JSON + PNG), v2 JSON export, CRUD, full editor field set, per-character default voice, alternate-greeting picker, lorebook preserved-not-injected.
-- Voice Lab with STT-auto-transcribed reference, both F5-TTS and XTTS v2 engines, test-play, library management.
+- Voice Lab with STT-auto-transcribed reference, three TTS engines (F5-TTS, XTTS v2, Qwen3-TTS — the last Phase-0-conditional), test-play, library management.
 - Unified thread: single messages table with `message_kind` discriminator; text and call turns interleave chronologically.
 - SillyTavern text-UX parity: Regenerate, Edit, Swipes, Continue, virtualized long threads.
 - Full-duplex voice calls with VAD-driven barge-in, sentence-streamed TTS, streaming STT with live captions, streaming LLM with live AI captions, Voice Visualizer three-state, call-end summary row.
@@ -66,22 +66,31 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 
 **Pitfalls owned:**
 - **#2 HTTPS / cert trust on mobile** — mkcert root CA installed on builder's iPhone, `https://rayme.local` loads in Safari, reproducible doc produced.
-- **#7 VRAM budget on 12 GB** — 30-minute soak with Whisper + Silero + one TTS engine under realistic cycling, peak tracked.
+- **#7 VRAM budget on 12 GB** — 30-minute soak with Whisper + Silero + each of the three TTS engines (F5, XTTS, Qwen3-TTS 0.6B-Base) under realistic cycling, peak tracked per engine.
 - **#8 LLM mid-stream cancel** — verified with `nvidia-smi` on the chosen LLM server that stream-close aborts generation.
-- Informs **#4 F5 streaming** (first-sentence TTFA measured) and **#5/#6 Whisper WER on Spanish-accented English** (default STT rung picked from measurement).
+- Informs **#4 F5 streaming** (first-sentence TTFA measured), **#5/#6 Whisper WER on Spanish-accented English** (default STT rung picked from measurement), and **Qwen3-TTS acceptance gate** (TTFA + RTF + accent-preservation + FA2-Windows install — see `.planning/research/QWEN3-TTS.md` §7).
 
 **Success criteria** (observable, testable):
 1. The builder can load `https://rayme.local` on their iPhone with no cert warnings and `window.isSecureContext === true`, following a documented one-time setup procedure.
 2. A measurement rig has logged WER, latency, and peak VRAM for `distil-large-v3 INT8`, `large-v3-turbo INT8`, and `large-v3 FP16` on a 10-minute read-aloud of the builder's Spanish-accented English voice, and the team has picked a default rung.
-3. F5-TTS first-sentence TTFA on a 3–5 word acknowledgment with 7-step Sway sampling is measured on the actual 3060; if >400 ms, XTTS is promoted to the v1 default (Resolved Tension #3 trigger).
-4. A 30-minute cycling soak test of `{Whisper default + Silero + one TTS engine}` stays under 11 GB peak VRAM and shows no unbounded growth.
+3. **TTS TTFA on the actual 3060** measured for: (a) F5-TTS with 7-step Sway sampling on a 3–5 word acknowledgment; (b) XTTS v2 first-chunk streaming; (c) Qwen3-TTS 0.6B-Base with FA2. If F5 TTFA >400 ms, XTTS or Qwen3-TTS is promoted to the v1 default (Resolved Tension #3 trigger). **Qwen3-TTS acceptance gate**: promoted to v1 third-engine status if TTFA <400 ms AND RTF <1 AND 30-min soak <11 GB AND builder's subjective listening test on Spanish-accented-English clone is acceptable; otherwise feature-flagged off for v1.
+4. A 30-minute cycling soak test of `{Whisper default + Silero + one TTS engine}` stays under 11 GB peak VRAM and shows no unbounded growth — run once per engine: F5, XTTS, Qwen3-TTS 0.6B-Base (and 1.7B-Base if FA2 installs cleanly on Windows).
 5. A 20-line LLM-cancel probe verifies that closing a streaming Chat Completions request to the chosen local LLM server causes GPU work to drop to idle within ~200 ms, logged in `nvidia-smi` output.
+6. **FlashAttention 2 install verified** on the builder's Windows 11 + Python 3.11/3.12 + CUDA 12.1 + RTX 3060 (Ampere sm_86). If install fails, Qwen3-TTS adoption is restricted to 0.6B-Base only (1.7B without FA2 blows the VRAM budget).
 
-**Plans:** TBD
+**Plans:** 8 plans
+- [ ] 00-01-wave0-setup-PLAN.md - Python 3.11 venv, pinned Phase 0 packages, Whisper weight cache, probes/ scaffolding + bench_utils (Wave 1)
+- [ ] 00-02-https-iphone-PLAN.md - HTTPS on iPhone via Tailscale (primary) or mkcert (fallback), reproducible doc (Wave 2)
+- [ ] 00-03-whisper-wer-PLAN.md - Whisper WER/latency/VRAM across 3 rungs on builder voice, pick default rung (Wave 2)
+- [ ] 00-04-tts-ttfa-PLAN.md - F5/XTTS/Qwen3 TTFA+RTF, Qwen3 accent gate, pick v1 default (Wave 2)
+- [ ] 00-05-vram-soak-PLAN.md - 30-min VRAM soak per TTS engine F5/XTTS/Qwen3-0.6B (Wave 2)
+- [ ] 00-06-llm-cancel-PLAN.md - Streaming LLM cancel probe with nvidia-smi GPU-idle polling, p50 (Wave 2)
+- [ ] 00-07-fa2-install-PLAN.md - FlashAttention 2 install verification (gates Qwen3-1.7B eligibility) (Wave 2)
+- [ ] 00-08-synthesis-writeback-PLAN.md - Key Decisions roll-up + PROJECT.md/STATE.md writeback (Wave 3)
 
 **UI hint:** no
 
-**Scope signal:** S (2–3 days wall time; one-person spike).
+**Scope signal:** S–M (3–4 days wall time; one-person spike — expanded from 2–3 days with the Qwen3-TTS acceptance-gate measurements added 2026-04-17).
 
 ---
 
@@ -127,14 +136,15 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 
 **Pitfalls owned:**
 - **#6 Whisper hallucinations** — VAD-gated input + `condition_on_previous_text=False` + hallucination blocklist.
-- **#7 VRAM budget** — exactly one TTS engine resident, documented hot-swap registry, `expandable_segments` CUDA allocator config, startup self-test asserts headroom.
-- **#9 F5 transcript error** — Voice Lab forces an editable-transcript step and a synth-preview before save.
-- **#12 Coqui abandonware** — `coqui-tts` idiap fork pinned; never `TTS`.
-- **#13 Non-commercial licenses** — `LICENSES.md` shipped with F5 + XTTS non-commercial notices.
+- **#7 VRAM budget** — exactly one TTS engine resident, documented hot-swap registry (F5 ↔ XTTS ↔ Qwen3-TTS, six directed swap paths), `expandable_segments` CUDA allocator config, startup self-test asserts headroom per engine.
+- **#9 F5 transcript error** — Voice Lab forces an editable-transcript step and a synth-preview before save. (Same editable transcript is captured for Qwen3-TTS voices, which also require a reference transcript; XTTS does not require one but still stores it for portability.)
+- **#12 Coqui abandonware** — `coqui-tts` idiap fork pinned; never `TTS`. (Qwen3-TTS is the medium-term v1.x fallback if idiap fork stalls.)
+- **#13 Non-commercial licenses** — `LICENSES.md` shipped with F5 (CC-BY-NC) + XTTS (CPML) non-commercial notices and a **Qwen3-TTS Apache-2.0** entry (the only commercially-permissive engine; activates if RayMe ever pivots past PROJECT.md's non-commercial scope).
+- **Qwen3-TTS install friction** — backend bringup script verifies `qwen-tts==0.1.1` load and FlashAttention 2 availability; falls back to 0.6B-Base without FA2 if the install fails. Pinned dependency prevents 0.2.x breaking upgrades.
 
 **Success criteria** (observable, testable):
-1. The AI backend boots, loads Whisper (Phase 0 default) + Silero VAD + one TTS engine, and reports GPU residency < 11 GB in its `/health` response; the Web UI Settings screen shows all three endpoints green on connection-test.
-2. The builder can upload a 6–15 s WAV/MP3/FLAC voice sample in Voice Lab, see an auto-generated reference transcript appear within a few seconds, edit it inline, pick F5-TTS or XTTS v2 as the engine, save the voice with a name, and hear a synth-preview of a stock phrase using the new voice before committing the save.
+1. The AI backend boots, loads Whisper (Phase 0 default) + Silero VAD + one TTS engine (default per Phase 0 outcome — F5, XTTS, or Qwen3-TTS 0.6B-Base), and reports GPU residency < 11 GB in its `/health` response; the Web UI Settings screen shows all three endpoints green on connection-test.
+2. The builder can upload a 6–15 s WAV/MP3/FLAC voice sample in Voice Lab, see an auto-generated reference transcript appear within a few seconds, edit it inline, pick **F5-TTS, XTTS v2, or Qwen3-TTS** as the engine (Qwen3-TTS option hidden if Phase 0 rejected it), save the voice with a name, and hear a synth-preview of a stock phrase using the new voice before committing the save.
 3. The Voice Library lists all saved voices and supports rename, delete (with cascade-or-block handling of character defaults and per-chat overrides), and test-play with custom text.
 4. Assigning a voice as a character's default in the Character Editor persists the reference and surfaces in the Gallery; deleting a referenced voice either reassigns safely or surfaces a clear blocker listing the referents.
 5. Settings exposes save-AI-audio (default ON) and save-mic-audio (default OFF) toggles that the backend respects, plus VAD sensitivity placeholders whose backend wiring is verified in Phase 4.
@@ -209,18 +219,18 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 
 ### Phase 5: Voice Breadth & Unified Thread Polish
 
-**Goal:** Broaden the Phase-4 core — both TTS engines with cold-swap UX, per-chat voice override, saved-audio replay — and close out the unified-thread rendering so text and call turns interleave exactly as DESIGN.md prescribes.
+**Goal:** Broaden the Phase-4 core — all TTS engines (up to three: F5, XTTS, Qwen3-TTS) with cold-swap UX, per-chat voice override, saved-audio replay — and close out the unified-thread rendering so text and call turns interleave exactly as DESIGN.md prescribes.
 
-**Depends on:** Phase 4 (a call feels right with one engine; adding the second engine multiplies bug surface only after the hard semantic work is done).
+**Depends on:** Phase 4 (a call feels right with one engine; adding the second and third engines multiplies bug surface only after the hard semantic work is done).
 
-**Requirements delivered:** REQ-15 (per-chat override verified in a call), REQ-22 (both engines live per voice), REQ-61 (grouped collapsible "Call — Nm Ns" header treatment), REQ-62, REQ-63 (window now spans text + call turns; verified in call-after-text scenarios).
+**Requirements delivered:** REQ-15 (per-chat override verified in a call), REQ-22 (all Phase-0-accepted engines live per voice — 2 or 3), REQ-61 (grouped collapsible "Call — Nm Ns" header treatment), REQ-62, REQ-63 (window now spans text + call turns; verified in call-after-text scenarios).
 
 **Pitfalls owned:**
-- **#7 VRAM (swap path)** — 2–8 s cold-swap between calls with UI feedback ("Switching voice…"); last-used engine cached; swap never mid-call.
+- **#7 VRAM (swap path)** — 2–8 s cold-swap between calls with UI feedback ("Switching voice…"); last-used engine cached; swap never mid-call. Six directed swap paths across three engines (or two, if Qwen3-TTS was rejected at Phase 0). Swap-correctness test matrix scales O(N²).
 - **#20 Audio storage** — atomic temp-rename writes for per-turn Opus blobs, orphan reaper on startup, storage size indicator in Settings.
 
 **Success criteria** (observable, testable):
-1. The builder can assign a voice built on F5-TTS as a character's default and have a call; then switch to a voice built on XTTS v2 for the same character in a different chat and have a call; the cold-swap between calls shows a "Switching voice…" state and completes without OOM.
+1. The builder can assign a voice built on F5-TTS as a character's default and have a call; then switch to a voice built on XTTS v2 (and, if Phase 0 accepted Qwen3-TTS, a third voice on Qwen3-TTS) for the same character in a different chat and have a call; each cold-swap between calls shows a "Switching voice…" state and completes without OOM across all pairwise engine transitions.
 2. A per-chat voice override is settable from the chat header, persists across resume, and shadows the character default for calls in that chat only — the underlying character card is not modified.
 3. Saved AI audio blobs have an inline play button per `ai_speech` turn that replays the exact call audio; the save-AI-audio toggle and save-mic-audio toggle in Settings take effect on the next call and retroactive replay shows "audio not saved" cleanly when toggled off.
 4. A thread that mixes text and call turns renders chronologically with call turns visually distinct (left-rail accent, grouped under a collapsible "Call — Nm Ns" header per DESIGN.md) and the sliding window fed to the LLM mid-call includes both text and call transcripts from recent history.
@@ -298,7 +308,7 @@ Every v1 requirement from `REQUIREMENTS.md` is covered. Phase-0 requirements are
 | REQ-17 | Alternate-greeting picker on v3 cards | 1 |
 | REQ-20 | Voice Lab sample upload (WAV/MP3/FLAC) | 2 |
 | REQ-21 | STT auto-transcript, editable | 2 |
-| REQ-22 | Voice save: name + engine + sample + transcript | 2 (both engines live in 2; in-call usage across engines verified in 5) |
+| REQ-22 | Voice save: name + engine + sample + transcript | 0 (Qwen3-TTS acceptance gate) / 2 (Phase-0-accepted engines live in 2; in-call usage across engines verified in 5) |
 | REQ-23 | Voice Library: list / rename / delete / test-play | 2 |
 | REQ-24 | Voice delete safe against references | 2 |
 | REQ-30 | Chat thread chronological list + streaming LLM output | 1 |
@@ -349,7 +359,7 @@ Every v1 requirement from `REQUIREMENTS.md` is covered. Phase-0 requirements are
 
 5. **Call feel (Phase 4) is where the product either lives or dies.** Phase 4 validates the single line in PROJECT.md that justifies the whole project: "It must feel like an actual phone call with an AI." If Phase 4 doesn't land, nothing after it matters. This is why call feel is validated as early as Phase 4 and not left for the end.
 
-6. **Voice breadth in Phase 5 after Phase 4 proves one engine works.** Doing the hard semantic work with a single engine first prevents multiplying the bug surface during tuning. Cold-swap between calls is an additive feature; it's not the load-bearing path.
+6. **Voice breadth in Phase 5 after Phase 4 proves one engine works.** Doing the hard semantic work with a single engine first prevents multiplying the bug surface during tuning. Cold-swap between calls is an additive feature; it's not the load-bearing path. With three engines (up from two) the swap test matrix scales from 2 paths to 6 — Phase 5 scope was re-checked 2026-04-17 when Qwen3-TTS was added; M remains the right signal.
 
 7. **Mobile hardening last in Phase 6 because iOS quirks are discrete and many can only be verified once the call loop works.** Mobile Safari is on every prior phase's test checklist, but the AirPods / Wake Lock / visibilitychange long tail is its own phase rather than a distraction layered across every feature phase.
 
@@ -359,7 +369,9 @@ Every v1 requirement from `REQUIREMENTS.md` is covered. Phase-0 requirements are
 
 Roadmap-level decisions that remain open after Phase-0 resolves the empirical questions. These are not yet scoped into specific plans.
 
-1. **F5-TTS first-sentence TTFA on the 3060 may exceed the 300 ms budget.** Phase 0 measures. If it does, the Resolved Tension #3 trigger fires and XTTS becomes the v1 default; F5 becomes opt-in per-voice. This flips Phase 2's default engine and affects Phase 5's cold-swap UX emphasis. **Owner: Phase 0 outputs.**
+1. **F5-TTS first-sentence TTFA on the 3060 may exceed the 300 ms budget.** Phase 0 measures. If it does, the Resolved Tension #3 trigger fires and either **XTTS v2** (proven) or **Qwen3-TTS 0.6B-Base** (Apache-2.0 advantage, Phase-0-gated) becomes the v1 default; F5 becomes opt-in per-voice. This flips Phase 2's default engine and affects Phase 5's cold-swap UX emphasis. **Owner: Phase 0 outputs.**
+
+1a. **Qwen3-TTS (added 2026-04-17 as third engine) may fail Phase 0 acceptance on any of four gates**: TTFA ≥400 ms, RTF ≥1, FA2 install failure on Windows, or Spanish-accented-English clone drift. If any gate fails, Qwen3-TTS is feature-flagged off for v1, REQ-22 falls back to two engines, Voice Lab engine picker hides the third option, and `QWEN3-TTS.md` stays as v2+ reference. If all gates pass, the three-engine plan ships as currently documented. **Owner: Phase 0 outputs; see `.planning/research/QWEN3-TTS.md` §7 for conditional triggers.**
 
 2. **Whisper `distil-large-v3 INT8` WER on Spanish-accented English may be >2 pp worse than turbo or FP16.** Phase 0 measures against the builder's own voice. If it is, the Resolved Tension #2 trigger fires and the default STT rung is promoted — which in the FP16 case forces XTTS over F5 (VRAM math). **Owner: Phase 0 outputs.**
 
