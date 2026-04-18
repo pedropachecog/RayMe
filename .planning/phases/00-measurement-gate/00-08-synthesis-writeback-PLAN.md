@@ -2,7 +2,7 @@
 phase: 00-measurement-gate
 plan: 08
 type: execute
-wave: 3
+wave: 4
 depends_on: [02, 03, 04, 05, 06, 07]
 files_modified:
   - .planning/phases/00-measurement-gate/KEY_DECISIONS.md

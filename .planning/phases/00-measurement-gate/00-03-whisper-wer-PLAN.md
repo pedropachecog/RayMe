@@ -445,17 +445,17 @@ wer = jiwer.wer(reference, hypothesis,
        cd .planning/phases/00-measurement-gate/probes
        ../.venv-phase0/Scripts/python.exe -m pytest test_whisper_bench.py -v
        ```
-       Must exit 0 with 7 passing tests (including `test_build_result_schema` + 3 pick_default tests + 3 WER tests, total 7). Fix any failures before proceeding to the measurement task.
+       Must exit 0 with 8 passing tests (1 schema + 4 WER + 3 pick_default = 8 total). Fix any failures before proceeding to the measurement task.
 
     5. Commit all three files.
   </action>
   <verify>
-    <automated>cd .planning/phases/00-measurement-gate/probes &amp;&amp; ../.venv-phase0/Scripts/python.exe -m pytest test_whisper_bench.py -v 2&gt;&amp;1 | tee /tmp/wer_tests.out &amp;&amp; grep -q "7 passed" /tmp/wer_tests.out &amp;&amp; test -f fixtures/reference_transcript.txt &amp;&amp; wc -w &lt; fixtures/reference_transcript.txt | awk '{exit !($1 &gt;= 1000)}'</automated>
+    <automated>cd .planning/phases/00-measurement-gate/probes &amp;&amp; ../.venv-phase0/Scripts/python.exe -m pytest test_whisper_bench.py -v 2&gt;&amp;1 | tee /tmp/wer_tests.out &amp;&amp; grep -q "8 passed" /tmp/wer_tests.out &amp;&amp; test -f fixtures/reference_transcript.txt &amp;&amp; wc -w &lt; fixtures/reference_transcript.txt | awk '{exit !($1 &gt;= 1000)}'</automated>
   </verify>
   <acceptance_criteria>
     - File `.planning/phases/00-measurement-gate/probes/whisper_bench.py` exists with functions `compute_wer`, `pick_default`, `build_result`, `measure_rung`, `main` (grep each).
-    - File `.planning/phases/00-measurement-gate/probes/test_whisper_bench.py` has 7 `def test_*` functions.
-    - Running pytest on the test file under the Phase 0 venv exits 0 with `7 passed`.
+    - File `.planning/phases/00-measurement-gate/probes/test_whisper_bench.py` has 8 `def test_*` functions.
+    - Running pytest on the test file under the Phase 0 venv exits 0 with `8 passed`.
     - File `.planning/phases/00-measurement-gate/probes/fixtures/reference_transcript.txt` exists and contains at least 1000 words (target ~1500) after stripping comment lines.
     - `whisper_bench.py` uses `condition_on_previous_text=False` and `language="en"` in the transcribe call (grep both).
   </acceptance_criteria>
@@ -585,7 +585,7 @@ git status --porcelain | grep -E 'reference_audio\.(wav|mp3|flac)' && echo "FAIL
 - [ ] Each rung has WER (normalized), p50/p95 latency, peak VRAM in results/whisper.json
 - [ ] Exactly one rung marked `default: true` per Resolved Tension #2 logic
 - [ ] Reference transcript is committed (public-domain composition); audio is NOT
-- [ ] Unit tests for WER + default-picker pass 7/7
+- [ ] Unit tests for WER + default-picker pass 8/8
 </success_criteria>
 
 <output>

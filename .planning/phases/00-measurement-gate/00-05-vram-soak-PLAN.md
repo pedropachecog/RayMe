@@ -2,8 +2,8 @@
 phase: 00-measurement-gate
 plan: 05
 type: execute
-wave: 2
-depends_on: [01]
+wave: 3
+depends_on: [01, 03, 04]
 files_modified:
   - .planning/phases/00-measurement-gate/probes/vram_soak.py
   - .planning/phases/00-measurement-gate/probes/test_vram_soak.py
@@ -132,8 +132,9 @@ speech = model(audio_tensor, 16000)  # any 16kHz audio tensor
          .venv-phase0/Scripts/python.exe probes/vram_soak.py --engine xtts  --duration-min 30
          .venv-phase0/Scripts/python.exe probes/vram_soak.py --engine qwen3 --duration-min 30
 
-       Reads the Whisper default from results/whisper.json; falls back to
-       distil-large-v3 if that file does not yet exist (plan 03 may not be done).
+       Reads the Whisper default from results/whisper.json. FAILS LOUDLY
+       (stderr + non-zero exit) if that file does not yet exist — plan 05
+       hard-depends on plan 03's output.
        """
        from __future__ import annotations
        import argparse
@@ -205,14 +206,19 @@ speech = model(audio_tensor, 16000)  # any 16kHz audio tensor
 
 
        def _load_whisper_default() -> tuple[str, str]:
-           """Returns (model_name, compute_type) for the Whisper rung to pair with."""
+           """Returns (model_name, compute_type) for the Whisper rung to pair with.
+           Hard-fails if results/whisper.json is missing — plan 05 depends on plan 03."""
            results = Path(".planning/phases/00-measurement-gate/results/whisper.json")
-           if results.exists():
-               d = json.loads(results.read_text())
-               for r in d.get("rungs", []):
-                   if r.get("default"):
-                       return r["model"], r["compute_type"]
-           return "distil-large-v3", "int8_float16"  # fallback
+           if not results.exists():
+               print(f"ERROR: results/whisper.json missing — plan 03 must complete first.",
+                     file=sys.stderr)
+               sys.exit(2)
+           d = json.loads(results.read_text())
+           for r in d.get("rungs", []):
+               if r.get("default"):
+                   return r["model"], r["compute_type"]
+           print("ERROR: results/whisper.json has no default rung set.", file=sys.stderr)
+           sys.exit(2)
 
 
        def _load_silero():
@@ -445,7 +451,7 @@ speech = model(audio_tensor, 16000)  # any 16kHz audio tensor
     - File `probes/vram_soak.py` exists with `soak`, `detect_growth`, `build_soak_result`, `main` functions.
     - File `probes/test_vram_soak.py` has 5 `def test_*` functions.
     - Pytest exits 0 with `5 passed`.
-    - `vram_soak.py` reads `results/whisper.json` for the default Whisper rung (grep `default_rung` or equivalent logic).
+    - `vram_soak.py` reads `results/whisper.json` for the default Whisper rung AND fails loudly (`sys.exit(2)`) if that file is missing — no silent fallback (grep `sys.exit(2)`).
   </acceptance_criteria>
   <done>Soak harness + unit-tested growth detector ready; awaiting the three 30-minute runs.</done>
 </task>

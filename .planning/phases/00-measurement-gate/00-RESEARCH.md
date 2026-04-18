@@ -464,32 +464,37 @@ def run_soak(engine_name: str, engine_instance, soak_minutes=30):
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Does the builder have a separate RTX 3060 box?**
    - What we know: The `pedro-2023` machine has an RTX 4090, 24 GB VRAM. The requirements, STACK.md, and QWEN3-TTS.md all assume a 3060.
    - What's unclear: Whether this is an upgrade (no 3060 exists) or whether the 3060 is a separate "AI backend" machine.
    - Recommendation: Record this as "hardware TBD" in KEY_DECISIONS.md. If only the 4090 exists, the VRAM budgets in STACK.md are far more comfortable than planned, and the Qwen3-TTS 1.7B option becomes viable even without FA2.
+   - **RESOLVED:** measured during phase; the dev machine is RTX 4090 24GB. The 11 GB soak-budget gate in plan 05 generalizes the measurement to the 3060 12GB user class. Any separate 3060 box is out of scope for this spike — documented in KEY_DECISIONS.md §Hardware Note.
 
 2. **Is the builder's iPhone on the Tailscale tailnet?**
    - What we know: `tailscale status` shows `pixel-10-pro` (Android) and `siss-macbook-pro` but no iPhone.
    - What's unclear: Whether the iPhone simply wasn't online at research time, or whether it isn't enrolled.
    - Recommendation: Test both Tailscale path (if iPhone gets enrolled) and mkcert path; document whichever works as the standard procedure.
+   - **RESOLVED:** deferred empirical outcome of plan 02. Plan 02 attempts Tailscale path first (requires iPhone on tailnet); if iPhone absent from tailnet, falls back to mkcert + iOS profile install. Documented in KEY_DECISIONS.md §1 HTTPS.
 
 3. **Is Python 3.13 (system default) acceptable for any measurement scripts?**
    - What we know: Python 3.13.1 is the system default. PyTorch 2.6.0+cu124 is installed in 3.13. Pipecat 1.0 requires 3.11+.
    - What's unclear: Whether F5-TTS, coqui-tts, and qwen-tts install cleanly on 3.13.
    - Recommendation: Use Python 3.11 (via `py -3.11`) for all AI backend measurement scripts. Python 3.13 can serve as the web/tooling environment but should not be the AI inference env for v1.
+   - **RESOLVED:** Python 3.11.5 selected; 3.12/3.13 rejected due to package compatibility (faster-whisper, f5-tts, coqui-tts pinned to 3.11). Plan 01 pins to 3.11 via `py -3.11 -m venv .venv-phase0`.
 
 4. **Does flash-attn build successfully on this machine?**
    - What we know: No prebuilt wheel was found (download started, then source build began). CUDA toolkit 12.8 is installed. The RTX 4090 is Ada Lovelace (sm_89) — FA2 supports sm_80+.
    - What's unclear: Whether the MSVC build toolchain is present and compatible.
    - Recommendation: This is exactly what Phase 0 success criterion #6 measures. Proceed with the build and record the outcome.
+   - **RESOLVED:** deferred empirical outcome of plan 07. Plan 07 runs `pip install flash-attn --no-build-isolation` with 30-min build timeout, classifies failure modes, and writes results/fa2_install.json. Outcome gates Qwen3-TTS 1.7B adoption in plan 08 synthesis.
 
 5. **What LLM is loaded in llama-server for the cancel probe?**
    - What we know: `llama-server` is installed. No GGUF models were found in the `~/.cache` quick scan (the search timed out).
    - What's unclear: Whether a model is locally available or needs to be downloaded before the cancel probe.
    - Recommendation: Use Ollama with any available model (e.g., `ollama run llama3.2`) for the cancel probe if a GGUF is not at hand; Ollama is installed and the probe verifies cancel semantics, not model quality.
+   - **RESOLVED:** plan 06 defaults to ollama (simpler API per research); concrete model choice is documented as the first runtime step (pull whichever small instruct model is available — e.g., llama3.2:3b — so the stream cancel behavior is model-agnostic). llama-server documented as fallback.
 
 ---
 
