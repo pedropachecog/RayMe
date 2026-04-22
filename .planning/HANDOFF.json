@@ -118,8 +118,8 @@
     },
     {
       "id": 62,
-      "name": "Install a local LLM server on OMEN-PC and run the cancel probe against it",
-      "status": "blocked_on_builder"
+      "name": "Run the cancel probe against the existing LLM endpoint at 192.168.1.190:8001 from a shell that can observe its GPU",
+      "status": "blocked_on_gpu_observation_path"
     },
     {
       "id": 81,
@@ -129,14 +129,14 @@
   ],
   "blockers": [
     "Android browser verification is still pending for 00-02 Task 2.",
-    "Local LLM server install is still pending for 00-06 Task 2.",
+    "00-06 no longer needs a new server install, but the cancel probe still needs to run from a shell that can observe the GPU used by the existing endpoint at 192.168.1.190:8001.",
     "Phase 00 writeback (00-08) is blocked until 00-02, 00-05, and 00-06 provide their missing inputs.",
     "No measured TTS engine clears the v1 latency budget on OMEN-PC: F5 is 517.3 ms via simulated chunk streaming, XTTS native streaming is 534.3 ms, and Qwen3 eager baseline is 5626.8 ms.",
     "FlashAttention 2 still fails to build on OMEN-PC, so Qwen3 remains an eager-attention baseline only."
   ],
   "human_actions_pending": [
     "Run the HTTPS probe from the actual Android device and confirm trusted cert + isSecureContext for 00-02 Task 2.",
-    "Install or provide a local OpenAI-compatible LLM server on OMEN-PC (prefer Ollama + a small model) for 00-06 Task 2."
+    "Keep the existing OpenAI-compatible server at 192.168.1.190:8001 running and provide the execution path that can observe its GPU with nvidia-smi during 00-06 Task 2."
   ],
   "decisions": [
     {
@@ -160,14 +160,19 @@
       "phase": "00"
     },
     {
+      "decision": "Use `http://192.168.1.190:8001/v1` with model `unsloth/Qwen3.5-27B` as the current Phase 0 LLM endpoint for plan 00-06.",
+      "rationale": "The endpoint is now reachable from the current workspace, returns healthy status, and exposes an OpenAI-compatible models list.",
+      "phase": "00"
+    },
+    {
       "decision": "Keep F5-TTS as the current v1 default candidate while retaining XTTS as compatibility fallback.",
       "rationale": "No engine meets the target budget, and the latest OMEN-PC rerun still leaves F5 with the best TTFA while XTTS remains the only native streamer.",
       "phase": "00"
     }
   ],
   "uncommitted_files": [],
-  "next_action": "If continuing autonomous work, run ./scripts/bootstrap-rayme-ssh.sh restore and execute 00-05-vram-soak on OMEN-PC so Phase 00 has the missing 3060 budget data. In parallel or before final writeback, the builder still needs to complete Android HTTPS verification for 00-02 and install a local LLM server for 00-06.",
-  "context_notes": "00-07.1 is now complete. The TTS probe and matrix explicitly label backend support: F5=not_applicable, XTTS=not_applicable, Qwen3=eager baseline with flash_attention_2 unavailable and sdpa not supported by the current probe. Fresh OMEN-PC rerun metrics are F5 517.3 ms / 0.388 RTF / 1990.2 MB, XTTS 534.3 ms / 0.59 RTF / 1897.6 MB, Qwen3 5626.8 ms / 2.705 RTF / 2509.1 MB. Remote unit tests for test_tts_ttfa.py now pass at 12/12 in the Phase 0 backend venv. 00-08 must cite the matrix instead of describing Qwen3 as an unlabeled result.",
+  "next_action": "If continuing autonomous work, run ./scripts/bootstrap-rayme-ssh.sh restore and execute 00-05-vram-soak on OMEN-PC so Phase 00 has the missing 3060 budget data. In parallel or before final writeback, the builder still needs to complete Android HTTPS verification for 00-02 and provide the GPU-observable execution path for 00-06 against `http://192.168.1.190:8001/v1`.",
+  "context_notes": "00-07.1 is now complete. The TTS probe and matrix explicitly label backend support: F5=not_applicable, XTTS=not_applicable, Qwen3=eager baseline with flash_attention_2 unavailable and sdpa not supported by the current probe. Fresh OMEN-PC rerun metrics are F5 517.3 ms / 0.388 RTF / 1990.2 MB, XTTS 534.3 ms / 0.59 RTF / 1897.6 MB, Qwen3 5626.8 ms / 2.705 RTF / 2509.1 MB. Remote unit tests for test_tts_ttfa.py now pass at 12/12 in the Phase 0 backend venv. 00-08 must cite the matrix instead of describing Qwen3 as an unlabeled result. The Phase 0 LLM endpoint is now known: `http://192.168.1.190:8001/v1`, health OK, model `unsloth/Qwen3.5-27B`, OpenAI-compatible, `owned_by: llamacpp`.",
   "incident": {
     "severity": "SEV-1",
     "summary": "Phase 0 execution previously ran on the wrong machine and lost SSH persistence, forcing repeated recovery loops.",

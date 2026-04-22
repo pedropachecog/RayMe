@@ -11,12 +11,12 @@ files_modified:
 autonomous: false
 requirements: []
 user_setup:
-  - service: ollama-model
-    why: "The cancel probe needs a local LLM to stream against. Re-research found neither ollama nor llama-server installed on the backend."
+  - service: existing-llm-server
+    why: "A reachable OpenAI-compatible server already exists at `http://192.168.1.190:8001/v1` and exposes `unsloth/Qwen3.5-27B`. The remaining requirement is to keep that server running while the cancel probe executes and to run GPU-idle observation from the host that actually owns the server GPU."
     env_vars: []
     dashboard_config:
-      - task: "Install a local OpenAI-compatible server first. Prefer Ollama if you want the simpler path: install it, start it, and pull a small model like `llama3.2:3b`. Otherwise install/provide `llama-server` plus a GGUF model."
-        location: "Any terminal"
+      - task: "Keep the existing LLM server at `192.168.1.190:8001` running during the cancel probe, and run the probe from a shell that can observe the server GPU with `nvidia-smi`."
+        location: "The machine at 192.168.1.190 (or another shell with visibility into that GPU)"
 
 must_haves:
   truths:
@@ -65,17 +65,25 @@ Output: `probes/llm_cancel.py` + `results/llm_cancel.json` with per-trial metric
 @.planning/research/PITFALLS.md
 
 <interfaces>
-From 00-RESEARCH.md §Standard Stack: neither `ollama` nor `llama-server` is installed on the backend today. Planning guidance remains: **prefer Ollama** if you want the simpler install + OpenAI-compatible API path, but support llama-server as the alternative if that is what the builder chooses to install.
+Updated runtime fact: a reachable OpenAI-compatible endpoint now exists at `http://192.168.1.190:8001/v1`.
+
+Verified from the current workspace on 2026-04-22:
+- `GET /health` → `{"status":"ok"}`
+- `GET /v1/models` includes `unsloth/Qwen3.5-27B`
+- The API responds to `POST /v1/chat/completions`
+
+The server advertises `owned_by: "llamacpp"` in `/v1/models`, so treat this as an existing llama.cpp-compatible OpenAI endpoint rather than planning around a fresh Ollama install.
 
 Execution host for this plan is the real backend `OMEN-PC` at `192.168.1.199`, reached over SSH. Do NOT run the server-install or GPU-idle probe commands from the local Codex workstation or a local WSL shell.
 
-Ollama OpenAI-compatible endpoint:
-- Base URL: `http://localhost:11434/v1`
+Chosen OpenAI-compatible endpoint for Phase 0 probing:
+- Base URL: `http://192.168.1.190:8001/v1`
+- Model: `unsloth/Qwen3.5-27B`
 - Path: `/chat/completions`
 - Streaming: `{"stream": true}`
 - Works with httpx, openai-python, etc.
-- To start: `ollama serve` (daemon)
-- To pull a model: `ollama pull llama3.2:3b` (~2 GB, small, fast, streams rapidly)
+
+If this endpoint later disappears, only then fall back to provisioning another local server (Ollama or llama-server).
 
 Cancel pattern (00-RESEARCH.md §Architecture Patterns Pattern 3):
 ```python
