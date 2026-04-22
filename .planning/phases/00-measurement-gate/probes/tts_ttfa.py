@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import importlib.machinery
 import json
 import os
 import subprocess
 import sys
 import traceback
+import types
 from pathlib import Path
 from typing import Any
 
@@ -73,10 +75,74 @@ def qwen_gate_disposition(
     return {"accepted": True, "reasons": ["ttfa_ok", "rtf_ok", "accent_ok"]}
 
 
+def _maybe_cuda_sync(torch_module: Any) -> None:
+    if torch_module.cuda.is_available():
+        torch_module.cuda.synchronize()
+
+
+def _install_f5_runtime_shims() -> None:
+    """Avoid Windows-only F5 import crashes from training deps and librosa/numba."""
+    import numpy as np
+    import torchaudio.functional as audio_functional
+
+    def mel_filter(
+        *, sr: int, n_fft: int, n_mels: int, fmin: float = 0, fmax: float | None = None, **_: Any
+    ) -> np.ndarray:
+        filter_bank = audio_functional.melscale_fbanks(
+            n_freqs=(int(n_fft) // 2) + 1,
+            f_min=float(fmin or 0),
+            f_max=float((sr / 2) if fmax is None else fmax),
+            n_mels=int(n_mels),
+            sample_rate=int(sr),
+            norm="slaney",
+            mel_scale="slaney",
+        )
+        return filter_bank.transpose(0, 1).cpu().numpy().astype(np.float32)
+
+    librosa_mod = types.ModuleType("librosa")
+    librosa_mod.__path__ = []
+    librosa_mod.__spec__ = importlib.machinery.ModuleSpec(
+        "librosa",
+        loader=None,
+        is_package=True,
+    )
+    filters_mod = types.ModuleType("librosa.filters")
+    filters_mod.__spec__ = importlib.machinery.ModuleSpec(
+        "librosa.filters",
+        loader=None,
+        is_package=False,
+    )
+    filters_mod.mel = mel_filter
+    librosa_mod.filters = filters_mod
+    sys.modules["librosa"] = librosa_mod
+    sys.modules["librosa.filters"] = filters_mod
+
+    trainer_mod = types.ModuleType("f5_tts.model.trainer")
+    trainer_mod.__spec__ = importlib.machinery.ModuleSpec(
+        "f5_tts.model.trainer",
+        loader=None,
+        is_package=False,
+    )
+
+    class Trainer:  # pragma: no cover - runtime shim only
+        pass
+
+    trainer_mod.Trainer = Trainer
+    sys.modules["f5_tts.model.trainer"] = trainer_mod
+
+
 def measure_f5(ref_audio: str, ref_text: str, target_text: str, sample_out: Path) -> dict[str, Any]:
+    import time
+
+    import numpy as np
     import torch
     import soundfile as sf
+    import torchaudio
+
+    _install_f5_runtime_shims()
+
     from f5_tts.api import F5TTS
+    from f5_tts.infer.utils_infer import infer_batch_process, preprocess_ref_audio_text
 
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
@@ -85,12 +151,41 @@ def measure_f5(ref_audio: str, ref_text: str, target_text: str, sample_out: Path
     model = F5TTS()
     warmup_cuda()
     _ = model.infer(ref_audio, ref_text, "Warm.", nfe_step=7)
-    torch.cuda.synchronize()
+    _maybe_cuda_sync(torch)
+
+    prepared_ref_audio, prepared_ref_text = preprocess_ref_audio_text(
+        ref_audio,
+        ref_text,
+        show_info=lambda *_args, **_kwargs: None,
+    )
+    ref_wave, ref_sample_rate = torchaudio.load(prepared_ref_audio)
+    chunks: list[np.ndarray] = []
+    sample_rate = model.target_sample_rate
+    first_chunk_s: float | None = None
 
     with Timer() as timer:
-        wav, sample_rate, _ = model.infer(ref_audio, ref_text, target_text, nfe_step=7)
-        torch.cuda.synchronize()
+        started = time.perf_counter()
+        for chunk, sample_rate in infer_batch_process(
+            (ref_wave, ref_sample_rate),
+            prepared_ref_text,
+            [target_text],
+            model.ema_model,
+            model.vocoder,
+            mel_spec_type=model.mel_spec_type,
+            progress=None,
+            nfe_step=7,
+            cfg_strength=2.0,
+            sway_sampling_coef=-1.0,
+            speed=1.0,
+            device=model.device,
+            streaming=True,
+        ):
+            if first_chunk_s is None:
+                first_chunk_s = time.perf_counter() - started
+            chunks.append(np.asarray(chunk, dtype=np.float32).flatten())
+        _maybe_cuda_sync(torch)
 
+    wav = np.concatenate(chunks) if chunks else np.zeros(1, dtype=np.float32)
     synthesis_s = timer.elapsed_s
     audio_duration_s = len(wav) / float(sample_rate)
     sample_out.parent.mkdir(parents=True, exist_ok=True)
@@ -102,14 +197,17 @@ def measure_f5(ref_audio: str, ref_text: str, target_text: str, sample_out: Path
 
     return {
         "engine": "f5",
-        "mode": "non_streaming",
-        "ttfa_ms": round(synthesis_s * 1000, 1),
+        "mode": "simulated_streaming",
+        "streaming_support": "simulated",
+        "true_streaming": False,
+        "ttfa_ms": round((first_chunk_s or synthesis_s) * 1000, 1),
         "rtf": round(compute_rtf(audio_duration_s, synthesis_s), 3),
         "audio_duration_s": round(audio_duration_s, 3),
         "synthesis_time_s": round(synthesis_s, 3),
         "peak_vram_mb": round(peak_vram_mb, 1),
         "sample_rate": int(sample_rate),
         "output_wav": str(sample_out),
+        "streaming_notes": "F5-TTS slices generated audio into chunks after synthesis; no true incremental decode.",
     }
 
 
@@ -119,6 +217,18 @@ def measure_xtts(ref_audio: str, target_text: str, sample_out: Path) -> dict[str
     import numpy as np
     import soundfile as sf
     import torch
+
+    local_appdata = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local"))
+    roaming_appdata = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
+    tts_home = Path(os.environ.get("TTS_HOME", local_appdata / "rayme-tts-home"))
+    local_appdata.mkdir(parents=True, exist_ok=True)
+    roaming_appdata.mkdir(parents=True, exist_ok=True)
+    tts_home.mkdir(parents=True, exist_ok=True)
+    os.environ.setdefault("LOCALAPPDATA", str(local_appdata))
+    os.environ.setdefault("APPDATA", str(roaming_appdata))
+    os.environ.setdefault("XDG_DATA_HOME", str(local_appdata))
+    os.environ.setdefault("TTS_HOME", str(tts_home))
+
     from TTS.api import TTS
 
     torch.cuda.empty_cache()
@@ -126,48 +236,55 @@ def measure_xtts(ref_audio: str, target_text: str, sample_out: Path) -> dict[str
 
     print("[tts] Loading XTTS v2...", flush=True)
     model = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to("cuda")
+    xtts_model = model.synthesizer.tts_model
     warmup_cuda()
 
     chunks: list[np.ndarray] = []
-    sample_rate = 24000
+    sample_rate = int(getattr(model.synthesizer, "output_sample_rate", 24000))
     ttfa_ms: float
     synthesis_s: float
     streaming_ok = False
+    streaming_error: str | None = None
 
     try:
         _ = model.tts(text="Warm.", speaker_wav=ref_audio, language="en")
-        torch.cuda.synchronize()
+        _maybe_cuda_sync(torch)
 
-        if hasattr(model, "tts_stream"):
+        if hasattr(xtts_model, "inference_stream"):
             first_chunk_s: float | None = None
             with Timer() as timer:
                 started = time.perf_counter()
-                for chunk in model.tts_stream(
+                gpt_cond_latent, speaker_embedding = xtts_model.get_conditioning_latents(
+                    audio_path=ref_audio,
+                )
+                for chunk in xtts_model.inference_stream(
                     text=target_text,
-                    speaker_wav=ref_audio,
                     language="en",
+                    gpt_cond_latent=gpt_cond_latent,
+                    speaker_embedding=speaker_embedding,
                 ):
                     if first_chunk_s is None:
                         first_chunk_s = time.perf_counter() - started
                     if isinstance(chunk, torch.Tensor):
                         chunk = chunk.detach().cpu().numpy()
                     chunks.append(np.asarray(chunk, dtype=np.float32).flatten())
-                torch.cuda.synchronize()
+                _maybe_cuda_sync(torch)
             ttfa_ms = round((first_chunk_s or timer.elapsed_s) * 1000, 1)
             synthesis_s = timer.elapsed_s
             streaming_ok = True
         else:
             with Timer() as timer:
                 wav = model.tts(text=target_text, speaker_wav=ref_audio, language="en")
-                torch.cuda.synchronize()
+                _maybe_cuda_sync(torch)
             ttfa_ms = round(timer.elapsed_s * 1000, 1)
             synthesis_s = timer.elapsed_s
             chunks = [np.asarray(wav, dtype=np.float32).flatten()]
     except Exception:
+        streaming_error = traceback.format_exc(limit=8)
         traceback.print_exc()
         with Timer() as timer:
             wav = model.tts(text=target_text, speaker_wav=ref_audio, language="en")
-            torch.cuda.synchronize()
+            _maybe_cuda_sync(torch)
         ttfa_ms = round(timer.elapsed_s * 1000, 1)
         synthesis_s = timer.elapsed_s
         chunks = [np.asarray(wav, dtype=np.float32).flatten()]
@@ -184,6 +301,8 @@ def measure_xtts(ref_audio: str, target_text: str, sample_out: Path) -> dict[str
     return {
         "engine": "xtts",
         "mode": "streaming" if streaming_ok else "non_streaming_fallback",
+        "streaming_support": "native" if streaming_ok else "native_fallback",
+        "true_streaming": streaming_ok,
         "fallback_to_non_streaming": not streaming_ok,
         "ttfa_ms": ttfa_ms,
         "rtf": round(compute_rtf(audio_duration_s, synthesis_s), 3),
@@ -192,6 +311,7 @@ def measure_xtts(ref_audio: str, target_text: str, sample_out: Path) -> dict[str
         "peak_vram_mb": round(peak_vram_mb, 1),
         "sample_rate": sample_rate,
         "output_wav": str(sample_out),
+        "streaming_error": streaming_error,
     }
 
 
@@ -222,16 +342,18 @@ def measure_qwen3(
         text="Warm.",
         voice_clone_prompt=prompt,
         language="English",
+        non_streaming_mode=False,
     )
-    torch.cuda.synchronize()
+    _maybe_cuda_sync(torch)
 
     with Timer() as timer:
         wavs, sample_rate = model.generate_voice_clone(
             text=target_text,
             voice_clone_prompt=prompt,
             language="English",
+            non_streaming_mode=False,
         )
-        torch.cuda.synchronize()
+        _maybe_cuda_sync(torch)
 
     synthesis_s = timer.elapsed_s
     wav = wavs[0] if hasattr(wavs, "__len__") and len(wavs) > 0 else wavs
@@ -248,7 +370,9 @@ def measure_qwen3(
 
     return {
         "engine": "qwen3",
-        "mode": "non_streaming",
+        "mode": "simulated_streaming_text",
+        "streaming_support": "simulated",
+        "true_streaming": False,
         "variant": "0.6B-Base",
         "flash_attention": "eager",
         "ttfa_ms": round(synthesis_s * 1000, 1),
@@ -258,6 +382,7 @@ def measure_qwen3(
         "peak_vram_mb": round(peak_vram_mb, 1),
         "sample_rate": int(sample_rate),
         "output_wav": str(sample_out),
+        "streaming_notes": "Qwen3-TTS non_streaming_mode=False simulates streaming text input but still returns audio after full generation.",
     }
 
 
@@ -347,6 +472,10 @@ def _read_reference_text(path: Path) -> str:
     return "\n".join(lines).strip()
 
 
+def _read_target_text(path: Path) -> str:
+    return " ".join(path.read_text(encoding="utf-8").split())
+
+
 def _default_reason(default: str | None, engines: dict[str, dict[str, Any]]) -> str:
     if default is None:
         return "All engines failed"
@@ -367,6 +496,10 @@ def main() -> int:
         "--target-text",
         default="Hey, got it.",
         help="Short target utterance to synthesize",
+    )
+    parser.add_argument(
+        "--target-text-file",
+        help="Optional path to a UTF-8 text file whose contents override --target-text",
     )
     parser.add_argument("--output", help="Results JSON path")
     parser.add_argument(
@@ -400,6 +533,13 @@ def main() -> int:
         return 2
 
     ref_text = _read_reference_text(ref_text_path)
+    target_text = args.target_text
+    if args.target_text_file:
+        target_text_path = Path(args.target_text_file)
+        if not target_text_path.exists():
+            print(f"ERROR: target-text-file missing: {target_text_path}", file=sys.stderr)
+            return 2
+        target_text = _read_target_text(target_text_path)
     OUTPUT_SAMPLE_DIR.mkdir(parents=True, exist_ok=True)
 
     if args.run_engine:
@@ -410,7 +550,7 @@ def main() -> int:
             args.run_engine,
             str(ref_audio),
             ref_text,
-            args.target_text,
+            target_text,
             Path(args.sample_out),
         )
         Path(args.engine_output).write_text(json.dumps(metrics, indent=2), encoding="utf-8")
@@ -428,7 +568,7 @@ def main() -> int:
                 name,
                 ref_audio,
                 ref_text_path,
-                args.target_text,
+                target_text,
                 sample_out,
             )
             if engines[name].get("ttfa_ms") is not None:
@@ -456,7 +596,7 @@ def main() -> int:
     qwen_gate = qwen_gate_disposition(engines.get("qwen3", {}), args.accent_ok)
     payload = {
         "probe": "tts_ttfa",
-        "target_text": args.target_text,
+        "target_text": target_text,
         "ref_audio": str(ref_audio),
         "engines": engines,
         "v1_default": default,

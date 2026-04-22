@@ -3,7 +3,7 @@ phase: 00-measurement-gate
 plan: 08
 type: execute
 wave: 4
-depends_on: [02, 03, 04, 05, 06, 07]
+depends_on: [02, 03, 04, 05, 06, 07, "07.1"]
 files_modified:
   - .planning/phases/00-measurement-gate/KEY_DECISIONS.md
   - .planning/phases/00-measurement-gate/results/phase0_summary.json
@@ -66,6 +66,7 @@ Output: `KEY_DECISIONS.md` (human-readable), `results/phase0_summary.json` (mach
 @.planning/phases/00-measurement-gate/results/vram_soak_qwen3.json
 @.planning/phases/00-measurement-gate/results/llm_cancel.json
 @.planning/phases/00-measurement-gate/results/fa2_install.json
+@.planning/phases/00-measurement-gate/results/tts_attention_matrix.json
 @.planning/ROADMAP.md
 @.planning/REQUIREMENTS.md
 
@@ -85,6 +86,10 @@ The synthesis must resolve every quantitative cascade trigger from the roadmap:
 **Qwen3-TTS v1 disposition (QWEN3-TTS.md §7):**
 - Accepted if: `tts_ttfa.json["qwen_gate"]["accepted"] == true` AND `vram_soak_qwen3.json["fits_3060_budget"] == true` AND (optionally) `fa2_install.json["installed"] == true` if 1.7B is desired.
 - Rejected otherwise. When rejected: REQ-22 falls back to two engines, Voice Lab hides the Qwen option.
+
+**TTS optimization backend labeling:**
+- `tts_attention_matrix.json` is the source of truth for which backend was actually measured per engine (`eager`, `sdpa`, `flash_attention_2`, `not_supported`, `not_applicable`).
+- The writeback must not present Qwen3 eager-baseline numbers as if they were FlashAttention-optimized results.
 
 **FA2 / Qwen3-TTS 1.7B:**
 - 1.7B eligible iff `fa2_install.json["qwen17b_recommended"] == true`.

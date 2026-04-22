@@ -10,24 +10,27 @@ This addendum exists so the executor can use the correct backend access details 
 - Real backend LAN IP: `192.168.1.199`
 - Real SSH user: `rayme-ssh`
 - SSH/access details file: `.planning/phases/00-measurement-gate/BACKEND-SSH-199.md`
-- Durable private key path: `/home/agent/.ssh/rayme_omen_phase0_ed25519`
-- Durable public key path: `/home/agent/.ssh/rayme_omen_phase0_ed25519.pub`
+- Canonical persisted private key path: `.local/phase0-ssh/rayme_omen_phase0_ed25519`
+- Canonical persisted public key path: `.local/phase0-ssh/rayme_omen_phase0_ed25519.pub`
+- Runtime bootstrap script: `./scripts/bootstrap-rayme-ssh.sh`
 - Preferred local alias: `rayme-ssh`
 
 Do not probe the local Codex workstation or the old `pedro-2023` machine.
 Do not store persistent keys or SSH state in `/tmp`.
+Do not assume `/home/agent/.ssh` survives a fresh `containme` session.
 
 ## Executor Instruction
 
 Before doing any more backend probing or Phase 0 execution work:
 
 1. Read `.planning/phases/00-measurement-gate/BACKEND-SSH-199.md`
-2. Verify the durable key exists at `/home/agent/.ssh/rayme_omen_phase0_ed25519`
-3. Use the exact verified command from that file, or the `rayme-ssh` alias if local config exists
-4. Verify remote output includes `OMEN-PC`, `omen-pc\rayme-ssh`, `Python 3.10.8`, and `NVIDIA GeForce RTX 3060, 12288 MiB, 560.94`
-5. Continue Phase 0 work against `192.168.1.199`
+2. Verify the canonical repo-local key exists at `.local/phase0-ssh/rayme_omen_phase0_ed25519`
+3. Run `./scripts/bootstrap-rayme-ssh.sh restore`
+4. Use the exact verified command from that file, or the `rayme-ssh` alias once the restore step succeeds
+5. Verify remote output includes `OMEN-PC`, `omen-pc\rayme-ssh`, `Python 3.10.8`, and `NVIDIA GeForce RTX 3060, 12288 MiB, 560.94`
+6. Continue Phase 0 work against `192.168.1.199`
 
-If step 2 fails because the key file is missing locally, stop and restore that exact key path. Do not generate a new key unless the user explicitly decides to rotate credentials.
+If step 2 fails because the repo-local key is missing, stop and restore that exact key path on the bind-mounted repo. Do not generate a new key unless the user explicitly decides to rotate credentials.
 
 ## Phase 0 Reality Check
 

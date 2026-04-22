@@ -56,6 +56,8 @@ Output: `results/fa2_install.json` with installed flag, version, build_duration_
 <interfaces>
 From 00-RESEARCH.md §Code Examples → FlashAttention 2 Install and Verify:
 
+Execution host for this plan is the real backend `OMEN-PC` at `192.168.1.199`, reached over SSH. Do NOT attempt the Windows build/install steps from the local Codex workstation or a local WSL shell.
+
 ```bash
 # On the Phase 0 venv after plan 01 installs Python 3.11 + torch
 # Re-research note: the host currently exposes nvcc 11.7 and no cl.exe on PATH

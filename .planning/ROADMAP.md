@@ -73,12 +73,12 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 **Success criteria** (observable, testable):
 1. The builder can load `https://rayme.local` on their iPhone with no cert warnings and `window.isSecureContext === true`, following a documented one-time setup procedure.
 2. A measurement rig has logged WER, latency, and peak VRAM for `distil-large-v3 INT8`, `large-v3-turbo INT8`, and `large-v3 FP16` on a 10-minute read-aloud of the builder's Spanish-accented English voice, and the team has picked a default rung.
-3. **TTS TTFA on the actual 3060** measured for: (a) F5-TTS with 7-step Sway sampling on a 3–5 word acknowledgment; (b) XTTS v2 first-chunk streaming; (c) Qwen3-TTS 0.6B-Base with FA2. If F5 TTFA >400 ms, XTTS or Qwen3-TTS is promoted to the v1 default (Resolved Tension #3 trigger). **Qwen3-TTS acceptance gate**: promoted to v1 third-engine status if TTFA <400 ms AND RTF <1 AND 30-min soak <11 GB AND builder's subjective listening test on Spanish-accented-English clone is acceptable; otherwise feature-flagged off for v1.
+3. **TTS TTFA on the actual 3060** measured for: (a) F5-TTS with 7-step Sway sampling on a 3–5 word acknowledgment; (b) XTTS v2 first-chunk streaming; (c) Qwen3-TTS 0.6B-Base with the actual attention backend explicitly labeled (`eager`, `sdpa`, or `flash_attention_2` when available). If F5 TTFA >400 ms, XTTS or Qwen3-TTS is promoted to the v1 default (Resolved Tension #3 trigger). **Qwen3-TTS acceptance gate**: promoted to v1 third-engine status if TTFA <400 ms AND RTF <1 AND 30-min soak <11 GB AND builder's subjective listening test on Spanish-accented-English clone is acceptable; otherwise feature-flagged off for v1.
 4. A 30-minute cycling soak test of `{Whisper default + Silero + one TTS engine}` stays under 11 GB peak VRAM and shows no unbounded growth — run once per engine: F5, XTTS, Qwen3-TTS 0.6B-Base (and 1.7B-Base if FA2 installs cleanly on Windows).
 5. A 20-line LLM-cancel probe verifies that closing a streaming Chat Completions request to the chosen local LLM server causes GPU work to drop to idle within ~200 ms, logged in `nvidia-smi` output.
 6. **FlashAttention 2 install verified** on the builder's Windows 11 + Python 3.11/3.12 + CUDA 12.1 + RTX 3060 (Ampere sm_86). If install fails, Qwen3-TTS adoption is restricted to 0.6B-Base only (1.7B without FA2 blows the VRAM budget).
 
-**Plans:** 8 plans
+**Plans:** 9 plans
 - [ ] 00-01-wave0-setup-PLAN.md - Python 3.11 venv, pinned Phase 0 packages, Whisper weight cache, probes/ scaffolding + bench_utils (Wave 1)
 - [ ] 00-02-https-iphone-PLAN.md - HTTPS on iPhone via Tailscale (primary) or mkcert (fallback), reproducible doc (Wave 2)
 - [ ] 00-03-whisper-wer-PLAN.md - Whisper WER/latency/VRAM across 3 rungs on builder voice, pick default rung (Wave 2)
@@ -86,6 +86,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 - [ ] 00-05-vram-soak-PLAN.md - 30-min VRAM soak per TTS engine F5/XTTS/Qwen3-0.6B (Wave 2)
 - [ ] 00-06-llm-cancel-PLAN.md - Streaming LLM cancel probe with nvidia-smi GPU-idle polling, p50 (Wave 2)
 - [ ] 00-07-fa2-install-PLAN.md - FlashAttention 2 install verification (gates Qwen3-1.7B eligibility) (Wave 2)
+- [ ] 00-07.1-attention-backend-matrix-PLAN.md - Benchmark per-engine optimization backends (`eager` / `sdpa` / `flash_attention_2` where supported) and separate no-FA2 baselines from optimized runs before final TTS writeback (Wave 3) (INSERTED)
 - [ ] 00-08-synthesis-writeback-PLAN.md - Key Decisions roll-up + PROJECT.md/STATE.md writeback (Wave 3)
 
 **UI hint:** no

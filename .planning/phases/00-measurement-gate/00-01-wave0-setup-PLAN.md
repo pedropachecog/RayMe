@@ -76,6 +76,7 @@ Output: A runnable `.venv-phase0/` venv; `requirements-phase0.txt` pinning every
 <interfaces>
 Key facts the executor must use (already verified in 00-RESEARCH.md):
 
+- Execution host for this plan is the real backend `OMEN-PC` at `192.168.1.199`, reached over SSH. Do NOT run the host-level setup commands from the local Codex workstation or a local WSL shell.
 - The backend currently has only Python 3.10.8. `py -3.11` is NOT available yet. Install Python 3.11 first, then use `py -3.11` for the venv. Do NOT use the system Python 3.10 for the AI measurement environment.
 - PyTorch is NOT installed on the backend. Install a CUDA-enabled torch build inside the venv and record the exact resolved versions in `setup_install.json`.
 - Pinned package versions (all verified from PyPI on 2026-04-18):

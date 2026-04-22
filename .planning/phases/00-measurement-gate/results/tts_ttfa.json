@@ -5,34 +5,52 @@
   "engines": {
     "f5": {
       "engine": "f5",
-      "ttfa_ms": null,
-      "rtf": null,
-      "error": "subprocess_exit_3221225477",
-      "stderr": "C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\torch\\cuda\\__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.\n  import pynvml  # type: ignore[import]\nC:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\pydub\\utils.py:170: RuntimeWarning: Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work\n  warn(\"Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work\", RuntimeWarning)"
+      "mode": "simulated_streaming",
+      "streaming_support": "simulated",
+      "true_streaming": false,
+      "ttfa_ms": 530.3,
+      "rtf": 0.398,
+      "audio_duration_s": 1.333,
+      "synthesis_time_s": 0.53,
+      "peak_vram_mb": 1990.2,
+      "sample_rate": 24000,
+      "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\f5.wav",
+      "streaming_notes": "F5-TTS slices generated audio into chunks after synthesis; no true incremental decode."
     },
     "xtts": {
       "engine": "xtts",
-      "ttfa_ms": null,
-      "rtf": null,
-      "error": "subprocess_exit_1",
-      "stderr": "[tts] Loading XTTS v2...\n > You must confirm the following:\n | > \"I have purchased a commercial license from Coqui: licensing@coqui.ai\"\n | > \"Otherwise, I agree to the terms of the non-commercial CPML: https://coqui.ai/cpml\" - [y/n]\n | | > \nC:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\torch\\cuda\\__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.\n  import pynvml  # type: ignore[import]\nTraceback (most recent call last):\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\tts_ttfa.py\", line 474, in <module>\n    sys.exit(main())\n             ^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\tts_ttfa.py\", line 409, in main\n    metrics = run_engine_locally(\n              ^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\tts_ttfa.py\", line 274, in run_engine_locally\n    return measure_xtts(ref_audio, target_text, sample_out)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\tts_ttfa.py\", line 128, in measure_xtts\n    model = TTS(\"tts_models/multilingual/multi-dataset/xtts_v2\").to(\"cuda\")\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\TTS\\api.py\", line 97, in __init__\n    self.load_tts_model_by_name(model_name, vocoder_name, gpu=gpu)\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\TTS\\api.py\", line 232, in load_tts_model_by_name\n    model_path, config_path, vocoder_path, vocoder_config_path, model_dir = self.download_model_by_name(\n                                                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\TTS\\api.py\", line 166, in download_model_by_name\n    model_path, config_path, model_item = self.manager.download_model(model_name)\n                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\TTS\\utils\\manage.py\", line 432, in download_model\n    self.create_dir_and_download_model(model_name, model_item, output_path)\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\TTS\\utils\\manage.py\", line 355, in create_dir_and_download_model\n    if not self.ask_tos(output_path):\n           ^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\TTS\\utils\\manage.py\", line 334, in ask_tos\n    answer = input(\" | | > \")\n             ^^^^^^^^^^^^^^^^\nEOFError: EOF when reading a line"
+      "mode": "streaming",
+      "streaming_support": "native",
+      "true_streaming": true,
+      "fallback_to_non_streaming": false,
+      "ttfa_ms": 595.2,
+      "rtf": 0.657,
+      "audio_duration_s": 2.464,
+      "synthesis_time_s": 1.619,
+      "peak_vram_mb": 1897.6,
+      "sample_rate": 24000,
+      "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\xtts.wav",
+      "streaming_error": null
     },
     "qwen3": {
       "engine": "qwen3",
-      "mode": "non_streaming",
+      "mode": "simulated_streaming_text",
+      "streaming_support": "simulated",
+      "true_streaming": false,
       "variant": "0.6B-Base",
       "flash_attention": "eager",
-      "ttfa_ms": 4848.4,
-      "rtf": 3.03,
-      "audio_duration_s": 1.6,
-      "synthesis_time_s": 4.848,
-      "peak_vram_mb": 2494.1,
+      "ttfa_ms": 7527.3,
+      "rtf": 3.035,
+      "audio_duration_s": 2.48,
+      "synthesis_time_s": 7.527,
+      "peak_vram_mb": 2520.1,
       "sample_rate": 24000,
-      "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\qwen3.wav"
+      "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\qwen3.wav",
+      "streaming_notes": "Qwen3-TTS non_streaming_mode=False simulates streaming text input but still returns audio after full generation."
     }
   },
-  "v1_default": "qwen3",
-  "v1_default_reason": "No engine hit the budget; qwen3 has best TTFA",
+  "v1_default": "f5",
+  "v1_default_reason": "No engine hit the budget; f5 has best TTFA",
   "qwen_gate": {
     "accepted": false,
     "reasons": [
@@ -43,7 +61,7 @@
   },
   "accent_ok_passed_to_probe": false,
   "meta": {
-    "timestamp": "2026-04-22T18:57:19+00:00",
+    "timestamp": "2026-04-22T20:07:58+00:00",
     "python_version": "3.11.15",
     "platform": "Windows-10-10.0.26200-SP0",
     "gpu": {

@@ -67,6 +67,8 @@ Output: `probes/llm_cancel.py` + `results/llm_cancel.json` with per-trial metric
 <interfaces>
 From 00-RESEARCH.md §Standard Stack: neither `ollama` nor `llama-server` is installed on the backend today. Planning guidance remains: **prefer Ollama** if you want the simpler install + OpenAI-compatible API path, but support llama-server as the alternative if that is what the builder chooses to install.
 
+Execution host for this plan is the real backend `OMEN-PC` at `192.168.1.199`, reached over SSH. Do NOT run the server-install or GPU-idle probe commands from the local Codex workstation or a local WSL shell.
+
 Ollama OpenAI-compatible endpoint:
 - Base URL: `http://localhost:11434/v1`
 - Path: `/chat/completions`

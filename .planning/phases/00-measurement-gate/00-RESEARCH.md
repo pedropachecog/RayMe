@@ -1,40 +1,60 @@
 # Phase 0: Measurement Gate — Research
 
-**Researched:** 2026-04-18
+**Researched:** 2026-04-22
 **Domain:** Empirical spike — HTTPS cert strategy, Whisper WER on accented English, TTS TTFA/RTF on actual hardware, VRAM soak methodology, LLM mid-stream cancel verification, FlashAttention 2 Windows install
-**Confidence:** HIGH (environment probed directly; all major claims verified from live system or official sources)
+**Confidence:** HIGH for backend machine state (probed directly over SSH); MEDIUM for install-path recommendations where the machine is not yet provisioned
 
 ---
 
 ## Summary
 
-Phase 0 is a **pure measurement spike** — no production code ships, all outputs become Key Decisions written back to `PROJECT.md` / `STATE.md`. It exists because four Resolved Tensions in the project's SUMMARY have quantitative revisit triggers, and the stack commitments in Phases 1–5 can only be frozen after the empirical numbers are in hand.
+Phase 0 is a **pure measurement spike**. No production code ships here; the output is a set of empirical decisions that unblock Phases 1–6.
 
-**Critical discovery from environment audit:** The physical machine running this codebase (`pedro-2023`) has an **RTX 4090 (24 GB VRAM, sm_89 Ada Lovelace)**, not the RTX 3060 (12 GB) described in the requirements. Python 3.13.1 is the system default; Python 3.11.5 and 3.12.10 are installed and available via the `py` launcher. PyTorch 2.5.1+cu121 is already installed under Python 3.11. Tailscale 1.96.3 is active with a `pedro-2023.tailc48d1c.ts.net` hostname that can receive a free Tailscale HTTPS cert — this eliminates mkcert as the required HTTPS strategy. `llama-server` (llama.cpp) and `ollama` are both installed. `flash-attn` 2.8.3 is on PyPI but has no prebuilt wheel for this Python/CUDA combination and builds from source — this is the FA2 install friction the research flagged.
+**Critical discovery from the corrected environment audit:** the real backend is the separate LAN machine `OMEN-PC` at `192.168.1.199`, and it **does** match the project constraint hardware: **RTX 3060 12 GB, driver 560.94, compute capability 8.6 / sm_86**. The previous research was wrong because it probed a different machine (`pedro-2023`, RTX 4090 24 GB).
 
-The five Phase 0 questions re-stated in light of the actual environment:
+**Execution guard:** every Phase 0 host command must run on `OMEN-PC` over SSH at `192.168.1.199`. If SSH is unavailable, stop and repair SSH access; do **not** fall back to this local Codex workstation or its WSL shell for backend measurements.
 
-1. **HTTPS on mobile** — Tailscale cert path is simpler than mkcert on this machine; both paths should be documented so the plan can verify either works on the builder's iPhone.
-2. **Whisper WER** — `faster-whisper-large-v2` is already cached; distil-large-v3 and large-v3-turbo need to be downloaded. Python 3.11 + torch 2.5.1+cu121 is the target env.
-3. **TTS TTFA on actual hardware** — measurements will be on RTX 4090, not RTX 3060. Results will be faster than the Phase 4 budget by a wide margin on this GPU; the 3060 extrapolation logic documented in STACK.md / QWEN3-TTS.md will need to be applied or noted as a future open question.
-4. **VRAM soak** — 24 GB on the 4090 means the soak is not about headroom; it is about fragmentation growth, swap correctness, and model-loading behavior.
-5. **LLM cancel** — llama-server is installed; cancel probe can be run immediately.
+The backend is also much less provisioned than the prior research assumed:
 
-**Primary recommendation:** Run all measurements on the RTX 4090 as the available hardware. Document results, note the 4090 → 3060 extrapolation factor (~2.5×), and record the hardware discrepancy as an open question for the builder to resolve (does a 3060 box exist, or has the GPU been upgraded?). HTTPS strategy: use Tailscale cert first (zero friction), mkcert as the documented fallback.
+- `python` and `py` resolve only to **Python 3.10.8**.
+- `py -3.11` is **not installed**.
+- `torch`, `faster_whisper`, `f5_tts`, `TTS`, and `flash_attn` are **not installed** in the system Python.
+- `tailscale` is **not installed / not on PATH**.
+- `ollama` and `llama-server` are **not installed / not on PATH**.
+- `nvcc` is present and reports **CUDA toolkit 11.7**.
+- `cl.exe` is **not on PATH**, so MSVC Build Tools are not currently usable from the shell.
+- The user profile drive has about **40.2 GB free**, which is enough for Phase 0 model downloads and probe artifacts.
+
+That changes the six Phase 0 questions materially:
+
+1. **HTTPS on iPhone**: this backend cannot use the previously assumed Tailscale cert flow today because there is no Tailscale install or `.ts.net` hostname. The default path is now **mkcert over direct LAN**.
+2. **Whisper WER**: the hardware target is finally correct (RTX 3060 12 GB), but the Python/torch stack must be installed first.
+3. **TTS TTFA**: measurements will be on the intended 3060, but only after Python 3.11, torch, and the TTS packages are installed.
+4. **VRAM soak**: the 11 GB budget gate is now a real hardware constraint instead of an extrapolation.
+5. **LLM cancel**: a local OpenAI-compatible server is not present yet, so plan 06 must begin with server installation or explicit selection.
+6. **FlashAttention 2 install**: this is now a higher-risk, more realistic Windows test because the host has CUDA 11.7 on PATH and no `cl.exe` on PATH yet.
+
+**Primary recommendation:** treat plan 01 as real machine provisioning, not just a venv bootstrap. The corrected sequence is:
+
+1. install Python 3.11 on the backend;
+2. create `.venv-phase0` and install torch + Phase 0 packages;
+3. use **mkcert** as the HTTPS primary path on `192.168.1.199`;
+4. install or choose a local LLM server before the cancel probe;
+5. expect FA2 to fail until MSVC Build Tools are installed or surfaced on PATH.
 
 ---
 
 ## Architectural Responsibility Map
 
-Phase 0 produces no application tiers — it is a measurement and documentation spike. The table below maps the five empirical questions to the components they inform.
+Phase 0 still produces no application tiers. It only answers the six empirical questions that later phases depend on.
 
 | Measurement | Informs Tier | Downstream Decision |
 |---|---|---|
-| HTTPS / cert trust on iPhone | Web UI host + LAN networking | Phase 1 HTTPS implementation choice (mkcert vs Tailscale vs Let's Encrypt) |
+| HTTPS / cert trust on iPhone | Web UI host + LAN networking | Phase 1 HTTPS implementation choice (mkcert primary, Tailscale optional if later installed) |
 | Whisper WER on Spanish-accented English | AI Backend — STT | Default STT model frozen before Phase 2 |
 | TTS TTFA (F5, XTTS, Qwen3-TTS) | AI Backend — TTS | Default TTS engine frozen; Qwen3-TTS v1 inclusion/exclusion decided |
-| VRAM 30-min soak | AI Backend — GPU resident | VRAM coexistence rule verified; swap strategy confirmed |
-| LLM mid-stream cancel | AI Backend → LLM endpoint | LLM server choice confirmed; barge-in architecture validated |
+| VRAM 30-min soak | AI Backend — GPU resident | 3060-fit rule verified on the actual target hardware |
+| LLM mid-stream cancel | AI Backend → LLM endpoint | Local LLM server choice confirmed; barge-in architecture validated |
 | FlashAttention 2 install | AI Backend — Qwen3-TTS only | Qwen3-TTS 1.7B inclusion/exclusion decided |
 
 ---
@@ -43,43 +63,56 @@ Phase 0 produces no application tiers — it is a measurement and documentation 
 
 ### Python Environment for AI Backend
 
-| Package | Version | Purpose | Why Standard |
+| Component | Current Backend State | Purpose | Phase 0 Implication |
 |---|---|---|---|
-| Python | 3.11.5 (via `py -3.11`) | AI backend runtime | Pipecat 1.0 requires 3.11+; PyTorch 2.5.1+cu121 already installed in this env; 3.13 not yet safe for ML dependencies |
-| PyTorch | 2.5.1+cu121 (installed) | GPU compute | Already present in Python 3.11 env; CUDA 12.1 runtime matches toolkit 12.8 |
-| uv | 0.5.22 (installed) | Venv + dep management | Available at `/c/Users/pmpg/.local/bin/uv`; recommended by coqui-tts README |
-| faster-whisper | 1.2.1 (latest, verified PyPI) | STT inference | CTranslate2 backend, 4x faster than openai-whisper; int8_float16 requires Ampere+ (RTX 4090 is Ada = sm_89, supported) |
-| f5-tts | 1.1.17 (latest, verified PyPI) | TTS engine #1 | Note: PyPI shows 1.1.17, STACK.md shows 1.1.19 — 1.1.19 may be pulled; use latest available |
-| coqui-tts | 0.27.5 (latest, verified PyPI) | TTS engine #2 (XTTS v2) | Idiap fork; only available version is 0.27.5 |
-| qwen-tts | 0.1.1 (latest, verified PyPI) | TTS engine #3 (Qwen3-TTS) | No newer version; pin exactly |
-| flash-attn | 2.8.3 (latest, verified PyPI) | Qwen3-TTS performance | Builds from source on this machine — FA2 install friction confirmed; RTX 4090 sm_89 is supported by FA2 |
-| jiwer | current | WER calculation | Standard Python library for Word Error Rate measurement; not currently installed |
-| soundfile | current | Audio I/O for measurement scripts | Standard; not currently installed |
+| Python launcher | `python` / `py` -> 3.10.8 only | Base runtime | Python 3.11 must be installed before `.venv-phase0` can exist |
+| Python 3.11 | NOT installed | Required AI backend runtime | Plan 01 must install it first; do not use 3.10 for the measurement env |
+| PyTorch | NOT installed | GPU compute | Plan 01 must install torch inside the venv before any probe can run |
+| faster-whisper | NOT installed | STT inference | Install in plan 01 |
+| f5-tts | NOT installed | TTS engine #1 | Install in plan 01 |
+| coqui-tts / `TTS` | NOT installed | XTTS v2 | Install in plan 01 |
+| qwen-tts | NOT installed | TTS engine #3 | Install in plan 01 |
+| flash-attn | NOT installed | FA2 / Qwen3-TTS 1.7B gate | Plan 07 owns the attempt |
+| jiwer / soundfile / librosa / pynvml / httpx / pytest | NOT installed | Probe support libs | Install in plan 01 |
 
-[VERIFIED: PyPI registry via `pip index versions`]
+**Package pin set:** the existing plan pins still make sense and are not invalidated by the machine correction:
 
-**Version notes (STACK.md vs verified PyPI):**
-- `f5-tts`: STACK.md says 1.1.19; PyPI shows 1.1.17 as latest. [VERIFIED: PyPI registry 2026-04-18] — use 1.1.17.
-- `faster-whisper`: STACK.md says 1.1+; latest is 1.2.1. [VERIFIED: PyPI registry 2026-04-18]
+- `faster-whisper==1.2.1`
+- `f5-tts==1.1.17`
+- `coqui-tts[server]==0.27.5`
+- `qwen-tts==0.1.1`
+- `flash-attn` target remains `2.8.3` for plan 07
+
+**PyTorch wheel note:** official PyTorch 2.5.1 Windows wheels exist for both `cu118` and `cu121`. Because this backend exposes `nvcc` 11.7 on PATH and no CUDA 12.x toolkit, `cu118` is the lower-friction starting point for plan 01. This is an inference from the host state plus the official PyTorch wheel matrix, not something already installed on the backend.
 
 ### HTTPS Strategy Tools
 
 | Tool | Installed | Purpose | Notes |
 |---|---|---|---|
-| Tailscale | 1.96.3 (installed) | Primary HTTPS strategy | `pedro-2023.tailc48d1c.ts.net` is the node hostname; `tailscale cert <hostname>` issues a real Let's Encrypt cert for the tailnet domain |
-| mkcert | NOT installed | Fallback HTTPS strategy | Available via `choco install mkcert`; required if phone is not on the Tailscale tailnet |
-| openssl | 3.2.1 (installed, MinGW) | Fallback cert generation | Available but mkcert is the simpler path for CA trust |
+| Tailscale | NO | Optional HTTPS strategy | No command on PATH, no tailnet hostname, no tailnet IP available today |
+| mkcert | NO | Primary HTTPS strategy on this backend | Must be installed before plan 02 can run |
+| openssl | NO | Optional cert helper | Not on PATH; not the preferred path anyway |
 
-[VERIFIED: `command -v mkcert`, `tailscale version`, `openssl version` probed directly]
+**Networking identity for the real backend:**
+
+- Hostname: `OMEN-PC`
+- LAN IP: `192.168.1.199`
+- No Tailscale hostname currently exists for this box
 
 ### LLM Servers
 
 | Server | Installed | Path | Notes |
 |---|---|---|---|
-| llama-server (llama.cpp) | YES | `/c/Users/pmpg/AppData/Local/Microsoft/WinGet/Packages/ggml.llamacpp_Microsoft.Winget.Source_8wekyb3d8bbwe/llama-server` | Installed via WinGet; available in PATH |
-| ollama | YES | `/c/Users/pmpg/AppData/Local/Programs/Ollama/ollama` | v0.17.0; not running at research time |
+| ollama | NO | — | Must be installed before using the Ollama path in plan 06 |
+| llama-server | NO | — | Must be installed or otherwise made available before using the llama.cpp path |
 
-[VERIFIED: `command -v llama-server`, `command -v ollama` probed directly]
+### Build / GPU Tooling
+
+| Tool | Installed | Version / State | Notes |
+|---|---|---|---|
+| `nvidia-smi` | YES | RTX 3060, 12288 MiB, driver 560.94, compute cap 8.6 | This is the correct target hardware |
+| `nvcc` | YES | CUDA toolkit 11.7.99 | Present on PATH |
+| `cl.exe` | NO | not found on PATH | FA2 source builds will likely fail until MSVC Build Tools are installed or loaded into PATH |
 
 ---
 
@@ -87,178 +120,155 @@ Phase 0 produces no application tiers — it is a measurement and documentation 
 
 ### System Data Flow for Phase 0 Measurements
 
-```
+```text
 Measurement Spike (Phase 0)
-          │
-          ├─── [M1] HTTPS Probe
-          │         Browser → https://pedro-2023.tailc48d1c.ts.net
-          │         iPhone Safari → window.isSecureContext check
-          │
-          ├─── [M2] STT WER Measurement
-          │         Reference audio (builder's voice) → faster-whisper
-          │         Three models: distil-large-v3 INT8, large-v3-turbo INT8, large-v3 FP16
-          │         WER via jiwer, latency via time.perf_counter()
-          │         nvidia-smi VRAM logged per model
-          │
-          ├─── [M3] TTS TTFA Measurement
-          │         Short text (3–5 words) → each TTS engine
-          │         Timestamps: synthesis_start → first_audio_sample_ready
-          │         Engines: F5-TTS (7-step Sway), XTTS v2, Qwen3-TTS 0.6B-Base + FA2
-          │
-          ├─── [M4] 30-Minute VRAM Soak
-          │         Per-engine: {Whisper default + Silero + TTS engine}
-          │         Cycle: synthesize 10s phrase → transcribe 10s audio → repeat
-          │         Log: torch.cuda.memory_reserved() every 60s via nvidia-smi
-          │
-          ├─── [M5] LLM Cancel Probe
-          │         Python script → llama-server streaming request → AbortController
-          │         nvidia-smi GPU util logged every 100ms for 2s post-cancel
-          │
-          └─── [M6] FlashAttention 2 Install
-                    py -3.11 -m pip install flash-attn --no-build-isolation
-                    Import check: from flash_attn import flash_attn_func
-                    Qwen3-TTS 1.7B load test if FA2 succeeds
+          |
+          |--- [M1] HTTPS Probe
+          |      Browser -> https://rayme.local or https://192.168.1.199:8443
+          |      iPhone Safari -> window.isSecureContext check
+          |      Transport trust via mkcert-installed root CA
+          |
+          |--- [M2] STT WER Measurement
+          |      Reference audio (builder voice) -> faster-whisper
+          |      Three models: distil-large-v3 INT8, large-v3-turbo INT8, large-v3 FP16
+          |      WER via jiwer, latency via monotonic timer, VRAM via torch + nvidia-smi
+          |
+          |--- [M3] TTS TTFA Measurement
+          |      Short text (3-5 words) -> each TTS engine
+          |      Engines: F5-TTS, XTTS v2, Qwen3-TTS 0.6B
+          |
+          |--- [M4] 30-Minute VRAM Soak
+          |      Per-engine: {Whisper default + Silero + one TTS engine}
+          |      Evaluate against the real 11 GB / 12 GB target budget
+          |
+          |--- [M5] LLM Cancel Probe
+          |      Python script -> whichever local OpenAI-compatible server is installed
+          |      Poll nvidia-smi after stream close
+          |
+          \--- [M6] FlashAttention 2 Install
+                 Python 3.11 venv from plan 01 -> pip install flash-attn --no-build-isolation
+                 Requires torch already installed; likely blocked until MSVC Build Tools are available
 ```
 
 ### Recommended Project Structure for Phase 0
 
+```text
+.planning/phases/00-measurement-gate/
+  probes/
+    bench_utils.py
+    https_serve.py
+    whisper_bench.py
+    tts_bench.py
+    llm_cancel.py
+    fa2_check.py
+  results/
+    setup_install.json
+    https_iphone.json
+    whisper.json
+    tts.json
+    vram_soak.json
+    llm_cancel.json
+    fa2_install.json
 ```
-spikes/
-├── 00-https/
-│   ├── serve.py               # minimal HTTPS server with tailscale cert
-│   └── README.md              # one-time iPhone setup procedure
-├── 01-stt-wer/
-│   ├── measure_wer.py         # download models, run WER benchmark
-│   ├── reference_audio.wav    # 10-min builder voice recording
-│   └── reference_transcript.txt
-├── 02-tts-ttfa/
-│   ├── measure_ttfa.py        # F5, XTTS, Qwen3-TTS first-audio latency
-│   └── results.json           # output consumed by KEY_DECISIONS.md
-├── 03-vram-soak/
-│   ├── soak_test.py           # 30-min cycling soak per engine
-│   └── soak_results.json
-├── 04-llm-cancel/
-│   └── cancel_probe.py        # ~20-line streaming cancel verifier
-├── 05-flash-attn/
-│   └── verify_fa2.sh          # install + import + Qwen3-TTS 1.7B load
-└── KEY_DECISIONS.md           # filled in after all measurements
-```
+
+This matches the existing plan files more closely than the previous `spikes/` recommendation.
 
 ### Pattern 1: WER Measurement Script
 
 ```python
-# Source: faster-whisper docs + jiwer API
 from faster_whisper import WhisperModel
-import jiwer, time
+import jiwer
+import time
 
-def measure_wer(model_size: str, quantization: str, audio_path: str, reference: str):
-    model = WhisperModel(model_size, device="cuda", compute_type=quantization)
+
+def measure_wer(model_name: str, compute_type: str, audio_path: str, reference: str):
+    model = WhisperModel(model_name, device="cuda", compute_type=compute_type)
     t0 = time.perf_counter()
-    segments, info = model.transcribe(audio_path, beam_size=5,
-                                       condition_on_previous_text=False)
+    segments, _ = model.transcribe(
+        audio_path,
+        beam_size=5,
+        condition_on_previous_text=False,
+    )
     hypothesis = " ".join(s.text for s in segments)
     elapsed = time.perf_counter() - t0
-    wer = jiwer.wer(reference, hypothesis)
-    return {"wer": wer, "latency_s": elapsed, "hypothesis": hypothesis}
-
-# Run for three models:
-# measure_wer("distil-large-v3", "int8_float16", audio, ref)
-# measure_wer("large-v3-turbo",  "int8_float16", audio, ref)
-# measure_wer("large-v3",        "float16",      audio, ref)
+    return {
+        "wer": jiwer.wer(reference, hypothesis),
+        "latency_s": elapsed,
+        "hypothesis": hypothesis,
+    }
 ```
-[CITED: https://github.com/SYSTRAN/faster-whisper — API verified from official docs]
 
 ### Pattern 2: TTFA Measurement for TTS Engines
 
 ```python
-# Source: derived from qwen-tts PyPI docs and f5-tts README
-import time, numpy as np
+import time
+
 
 def measure_ttfa_f5(ref_audio: str, ref_text: str, target_text: str) -> float:
     from f5_tts.api import F5TTS
+
     model = F5TTS()
     t0 = time.perf_counter()
-    # 7-step Sway sampling for minimum latency
-    wav, sr, _ = model.infer(ref_audio, ref_text, target_text, nfe_step=7)
-    return time.perf_counter() - t0  # TTFA = full generation for non-streaming F5
-
-def measure_ttfa_xtts(ref_audio: str, target_text: str) -> float:
-    from TTS.api import TTS  # using coqui-tts import
-    model = TTS("tts_models/multilingual/multi-dataset/xtts_v2").to("cuda")
-    t0 = time.perf_counter()
-    # XTTS streams; first chunk time is TTFA
-    chunks = list(model.tts_with_vc_to_file_streaming(target_text, speaker_wav=ref_audio))
-    return time.perf_counter() - t0
-
-def measure_ttfa_qwen(ref_audio: str, ref_text: str, target_text: str) -> float:
-    import torch
-    from qwen_tts import Qwen3TTSModel
-    model = Qwen3TTSModel.from_pretrained(
-        "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
-        device_map="cuda:0", dtype=torch.bfloat16,
-        attn_implementation="flash_attention_2"
-    )
-    prompt = model.create_voice_clone_prompt(ref_audio=ref_audio, ref_text=ref_text)
-    t0 = time.perf_counter()
-    wavs, sr = model.generate_voice_clone(text=target_text, voice_clone_prompt=prompt)
+    model.infer(ref_audio, ref_text, target_text, nfe_step=7)
     return time.perf_counter() - t0
 ```
-[CITED: https://pypi.org/project/qwen-tts/ — voice_clone API; https://github.com/SWivid/F5-TTS — inference API]
+
+Plan 04 still owns the concrete per-engine implementation details; the correction here is that the machine is finally the intended 3060 target.
 
 ### Pattern 3: LLM Cancel Probe
 
 ```python
-# Source: Pitfalls.md #8 mitigation pattern
-import asyncio, time, httpx
+import asyncio
+import time
+import httpx
+
 
 async def probe_llm_cancel(base_url: str, model: str):
-    """Verifies that closing the stream actually stops GPU generation."""
-    async with httpx.AsyncClient(base_url=base_url) as client:
-        # Start generation of a long response
-        async with client.stream("POST", "/v1/chat/completions", json={
-            "model": model,
-            "messages": [{"role": "user", "content": "Write a 500-word essay."}],
-            "stream": True, "max_tokens": 500
-        }) as response:
+    async with httpx.AsyncClient(base_url=base_url, timeout=30.0) as client:
+        async with client.stream(
+            "POST",
+            "/chat/completions",
+            json={
+                "model": model,
+                "messages": [{"role": "user", "content": "Write a 500-word essay."}],
+                "stream": True,
+                "max_tokens": 500,
+            },
+        ) as response:
             t0 = time.perf_counter()
-            async for chunk in response.aiter_bytes():
-                if time.perf_counter() - t0 > 0.5:  # cancel after ~500ms
-                    break  # closes the stream
-            cancel_time = time.perf_counter()
-
-    # After stream close: watch nvidia-smi for 2 seconds
-    # GPU util should drop to ~0% within 200ms if cancel propagates
-    print(f"Stream closed at {cancel_time - t0:.3f}s. Check nvidia-smi now.")
-    await asyncio.sleep(2.0)  # monitor window
-
-asyncio.run(probe_llm_cancel("http://localhost:8080", "<model-name>"))
+            tokens_seen = 0
+            async for chunk in response.aiter_lines():
+                tokens_seen += 1
+                if time.perf_counter() - t0 > 0.5:
+                    break
+    return tokens_seen
 ```
-[CITED: PITFALLS.md #8; httpx stream cancellation pattern]
 
-### Pattern 4: VRAM Soak Test
+The key correction is not the probe logic. It is that **no server is installed yet**, so the probe cannot start from a pre-existing local endpoint assumption.
+
+### Pattern 4: HTTPS Probe on Direct LAN
 
 ```python
-# Source: Pitfalls.md #7 prevention strategy
-import torch, time, json
+import ssl
+import http.server
 
-def log_vram(label: str):
-    allocated = torch.cuda.memory_allocated() / 1024**3
-    reserved  = torch.cuda.memory_reserved()  / 1024**3
-    print(f"[{label}] allocated={allocated:.2f}GB reserved={reserved:.2f}GB")
-    return {"label": label, "allocated_gb": allocated, "reserved_gb": reserved}
+ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+ctx.load_cert_chain("rayme.local.pem", "rayme.local-key.pem")
 
-# During soak: call log_vram every 60 seconds
-# Expected: reserved should plateau, not grow unboundedly
-# Warning threshold: reserved > 11 GB on 12 GB device (or > 22 GB here on 4090)
+with http.server.HTTPServer(("192.168.1.199", 8443), http.server.SimpleHTTPRequestHandler) as server:
+    server.socket = ctx.wrap_socket(server.socket, server_side=True)
+    server.serve_forever()
 ```
-[ASSUMED] — specific threshold numbers adapted from STACK.md/PITFALLS.md design rules
+
+The important backend correction is that the machine has no Tailscale today, so the probe should start from a LAN-bound mkcert flow.
 
 ### Anti-Patterns to Avoid
 
-- **Running VRAM soak without `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True`:** This env var must be set before torch initializes, not after. Set it in the measurement script's `os.environ` before any import of torch. [VERIFIED: PITFALLS.md #7]
-- **Measuring TTFA with model cold-loaded:** Always warm the model with one dummy inference before timing. Cold-load includes CUDA kernel compilation which inflates first-run numbers by 2–10×.
-- **Using the `openai-whisper` package instead of `faster-whisper`:** `openai-whisper` is 4× slower and lacks the `compute_type` parameter needed for INT8 measurement. [VERIFIED: faster-whisper README]
-- **Measuring F5-TTS TTFA at default NFE (32 steps):** The plan targets 7-step Sway sampling. Always set `nfe_step=7` in the measurement. [CITED: STACK.md F5-TTS entry]
+- **Assuming `py -3.11` exists because it existed on the wrong machine:** it does not.
+- **Assuming torch is preinstalled:** it is not.
+- **Assuming the HTTPS path can start with `tailscale cert`:** it cannot on this backend until Tailscale is installed.
+- **Assuming the cancel probe can run immediately against Ollama:** no local LLM server is currently available.
+- **Assuming FA2 failure means “unsupported GPU”:** the more immediate blocker is likely missing MSVC tooling or Python/torch provisioning, not the Ampere GPU itself.
 
 ---
 
@@ -266,188 +276,148 @@ def log_vram(label: str):
 
 | Problem | Don't Build | Use Instead | Why |
 |---|---|---|---|
-| WER calculation | Custom string edit-distance | `jiwer` library | Handles normalization, punctuation, case, multiple references |
-| VRAM monitoring | Custom `nvidia-smi` parser | `torch.cuda.memory_allocated()` + `torch.cuda.memory_reserved()` | Direct Python API; no subprocess overhead |
-| Audio recording for WER test | Custom mic capture script | Any existing audio recorder; 10-min WAV file produced externally | Phase 0 is a spike; the measurement rig doesn't need to match the production audio pipeline |
-| FlashAttention build | Source compile from scratch | `pip install flash-attn --no-build-isolation` | Prebuilt wheels exist for supported configurations; only falls back to source on mismatch |
-| Tailscale cert | Manual Let's Encrypt workflow | `tailscale cert <hostname>` | Single command issues a real LE cert; no ACME dance required |
+| WER calculation | Custom edit-distance code | `jiwer` | Standard, normalized WER metrics |
+| HTTPS trust | Self-signed ad hoc cert workflow | `mkcert` | Simple LAN trust path for iPhone Safari |
+| VRAM monitoring | Manual spreadsheet logging | `torch.cuda` + `nvidia-smi` | Captures allocator state plus device totals |
+| Local LLM API | Custom shim over raw model binaries | `ollama` or `llama-server` | OpenAI-compatible endpoint is what plan 06 needs |
+| FA2 build logic | Custom C++ build steps | `pip install flash-attn --no-build-isolation` | Fastest way to measure whether the host supports it |
 
 ---
 
 ## Runtime State Inventory
 
-Phase 0 is a greenfield spike with no rename/refactor component. This section is not applicable.
+This backend starts almost empty relative to the old research:
+
+- no Phase 0 venv
+- no Python 3.11
+- no torch
+- no AI packages
+- no HTTPS toolchain
+- no local LLM server
+
+That means Phase 0 is now a real bootstrap on the correct hardware, not just a “run the measurements” pass.
 
 ---
 
 ## Common Pitfalls
 
-### Pitfall 1: Hardware Mismatch — RTX 4090 vs Documented RTX 3060
+### Pitfall 1: Python 3.11 Is Missing on the Backend
 
-**What goes wrong:** All Phase 0 measurements run on the RTX 4090 (sm_89, 24 GB). The requirements, STACK.md, and QWEN3-TTS.md all assume RTX 3060 (sm_86, 12 GB). If results are recorded without noting the hardware difference, Phase 2 plans may inherit incorrect VRAM budgets and TTFA baselines.
+**What goes wrong:** plan 01 starts with `py -3.11 -m venv .venv-phase0` and immediately fails because `py -3.11` is not available.
 
-**Why it happens:** The machine `pedro-2023` has an RTX 4090. Either the builder upgraded GPUs after requirements were written, or the 3060 is in a separate box not connected at research time.
-
-**How to avoid:**
-- Record all measurements with GPU name, VRAM, and compute capability in the results JSON.
-- Apply the ~2.5× RTX 4090 → RTX 3060 slowdown factor when projecting TTFA/RTF results downward.
-- Flag in KEY_DECISIONS.md: "Measured on RTX 4090; 3060 extrapolation applied."
-- Ask the builder to clarify: is this machine the "AI backend box," or does a 3060 box also exist?
-
-**Warning signs:** Phase 2 plans VRAM budget that assumes 12 GB but deployment box has 24 GB (or vice versa).
-
-### Pitfall 2: FlashAttention 2 Builds From Source (Slow, Potentially Fragile)
-
-**What goes wrong:** `pip install flash-attn` on this machine (Python 3.11, CUDA 12.1, RTX 4090 sm_89) downloads the source tarball (8.4 MB) and attempts compilation. This takes 10–30 minutes and requires a working C++ build chain. If any build dep is missing, the install silently fails with a long compilation log.
-
-**Why it happens:** PyPI has prebuilt wheels for specific `(Python, CUDA, torch)` combinations. Python 3.11 + CUDA 12.1 + sm_89 may not match a prebuilt wheel exactly, triggering a source build.
+**Why it happens:** only Python 3.10.8 is installed on `OMEN-PC`.
 
 **How to avoid:**
-- Check available prebuilt wheels: `pip install flash-attn==2.8.3 --dry-run` — if it shows "no matching distribution" without downloading source, a prebuilt exists.
-- Use `--no-build-isolation` as shown in STACK.md; this reuses the existing torch/numpy environment.
-- Set a 30-minute timeout on the install step. If it fails, record "FA2 install: FAILED (source build timed out)" and restrict Qwen3-TTS to 0.6B-Base only per the Phase 0 success criterion #6 fallback.
 
-**Warning signs:** `pip install flash-attn` shows "Building wheel for flash-attn" — this is a source build. Watch for build errors in the gcc/MSVC output.
+- Install Python 3.11 first.
+- Re-open the shell so the `py` launcher sees the new runtime.
+- Do not try to force the ML stack into Python 3.10 just because it is present.
 
-### Pitfall 3: Tailscale Cert Requires HTTPS Serve on the Tailnet Interface
+### Pitfall 2: HTTPS Research Assumed Tailscale, but the Backend Has No Tailscale
 
-**What goes wrong:** Tailscale cert is obtained successfully. Builder hits `https://pedro-2023.tailc48d1c.ts.net` from iPhone. iPhone is not on the Tailscale tailnet → connection refused or `NET::ERR_CERT_AUTHORITY_INVALID` (different from a cert trust issue — this is about routing).
+**What goes wrong:** plan 02 begins with `tailscale cert ...` and fails immediately because `tailscale` is not installed.
 
-**Why it happens:** Tailscale cert covers `*.tailc48d1c.ts.net` — only accessible from devices that are on the tailnet. The builder's iPhone may or may not have Tailscale installed.
+**Why it happens:** the wrong-machine research imported the dev machine’s tailnet setup.
 
 **How to avoid:**
-- If iPhone has Tailscale installed: bind the test server to `100.100.8.103` (the tailnet IP) — works immediately.
-- If iPhone does not have Tailscale: fall back to mkcert path or install Tailscale on iPhone (free; one tap).
-- Test `window.isSecureContext` from Safari's JavaScript console as the acceptance gate — this is the definitive check.
-- Document both paths (Tailscale and mkcert) in the Phase 0 output for Phase 1 to choose from.
 
-**Warning signs:** `navigator.mediaDevices` is `undefined` in Safari console — this means the context is not secure.
+- Make **mkcert over direct LAN** the primary path.
+- Use `rayme.local` or a LAN hostname plus `192.168.1.199`.
+- Treat Tailscale as optional future convenience, not a current prerequisite.
 
-### Pitfall 4: Whisper Distil-Large-V3 Is Not in the HF Cache Yet
+### Pitfall 3: No Local LLM Server Exists Yet
 
-**What goes wrong:** The HF cache contains `faster-whisper-large-v2` but not `distil-large-v3` or `large-v3-turbo`. First run triggers a ~1.5 GB download. If the machine is offline or HF is slow, the measurement script stalls.
+**What goes wrong:** plan 06 assumes `ollama serve` or `llama-server --version` works and discovers neither binary exists.
 
-**Why it happens:** These models haven't been used on this machine before.
+**Why it happens:** this backend has not been provisioned with a local OpenAI-compatible LLM server.
 
-**How to avoid:** Pre-download all three models before the measurement session: `faster_whisper.WhisperModel("distil-large-v3", device="cpu")` (the device doesn't matter for the download) will cache them. Do this at the start of Phase 0 before recording any timings.
+**How to avoid:**
 
-### Pitfall 5: F5-TTS Latest PyPI Version Discrepancy
+- Install a local server first, or explicitly defer the cancel probe until one exists.
+- Prefer a small local model for the probe; the goal is cancel semantics, not model quality.
 
-**What goes wrong:** STACK.md references f5-tts 1.1.19 but PyPI shows 1.1.17 as the latest at research time. If the install command pins to 1.1.19, `pip install f5-tts==1.1.19` will fail with "no matching distribution."
+### Pitfall 4: FA2 Is More Likely to Fail on Missing Build Tooling Than on the GPU
 
-**Why it happens:** Either 1.1.19 was briefly published and yanked, or the STACK.md was written from a different PyPI state.
+**What goes wrong:** FA2 build logs may look like “unsupported” or “build failed,” but the actual blocker is missing `cl.exe` or an incompatible local toolchain.
 
-**How to avoid:** Use `pip install "f5-tts>=1.1.17"` and record the exact installed version in the results. [VERIFIED: PyPI registry 2026-04-18 — 1.1.17 is latest]
+**Why it happens:** `nvcc` is present, but MSVC is not on PATH.
+
+**How to avoid:**
+
+- Validate `cl.exe` before attempting plan 07.
+- Record the exact failure mode in `results/fa2_install.json`.
+- Treat “toolchain missing” as a provisioning issue, not a GPU-eligibility issue.
+
+### Pitfall 5: First-Run Downloads and Installs Are Real Work on This Backend
+
+**What goes wrong:** WER, TTS, and soak probes all appear “slow” or “hung” on first run because the machine is downloading weights and installing packages for the first time.
+
+**Why it happens:** unlike the previously probed dev machine, this backend is not warm.
+
+**How to avoid:**
+
+- Pre-download Whisper weights in plan 01.
+- Expect package install time and model-download time to dominate the first setup pass.
 
 ---
 
 ## Code Examples
 
-### FlashAttention 2 Install and Verify
+### Python 3.11 Preflight
 
-```bash
-# On Python 3.11 with CUDA 12.1 (the AI backend env)
-# First: try to find prebuilt wheel
-pip install flash-attn==2.8.3 --dry-run 2>&1 | head -5
-
-# If source build is needed (no prebuilt):
-# Ensure MSVC / Visual Studio Build Tools are installed (Windows requirement)
-# Then:
-FLASH_ATTENTION_SKIP_CUDA_BUILD=FALSE pip install flash-attn --no-build-isolation
-
-# Verify install:
-python -c "from flash_attn import flash_attn_func; print('FA2 installed successfully')"
+```powershell
+py -3.11 --version
 ```
-[CITED: https://github.com/QwenLM/Qwen3-TTS README; Pitfall research]
 
-### Tailscale HTTPS Server (Minimal)
+If this fails with “No suitable Python runtime found,” install Python 3.11 before continuing.
 
-```python
-# Source: Tailscale docs pattern
-import ssl, http.server
+### PyTorch Wheel Install (Official Windows Wheel Matrix)
 
-# Assumes: tailscale cert pedro-2023.tailc48d1c.ts.net already run
-# Produces: pedro-2023.tailc48d1c.ts.net.crt + pedro-2023.tailc48d1c.ts.net.key
-hostname = "pedro-2023.tailc48d1c.ts.net"
-cert_path = f"{hostname}.crt"
-key_path  = f"{hostname}.key"
-
-ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-ctx.load_cert_chain(certfile=cert_path, keyfile=key_path)
-
-class CheckSecureContext(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        html = b"""
-        <script>
-          document.body.innerText = 'isSecureContext: ' + window.isSecureContext;
-          console.log('mediaDevices defined:', !!navigator.mediaDevices);
-        </script>
-        """
-        self.send_response(200)
-        self.send_header("Content-Type", "text/html")
-        self.end_headers()
-        self.wfile.write(html)
-
-with http.server.HTTPServer((hostname, 443), CheckSecureContext) as server:
-    server.socket = ctx.wrap_socket(server.socket, server_side=True)
-    print(f"Serving at https://{hostname}")
-    server.serve_forever()
+```powershell
+.venv-phase0\Scripts\python.exe -m pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu118
 ```
-[ASSUMED] — Tailscale cert mechanism is standard; exact Python ssl binding is training knowledge
 
-### VRAM Soak Script Skeleton
+This is the lower-friction starting point for this host because `nvcc` 11.7 is present and no CUDA 12.x toolkit was found on PATH.
 
-```python
-# Source: Pitfalls.md #7 prevention + torch docs
-import os, torch, time, json
+### mkcert LAN HTTPS Flow
 
-os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
+```powershell
+mkcert -install
+mkcert rayme.local 192.168.1.199
 
-def run_soak(engine_name: str, engine_instance, soak_minutes=30):
-    readings = []
-    start = time.time()
-    cycle = 0
-    while time.time() - start < soak_minutes * 60:
-        # Simulate realistic inference cycle
-        engine_instance.synthesize("This is a test utterance for VRAM soak validation.")
-        cycle += 1
-        if cycle % 10 == 0:
-            torch.cuda.empty_cache()  # optional: mitigate fragmentation
-        reading = {
-            "time_s": round(time.time() - start),
-            "cycle": cycle,
-            "allocated_gb": round(torch.cuda.memory_allocated() / 1e9, 2),
-            "reserved_gb": round(torch.cuda.memory_reserved() / 1e9, 2),
-            "peak_gb": round(torch.cuda.max_memory_allocated() / 1e9, 2),
-        }
-        readings.append(reading)
-        print(reading)
-        time.sleep(2)
-    return readings
-
-# Run once per engine configuration:
-# F5 + distil-large-v3 INT8 + Silero
-# XTTS v2 + distil-large-v3 INT8 + Silero
-# Qwen3-TTS 0.6B + distil-large-v3 INT8 + Silero
-# (+ Qwen3-TTS 1.7B if FA2 installed)
+.venv-phase0\Scripts\python.exe probes\https_serve.py `
+  --host rayme.local `
+  --cert rayme.local+1.pem `
+  --key  rayme.local+1-key.pem `
+  --bind 192.168.1.199 `
+  --port 8443
 ```
-[ASSUMED] — pattern derived from Pitfalls.md; specific torch API is verified
+
+### FA2 Preflight
+
+```powershell
+where nvcc
+where cl
+```
+
+If `cl.exe` is absent, expect plan 07 to fail until MSVC Build Tools are installed or the environment is loaded correctly.
 
 ---
 
 ## State of the Art
 
-| Old Approach | Current Approach | When Changed | Impact |
-|---|---|---|---|
-| Manual mkcert on every device | Tailscale automatic Let's Encrypt cert | Tailscale 1.x (2022+) | Zero-friction HTTPS on LAN for Tailscale users; eliminates the "install Root CA on iPhone" step |
-| `openai-whisper` for STT | `faster-whisper` with CTranslate2 INT8 | 2023+ | 4× faster, 50% less VRAM, identical accuracy |
-| Full-sentence TTS synthesis | Sentence-boundary streaming TTS | F5 workaround pattern established 2024 | First audio in <500 ms instead of 2–3 s for multi-sentence replies |
-| Manual `nvidia-smi` polling | `torch.cuda.memory_allocated()` + `max_memory_allocated()` | PyTorch 2.x | Programmatic VRAM tracking in measurement scripts |
-| WER by hand | `jiwer` library | ~2020 | Standard, normalized WER/WIL/MER metrics in one library call |
+| Old Approach | Current Approach | Impact on RayMe |
+|---|---|---|
+| Trust mobile Safari via Tailscale-only assumptions | Trust mobile Safari via mkcert on LAN; add Tailscale later if desired | Matches the actual backend state |
+| Extrapolate 3060 behavior from a 4090 dev box | Measure directly on the real 3060 | Removes the main Phase 0 hardware uncertainty |
+| Assume backend is pre-provisioned | Treat backend as fresh Windows host | Makes setup steps explicit and reproducible |
+| Assume local LLM server already exists | Install or choose one before the cancel probe | Prevents plan 06 from failing on missing binaries |
 
-**Deprecated/outdated:**
-- `openai-whisper` package: use `faster-whisper`. The `openai-whisper` on this machine (`openai-whisper 20250625`) is the system Python 3.13 install and should not be used for AI backend work.
-- Reliance on `pip install TTS` for XTTS v2: use `coqui-tts` (idiap fork). [VERIFIED: PITFALLS.md #12]
+**Deprecated/outdated for this backend:**
+
+- The old Tailscale hostname from the wrong machine.
+- The assumption that Python 3.11 + torch are already installed.
+- The assumption that Ollama and llama.cpp are already available.
 
 ---
 
@@ -455,79 +425,68 @@ def run_soak(engine_name: str, engine_instance, soak_minutes=30):
 
 | # | Claim | Section | Risk if Wrong |
 |---|---|---|---|
-| A1 | Tailscale cert binds to the tailnet IP and is trusted by Safari if iPhone has Tailscale installed | Common Pitfalls #3 | If Tailscale cert is not trusted on iOS Safari, mkcert fallback must be used; one extra setup day |
-| A2 | The RTX 4090 → RTX 3060 slowdown factor is ~2.5× for autoregressive TTS inference | Summary, Common Pitfalls #1 | If the 3060 box has different drivers/thermals, actual measurements may differ; Phase 0 results would need a hardware note |
-| A3 | `tailscale cert` command can be run without elevated privileges on Windows | Code Examples | If cert issuance requires admin, the HTTPS setup procedure gains a step |
-| A4 | F5-TTS 1.1.17's inference API (`F5TTS` class, `nfe_step` parameter) matches the pattern shown | Code Examples | API may differ; verify from the installed package's README or source |
-| A5 | XTTS v2 streaming via `coqui-tts[server]` works in-process without Docker | Code Examples | Pipecat docs show Docker path as default; in-process may require additional config (STACK.md open question) |
-| A6 | `jiwer.wer()` accepts raw string hypothesis and reference without any pre-normalization needed | Code Examples | If jiwer requires normalized text (lowercase, no punctuation), the WER numbers will be inflated until normalization is added |
+| A1 | Installing Python 3.11 alongside 3.10 on this host is straightforward and low-risk | Summary, Common Pitfalls #1 | If installation is blocked by policy, plan 01 must begin with a machine-setup step |
+| A2 | PyTorch 2.5.1 `cu118` is the lower-friction starting wheel for this backend | Standard Stack, Code Examples | If a different wheel works better, plan 01 should record the actual installed version instead of forcing this inference |
+| A3 | mkcert is the right default HTTPS path because Tailscale is absent | Summary, Common Pitfalls #2 | If the user installs Tailscale before plan 02 runs, plan 02 can still take the Tailscale branch |
+| A4 | FA2 will likely fail first on missing MSVC tooling rather than on GPU support | Common Pitfalls #4 | If `cl.exe` exists outside PATH or a dev shell is used, plan 07 may proceed further than expected |
+| A5 | A small local model is sufficient for the cancel probe | Common Pitfalls #3 | If only a remote/API LLM is available, plan 06 cannot validate local GPU idle semantics |
 
 ---
 
 ## Open Questions (RESOLVED)
 
-1. **Does the builder have a separate RTX 3060 box?**
-   - What we know: The `pedro-2023` machine has an RTX 4090, 24 GB VRAM. The requirements, STACK.md, and QWEN3-TTS.md all assume a 3060.
-   - What's unclear: Whether this is an upgrade (no 3060 exists) or whether the 3060 is a separate "AI backend" machine.
-   - Recommendation: Record this as "hardware TBD" in KEY_DECISIONS.md. If only the 4090 exists, the VRAM budgets in STACK.md are far more comfortable than planned, and the Qwen3-TTS 1.7B option becomes viable even without FA2.
-   - **RESOLVED:** measured during phase; the dev machine is RTX 4090 24GB. The 11 GB soak-budget gate in plan 05 generalizes the measurement to the 3060 12GB user class. Any separate 3060 box is out of scope for this spike — documented in KEY_DECISIONS.md §Hardware Note.
+1. **Is `OMEN-PC` actually the real backend machine?**
+   - What we know: it is the LAN box at `192.168.1.199` the user identified as the backend.
+   - What's unclear: nothing material remains here.
+   - **RESOLVED:** yes. This is the correct Phase 0 backend, and it has the intended RTX 3060 12 GB GPU.
 
-2. **Is the builder's iPhone on the Tailscale tailnet?**
-   - What we know: `tailscale status` shows `pixel-10-pro` (Android) and `siss-macbook-pro` but no iPhone.
-   - What's unclear: Whether the iPhone simply wasn't online at research time, or whether it isn't enrolled.
-   - Recommendation: Test both Tailscale path (if iPhone gets enrolled) and mkcert path; document whichever works as the standard procedure.
-   - **RESOLVED:** deferred empirical outcome of plan 02. Plan 02 attempts Tailscale path first (requires iPhone on tailnet); if iPhone absent from tailnet, falls back to mkcert + iOS profile install. Documented in KEY_DECISIONS.md §1 HTTPS.
+2. **Does this backend support the Tailscale HTTPS path today?**
+   - What we know: `tailscale` is not installed / not on PATH.
+   - What's unclear: whether the user will later choose to install it.
+   - **RESOLVED:** no, not today. Plan 02 must start from mkcert over LAN.
 
-3. **Is Python 3.13 (system default) acceptable for any measurement scripts?**
-   - What we know: Python 3.13.1 is the system default. PyTorch 2.6.0+cu124 is installed in 3.13. Pipecat 1.0 requires 3.11+.
-   - What's unclear: Whether F5-TTS, coqui-tts, and qwen-tts install cleanly on 3.13.
-   - Recommendation: Use Python 3.11 (via `py -3.11`) for all AI backend measurement scripts. Python 3.13 can serve as the web/tooling environment but should not be the AI inference env for v1.
-   - **RESOLVED:** Python 3.11.5 selected; 3.12/3.13 rejected due to package compatibility (faster-whisper, f5-tts, coqui-tts pinned to 3.11). Plan 01 pins to 3.11 via `py -3.11 -m venv .venv-phase0`.
+3. **Is Python 3.11 already available for the AI environment?**
+   - What we know: only Python 3.10.8 is available through `python` and `py`.
+   - What's unclear: nothing material.
+   - **RESOLVED:** no. Plan 01 must install Python 3.11 before creating `.venv-phase0`.
 
-4. **Does flash-attn build successfully on this machine?**
-   - What we know: No prebuilt wheel was found (download started, then source build began). CUDA toolkit 12.8 is installed. The RTX 4090 is Ada Lovelace (sm_89) — FA2 supports sm_80+.
-   - What's unclear: Whether the MSVC build toolchain is present and compatible.
-   - Recommendation: This is exactly what Phase 0 success criterion #6 measures. Proceed with the build and record the outcome.
-   - **RESOLVED:** deferred empirical outcome of plan 07. Plan 07 runs `pip install flash-attn --no-build-isolation` with 30-min build timeout, classifies failure modes, and writes results/fa2_install.json. Outcome gates Qwen3-TTS 1.7B adoption in plan 08 synthesis.
+4. **Are FA2 prerequisites already satisfied on this machine?**
+   - What we know: `nvcc` 11.7 is present; `cl.exe` is not on PATH.
+   - What's unclear: whether MSVC Build Tools are installed but not loaded into the shell.
+   - **RESOLVED:** not currently. Plan 07 must expect missing MSVC tooling as a likely first blocker.
 
-5. **What LLM is loaded in llama-server for the cancel probe?**
-   - What we know: `llama-server` is installed. No GGUF models were found in the `~/.cache` quick scan (the search timed out).
-   - What's unclear: Whether a model is locally available or needs to be downloaded before the cancel probe.
-   - Recommendation: Use Ollama with any available model (e.g., `ollama run llama3.2`) for the cancel probe if a GGUF is not at hand; Ollama is installed and the probe verifies cancel semantics, not model quality.
-   - **RESOLVED:** plan 06 defaults to ollama (simpler API per research); concrete model choice is documented as the first runtime step (pull whichever small instruct model is available — e.g., llama3.2:3b — so the stream cancel behavior is model-agnostic). llama-server documented as fallback.
+5. **Is a local OpenAI-compatible LLM server already available?**
+   - What we know: `ollama` and `llama-server` are both absent from PATH.
+   - What's unclear: whether the user intends to install one before plan 06 runs.
+   - **RESOLVED:** no. Plan 06 must begin with installing or selecting a local server.
+
+6. **Is there enough local disk for Phase 0 artifacts?**
+   - What we know: user profile directory listing reported `40,232,869,888` bytes free.
+   - What's unclear: exact free space on other volumes, if any.
+   - **RESOLVED:** yes. There is enough space for the expected Phase 0 packages, weights, and result files.
 
 ---
 
 ## Environment Availability
 
-| Dependency | Required By | Available | Version | Fallback |
+| Dependency | Required By | Available | Version / State | Action |
 |---|---|---|---|---|
-| Python 3.11 | AI backend (all measurement scripts) | YES | 3.11.5 (via `py -3.11`) | Python 3.12.10 also available |
-| PyTorch + CUDA | All AI inference scripts | YES | 2.5.1+cu121 (Python 3.11 env) | — |
-| RTX 4090 (24 GB) | VRAM soak + TTS/STT measurements | YES | sm_89, 24 GB | Hardware docs say 3060 (see Open Q #1) |
-| CUDA toolkit 12.8 | FA2 build + torch compilation | YES | 12.8 | — |
-| uv | Python venv management | YES | 0.5.22 | pip with venv |
-| Tailscale | Primary HTTPS strategy | YES | 1.96.3 | mkcert (choco install mkcert) |
-| mkcert | HTTPS fallback | NO | — | `choco install mkcert` |
-| llama-server | LLM cancel probe | YES | (WinGet install, version not checked) | ollama (also installed) |
-| ollama | LLM cancel probe fallback | YES | 0.17.0 | llama-server |
-| faster-whisper | STT WER measurement | NOT installed | — | `pip install faster-whisper==1.2.1` |
-| f5-tts | TTS TTFA measurement | NOT installed | — | `pip install f5-tts==1.1.17` |
-| coqui-tts | XTTS TTFA measurement | NOT installed | — | `pip install "coqui-tts[server]==0.27.5"` |
-| qwen-tts | Qwen3-TTS measurement | NOT installed | — | `pip install qwen-tts==0.1.1` |
-| flash-attn | Qwen3-TTS 1.7B + perf | NOT installed | — | Skip (restricts Qwen to 0.6B only) |
-| jiwer | WER calculation | NOT installed | — | `pip install jiwer` |
-| distil-large-v3 weights | STT WER measurement | NOT cached | — | Auto-downloads on first use (~1.5 GB) |
-| large-v3-turbo weights | STT WER measurement | NOT cached | — | Auto-downloads (~0.75 GB) |
-| large-v3 FP16 weights | STT WER measurement | NOT cached | — | Auto-downloads (~3 GB) |
-
-**Missing dependencies with no fallback:**
-- None. All dependencies have a clear install path or fallback.
-
-**Missing dependencies with install required before measurement:**
-- `faster-whisper`, `f5-tts`, `coqui-tts`, `qwen-tts`, `jiwer` — all installable via pip in the Python 3.11 env.
-- `flash-attn` — install attempted; outcome is itself a Phase 0 measurement.
-- Whisper model weights — auto-download on first use; plan for time and bandwidth.
+| Python 3.11 | All AI probes | NO | `py -3.11` missing | Install before plan 01 continues |
+| Python 3.10 | Host tooling only | YES | 3.10.8 | Do not use as the measurement runtime |
+| PyTorch | All AI inference scripts | NO | import fails | Install in `.venv-phase0` |
+| RTX 3060 (12 GB) | STT/TTS/VRAM probes | YES | 12288 MiB, driver 560.94, sm_86 | Correct target hardware |
+| `nvcc` | FA2 build path | YES | CUDA 11.7.99 | Present on PATH |
+| `cl.exe` | FA2 build path | NO | not found | Install / expose MSVC Build Tools |
+| Tailscale | Optional HTTPS path | NO | command not found | Ignore for now or install later |
+| mkcert | Primary HTTPS path | NO | command not found | Install in plan 02 |
+| `ollama` | Preferred LLM cancel path | NO | command not found | Install before plan 06 |
+| `llama-server` | LLM cancel fallback | NO | command not found | Install or provide separately |
+| `faster-whisper` | STT WER | NO | import absent | Install in plan 01 |
+| `f5-tts` | TTS TTFA | NO | import absent | Install in plan 01 |
+| `TTS` / coqui-tts | XTTS TTFA | NO | import absent | Install in plan 01 |
+| `qwen-tts` | Qwen3-TTS TTFA | NO | import absent | Install in plan 01 |
+| `flash_attn` | FA2 gate | NO | import absent | Attempt in plan 07 |
+| Disk free | Model downloads / results | YES | ~40.2 GB free in user profile volume | Sufficient for Phase 0 |
 
 ---
 
@@ -537,37 +496,43 @@ def run_soak(engine_name: str, engine_instance, soak_minutes=30):
 
 | Property | Value |
 |---|---|
-| Framework | pytest + pytest-asyncio (for the LLM cancel probe async script) |
-| Config file | None — Wave 0 creates pytest.ini under `spikes/` |
-| Quick run command | `py -3.11 -m pytest spikes/ -x -q` |
-| Full suite command | `py -3.11 -m pytest spikes/ -v` |
+| Framework | `pytest` + `pytest-asyncio` |
+| Probe package root | `.planning/phases/00-measurement-gate/probes/` |
+| Quick run command | `.venv-phase0/Scripts/python.exe -m pytest .planning/phases/00-measurement-gate/probes -x -q` |
+| Full suite command | `.venv-phase0/Scripts/python.exe -m pytest .planning/phases/00-measurement-gate/probes -v` |
 
 ### Phase Requirements → Test Map
 
-Phase 0 delivers no REQ-IDs (spike only). Tests are measurement scripts, not unit tests.
+Phase 0 still delivers no shipped REQ IDs. Validation remains probe-driven.
 
 | Spike Item | Behavior | Test Type | Automated? |
 |---|---|---|---|
-| HTTPS probe | `window.isSecureContext === true` on iPhone Safari | Manual verification + automated server script | Server script automated; iPhone check is manual |
-| STT WER | WER, latency, VRAM logged for 3 models | Automated measurement script | YES — `spikes/01-stt-wer/measure_wer.py` |
-| TTS TTFA | TTFA (ms) and RTF logged for 3 engines | Automated measurement script | YES — `spikes/02-tts-ttfa/measure_ttfa.py` |
-| VRAM soak | Peak VRAM < 11 GB (3060) or no unbounded growth | Automated 30-min script | YES — `spikes/03-vram-soak/soak_test.py` |
-| LLM cancel | GPU drops to idle ≤200 ms after stream close | Automated probe + manual nvidia-smi check | Probe automated; GPU check manual |
-| FA2 install | `from flash_attn import flash_attn_func` succeeds | Automated install script | YES — `spikes/05-flash-attn/verify_fa2.sh` |
+| HTTPS probe | `window.isSecureContext === true` on iPhone Safari | Manual iPhone verification + automated local server | Partial |
+| STT WER | WER, latency, VRAM logged for 3 models | Automated probe | YES |
+| TTS TTFA | TTFA and RTF logged for 3 engines | Automated probe | YES |
+| VRAM soak | Peak VRAM < 11 GB and no unbounded growth | Automated 30-min probe | YES |
+| LLM cancel | GPU drops to idle <= 200 ms after stream close | Automated probe + local server install prerequisite | Partial |
+| FA2 install | `from flash_attn import flash_attn_func` succeeds | Automated install probe | YES |
 
 ### Wave 0 Gaps
 
-- [ ] `spikes/` directory — does not exist yet; create with the five measurement subdirs
-- [ ] `spikes/pytest.ini` — needed only if pytest is used for any automated assertions
-- [ ] Python 3.11 venv at `.venv311/` — none exists; Wave 0 creates it
+- [ ] Python 3.11 is not installed on the backend
+- [ ] `.venv-phase0/` does not exist
+- [ ] torch and all Phase 0 packages are missing
+- [ ] mkcert is missing
+- [ ] no local LLM server is available
+- [ ] MSVC tooling is not available on PATH for FA2 builds
 
 ---
 
 ## Security Domain
 
-Phase 0 produces no application code, no network endpoints, and no stored secrets. Security domain is not applicable for this spike. No ASVS categories apply.
+Phase 0 still produces no persistent app surface, but the corrected backend state changes one operational note:
 
-The one security-adjacent note: the HTTPS probe server (minimal Python HTTPS server with a Tailscale cert) should be run only during the measurement session and terminated immediately after. It should not be left running unattended since it exposes a port on the Tailscale tailnet.
+- HTTPS private keys generated by mkcert must remain local and gitignored.
+- The temporary research SSH account should not be reused for production and can be rotated after the Phase 0 work is done.
+
+No ASVS categories apply directly to the spike itself.
 
 ---
 
@@ -575,39 +540,40 @@ The one security-adjacent note: the HTTPS probe server (minimal Python HTTPS ser
 
 ### Primary (HIGH confidence)
 
-- Live environment probe (2026-04-18) — `nvidia-smi`, `python --version`, `py -3.11 -c "import torch..."`, `tailscale version`, `tailscale status`, `command -v llama-server`, `command -v ollama`, `pip index versions` — all commands run directly against the `pedro-2023` machine
-- [PyPI: faster-whisper](https://pypi.org/project/faster-whisper/) — version 1.2.1 verified as latest [VERIFIED]
-- [PyPI: f5-tts](https://pypi.org/project/f5-tts/) — version 1.1.17 verified as latest [VERIFIED]
-- [PyPI: coqui-tts](https://pypi.org/project/coqui-tts/) — version 0.27.5 [VERIFIED]
-- [PyPI: qwen-tts](https://pypi.org/project/qwen-tts/) — version 0.1.1 [VERIFIED]
-- [PyPI: flash-attn](https://pypi.org/project/flash-attn/) — version 2.8.3 [VERIFIED]
-- [PyPI: pipecat-ai](https://pypi.org/project/pipecat-ai/) — version 1.0.0 [VERIFIED]
-- `.planning/research/STACK.md` — technology stack decisions and VRAM budget math
-- `.planning/research/PITFALLS.md` — all critical pitfalls for this phase (#2, #4, #5, #6, #7, #8)
-- `.planning/research/QWEN3-TTS.md` — full Qwen3-TTS assessment including Phase 0 acceptance gate triggers
+- Live backend probe on `OMEN-PC` (`192.168.1.199`) over SSH on 2026-04-22 using:
+  - `hostname`
+  - `whoami`
+  - `ipconfig`
+  - `nvidia-smi --query-gpu=...`
+  - `python --version`
+  - `py -0p`
+  - `python -c "import ..."`
+  - `Get-Command ollama,llama-server,nvcc,cl`
+  - `where mkcert`
+  - `where tailscale`
+  - `dir C:\Users\rayme-ssh`
+- [PyTorch previous versions (official)](https://pytorch.org/get-started/previous-versions) — confirms Windows wheel availability for PyTorch 2.5.1 `cu118` and `cu121`
+- `.planning/research/STACK.md`
+- `.planning/research/PITFALLS.md`
+- `.planning/research/QWEN3-TTS.md`
 
 ### Secondary (MEDIUM confidence)
 
-- [faster-whisper GitHub](https://github.com/SYSTRAN/faster-whisper) — `compute_type` parameters, `condition_on_previous_text` flag
-- [QwenLM/Qwen3-TTS GitHub](https://github.com/QwenLM/Qwen3-TTS) — voice clone API, FA2 requirement
-- [jamiepine/voicebox](https://github.com/jamiepine/voicebox) — voicebox integration patterns for Qwen3-TTS (non-streaming reference)
-- [Hacker News: Qwen3-TTS family is now open sourced](https://news.ycombinator.com/item?id=46719229) — FA2 Windows install friction reports, GTX 1080 RTF 2.11 datapoint
-
-### Tertiary (LOW confidence)
-
-- [qwen3-tts.app benchmark article](https://qwen3-tts.app/blog/qwen3-tts-performance-benchmarks-hardware-guide-2026) — RTF numbers for RTX 3060 Ti (closest hardware to 3060 with published data)
-- [andimarafioti/faster-qwen3-tts](https://github.com/andimarafioti/faster-qwen3-tts) — CUDA graph capture TTFA numbers on RTX 4060 (extrapolation basis)
+- Existing Phase 0 plans under `.planning/phases/00-measurement-gate/`
+- Existing package pins already captured in the plan set from the earlier non-machine-specific research
 
 ---
 
 ## Metadata
 
 **Confidence breakdown:**
-- Standard stack: HIGH — all package versions verified live from PyPI registry
-- Architecture: HIGH — measurement patterns derived from official docs and PITFALLS.md
-- Environment: HIGH — probed directly on the target machine
-- Hardware accuracy: MEDIUM — 4090 vs 3060 discrepancy unresolved; 3060 may exist as separate box
-- TTFA extrapolation for 3060: LOW — derived from indirect benchmarks on adjacent hardware
 
-**Research date:** 2026-04-18
-**Valid until:** 2026-05-18 (30 days; PyPI package versions are stable; HW environment should not change)
+- Hardware / driver / GPU memory: HIGH
+- Python / package / binary availability: HIGH
+- HTTPS current-path recommendation: HIGH
+- Local LLM server absence: HIGH
+- FA2 install prognosis before running it: MEDIUM
+- Exact final torch wheel choice for plan 01: MEDIUM
+
+**Research date:** 2026-04-22
+**Valid until:** 2026-05-22, unless the backend is reprovisioned

@@ -1,0 +1,43 @@
+{
+  "engine": "f5",
+  "mode": "production_ack_then_chunked_remainder",
+  "true_streaming": false,
+  "speed": 1.5,
+  "ack_text": "Yeah, I hear you.",
+  "ack_ttfa_ms": 528.4,
+  "ack_audio_duration_s": 1.259,
+  "remainder_first_chunk_after_ack_start_ms": 1076.7,
+  "remainder_audio_duration_s": 68.021,
+  "remainder_synthesis_time_s": 6.531,
+  "remainder_rtf": 0.096,
+  "dead_air_after_ack_ms": 0.0,
+  "hidden_by_ack_playback_ms": 182.0,
+  "num_batches": 7,
+  "max_chars": 161,
+  "batch_char_lengths": [
+    139,
+    137,
+    137,
+    144,
+    147,
+    91,
+    117
+  ],
+  "peak_vram_mb": 1990.2,
+  "combined_audio_duration_s": 69.36,
+  "combined_output_wav": "fixtures\\tts_samples\\f5_production_chunked_speed15.wav",
+  "meta": {
+    "timestamp": "2026-04-22T20:50:25+00:00",
+    "python_version": "3.11.15",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "gpu": {
+      "cuda_available": true,
+      "name": "NVIDIA GeForce RTX 3060",
+      "vram_total_mb": 12287,
+      "compute_capability": "8.6",
+      "driver_version": "560.94",
+      "cuda_version": "11.8",
+      "torch_version": "2.5.1+cu118"
+    }
+  }
+}

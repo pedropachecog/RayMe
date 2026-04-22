@@ -833,5 +833,53 @@ How roadmap phases should address these pitfalls.
 - [WebRTC Bluetooth audio routing issues on iOS](https://www.webrtc-developers.com/using-homepod-mini-and-airpods-with-webrtc/) — AirPods discovery gaps
 
 ---
+
+## Addendum — Qwen3-TTS Pitfalls (added 2026-04-17)
+
+Added when Qwen3-TTS was promoted to v1 third-engine candidate. Full assessment: `.planning/research/QWEN3-TTS.md` §9.
+
+### P-Qwen-1. FlashAttention 2 install friction on Windows (critical)
+
+**What breaks:** Qwen3-TTS strongly recommends FA2 for viable TTFA and VRAM. Hacker News community reports FA2 install failures on Windows + Python 3.12 + CUDA 12.1. Without FA2, 1.7B-Base blows the 3060 12 GB budget; 0.6B-Base still works but loses its TTFA advantage.
+
+**Mitigation:** Phase 0 verifies FA2 install as success criterion #6. If fails, Qwen3-TTS is restricted to 0.6B-Base without FA2 (VRAM still fits; TTFA measured without FA2). If 0.6B-without-FA2 also misses TTFA <400 ms, Qwen3-TTS is feature-flagged off for v1.
+
+### P-Qwen-2. Long-generation infinite loops and emotional outbursts
+
+**What breaks:** `ref_audio >30 s` causes EOS failure (model loops). Long generations (>15 s output) inject random laughter/moaning/humming. Both attested in community reports.
+
+**Mitigation:** `qwen-tts` enforces `ref_audio_max_seconds=30`; REQ-20 already caps at 15 s. Sentence-boundary chunking (REQ-45) keeps generated chunks <15 s. Inference hard timeout per sentence (15 s) with cancel-and-retry on timeout.
+
+### P-Qwen-3. Chinese-accent bleed and timbre drift on English
+
+**What breaks:** Zero-shot clones produce inconsistent timbre across generations; some English outputs carry Chinese-accent flavor. Unknown handling of Spanish-accented-English reference audio — may preserve accent or drift.
+
+**Mitigation:** Phase 0 SC#3 includes subjective listening test on the builder's Spanish-accented-English clone. Voice Lab test-play button (REQ-23) uses a fixed seed for reproducible auditioning. If clone drifts to default American or Chinese-flavored English, Qwen3-TTS is rejected for this builder and REQ-22 falls back to two engines.
+
+### P-Qwen-4. Phoneme bleed from reference audio ending
+
+**What breaks:** The first generated token conditions on whatever phoneme the reference audio ends on, causing bleed into the start of synthesized speech.
+
+**Mitigation:** Voice Lab guidance recommends trimming silence/breath from the end of reference audio (already good hygiene for F5 too). No code change required beyond a UI hint.
+
+### P-Qwen-5. `qwen-tts` package is 2 months old — API stability risk
+
+**What breaks:** `qwen-tts` 0.1.1 (2026-02-06). Breaking changes in 0.2.x possible.
+
+**Mitigation:** Pin `qwen-tts==0.1.1` exactly (no `^` or `>=`). Do not auto-upgrade. If upstream breaks, vendor the needed modules into RayMe's own `Qwen3TTSService`.
+
+### P-Qwen-6. Sample-rate mismatch (24 kHz native, 48 kHz WebRTC)
+
+**What breaks:** Qwen3-TTS outputs 24 kHz (or 48 kHz if the new 48 kHz tokenizer decoder is used). WebRTC / aiortc expects 48 kHz Opus.
+
+**Mitigation:** Already handled — RayMe's resampler (in place for XTTS which is also 24 kHz) covers this without change.
+
+### P-Qwen-7. Pipecat frame-cancellation semantics for Qwen3-TTS streaming
+
+**What breaks:** `stream_generate_voice_clone` exists in `qwen-tts` but has not been tested with Pipecat's frame-cancellation protocol (barge-in mid-sentence). A custom `Qwen3TTSService` must honor the cancel signal or barge-in will not work for Qwen-backed voices.
+
+**Mitigation:** Phase 2 AI-backend bringup includes a barge-in smoke test per engine. If Qwen's streaming wrapper does not cancel cleanly, Qwen-backed voices are flagged as "non-interruptible in v1" and their TTS is routed through the non-streaming path (synchronous generate per sentence with a hard 15 s timeout). This is documented in `.planning/research/QWEN3-TTS.md` §10 as an open question.
+
+---
 *Pitfalls research for: Self-hosted real-time voice AI calls (RayMe)*
-*Researched: 2026-04-16*
+*Researched: 2026-04-16 (Qwen3-TTS addendum 2026-04-17)*

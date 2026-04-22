@@ -71,7 +71,7 @@
       "status": "done_with_engine_blockers",
       "host": "OMEN-PC",
       "result_file": ".planning/phases/00-measurement-gate/results/tts_ttfa.json",
-      "objective_default": "qwen3"
+      "objective_default": "f5"
     }
   ],
   "remaining_tasks": [
@@ -87,14 +87,15 @@
     },
     {
       "id": 43,
-      "name": "Resolve TTS engine blockers: F5 crash, XTTS license prompt, optional accent listening",
+      "name": "Resolve TTS engine budget miss: simulated vs native streaming, optional accent listening",
       "status": "blocked_on_engine_or_user"
     }
   ],
   "blockers": [
     "Android browser verification still pending for 00-02 Task 2",
-    "F5-TTS crashes the subprocess on Windows backend OMEN-PC before a TTFA result is produced",
-    "XTTS v2 is blocked on interactive Coqui CPML acceptance and must not be auto-accepted on the user's behalf",
+    "No measured TTS engine clears the v1 budget on OMEN-PC: F5 is simulated-streaming at 530.3 ms TTFA, XTTS native streaming is 595.2 ms, and Qwen3 simulated streaming is 7527.3 ms",
+    "The current OMEN-PC Qwen3-TTS result is a no-FlashAttention baseline only: the probe records eager attention, flash-attn is not installed on OMEN-PC, and any later Qwen3 comparison must distinguish eager-baseline numbers from a future FA2-enabled rerun",
+    "Phase 00 still needs a policy call on whether simulated streaming is acceptable for the fallback engine; F5 is fastest but not a true incremental streamer",
     "Local LLM server install still pending for 00-06 Task 2"
   ],
   "human_actions_pending": [],
@@ -105,8 +106,8 @@
       "phase": "00"
     },
     {
-      "decision": "Use the durable SSH identity /home/agent/.ssh/rayme_omen_phase0_ed25519",
-      "rationale": "Persistent key material must not live in /tmp and this key is the verified backend path",
+      "decision": "Use the canonical SSH identity .local/phase0-ssh/rayme_omen_phase0_ed25519 and bootstrap ~/.ssh from it each session",
+      "rationale": "Persistent key material must not live in /tmp or be assumed durable under /home/agent/.ssh in containme; the repo bind mount is the verified persistent path",
       "phase": "00"
     },
     {
@@ -130,8 +131,28 @@
       "phase": "00"
     },
     {
-      "decision": "Do not auto-accept the Coqui XTTS CPML license prompt",
-      "rationale": "That prompt is a real license acknowledgement and should be an explicit user choice, not silently answered by the agent",
+      "decision": "User explicitly approved the Coqui XTTS CPML on 2026-04-22 and OMEN-PC now persists that state via tos_agreed.txt",
+      "rationale": "The license prompt required an explicit human choice; after approval, the accepted state was persisted on OMEN-PC so future XTTS runs no longer hit EOF at the prompt",
+      "phase": "00"
+    },
+    {
+      "decision": "Classify XTTS as the only native streaming engine in the current Phase 00 benchmark; treat F5 and Qwen3 as simulated-streaming only",
+      "rationale": "The updated probe now measures XTTS through its internal inference_stream path, while F5 only slices generated audio into chunks after synthesis and Qwen3 only simulates streaming text input",
+      "phase": "00"
+    },
+    {
+      "decision": "Use F5-TTS as the primary cloned-voice path and keep XTTS as a compatibility-only option",
+      "rationale": "User listening tests found XTTS clone quality very poor compared with F5. XTTS remains useful only as a compatibility fallback because it has native streaming support.",
+      "phase": "00"
+    },
+    {
+      "decision": "Use the production-style F5 preset with short ack plus chunked remainder at speed 1.5 as the current responsiveness baseline",
+      "rationale": "On OMEN-PC this profile delivered 528.4 ms ack TTFA, 1.259 s ack duration, 0 ms dead air after the ack, and a 69.36 s long-form combined render that sounds materially less sluggish than speed 1.0.",
+      "phase": "00"
+    },
+    {
+      "decision": "Treat the current OMEN-PC Qwen3-TTS benchmark as an eager-attention baseline, not a FlashAttention-optimized result",
+      "rationale": "The benchmark JSON on OMEN-PC records Qwen3 with flash_attention=eager, qwen_tts warns that flash-attn is not installed, and the separate FA2 install task previously failed on OMEN-PC. Any future Qwen3 performance comparison must call out whether FA2 is still absent or has been enabled.",
       "phase": "00"
     }
   ],
@@ -158,8 +179,8 @@
     ".planning/research/QWEN3-TTS.md",
     "docs/stitch/DESIGN.md"
   ],
-  "next_action": "Commit the new probe code and result JSONs, then continue Phase 00 with non-license, non-phone work. If resuming TTS, keep XTTS blocked on explicit license acceptance and debug the F5 Windows native crash in isolation.",
-  "context_notes": "SEV-1 process failure and user-trust incident. The voice benchmark fixtures are persisted in commit f207093, the live STT/TTS runs have now been executed on OMEN-PC, and the handoff must remember the CTranslate2 CUDA 11 workaround plus the two TTS engine blockers.",
+  "next_action": "Run ./scripts/bootstrap-rayme-ssh.sh restore, then plan and execute 00-07.1-attention-backend-matrix so Phase 00 has backend-labeled TTS measurements (`eager` / `sdpa` / `flash_attention_2` / `not_applicable`) before final writeback. Keep the current F5 production path as the leading candidate, XTTS as compatibility fallback, and treat existing OMEN-PC Qwen3 numbers as the no-FA2 eager baseline until a separately labeled rerun exists.",
+  "context_notes": "SEV-1 process failure and user-trust incident. The voice benchmark fixtures are persisted in commit f207093, the live STT/TTS runs have now been executed on OMEN-PC, and the handoff must remember the CTranslate2 CUDA 11 workaround, the F5 probe shims that fixed the Windows crash, the current production-style F5 baseline at speed 1.5, the XTTS native-streaming result after explicit user-approved CPML acceptance, the fact that OMEN-PC Qwen3 numbers are an eager-attention no-FlashAttention baseline rather than an FA2-optimized result, the fact that containme does not persist /home/agent/.ssh across sessions, and the fact that git safe.directory may need to be re-added in fresh sessions and should be fixed automatically rather than treated as a blocker.",
   "incident": {
     "severity": "SEV-1",
     "summary": "Phase 0 execution was attempted on the wrong machine, persistent SSH state was lost by using /tmp, and the user was repeatedly forced into manual recovery loops.",
@@ -172,7 +193,8 @@
     ],
     "prevention_rules": [
       "Use OMEN-PC only for Phase 0 backend work",
-      "Never store persistent SSH material in /tmp",
+      "Never store persistent SSH material in /tmp or assume /home/agent/.ssh persists",
+      "If git reports dubious ownership for /d/Pedro/Repos/Program/RayMe, immediately run git config --global --add safe.directory /d/Pedro/Repos/Program/RayMe and continue",
       "Verify hostname, whoami, python --version, and nvidia-smi before claiming backend access works",
       "Prefer the shortest validated recovery path under user frustration"
     ],
@@ -236,17 +258,51 @@
       }
     },
     "tts_result": {
-      "objective_default": "qwen3",
-      "qwen3": {
-        "ttfa_ms": 4848.4,
-        "rtf": 3.03,
-        "peak_vram_mb": 2494.1
+      "objective_default": "f5",
+      "f5": {
+        "mode": "simulated_streaming",
+        "streaming_support": "simulated",
+        "true_streaming": false,
+        "ttfa_ms": 530.3,
+        "rtf": 0.398,
+        "peak_vram_mb": 1990.2
       },
-      "f5_error": "subprocess_exit_3221225477",
-      "xtts_error": "interactive_cpml_license_prompt",
-      "qwen_gate": {
-        "accepted": false,
-        "reasons": [
+      "xtts": {
+        "mode": "streaming",
+        "streaming_support": "native",
+        "true_streaming": true,
+        "fallback_to_non_streaming": false,
+        "ttfa_ms": 595.2,
+        "rtf": 0.657,
+        "peak_vram_mb": 1897.6
+      },
+      "qwen3": {
+        "mode": "simulated_streaming_text",
+        "streaming_support": "simulated",
+        "true_streaming": false,
+        "flash_attention": "eager",
+        "fa2_enabled": false,
+        "ttfa_ms": 7527.3,
+        "rtf": 3.035,
+        "peak_vram_mb": 2520.1,
+        "interpretation": "No-FlashAttention baseline on OMEN-PC. Qwen3 numbers here should not be treated as FA2-optimized."
+      },
+        "production_f5_speed15": {
+          "mode": "production_ack_then_chunked_remainder",
+          "speed": 1.5,
+          "ack_ttfa_ms": 528.4,
+          "ack_audio_duration_s": 1.259,
+          "remainder_first_chunk_after_ack_start_ms": 1076.7,
+          "dead_air_after_ack_ms": 0.0,
+          "hidden_by_ack_playback_ms": 182.0,
+          "remainder_rtf": 0.096,
+          "combined_audio_duration_s": 69.36,
+          "result_file": ".planning/phases/00-measurement-gate/results/f5_production_chunked_speed15.json",
+          "audio_file": ".planning/phases/00-measurement-gate/results/f5_production_chunked_speed15.wav"
+        },
+        "qwen_gate": {
+          "accepted": false,
+          "reasons": [
           "ttfa_too_high",
           "rtf_too_high",
           "accent_drift_or_untested"

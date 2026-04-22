@@ -1,0 +1,70 @@
+{
+  "probe": "tts_ttfa",
+  "target_text": "Hey, I wanted to leave a fuller note so we can hear how the voice holds up over a longer stretch. The short samples are useful for latency, but they do not tell us much about consistency, pacing, breathiness, or how well the model carries emotion from one sentence to the next. So this version is intentionally longer and a little more conversational. It moves through a few different rhythms, includes some pauses, and should make it easier to notice whether the tone stays stable or starts to drift. I also want enough material to expose awkward transitions, repeated prosody, or the sort of flattening that sometimes shows up once a model has been speaking for a while. If the identity stays recognizable, the phrasing remains clear, and the overall delivery still sounds like one coherent person, then we will know it is much closer to something we could actually use in a real call. That is the point of this run.",
+  "ref_audio": "fixtures\\short_ref_audio.wav",
+  "engines": {
+    "f5": {
+      "engine": "f5",
+      "ttfa_ms": null,
+      "rtf": null,
+      "error": "subprocess_exit_1",
+      "stderr": "[tts] Loading F5-TTS...\nDownload Vocos from huggingface charactr/vocos-mel-24khz\n\nvocab :  C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\f5_tts\\infer\\examples\\vocab.txt\ntoken :  custom\nmodel :  C:\\Users\\rayme-ssh.OMEN-PC\\.cache\\huggingface\\hub\\models--SWivid--F5-TTS\\snapshots\\84e5a410d9cead4de2f847e7c9369a6440bdfaca\\F5TTS_v1_Base\\model_1250000.safetensors \n\nConverting audio...\nUsing custom reference text...\n\nref_text   Okay. Yeah. I resent you. I love you. I respect you. But you know what? You blew it!. \ngen_text 0 Warm.\n\n\nGenerating audio in 1 batches...\n\nref_text   Okay. Yeah. I resent you. I love you. I respect you. But you know what? You blew it!. \n\nC:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\torch\\cuda\\__init__.py:61: FutureWarning: The pynvml package is deprecated. Please install nvidia-ml-py instead. If you did not install pynvml directly, please report this to the maintainers of the package that installed pynvml for you.\n  import pynvml  # type: ignore[import]\nC:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\pydub\\utils.py:170: RuntimeWarning: Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work\n  warn(\"Couldn't find ffmpeg or avconv - defaulting to ffmpeg, but may not work\", RuntimeWarning)\nC:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\torch\\nn\\modules\\module.py:1326: UserWarning: expandable_segments not supported on this platform (Triggered internally at C:\\actions-runner\\_work\\pytorch\\pytorch\\builder\\windows\\pytorch\\c10/cuda/CUDAAllocatorConfig.h:28.)\n  return t.to(\n\n  0%|          | 0/1 [00:00<?, ?it/s]\n100%|##########| 1/1 [00:01<00:00,  1.09s/it]\n100%|##########| 1/1 [00:01<00:00,  1.09s/it]\nTraceback (most recent call last):\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\tts_ttfa.py\", line 614, in <module>\n    sys.exit(main())\n             ^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\tts_ttfa.py\", line 549, in main\n    metrics = run_engine_locally(\n              ^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\tts_ttfa.py\", line 397, in run_engine_locally\n    return measure_f5(ref_audio, ref_text, target_text, sample_out)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\tts_ttfa.py\", line 168, in measure_f5\n    for chunk, sample_rate in infer_batch_process(\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\f5_tts\\infer\\utils_infer.py\", line 523, in infer_batch_process\n    for chunk in process_batch(gen_text):\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\f5_tts\\infer\\utils_infer.py\", line 490, in process_batch\n    generated, _ = model_obj.sample(\n                   ^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\torch\\utils\\_contextlib.py\", line 116, in decorate_context\n    return func(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\f5_tts\\model\\cfm.py\", line 218, in sample\n    trajectory = odeint(fn, y0, t, **self.odeint_kwargs)\n                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\torchdiffeq\\_impl\\odeint.py\", line 80, in odeint\n    solution = solver.integrate(t)\n               ^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\torchdiffeq\\_impl\\solvers.py\", line 114, in integrate\n    dy, f0 = self._step_func(self.func, t0, dt, t1, y0)\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\torchdiffeq\\_impl\\fixed_grid.py\", line 10, in _step_func\n    f0 = func(t0, y0, perturb=Perturb.NEXT if self.perturb else Perturb.NONE)\n         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\torch\\nn\\modules\\module.py\", line 1736, in _wrapped_call_impl\n    return self._"
+    },
+    "xtts": {
+      "engine": "xtts",
+      "mode": "non_streaming_fallback",
+      "streaming_support": "native_fallback",
+      "true_streaming": false,
+      "fallback_to_non_streaming": true,
+      "ttfa_ms": 31446.0,
+      "rtf": 0.502,
+      "audio_duration_s": 62.693,
+      "synthesis_time_s": 31.446,
+      "peak_vram_mb": 2092.8,
+      "sample_rate": 24000,
+      "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\xtts.wav",
+      "streaming_error": "Traceback (most recent call last):\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\tts_ttfa.py\", line 260, in measure_xtts\n    for chunk in xtts_model.inference_stream(\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\torch\\utils\\_contextlib.py\", line 36, in generator_context\n    response = gen.send(None)\n               ^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\TTS\\tts\\models\\xtts.py\", line 625, in inference_stream\n    assert text_tokens.shape[-1] < self.args.gpt_max_text_tokens, (\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nAssertionError:  \u2757 XTTS can only generate text with a maximum of 400 tokens.\n"
+    },
+    "qwen3": {
+      "engine": "qwen3",
+      "mode": "simulated_streaming_text",
+      "streaming_support": "simulated",
+      "true_streaming": false,
+      "variant": "0.6B-Base",
+      "flash_attention": "eager",
+      "ttfa_ms": 141146.6,
+      "rtf": 2.633,
+      "audio_duration_s": 53.6,
+      "synthesis_time_s": 141.147,
+      "peak_vram_mb": 2880.7,
+      "sample_rate": 24000,
+      "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\qwen3.wav",
+      "streaming_notes": "Qwen3-TTS non_streaming_mode=False simulates streaming text input but still returns audio after full generation."
+    }
+  },
+  "v1_default": "xtts",
+  "v1_default_reason": "No engine hit the budget; xtts has best TTFA",
+  "qwen_gate": {
+    "accepted": false,
+    "reasons": [
+      "ttfa_too_high",
+      "rtf_too_high",
+      "accent_drift_or_untested"
+    ]
+  },
+  "accent_ok_passed_to_probe": false,
+  "meta": {
+    "timestamp": "2026-04-22T20:20:28+00:00",
+    "python_version": "3.11.15",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "gpu": {
+      "cuda_available": true,
+      "name": "NVIDIA GeForce RTX 3060",
+      "vram_total_mb": 12287,
+      "compute_capability": "8.6",
+      "driver_version": "560.94",
+      "cuda_version": "11.8",
+      "torch_version": "2.5.1+cu118"
+    }
+  }
+}

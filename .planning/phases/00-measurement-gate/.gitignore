@@ -20,3 +20,9 @@ iphone-cert.mobileconfig
 *.onnx
 *.smi.log
 results/*.log
+
+# Local benchmark snapshots copied back for listening/comparison
+probes/fixtures/tts_samples/
+results/local_4090/
+results/remote_tts_json/
+results/remote_tts_samples/
