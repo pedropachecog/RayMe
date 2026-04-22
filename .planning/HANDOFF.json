@@ -1,13 +1,13 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-22T16:15:54Z",
+  "timestamp": "2026-04-22T16:47:12Z",
   "phase": "00",
   "phase_name": "measurement-gate",
   "phase_dir": ".planning/phases/00-measurement-gate",
   "plan": 3,
-  "task": 1,
-  "total_tasks": 3,
-  "status": "in_progress",
+  "task": 2,
+  "total_tasks": 2,
+  "status": "blocked_on_builder",
   "completed_tasks": [
     {
       "id": 1,
@@ -33,24 +33,73 @@
     {
       "id": 21,
       "name": "Write HTTPS probe server and HTTPS setup doc skeleton",
-      "status": "done"
+      "status": "done",
+      "commit": "831f7a1"
     },
     {
       "id": 61,
       "name": "Build llm_cancel.py and parser/idleness unit tests",
       "status": "done",
-      "tests": "8 passed"
+      "tests": "8 passed",
+      "commit": "74c141a"
+    },
+    {
+      "id": 31,
+      "name": "Build whisper_bench.py, reference transcript, and unit tests",
+      "status": "done",
+      "tests": "8 passed",
+      "commit": "f207093"
+    },
+    {
+      "id": 41,
+      "name": "Build tts_ttfa.py, short reference transcript, and unit tests",
+      "status": "done",
+      "tests": "9 passed",
+      "commit": "f207093"
     }
   ],
   "remaining_tasks": [
     {
-      "id": 31,
-      "name": "Build whisper_bench.py, reference transcript, and unit tests",
-      "status": "ready"
+      "id": 22,
+      "name": "Verify trusted HTTPS from the actual Android device",
+      "status": "blocked_on_builder"
+    },
+    {
+      "id": 32,
+      "name": "Record reference_audio.wav and run the Whisper benchmark",
+      "status": "blocked_on_builder"
+    },
+    {
+      "id": 42,
+      "name": "Record short_ref_audio.wav and run the TTS TTFA benchmark",
+      "status": "blocked_on_builder"
+    },
+    {
+      "id": 62,
+      "name": "Install a local LLM server on OMEN-PC and run the cancel probe against it",
+      "status": "blocked_on_builder"
     }
   ],
-  "blockers": [],
-  "human_actions_pending": [],
+  "blockers": [
+    "Builder recording missing: .planning/phases/00-measurement-gate/probes/fixtures/reference_audio.wav",
+    "Builder recording missing: .planning/phases/00-measurement-gate/probes/fixtures/short_ref_audio.wav",
+    "Android browser verification still pending for 00-02 Task 2",
+    "Local LLM server install still pending for 00-06 Task 2"
+  ],
+  "human_actions_pending": [
+    {
+      "id": "record_reference_audio",
+      "file": ".planning/phases/00-measurement-gate/probes/fixtures/reference_audio.wav",
+      "source_text": ".planning/phases/00-measurement-gate/probes/fixtures/reference_transcript.txt",
+      "requirements": "~10 minutes, quiet room, mono, 16 kHz or higher"
+    },
+    {
+      "id": "record_short_ref_audio",
+      "file": ".planning/phases/00-measurement-gate/probes/fixtures/short_ref_audio.wav",
+      "source_text": ".planning/phases/00-measurement-gate/probes/fixtures/short_ref_transcript.txt",
+      "requirements": "6-12 seconds, quiet room, mono, 24 kHz or higher"
+    }
+  ],
   "decisions": [
     {
       "decision": "Use only OMEN-PC at 192.168.1.199 for Phase 0 host commands",
@@ -69,23 +118,40 @@
     },
     {
       "decision": "Treat 00-02 Task 2 as builder-blocked until an actual Android browser verification is performed",
-      "rationale": "The code and setup skeleton are ready, but the acceptance check requires the builder's actual phone and certificate trust flow",
+      "rationale": "The code and setup skeleton are ready, but the acceptance check requires the builder's actual Android phone and certificate trust flow",
       "phase": "00"
     },
     {
-      "decision": "Treat 00-06 Task 2 as builder-blocked until a local LLM server is installed on OMEN-PC",
-      "rationale": "The cancel probe and tests are ready, but there is no Ollama or llama-server runtime yet",
+      "decision": "Persist the voice benchmark fixtures in git before asking for recordings",
+      "rationale": "The exact transcript text to read must live in repo state, not in transient chat memory",
       "phase": "00"
     }
   ],
   "uncommitted_files": [
-    ".planning/HANDOFF.json",
-    ".planning/phases/00-measurement-gate/.continue-here.md",
-    ".planning/phases/00-measurement-gate/probes/llm_cancel.py",
-    ".planning/phases/00-measurement-gate/probes/test_llm_cancel.py"
+    ".planning/REQUIREMENTS.md",
+    ".planning/ROADMAP.md",
+    ".planning/config.json",
+    ".planning/phases/00-measurement-gate/00-01-wave0-setup-PLAN.md",
+    ".planning/phases/00-measurement-gate/00-03-whisper-wer-PLAN.md",
+    ".planning/phases/00-measurement-gate/00-04-tts-ttfa-PLAN.md",
+    ".planning/phases/00-measurement-gate/00-05-vram-soak-PLAN.md",
+    ".planning/phases/00-measurement-gate/00-06-llm-cancel-PLAN.md",
+    ".planning/phases/00-measurement-gate/00-07-fa2-install-PLAN.md",
+    ".planning/phases/00-measurement-gate/00-08-synthesis-writeback-PLAN.md",
+    ".planning/phases/00-measurement-gate/00-RESEARCH.md",
+    ".planning/phases/00-measurement-gate/00-VALIDATION.md",
+    ".planning/research/ARCHITECTURE.md",
+    ".planning/research/FEATURES.md",
+    ".planning/research/PITFALLS.md",
+    ".planning/research/STACK.md",
+    ".planning/research/SUMMARY.md",
+    ".claude/",
+    ".planning/STATE.md",
+    ".planning/research/QWEN3-TTS.md",
+    "docs/stitch/DESIGN.md"
   ],
-  "next_action": "Commit the LLM cancel probe and tests, then execute plan 00-03 task 1 while builder-blocked tasks wait on manual setup",
-  "context_notes": "SEV-1 process failure and user-trust incident. The user spent hours across days redoing SSH recovery because of wrong-machine execution, lost /tmp state, and high-friction speculative recovery. Future executors must treat these rules as blocking, not advisory.",
+  "next_action": "Wait for the builder to place reference_audio.wav and short_ref_audio.wav under probes/fixtures, then run whisper_bench.py and tts_ttfa.py on OMEN-PC. Until then, continue only non-builder backend work and never run host-sensitive Phase 0 commands on the local workstation.",
+  "context_notes": "SEV-1 process failure and user-trust incident. The voice benchmark fixtures are now persisted in commit f207093 and validated in the backend Phase 0 venv with 17 passing tests.",
   "incident": {
     "severity": "SEV-1",
     "summary": "Phase 0 execution was attempted on the wrong machine, persistent SSH state was lost by using /tmp, and the user was repeatedly forced into manual recovery loops.",
@@ -130,5 +196,21 @@
       "build_duration_s": 56.1,
       "qwen17b_recommended": false
     }
+  },
+  "voice_probe_state": {
+    "commit": "f207093",
+    "backend_stage_dir": "%USERPROFILE%\\phase0-probes",
+    "validation": "17 passed in 0.38s",
+    "reference_transcript_words": 1660,
+    "recordings_required": [
+      {
+        "file": ".planning/phases/00-measurement-gate/probes/fixtures/reference_audio.wav",
+        "from_text": ".planning/phases/00-measurement-gate/probes/fixtures/reference_transcript.txt"
+      },
+      {
+        "file": ".planning/phases/00-measurement-gate/probes/fixtures/short_ref_audio.wav",
+        "from_text": ".planning/phases/00-measurement-gate/probes/fixtures/short_ref_transcript.txt"
+      }
+    ]
   }
 }
