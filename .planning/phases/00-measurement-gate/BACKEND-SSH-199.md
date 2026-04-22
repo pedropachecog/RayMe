@@ -10,6 +10,7 @@ Use this file for direct executor access to the real Phase 0 backend.
 - Account type: standard local user, non-admin
 - WSL Ubuntu owner: `pmpg`
 - Verified on `2026-04-22`: `rayme-ssh` cannot enter WSL on this host because `wsl ls /` reports no installed distributions for that Windows account, while `pmpg` sees `Ubuntu` on WSL2 and `wsl ls /` works.
+- Verified on `2026-04-22`: SSH as `pmpg` works after installing the executor key into `C:\ProgramData\ssh\administrators_authorized_keys` because `pmpg` is in the local `Administrators` group.
 
 ## Hard Safety Guardrails
 
@@ -87,7 +88,14 @@ WSL connectivity test once `pmpg` key auth is added:
 
 ```bash
 RAYME_SSH_ALIAS=rayme-pmpg RAYME_SSH_USER=pmpg ./scripts/bootstrap-rayme-ssh.sh restore
-ssh rayme-pmpg "wsl --cd ~ -e bash -lc 'whoami && pwd && ls /'"
+ssh rayme-pmpg "wsl -d Ubuntu -e sh -c 'whoami && pwd && ls /'"
+```
+
+Verified WSL probe directory creation:
+
+```bash
+RAYME_SSH_ALIAS=rayme-pmpg RAYME_SSH_USER=pmpg ./scripts/bootstrap-rayme-ssh.sh restore
+ssh rayme-pmpg "wsl -d Ubuntu --cd /home/pmpg -e sh -c 'mkdir -p /home/pmpg/rayme-wsl-probe && readlink -f /home/pmpg/rayme-wsl-probe && ls -ld /home/pmpg/rayme-wsl-probe'"
 ```
 
 Expected output:
@@ -109,7 +117,7 @@ From now on:
 
 If SSH later fails with `Permission denied`, do not generate another key by default. First verify that `.local/phase0-ssh/rayme_omen_phase0_ed25519` exists on the repo bind mount, run `./scripts/bootstrap-rayme-ssh.sh restore`, and then verify that the public key above is still present in `C:\Users\rayme-ssh\.ssh\authorized_keys` on `OMEN-PC`.
 
-If WSL work is required, verify that the same public key is also present in `C:\Users\pmpg\.ssh\authorized_keys` and connect as `pmpg`.
+If WSL work is required, connect as `pmpg`. Because `pmpg` is in the local `Administrators` group on `OMEN-PC`, Windows OpenSSH reads the key from `C:\ProgramData\ssh\administrators_authorized_keys`, not from `C:\Users\pmpg\.ssh\authorized_keys`.
 
 ## One-Time Windows Fix If Key Auth Fails
 
@@ -145,21 +153,16 @@ Set-Content -Path $config -Value $filtered -Encoding ascii
 Restart-Service sshd
 ```
 
-For `pmpg`, use the same key but write it to that account's SSH directory instead:
+For `pmpg`, use the same key but write it to the administrators key file instead:
 
 ```powershell
-$user = 'pmpg'
-$acct = "${env:COMPUTERNAME}\${user}"
 $key  = 'ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINvaejBEFEdS8W4Dlfsbv3cOleizp7sKfcdKssWyI9ZV rayme-phase0-executor-2026-04-22'
+$file = 'C:\ProgramData\ssh\administrators_authorized_keys'
 
-$sshDir  = "C:\Users\$user\.ssh"
-$keyFile = "$sshDir\authorized_keys"
-
-New-Item -ItemType Directory -Force $sshDir | Out-Null
-Set-Content -Path $keyFile -Value $key -Encoding ascii
-
-cmd /c icacls "$sshDir"  /inheritance:r /grant:r "${acct}:(OI)(CI)F" /grant:r "Administrators:(OI)(CI)F" /grant:r "SYSTEM:(OI)(CI)F"
-cmd /c icacls "$keyFile" /inheritance:r /grant:r "${acct}:F"         /grant:r "Administrators:F"         /grant:r "SYSTEM:F"
+New-Item -ItemType Directory -Force C:\ProgramData\ssh | Out-Null
+Set-Content -Path $file -Value $key -Encoding ascii
+cmd /c icacls "$file" /inheritance:r /grant:r "Administrators:F" /grant:r "SYSTEM:F"
+Restart-Service sshd
 ```
 
 ## Host Key Fingerprint
@@ -193,6 +196,30 @@ omen-pc\rayme-ssh
 Python 3.10.8
 NVIDIA GeForce RTX 3060, 12288 MiB, 560.94
 ```
+
+This command was also executed successfully from Codex on 2026-04-22 for WSL-backed access:
+
+```bash
+RAYME_SSH_ALIAS=rayme-pmpg RAYME_SSH_USER=pmpg ./scripts/bootstrap-rayme-ssh.sh restore
+ssh rayme-pmpg "wsl -d Ubuntu --cd /home/pmpg -e sh -c 'mkdir -p /home/pmpg/rayme-wsl-probe && echo linux_user:\$(whoami) && echo linux_probe:\$(readlink -f /home/pmpg/rayme-wsl-probe) && ls -ld /home/pmpg/rayme-wsl-probe'"
+```
+
+Observed output:
+
+```text
+wsl: Failed to translate 'D:\Pedro\Programs\python\'
+wsl: Failed to translate 'D:\Pedro\Programs\python\Scripts'
+linux_user:pmpg
+linux_probe:/home/pmpg/rayme-wsl-probe
+drwxr-xr-x 2 pmpg pmpg 4096 Apr 22 19:09 /home/pmpg/rayme-wsl-probe
+```
+
+Those `Failed to translate ...` lines are PATH translation warnings from Windows environment propagation. They did not block WSL execution.
+
+## WSL Path Rule
+
+- From non-interactive SSH sessions, prefer direct `wsl -d Ubuntu -e sh -c '...'` commands with fixed Linux paths such as `/home/pmpg/...`.
+- Do not rely on `\\wsl.localhost\Ubuntu\...` or `\\wsl$\Ubuntu\...` from the remote SSH session; they were not reliably available during the 2026-04-22 verification.
 
 ## Scope Reminder
 
