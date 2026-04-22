@@ -1,12 +1,12 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-22T18:58:08Z",
+  "timestamp": "2026-04-22T22:36:07Z",
   "phase": "00",
   "phase_name": "measurement-gate",
   "phase_dir": ".planning/phases/00-measurement-gate",
-  "plan": 3,
-  "task": 2,
-  "total_tasks": 2,
+  "plan": "07.1",
+  "task": 4,
+  "total_tasks": 4,
   "status": "in_progress",
   "completed_tasks": [
     {
@@ -28,20 +28,14 @@
       "status": "done",
       "host": "OMEN-PC",
       "result": "windows_build_compile_error",
-      "qwen17b_recommended": false
+      "qwen17b_recommended": false,
+      "commit": "fd20ad2"
     },
     {
       "id": 21,
       "name": "Write HTTPS probe server and HTTPS setup doc skeleton",
       "status": "done",
       "commit": "831f7a1"
-    },
-    {
-      "id": 61,
-      "name": "Build llm_cancel.py and parser/idleness unit tests",
-      "status": "done",
-      "tests": "8 passed",
-      "commit": "74c141a"
     },
     {
       "id": 31,
@@ -51,19 +45,20 @@
       "commit": "f207093"
     },
     {
-      "id": 41,
-      "name": "Build tts_ttfa.py, short reference transcript, and unit tests",
-      "status": "done",
-      "tests": "9 passed",
-      "commit": "f207093"
-    },
-    {
       "id": 32,
       "name": "Run the real Whisper benchmark on the builder recording",
       "status": "done",
       "host": "OMEN-PC",
       "result_file": ".planning/phases/00-measurement-gate/results/whisper.json",
-      "default_rung": "distil-large-v3"
+      "default_rung": "distil-large-v3",
+      "commit": "23b506e"
+    },
+    {
+      "id": 41,
+      "name": "Build tts_ttfa.py, short reference transcript, and unit tests",
+      "status": "done",
+      "tests": "12 passed",
+      "commit": "f207093"
     },
     {
       "id": 42,
@@ -71,7 +66,38 @@
       "status": "done_with_engine_blockers",
       "host": "OMEN-PC",
       "result_file": ".planning/phases/00-measurement-gate/results/tts_ttfa.json",
-      "objective_default": "f5"
+      "objective_default": "f5",
+      "commit": "23b506e"
+    },
+    {
+      "id": 61,
+      "name": "Build llm_cancel.py and parser/idleness unit tests",
+      "status": "done",
+      "tests": "8 passed",
+      "commit": "74c141a"
+    },
+    {
+      "id": 71,
+      "name": "Extend TTS probes so backend selection and labeling are explicit",
+      "status": "done",
+      "tests": "12 passed on OMEN-PC",
+      "commit": "e48eae3"
+    },
+    {
+      "id": 72,
+      "name": "Re-run labeled TTS measurements on OMEN-PC and persist the backend matrix",
+      "status": "done",
+      "host": "OMEN-PC",
+      "result_files": [
+        ".planning/phases/00-measurement-gate/results/tts_ttfa.json",
+        ".planning/phases/00-measurement-gate/results/tts_attention_matrix.json"
+      ],
+      "commit": "55a3d59"
+    },
+    {
+      "id": 73,
+      "name": "Update handoff/writeback inputs to cite backend-labeled numbers",
+      "status": "done"
     }
   ],
   "remaining_tasks": [
@@ -81,122 +107,76 @@
       "status": "blocked_on_builder"
     },
     {
+      "id": 51,
+      "name": "Build vram_soak.py + unit tests for the growth detector",
+      "status": "not_started"
+    },
+    {
+      "id": 52,
+      "name": "Run 30-minute VRAM soak for F5, XTTS, and Qwen3 on OMEN-PC",
+      "status": "not_started"
+    },
+    {
       "id": 62,
       "name": "Install a local LLM server on OMEN-PC and run the cancel probe against it",
       "status": "blocked_on_builder"
     },
     {
-      "id": 43,
-      "name": "Resolve TTS engine budget miss: simulated vs native streaming, optional accent listening",
-      "status": "blocked_on_engine_or_user"
+      "id": 81,
+      "name": "Write final Phase 0 synthesis and write back PROJECT.md / STATE.md",
+      "status": "blocked_on_prior_results"
     }
   ],
   "blockers": [
-    "Android browser verification still pending for 00-02 Task 2",
-    "No measured TTS engine clears the v1 budget on OMEN-PC: F5 is simulated-streaming at 530.3 ms TTFA, XTTS native streaming is 595.2 ms, and Qwen3 simulated streaming is 7527.3 ms",
-    "The current OMEN-PC Qwen3-TTS result is a no-FlashAttention baseline only: the probe records eager attention, flash-attn is not installed on OMEN-PC, and any later Qwen3 comparison must distinguish eager-baseline numbers from a future FA2-enabled rerun",
-    "Phase 00 still needs a policy call on whether simulated streaming is acceptable for the fallback engine; F5 is fastest but not a true incremental streamer",
-    "Local LLM server install still pending for 00-06 Task 2"
+    "Android browser verification is still pending for 00-02 Task 2.",
+    "Local LLM server install is still pending for 00-06 Task 2.",
+    "Phase 00 writeback (00-08) is blocked until 00-02, 00-05, and 00-06 provide their missing inputs.",
+    "No measured TTS engine clears the v1 latency budget on OMEN-PC: F5 is 517.3 ms via simulated chunk streaming, XTTS native streaming is 534.3 ms, and Qwen3 eager baseline is 5626.8 ms.",
+    "FlashAttention 2 still fails to build on OMEN-PC, so Qwen3 remains an eager-attention baseline only."
   ],
-  "human_actions_pending": [],
+  "human_actions_pending": [
+    "Run the HTTPS probe from the actual Android device and confirm trusted cert + isSecureContext for 00-02 Task 2.",
+    "Install or provide a local OpenAI-compatible LLM server on OMEN-PC (prefer Ollama + a small model) for 00-06 Task 2."
+  ],
   "decisions": [
     {
-      "decision": "Use only OMEN-PC at 192.168.1.199 for Phase 0 host commands",
-      "rationale": "The local Codex workstation is not the backend and produced misleading execution results",
+      "decision": "Keep OMEN-PC as the only valid Phase 0 execution host and restore SSH from the repo-persisted key each session.",
+      "rationale": "The earlier SEV-1 came from running backend work on the wrong machine and relying on disposable SSH state.",
       "phase": "00"
     },
     {
-      "decision": "Use the canonical SSH identity .local/phase0-ssh/rayme_omen_phase0_ed25519 and bootstrap ~/.ssh from it each session",
-      "rationale": "Persistent key material must not live in /tmp or be assumed durable under /home/agent/.ssh in containme; the repo bind mount is the verified persistent path",
+      "decision": "Treat F5 and XTTS as not_applicable for attention backend labeling in the current probe.",
+      "rationale": "Neither probe path exposes eager, SDPA, or FlashAttention selection; their runtime differences are streaming-path differences, not attention-backend switches.",
       "phase": "00"
     },
     {
-      "decision": "Write repo artifacts locally but validate backend-only behavior over SSH on OMEN-PC",
-      "rationale": "The git checkout is local Linux while the executable Windows CUDA environment lives on OMEN-PC",
+      "decision": "Treat Qwen3-TTS as an eager-attention baseline until flash_attn imports successfully on OMEN-PC.",
+      "rationale": "The fresh labeled rerun and the FA2 install verdict both confirm that flash-attn is unavailable in this runtime.",
       "phase": "00"
     },
     {
-      "decision": "Treat 00-02 Task 2 as builder-blocked until an actual Android browser verification is performed",
-      "rationale": "The code and setup skeleton are ready, but the acceptance check requires the builder's actual Android phone and certificate trust flow",
+      "decision": "Use tts_attention_matrix.json as the source of truth for optimization backend labeling in future writeback.",
+      "rationale": "The old tts_ttfa.json schema could be misread as an optimized Qwen result; the dedicated matrix makes the backend status explicit per engine.",
       "phase": "00"
     },
     {
-      "decision": "Persist the voice benchmark fixtures in git before asking for recordings",
-      "rationale": "The exact transcript text to read must live in repo state, not in transient chat memory",
-      "phase": "00"
-    },
-    {
-      "decision": "Downgrade ctranslate2 to 3.24.0 on OMEN-PC while Phase 00 uses the CUDA 11.8 Torch stack",
-      "rationale": "Official faster-whisper guidance says current CTranslate2 wheels need CUDA 12, and the CUDA 11 workaround is ctranslate2 3.24.0",
-      "phase": "00"
-    },
-    {
-      "decision": "User explicitly approved the Coqui XTTS CPML on 2026-04-22 and OMEN-PC now persists that state via tos_agreed.txt",
-      "rationale": "The license prompt required an explicit human choice; after approval, the accepted state was persisted on OMEN-PC so future XTTS runs no longer hit EOF at the prompt",
-      "phase": "00"
-    },
-    {
-      "decision": "Classify XTTS as the only native streaming engine in the current Phase 00 benchmark; treat F5 and Qwen3 as simulated-streaming only",
-      "rationale": "The updated probe now measures XTTS through its internal inference_stream path, while F5 only slices generated audio into chunks after synthesis and Qwen3 only simulates streaming text input",
-      "phase": "00"
-    },
-    {
-      "decision": "Use F5-TTS as the primary cloned-voice path and keep XTTS as a compatibility-only option",
-      "rationale": "User listening tests found XTTS clone quality very poor compared with F5. XTTS remains useful only as a compatibility fallback because it has native streaming support.",
-      "phase": "00"
-    },
-    {
-      "decision": "Use the production-style F5 preset with short ack plus chunked remainder at speed 1.5 as the current responsiveness baseline",
-      "rationale": "On OMEN-PC this profile delivered 528.4 ms ack TTFA, 1.259 s ack duration, 0 ms dead air after the ack, and a 69.36 s long-form combined render that sounds materially less sluggish than speed 1.0.",
-      "phase": "00"
-    },
-    {
-      "decision": "Treat the current OMEN-PC Qwen3-TTS benchmark as an eager-attention baseline, not a FlashAttention-optimized result",
-      "rationale": "The benchmark JSON on OMEN-PC records Qwen3 with flash_attention=eager, qwen_tts warns that flash-attn is not installed, and the separate FA2 install task previously failed on OMEN-PC. Any future Qwen3 performance comparison must call out whether FA2 is still absent or has been enabled.",
+      "decision": "Keep F5-TTS as the current v1 default candidate while retaining XTTS as compatibility fallback.",
+      "rationale": "No engine meets the target budget, and the latest OMEN-PC rerun still leaves F5 with the best TTFA while XTTS remains the only native streamer.",
       "phase": "00"
     }
   ],
-  "uncommitted_files": [
-    ".planning/REQUIREMENTS.md",
-    ".planning/ROADMAP.md",
-    ".planning/config.json",
-    ".planning/phases/00-measurement-gate/00-01-wave0-setup-PLAN.md",
-    ".planning/phases/00-measurement-gate/00-03-whisper-wer-PLAN.md",
-    ".planning/phases/00-measurement-gate/00-04-tts-ttfa-PLAN.md",
-    ".planning/phases/00-measurement-gate/00-05-vram-soak-PLAN.md",
-    ".planning/phases/00-measurement-gate/00-06-llm-cancel-PLAN.md",
-    ".planning/phases/00-measurement-gate/00-07-fa2-install-PLAN.md",
-    ".planning/phases/00-measurement-gate/00-08-synthesis-writeback-PLAN.md",
-    ".planning/phases/00-measurement-gate/00-RESEARCH.md",
-    ".planning/phases/00-measurement-gate/00-VALIDATION.md",
-    ".planning/research/ARCHITECTURE.md",
-    ".planning/research/FEATURES.md",
-    ".planning/research/PITFALLS.md",
-    ".planning/research/STACK.md",
-    ".planning/research/SUMMARY.md",
-    ".claude/",
-    ".planning/STATE.md",
-    ".planning/research/QWEN3-TTS.md",
-    "docs/stitch/DESIGN.md"
-  ],
-  "next_action": "Run ./scripts/bootstrap-rayme-ssh.sh restore, then plan and execute 00-07.1-attention-backend-matrix so Phase 00 has backend-labeled TTS measurements (`eager` / `sdpa` / `flash_attention_2` / `not_applicable`) before final writeback. Keep the current F5 production path as the leading candidate, XTTS as compatibility fallback, and treat existing OMEN-PC Qwen3 numbers as the no-FA2 eager baseline until a separately labeled rerun exists.",
-  "context_notes": "SEV-1 process failure and user-trust incident. The voice benchmark fixtures are persisted in commit f207093, the live STT/TTS runs have now been executed on OMEN-PC, and the handoff must remember the CTranslate2 CUDA 11 workaround, the F5 probe shims that fixed the Windows crash, the current production-style F5 baseline at speed 1.5, the XTTS native-streaming result after explicit user-approved CPML acceptance, the fact that OMEN-PC Qwen3 numbers are an eager-attention no-FlashAttention baseline rather than an FA2-optimized result, the fact that containme does not persist /home/agent/.ssh across sessions, and the fact that git safe.directory may need to be re-added in fresh sessions and should be fixed automatically rather than treated as a blocker.",
+  "uncommitted_files": [],
+  "next_action": "If continuing autonomous work, run ./scripts/bootstrap-rayme-ssh.sh restore and execute 00-05-vram-soak on OMEN-PC so Phase 00 has the missing 3060 budget data. In parallel or before final writeback, the builder still needs to complete Android HTTPS verification for 00-02 and install a local LLM server for 00-06.",
+  "context_notes": "00-07.1 is now complete. The TTS probe and matrix explicitly label backend support: F5=not_applicable, XTTS=not_applicable, Qwen3=eager baseline with flash_attention_2 unavailable and sdpa not supported by the current probe. Fresh OMEN-PC rerun metrics are F5 517.3 ms / 0.388 RTF / 1990.2 MB, XTTS 534.3 ms / 0.59 RTF / 1897.6 MB, Qwen3 5626.8 ms / 2.705 RTF / 2509.1 MB. Remote unit tests for test_tts_ttfa.py now pass at 12/12 in the Phase 0 backend venv. 00-08 must cite the matrix instead of describing Qwen3 as an unlabeled result.",
   "incident": {
     "severity": "SEV-1",
-    "summary": "Phase 0 execution was attempted on the wrong machine, persistent SSH state was lost by using /tmp, and the user was repeatedly forced into manual recovery loops.",
-    "user_impact": "Multiple days of setup churn, repeated copy/paste, invalid or overlong instructions, and justified extreme frustration.",
-    "root_causes": [
-      "Wrong execution host was used despite research pointing at OMEN-PC",
-      "Persistent SSH material was treated as temporary",
-      "Remote success was claimed before enough command evidence was gathered",
-      "Recovery loops were longer and more speculative than necessary"
-    ],
+    "summary": "Phase 0 execution previously ran on the wrong machine and lost SSH persistence, forcing repeated recovery loops.",
+    "user_impact": "Multiple days of avoidable churn and justified loss of trust.",
     "prevention_rules": [
-      "Use OMEN-PC only for Phase 0 backend work",
-      "Never store persistent SSH material in /tmp or assume /home/agent/.ssh persists",
-      "If git reports dubious ownership for /d/Pedro/Repos/Program/RayMe, immediately run git config --global --add safe.directory /d/Pedro/Repos/Program/RayMe and continue",
-      "Verify hostname, whoami, python --version, and nvidia-smi before claiming backend access works",
-      "Prefer the shortest validated recovery path under user frustration"
+      "Use OMEN-PC only for Phase 0 backend work.",
+      "Restore SSH from .local/phase0-ssh/ each fresh session.",
+      "Verify hostname, whoami, python --version, and nvidia-smi before claiming backend access works.",
+      "Prefer the shortest validated recovery path."
     ],
     "validated_recovery": {
       "command": "ssh rayme-ssh \"cmd /c \\\"hostname & whoami & python --version & nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader\\\"\"",
@@ -215,99 +195,35 @@
     "gpu": "NVIDIA GeForce RTX 3060",
     "driver_version": "560.94",
     "memory_total": "12288 MiB",
-    "whisper_cache_dirs": [
-      "models--Systran--faster-distil-whisper-large-v3",
-      "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo",
-      "models--Systran--faster-whisper-large-v3"
-    ],
     "flash_attn": {
       "installed": false,
       "failure_reason": "windows_build_compile_error",
-      "build_duration_s": 56.1,
       "qwen17b_recommended": false
-    },
-    "runtime_overrides": {
-      "ctranslate2": "3.24.0",
-      "setuptools": "75.8.0"
     }
   },
   "voice_probe_state": {
-    "commit": "f207093",
+    "result_commit": "55a3d59",
     "backend_stage_dir": "%USERPROFILE%\\phase0-probes",
-    "validation": "17 passed in 0.38s",
-    "reference_transcript_words": 1660,
-    "recordings_required": [],
-    "whisper_result": {
-      "default_rung": "distil-large-v3",
-      "rungs": {
-        "distil-large-v3": {
-          "wer": 0.0627,
-          "p50_latency_ms": 18241.2,
-          "peak_vram_mb": 1731.4
-        },
-        "large-v3-turbo": {
-          "wer": 0.0524,
-          "p50_latency_ms": 23080.7,
-          "peak_vram_mb": 1074.0
-        },
-        "large-v3": {
-          "wer": 0.0452,
-          "p50_latency_ms": 66396.7,
-          "peak_vram_mb": 3538.0
-        }
-      }
-    },
+    "validation": "12 passed in OMEN-PC backend venv",
     "tts_result": {
       "objective_default": "f5",
       "f5": {
-        "mode": "simulated_streaming",
-        "streaming_support": "simulated",
-        "true_streaming": false,
-        "ttfa_ms": 530.3,
-        "rtf": 0.398,
-        "peak_vram_mb": 1990.2
+        "ttfa_ms": 517.3,
+        "rtf": 0.388,
+        "optimization_backend": "not_applicable"
       },
       "xtts": {
-        "mode": "streaming",
-        "streaming_support": "native",
-        "true_streaming": true,
-        "fallback_to_non_streaming": false,
-        "ttfa_ms": 595.2,
-        "rtf": 0.657,
-        "peak_vram_mb": 1897.6
+        "ttfa_ms": 534.3,
+        "rtf": 0.59,
+        "optimization_backend": "not_applicable"
       },
       "qwen3": {
-        "mode": "simulated_streaming_text",
-        "streaming_support": "simulated",
-        "true_streaming": false,
-        "flash_attention": "eager",
-        "fa2_enabled": false,
-        "ttfa_ms": 7527.3,
-        "rtf": 3.035,
-        "peak_vram_mb": 2520.1,
-        "interpretation": "No-FlashAttention baseline on OMEN-PC. Qwen3 numbers here should not be treated as FA2-optimized."
+        "ttfa_ms": 5626.8,
+        "rtf": 2.705,
+        "optimization_backend": "eager",
+        "flash_attention_2_available": false
       },
-        "production_f5_speed15": {
-          "mode": "production_ack_then_chunked_remainder",
-          "speed": 1.5,
-          "ack_ttfa_ms": 528.4,
-          "ack_audio_duration_s": 1.259,
-          "remainder_first_chunk_after_ack_start_ms": 1076.7,
-          "dead_air_after_ack_ms": 0.0,
-          "hidden_by_ack_playback_ms": 182.0,
-          "remainder_rtf": 0.096,
-          "combined_audio_duration_s": 69.36,
-          "result_file": ".planning/phases/00-measurement-gate/results/f5_production_chunked_speed15.json",
-          "audio_file": ".planning/phases/00-measurement-gate/results/f5_production_chunked_speed15.wav"
-        },
-        "qwen_gate": {
-          "accepted": false,
-          "reasons": [
-          "ttfa_too_high",
-          "rtf_too_high",
-          "accent_drift_or_untested"
-        ]
-      }
+      "matrix_file": ".planning/phases/00-measurement-gate/results/tts_attention_matrix.json"
     }
   }
 }
