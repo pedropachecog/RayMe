@@ -4,7 +4,7 @@
   "phase": "00",
   "phase_name": "measurement-gate",
   "phase_dir": ".planning/phases/00-measurement-gate",
-  "plan": 6,
+  "plan": 3,
   "task": 1,
   "total_tasks": 3,
   "status": "in_progress",
@@ -34,12 +34,18 @@
       "id": 21,
       "name": "Write HTTPS probe server and HTTPS setup doc skeleton",
       "status": "done"
+    },
+    {
+      "id": 61,
+      "name": "Build llm_cancel.py and parser/idleness unit tests",
+      "status": "done",
+      "tests": "8 passed"
     }
   ],
   "remaining_tasks": [
     {
-      "id": 61,
-      "name": "Build llm_cancel.py and parser/idleness unit tests",
+      "id": 31,
+      "name": "Build whisper_bench.py, reference transcript, and unit tests",
       "status": "ready"
     }
   ],
@@ -65,15 +71,20 @@
       "decision": "Treat 00-02 Task 2 as builder-blocked until an actual iPhone Safari verification is performed",
       "rationale": "The code and setup skeleton are ready, but the acceptance check requires the builder's device and certificate trust flow",
       "phase": "00"
+    },
+    {
+      "decision": "Treat 00-06 Task 2 as builder-blocked until a local LLM server is installed on OMEN-PC",
+      "rationale": "The cancel probe and tests are ready, but there is no Ollama or llama-server runtime yet",
+      "phase": "00"
     }
   ],
   "uncommitted_files": [
     ".planning/HANDOFF.json",
     ".planning/phases/00-measurement-gate/.continue-here.md",
-    ".planning/phases/00-measurement-gate/HTTPS-SETUP.md",
-    ".planning/phases/00-measurement-gate/probes/https_serve.py"
+    ".planning/phases/00-measurement-gate/probes/llm_cancel.py",
+    ".planning/phases/00-measurement-gate/probes/test_llm_cancel.py"
   ],
-  "next_action": "Commit the HTTPS probe server and setup doc skeleton, then execute plan 00-06 task 1 while the builder-blocked plans wait on manual setup",
+  "next_action": "Commit the LLM cancel probe and tests, then execute plan 00-03 task 1 while builder-blocked tasks wait on manual setup",
   "context_notes": "SEV-1 process failure and user-trust incident. The user spent hours across days redoing SSH recovery because of wrong-machine execution, lost /tmp state, and high-friction speculative recovery. Future executors must treat these rules as blocking, not advisory.",
   "incident": {
     "severity": "SEV-1",
