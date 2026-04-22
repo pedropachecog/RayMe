@@ -20,13 +20,13 @@ RUNTIME_PUB="$RUNTIME_DIR/rayme_omen_phase0_ed25519.pub"
 RUNTIME_CONFIG="$RUNTIME_DIR/config"
 RUNTIME_KNOWN_HOSTS="$RUNTIME_DIR/known_hosts"
 
-HOST_ALIAS="rayme-ssh"
-HOST_NAME="192.168.1.199"
-HOST_USER="rayme-ssh"
+HOST_ALIAS="${RAYME_SSH_ALIAS:-rayme-ssh}"
+HOST_NAME="${RAYME_SSH_HOST:-192.168.1.199}"
+HOST_USER="${RAYME_SSH_USER:-rayme-ssh}"
 HOST_KEY_LINE="|1|LQzkMlPBqXf8ePYptjPlykXbouc=|ouEQLKiH3I2PUADyDtJMWx8cPoo= ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMVVdInDujPHww5clxsjn+BEa014hFRlt0Wu11pwjnWL"
 
-CONFIG_BEGIN="# >>> RayMe Phase 0 SSH >>>"
-CONFIG_END="# <<< RayMe Phase 0 SSH <<<"
+CONFIG_BEGIN="# >>> RayMe Phase 0 SSH ($HOST_ALIAS) >>>"
+CONFIG_END="# <<< RayMe Phase 0 SSH ($HOST_ALIAS) <<<"
 
 die() {
   printf 'ERROR: %s\n' "$*" >&2
@@ -48,6 +48,11 @@ Persistent source:
 
 Runtime target:
   $RUNTIME_KEY
+
+Optional overrides:
+  RAYME_SSH_ALIAS   Host alias written to ~/.ssh/config (default: rayme-ssh)
+  RAYME_SSH_HOST    Host/IP to connect to (default: 192.168.1.199)
+  RAYME_SSH_USER    Windows account to log in as (default: rayme-ssh)
 EOF
 }
 
@@ -107,6 +112,9 @@ save_public_key_if_missing() {
 }
 
 command_status() {
+  printf 'host_alias=%s\n' "$HOST_ALIAS"
+  printf 'host_name=%s\n' "$HOST_NAME"
+  printf 'host_user=%s\n' "$HOST_USER"
   printf 'repo_root=%s\n' "$REPO_ROOT"
   printf 'persist_dir=%s\n' "$PERSIST_DIR"
   printf 'persist_key=%s\n' "$([[ -f "$PERSIST_KEY" ]] && echo present || echo missing)"
