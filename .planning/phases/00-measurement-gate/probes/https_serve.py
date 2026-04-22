@@ -18,7 +18,7 @@ h1{font-size:1.2em}
 li{margin:.3em 0}
 </style>
 <h1>RayMe Phase 0 - HTTPS probe</h1>
-<p>All rows must be green for Phase 3 voice capture to work on this device.</p>
+<p>All rows must be green for Phase 3 voice capture to work on this phone.</p>
 <ul id="out"></ul>
 <script>
   const out = document.getElementById("out");
@@ -86,7 +86,7 @@ def main() -> int:
         url = f"{url}:{args.port}"
 
     print(f"[probe] Serving at {url} (bound to {args.bind}:{args.port})", flush=True)
-    print(f"[probe] Load this URL on iPhone Safari: {url}", flush=True)
+    print(f"[probe] Load this URL on your Android browser: {url}", flush=True)
     print("[probe] Press Ctrl+C to stop.", flush=True)
 
     try:

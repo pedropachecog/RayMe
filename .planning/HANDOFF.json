@@ -68,8 +68,8 @@
       "phase": "00"
     },
     {
-      "decision": "Treat 00-02 Task 2 as builder-blocked until an actual iPhone Safari verification is performed",
-      "rationale": "The code and setup skeleton are ready, but the acceptance check requires the builder's device and certificate trust flow",
+      "decision": "Treat 00-02 Task 2 as builder-blocked until an actual Android browser verification is performed",
+      "rationale": "The code and setup skeleton are ready, but the acceptance check requires the builder's actual phone and certificate trust flow",
       "phase": "00"
     },
     {

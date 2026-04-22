@@ -12,23 +12,23 @@ autonomous: false
 requirements: []
 user_setup:
   - service: mkcert
-    why: "Primary HTTPS path on this backend. Tailscale is not installed, so the iPhone secure-context probe must start with a LAN cert trusted by the iPhone."
+    why: "Primary HTTPS path on this backend. Tailscale is not installed, so the mobile secure-context probe must start with a LAN cert trusted by the builder's Android phone."
     env_vars: []
     dashboard_config:
-      - task: "Install the generated rootCA-iphone.mobileconfig to iPhone via AirDrop or email; enable full trust in Settings → General → About → Certificate Trust Settings"
-        location: "iPhone Settings app"
+      - task: "Install or trust the generated root CA on the Android phone if the mkcert path is used, then verify the browser accepts the HTTPS origin"
+        location: "Android security settings / browser trust flow"
   - service: tailscale
-    why: "Optional alternate HTTPS path only if Tailscale is installed later on the backend and the iPhone joins the tailnet."
+    why: "Optional alternate HTTPS path only if Tailscale is installed later on the backend and the Android phone joins the tailnet."
     env_vars: []
     dashboard_config:
-      - task: "If you choose the Tailscale path later, enroll the iPhone on the tailnet and confirm it appears as a device"
+      - task: "If you choose the Tailscale path later, enroll the Android phone on the tailnet and confirm it appears as a device"
         location: "Tailscale admin (https://login.tailscale.com/admin/machines)"
 
 must_haves:
   truths:
-    - "The builder's iPhone Safari loads a local HTTPS URL with NO cert warning"
-    - "`window.isSecureContext` returns `true` from Safari JS console at that URL"
-    - "`navigator.mediaDevices` is defined (not undefined) in the same Safari tab"
+    - "The builder's Android browser loads a local HTTPS URL with NO cert warning"
+    - "`window.isSecureContext` returns `true` in that browser at that URL"
+    - "`navigator.mediaDevices` is defined (not undefined) in the same Android browser tab"
     - "HTTPS-SETUP.md documents the exact reproducible steps that worked, plus the untaken-path fallback"
     - "Private key material (Tailscale cert key, mkcert CA key) is NOT committed to git"
   artifacts:
@@ -36,8 +36,8 @@ must_haves:
       provides: "Minimal Python HTTPS server that serves an isSecureContext + mediaDevices probe page"
       contains: "window.isSecureContext"
     - path: ".planning/phases/00-measurement-gate/HTTPS-SETUP.md"
-      provides: "Reproducible builder-facing doc — which path worked, exact commands, iPhone steps"
-      contains: "# HTTPS on iPhone — Setup Procedure"
+      provides: "Reproducible builder-facing doc — which path worked, exact commands, Android steps"
+      contains: "# HTTPS on Android - Setup Procedure"
     - path: ".planning/phases/00-measurement-gate/results/https_iphone.json"
       provides: "Machine-readable outcome: chosen strategy, cert path, iPhone verification result"
       contains: "strategy"
@@ -74,6 +74,7 @@ Output: A minimal Python HTTPS server on the chosen hostname, a builder-facing H
 <interfaces>
 Key facts from 00-RESEARCH.md the executor must use verbatim:
 
+- Execution host for this plan is the real backend `OMEN-PC` at `192.168.1.199`, reached over SSH. Do NOT substitute the local Codex workstation or its WSL shell for any backend command in this probe.
 - Tailscale is NOT installed on the backend today. There is no `.ts.net` hostname or tailnet IP available for this machine.
 - Backend hostname: `OMEN-PC`. LAN IP: `192.168.1.199`.
 - mkcert is NOT installed. Installation path if needed: `choco install mkcert` (requires elevated shell) OR scoop OR download from GitHub releases.
