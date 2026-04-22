@@ -1,0 +1,7 @@
+# RayMe Phase 0 - Short TTS reference transcript
+#
+# Read aloud cleanly in a quiet room. Aim for 6-12 seconds total.
+# Save recording as probes/fixtures/short_ref_audio.wav (mono, >=24 kHz).
+# This is the reference clip all three TTS engines clone from.
+
+Okay. Yeah. I resent you. I love you. I respect you. But you know what? You blew it!
