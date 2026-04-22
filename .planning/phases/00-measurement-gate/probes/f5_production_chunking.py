@@ -18,6 +18,7 @@ from tts_ttfa import (
     _read_reference_text,
     _read_target_text,
     compute_rtf,
+    not_applicable_optimization_metadata,
 )
 
 _install_f5_runtime_shims()
@@ -169,6 +170,9 @@ def main() -> int:
         "peak_vram_mb": round(peak_vram_mb, 1),
         "combined_audio_duration_s": round(len(combined) / float(sample_rate), 3),
         "combined_output_wav": str(combined_out),
+        **not_applicable_optimization_metadata(
+            "Production-shaped F5 chunking tunes responsiveness, but it still does not expose a selectable attention backend."
+        ),
     }
     write_results(args.output, payload)
     print(payload)

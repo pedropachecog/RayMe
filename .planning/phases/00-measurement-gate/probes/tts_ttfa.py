@@ -18,6 +18,140 @@ from bench_utils import Timer, sample_vram_mb, warmup_cuda, write_results
 TTFA_TARGET_MS = 400
 RTF_TARGET = 1.0
 OUTPUT_SAMPLE_DIR = Path(__file__).resolve().parent / "fixtures" / "tts_samples"
+OPTIMIZATION_MODES = ("eager", "sdpa", "flash_attention_2")
+
+
+def detect_flash_attn_install() -> dict[str, Any]:
+    """Best-effort runtime probe for FlashAttention 2 availability."""
+    try:
+        import flash_attn  # type: ignore
+    except Exception as exc:
+        return {
+            "installed": False,
+            "version": None,
+            "reason": repr(exc),
+        }
+
+    return {
+        "installed": True,
+        "version": getattr(flash_attn, "__version__", None),
+        "reason": "import_ok",
+    }
+
+
+def not_applicable_optimization_metadata(reason: str) -> dict[str, Any]:
+    return {
+        "optimization_backend": "not_applicable",
+        "optimization_backend_reason": reason,
+        "supported_optimization_backends": ["not_applicable"],
+        "unsupported_optimization_backends": [],
+        "optimization_modes": {
+            mode: {
+                "status": "not_applicable",
+                "reason": reason,
+            }
+            for mode in OPTIMIZATION_MODES
+        },
+    }
+
+
+def qwen_optimization_metadata(
+    flash_attn_probe: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    flash_attn_probe = flash_attn_probe or detect_flash_attn_install()
+    fa2_installed = bool(flash_attn_probe.get("installed"))
+    measured_backend = "flash_attention_2" if fa2_installed else "eager"
+    unavailable_reason = (
+        "FlashAttention 2 imports successfully in the current runtime."
+        if fa2_installed
+        else (
+            "FlashAttention 2 is unavailable in the current runtime; "
+            f"falling back to eager attention ({flash_attn_probe.get('reason', 'import failed')})."
+        )
+    )
+
+    return {
+        "optimization_backend": measured_backend,
+        "optimization_backend_reason": (
+            "Qwen3-TTS probe measured the FlashAttention 2 path because flash_attn imports successfully."
+            if fa2_installed
+            else "Qwen3-TTS probe measured the eager baseline because flash_attn is not available."
+        ),
+        "supported_optimization_backends": ["eager", "flash_attention_2"],
+        "unsupported_optimization_backends": ["sdpa"],
+        "optimization_modes": {
+            "eager": {
+                "status": "measured" if measured_backend == "eager" else "available",
+                "reason": "Fallback baseline without FlashAttention 2.",
+            },
+            "sdpa": {
+                "status": "not_supported",
+                "reason": "The current qwen_tts probe does not expose an SDPA-specific execution path.",
+            },
+            "flash_attention_2": {
+                "status": "measured" if measured_backend == "flash_attention_2" else "unavailable",
+                "reason": unavailable_reason,
+                "version": flash_attn_probe.get("version"),
+            },
+        },
+        "flash_attn_probe": flash_attn_probe,
+    }
+
+
+def build_attention_matrix(
+    engines: dict[str, dict[str, Any]],
+    fa2_install: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    matrix_engines: dict[str, Any] = {}
+    for name, metrics in engines.items():
+        measured_backend = metrics.get("optimization_backend", "not_applicable")
+        matrix_engines[name] = {
+            "measured_backend": measured_backend,
+            "measured_backend_reason": metrics.get("optimization_backend_reason"),
+            "supported_optimization_backends": metrics.get(
+                "supported_optimization_backends", ["not_applicable"]
+            ),
+            "unsupported_optimization_backends": metrics.get(
+                "unsupported_optimization_backends", []
+            ),
+            "optimization_modes": metrics.get("optimization_modes", {}),
+            "measurement": {
+                "backend": measured_backend,
+                "streaming_mode": metrics.get("mode"),
+                "streaming_support": metrics.get("streaming_support"),
+                "true_streaming": metrics.get("true_streaming"),
+                "ttfa_ms": metrics.get("ttfa_ms"),
+                "rtf": metrics.get("rtf"),
+                "peak_vram_mb": metrics.get("peak_vram_mb"),
+            },
+        }
+        if name == "qwen3":
+            matrix_engines[name]["variant"] = metrics.get("variant")
+            matrix_engines[name]["flash_attn_probe"] = metrics.get("flash_attn_probe")
+
+    fa2_summary = None
+    if fa2_install:
+        fa2_summary = {
+            "installed": fa2_install.get("installed"),
+            "failure_reason": fa2_install.get("failure_reason"),
+            "build_duration_s": fa2_install.get("build_duration_s"),
+            "qwen17b_recommended": fa2_install.get("qwen17b_recommended"),
+        }
+
+    return {
+        "probe": "tts_attention_matrix",
+        "engines": matrix_engines,
+        "fa2_install": fa2_summary,
+    }
+
+
+def _load_optional_json(path: str | Path | None) -> dict[str, Any] | None:
+    if not path:
+        return None
+    target = Path(path)
+    if not target.exists():
+        return None
+    return json.loads(target.read_text(encoding="utf-8"))
 
 
 def compute_rtf(audio_duration_s: float, synthesis_time_s: float) -> float:
@@ -208,6 +342,10 @@ def measure_f5(ref_audio: str, ref_text: str, target_text: str, sample_out: Path
         "sample_rate": int(sample_rate),
         "output_wav": str(sample_out),
         "streaming_notes": "F5-TTS slices generated audio into chunks after synthesis; no true incremental decode.",
+        **not_applicable_optimization_metadata(
+            "F5-TTS does not expose a selectable attention/acceleration backend in this probe; "
+            "the measured path is controlled by synthesis chunking only."
+        ),
     }
 
 
@@ -312,6 +450,9 @@ def measure_xtts(ref_audio: str, target_text: str, sample_out: Path) -> dict[str
         "sample_rate": sample_rate,
         "output_wav": str(sample_out),
         "streaming_error": streaming_error,
+        **not_applicable_optimization_metadata(
+            "XTTS v2 native streaming path does not expose eager/SDPA/FlashAttention backend selection in this probe."
+        ),
     }
 
 
@@ -368,13 +509,15 @@ def measure_qwen3(
     del model
     torch.cuda.empty_cache()
 
+    optimization_metadata = qwen_optimization_metadata()
+
     return {
         "engine": "qwen3",
         "mode": "simulated_streaming_text",
         "streaming_support": "simulated",
         "true_streaming": False,
         "variant": "0.6B-Base",
-        "flash_attention": "eager",
+        "flash_attention": optimization_metadata["optimization_backend"],
         "ttfa_ms": round(synthesis_s * 1000, 1),
         "rtf": round(compute_rtf(audio_duration_s, synthesis_s), 3),
         "audio_duration_s": round(audio_duration_s, 3),
@@ -383,6 +526,7 @@ def measure_qwen3(
         "sample_rate": int(sample_rate),
         "output_wav": str(sample_out),
         "streaming_notes": "Qwen3-TTS non_streaming_mode=False simulates streaming text input but still returns audio after full generation.",
+        **optimization_metadata,
     }
 
 
@@ -503,6 +647,14 @@ def main() -> int:
     )
     parser.add_argument("--output", help="Results JSON path")
     parser.add_argument(
+        "--fa2-result",
+        help="Optional path to results/fa2_install.json for attention-matrix annotations",
+    )
+    parser.add_argument(
+        "--attention-matrix-output",
+        help="Optional output path for a dedicated backend-label summary JSON",
+    )
+    parser.add_argument(
         "--accent-ok",
         action="store_true",
         help="Only set after the builder confirms the Qwen accent test passes",
@@ -605,6 +757,14 @@ def main() -> int:
         "accent_ok_passed_to_probe": args.accent_ok,
     }
     write_results(args.output, payload)
+    if args.attention_matrix_output:
+        fa2_result = _load_optional_json(args.fa2_result)
+        attention_matrix = build_attention_matrix(engines, fa2_result)
+        write_results(args.attention_matrix_output, attention_matrix)
+        print(
+            f"[tts] attention matrix written to {args.attention_matrix_output}",
+            flush=True,
+        )
     print(f"[tts] v1_default = {default}", flush=True)
     print(f"[tts] qwen_gate  = {qwen_gate}", flush=True)
     return 0

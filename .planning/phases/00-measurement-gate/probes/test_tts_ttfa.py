@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from tts_ttfa import compute_rtf, pick_v1_default, qwen_gate_disposition
+from tts_ttfa import (
+    build_attention_matrix,
+    compute_rtf,
+    pick_v1_default,
+    qwen_gate_disposition,
+    qwen_optimization_metadata,
+)
 
 
 def test_pick_v1_default_f5_wins_when_under_400ms() -> None:
@@ -77,3 +83,78 @@ def test_qwen_gate_rejects_when_accent_not_ok() -> None:
 
 def test_compute_rtf() -> None:
     assert compute_rtf(audio_duration_s=5.0, synthesis_time_s=1.0) == pytest.approx(0.2)
+
+
+def test_qwen_optimization_metadata_marks_eager_when_fa2_missing() -> None:
+    metadata = qwen_optimization_metadata(
+        {"installed": False, "version": None, "reason": "ImportError('flash_attn')"}
+    )
+
+    assert metadata["optimization_backend"] == "eager"
+    assert metadata["optimization_modes"]["eager"]["status"] == "measured"
+    assert metadata["optimization_modes"]["flash_attention_2"]["status"] == "unavailable"
+    assert metadata["unsupported_optimization_backends"] == ["sdpa"]
+
+
+def test_qwen_optimization_metadata_marks_fa2_when_available() -> None:
+    metadata = qwen_optimization_metadata(
+        {"installed": True, "version": "2.8.3", "reason": "import_ok"}
+    )
+
+    assert metadata["optimization_backend"] == "flash_attention_2"
+    assert metadata["optimization_modes"]["flash_attention_2"]["status"] == "measured"
+    assert metadata["optimization_modes"]["flash_attention_2"]["version"] == "2.8.3"
+
+
+def test_build_attention_matrix_preserves_backend_labels() -> None:
+    engines = {
+        "f5": {
+            "optimization_backend": "not_applicable",
+            "optimization_backend_reason": "static",
+            "supported_optimization_backends": ["not_applicable"],
+            "optimization_modes": {
+                "eager": {"status": "not_applicable"},
+                "sdpa": {"status": "not_applicable"},
+                "flash_attention_2": {"status": "not_applicable"},
+            },
+            "mode": "simulated_streaming",
+            "streaming_support": "simulated",
+            "true_streaming": False,
+            "ttfa_ms": 530.3,
+            "rtf": 0.398,
+            "peak_vram_mb": 1990.2,
+        },
+        "qwen3": {
+            "optimization_backend": "eager",
+            "optimization_backend_reason": "fa2 missing",
+            "supported_optimization_backends": ["eager", "flash_attention_2"],
+            "unsupported_optimization_backends": ["sdpa"],
+            "optimization_modes": {
+                "eager": {"status": "measured"},
+                "sdpa": {"status": "not_supported"},
+                "flash_attention_2": {"status": "unavailable"},
+            },
+            "mode": "simulated_streaming_text",
+            "streaming_support": "simulated",
+            "true_streaming": False,
+            "ttfa_ms": 7527.3,
+            "rtf": 3.035,
+            "peak_vram_mb": 2520.1,
+            "variant": "0.6B-Base",
+            "flash_attn_probe": {"installed": False},
+        },
+    }
+
+    matrix = build_attention_matrix(
+        engines,
+        {
+            "installed": False,
+            "failure_reason": "windows_build_compile_error",
+            "build_duration_s": 56.1,
+            "qwen17b_recommended": False,
+        },
+    )
+
+    assert matrix["engines"]["f5"]["measured_backend"] == "not_applicable"
+    assert matrix["engines"]["qwen3"]["measured_backend"] == "eager"
+    assert matrix["fa2_install"]["failure_reason"] == "windows_build_compile_error"
