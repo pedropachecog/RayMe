@@ -1,0 +1,100 @@
+{
+  "version": "1.0",
+  "timestamp": "2026-04-22T16:15:54Z",
+  "phase": "00",
+  "phase_name": "measurement-gate",
+  "phase_dir": ".planning/phases/00-measurement-gate",
+  "plan": 1,
+  "task": 3,
+  "total_tasks": 3,
+  "status": "in_progress",
+  "completed_tasks": [
+    {
+      "id": 1,
+      "name": "Create probes package + requirements-phase0.txt + .gitignore",
+      "status": "done",
+      "commit": "e42c349"
+    },
+    {
+      "id": 2,
+      "name": "Create backend venv, install packages, pre-download Whisper weights",
+      "status": "done",
+      "host": "OMEN-PC",
+      "venv_path": "%USERPROFILE%\\.venv-phase0"
+    }
+  ],
+  "remaining_tasks": [
+    {
+      "id": 3,
+      "name": "Write bench_utils.py + smoke test + verify pytest green on OMEN-PC",
+      "status": "ready"
+    }
+  ],
+  "blockers": [],
+  "human_actions_pending": [],
+  "decisions": [
+    {
+      "decision": "Use only OMEN-PC at 192.168.1.199 for Phase 0 host commands",
+      "rationale": "The local Codex workstation is not the backend and produced misleading execution results",
+      "phase": "00"
+    },
+    {
+      "decision": "Use the durable SSH identity /home/agent/.ssh/rayme_omen_phase0_ed25519",
+      "rationale": "Persistent key material must not live in /tmp and this key is the verified backend path",
+      "phase": "00"
+    },
+    {
+      "decision": "Write repo artifacts locally but validate backend-only behavior over SSH on OMEN-PC",
+      "rationale": "The git checkout is local Linux while the executable Windows CUDA environment lives on OMEN-PC",
+      "phase": "00"
+    }
+  ],
+  "uncommitted_files": [
+    ".planning/HANDOFF.json",
+    ".planning/phases/00-measurement-gate/.continue-here.md",
+    ".planning/phases/00-measurement-gate/results/setup_install.json",
+    ".planning/phases/00-measurement-gate/probes/bench_utils.py",
+    ".planning/phases/00-measurement-gate/probes/test_smoke.py"
+  ],
+  "next_action": "Copy probes to OMEN-PC staging and run the backend smoke pytest with %USERPROFILE%\\.venv-phase0\\Scripts\\python.exe",
+  "context_notes": "SEV-1 process failure and user-trust incident. The user spent hours across days redoing SSH recovery because of wrong-machine execution, lost /tmp state, and high-friction speculative recovery. Future executors must treat these rules as blocking, not advisory.",
+  "incident": {
+    "severity": "SEV-1",
+    "summary": "Phase 0 execution was attempted on the wrong machine, persistent SSH state was lost by using /tmp, and the user was repeatedly forced into manual recovery loops.",
+    "user_impact": "Multiple days of setup churn, repeated copy/paste, invalid or overlong instructions, and justified extreme frustration.",
+    "root_causes": [
+      "Wrong execution host was used despite research pointing at OMEN-PC",
+      "Persistent SSH material was treated as temporary",
+      "Remote success was claimed before enough command evidence was gathered",
+      "Recovery loops were longer and more speculative than necessary"
+    ],
+    "prevention_rules": [
+      "Use OMEN-PC only for Phase 0 backend work",
+      "Never store persistent SSH material in /tmp",
+      "Verify hostname, whoami, python --version, and nvidia-smi before claiming backend access works",
+      "Prefer the shortest validated recovery path under user frustration"
+    ],
+    "validated_recovery": {
+      "command": "ssh rayme-ssh \"cmd /c \\\"hostname & whoami & python --version & nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader\\\"\"",
+      "output": [
+        "OMEN-PC",
+        "omen-pc\\rayme-ssh",
+        "Python 3.10.8",
+        "NVIDIA GeForce RTX 3060, 12288 MiB, 560.94"
+      ]
+    }
+  },
+  "backend_state": {
+    "python_version": "3.11.15",
+    "torch_version": "2.5.1+cu118",
+    "cuda_version": "11.8",
+    "gpu": "NVIDIA GeForce RTX 3060",
+    "driver_version": "560.94",
+    "memory_total": "12288 MiB",
+    "whisper_cache_dirs": [
+      "models--Systran--faster-distil-whisper-large-v3",
+      "models--mobiuslabsgmbh--faster-whisper-large-v3-turbo",
+      "models--Systran--faster-whisper-large-v3"
+    ]
+  }
+}
