@@ -11,18 +11,18 @@ files_modified:
 autonomous: false
 requirements: []
 user_setup:
-  - service: tailscale
-    why: "Issue a real Let's Encrypt cert for pedro-2023.tailc48d1c.ts.net (zero-install trust on iPhone if iPhone is also on the tailnet)."
-    env_vars: []
-    dashboard_config:
-      - task: "Enroll iPhone on the tailnet OR proceed to mkcert fallback"
-        location: "Tailscale admin (https://login.tailscale.com/admin/machines) — confirm iPhone appears as a device"
   - service: mkcert
-    why: "HTTPS fallback when iPhone is NOT on the Tailscale tailnet — installs a local CA trusted on the iPhone via Configuration Profile."
+    why: "Primary HTTPS path on this backend. Tailscale is not installed, so the iPhone secure-context probe must start with a LAN cert trusted by the iPhone."
     env_vars: []
     dashboard_config:
       - task: "Install the generated rootCA-iphone.mobileconfig to iPhone via AirDrop or email; enable full trust in Settings → General → About → Certificate Trust Settings"
         location: "iPhone Settings app"
+  - service: tailscale
+    why: "Optional alternate HTTPS path only if Tailscale is installed later on the backend and the iPhone joins the tailnet."
+    env_vars: []
+    dashboard_config:
+      - task: "If you choose the Tailscale path later, enroll the iPhone on the tailnet and confirm it appears as a device"
+        location: "Tailscale admin (https://login.tailscale.com/admin/machines)"
 
 must_haves:
   truths:
@@ -55,7 +55,7 @@ must_haves:
 <objective>
 Empirically verify that the builder can load an HTTPS URL on their iPhone Safari with NO cert warning and `window.isSecureContext === true`, and document the reproducible procedure so Phase 1 can ship this as the LAN HTTPS workflow.
 
-Purpose: This is Phase 0 success criterion #1. Mobile Safari gates `getUserMedia` behind secure contexts; without a trusted cert on the iPhone, Phase 3's first voice call cannot happen. Research discovered Tailscale 1.96.3 is installed and `pedro-2023.tailc48d1c.ts.net` is the node hostname — `tailscale cert` issues real Let's Encrypt certs, eliminating mkcert as the default path IF the iPhone is on the tailnet. iPhone tailnet enrollment is unknown (00-RESEARCH.md Open Q #2); mkcert remains the documented fallback.
+Purpose: This is Phase 0 success criterion #1. Mobile Safari gates `getUserMedia` behind secure contexts; without a trusted cert on the iPhone, Phase 3's first voice call cannot happen. Re-research on the real backend found no Tailscale install or `.ts.net` hostname on `OMEN-PC`, so **mkcert over direct LAN is the default path**. Tailscale remains an optional alternate path only if it is installed later on the backend and the iPhone is enrolled on the tailnet.
 
 Output: A minimal Python HTTPS server on the chosen hostname, a builder-facing HTTPS-SETUP.md describing the exact reproducible steps, and a results JSON capturing which path worked.
 </objective>
@@ -74,13 +74,11 @@ Output: A minimal Python HTTPS server on the chosen hostname, a builder-facing H
 <interfaces>
 Key facts from 00-RESEARCH.md the executor must use verbatim:
 
-- Tailscale 1.96.3 is installed and active. Node hostname: `pedro-2023.tailc48d1c.ts.net`. Tailnet IP: `100.100.8.103`.
-- `tailscale cert <hostname>` issues a real Let's Encrypt cert for the tailnet FQDN. On Windows, run from an elevated PowerShell if the first attempt reports a permission error.
-- Writes two files in the current directory: `<hostname>.crt` and `<hostname>.key`.
-- mkcert is NOT installed. Installation path if fallback is needed: `choco install mkcert` (requires elevated shell) OR scoop OR download from GitHub releases.
-- `tailscale status` at research time showed `pixel-10-pro` (Android) and `siss-macbook-pro` but no iPhone device — iPhone may need tailnet enrollment OR we fall back to mkcert.
+- Tailscale is NOT installed on the backend today. There is no `.ts.net` hostname or tailnet IP available for this machine.
+- Backend hostname: `OMEN-PC`. LAN IP: `192.168.1.199`.
+- mkcert is NOT installed. Installation path if needed: `choco install mkcert` (requires elevated shell) OR scoop OR download from GitHub releases.
 - From PITFALLS.md #2: the definitive acceptance check is `window.isSecureContext === true` in Safari, AND `navigator.mediaDevices` being defined (not undefined). Cert-valid + isSecureContext=false can happen on weird hostnames.
-- DO NOT bind `0.0.0.0` for this probe. Bind to the Tailscale IP (100.100.8.103) or mkcert hostname only. Binding `0.0.0.0` exposes the probe to the entire LAN and is not needed for this test.
+- DO NOT bind `0.0.0.0` for this probe. Bind to the LAN IP (`192.168.1.199`) or a future Tailscale IP only. Binding `0.0.0.0` exposes the probe to the entire LAN and is not needed for this test.
 
 Minimal probe page to serve (HTML + inline JS):
 ```html
@@ -111,7 +109,7 @@ Minimal probe page to serve (HTML + inline JS):
 <tasks>
 
 <task type="auto">
-  <name>Task 1: Write HTTPS probe server (tailscale-primary + mkcert-fallback) and HTTPS-SETUP doc skeleton</name>
+  <name>Task 1: Write HTTPS probe server (mkcert-primary + tailscale-optional) and HTTPS-SETUP doc skeleton</name>
   <files>
     .planning/phases/00-measurement-gate/probes/https_serve.py
     .planning/phases/00-measurement-gate/HTTPS-SETUP.md
@@ -131,20 +129,20 @@ Minimal probe page to serve (HTML + inline JS):
        that both are true / defined.
 
        Usage:
-         # Tailscale path (primary):
-         #   1. tailscale cert pedro-2023.tailc48d1c.ts.net
-         #   2. python https_serve.py --host pedro-2023.tailc48d1c.ts.net \
-         #                            --cert pedro-2023.tailc48d1c.ts.net.crt \
-         #                            --key  pedro-2023.tailc48d1c.ts.net.key \
-         #                            --bind 100.100.8.103
-         #
-         # mkcert path (fallback):
+         # mkcert path (primary on the real backend):
          #   1. mkcert -install
-         #   2. mkcert rayme.local 192.168.x.x
+         #   2. mkcert rayme.local 192.168.1.199
          #   3. python https_serve.py --host rayme.local \
          #                            --cert rayme.local+1.pem \
          #                            --key  rayme.local+1-key.pem \
-         #                            --bind 192.168.x.x
+         #                            --bind 192.168.1.199
+         #
+         # Tailscale path (optional only if installed later):
+         #   1. tailscale cert <tailscale-hostname>
+         #   2. python https_serve.py --host <tailscale-hostname> \
+         #                            --cert <tailscale-hostname>.crt \
+         #                            --key  <tailscale-hostname>.key \
+         #                            --bind <tailscale-ip>
        """
        from __future__ import annotations
        import argparse
@@ -195,7 +193,7 @@ h1{font-size:1.2em}li{margin:.3em 0}</style>
            ap.add_argument("--cert", required=True, help="Path to cert file (.crt or .pem)")
            ap.add_argument("--key",  required=True, help="Path to key  file (.key or -key.pem)")
            ap.add_argument("--bind", default="0.0.0.0",
-                           help="IP to bind. Use the Tailscale IP (100.100.8.103) or LAN IP, NOT 0.0.0.0")
+                           help="IP to bind. Use the LAN IP (192.168.1.199) or a future Tailscale IP, NOT 0.0.0.0")
            ap.add_argument("--port", type=int, default=443,
                            help="HTTPS port. 443 on Windows requires admin; use 8443 as unprivileged fallback.")
            args = ap.parse_args()
@@ -235,73 +233,27 @@ h1{font-size:1.2em}li{margin:.3em 0}</style>
 
        _Filled in by Task 2 after measurement._
 
-       - [ ] Tailscale (primary)
-       - [ ] mkcert (fallback)
+       - [ ] mkcert (primary)
+       - [ ] Tailscale (optional alternate)
 
-       ## Strategy A - Tailscale (preferred if iPhone is on the tailnet)
+       ## Strategy A - mkcert (primary on the real backend)
 
        ### Prerequisites
-       - Tailscale installed on the backend machine (verify: `tailscale version`).
-       - The iPhone must also be on the tailnet.
-         - Install the Tailscale iOS app from the App Store.
-         - Sign in with the same account that owns `pedro-2023`.
-         - Confirm the iPhone appears in `tailscale status` or in https://login.tailscale.com/admin/machines.
+       - Direct LAN access from iPhone to `192.168.1.199`.
+       - mkcert installed on the backend machine.
+       - The generated mkcert root CA must be trusted on the iPhone.
 
        ### One-time setup
        ```powershell
        # On the backend machine, in the phase 0 directory:
        cd .planning/phases/00-measurement-gate
-       tailscale cert pedro-2023.tailc48d1c.ts.net
+       mkcert -install
+       mkcert rayme.local 192.168.1.199
        # Produces:
-       #   pedro-2023.tailc48d1c.ts.net.crt
-       #   pedro-2023.tailc48d1c.ts.net.key
-       # These are real Let's Encrypt certs. Treat them as secrets.
+       #   rayme.local+1.pem
+       #   rayme.local+1-key.pem
+       # The private key must stay local and gitignored.
        ```
-
-       ### Running the probe
-       ```powershell
-       .venv-phase0\Scripts\python.exe probes\https_serve.py `
-         --host pedro-2023.tailc48d1c.ts.net `
-         --cert pedro-2023.tailc48d1c.ts.net.crt `
-         --key  pedro-2023.tailc48d1c.ts.net.key `
-         --bind 100.100.8.103 `
-         --port 443
-       # If port 443 fails with permission error, use --port 8443 and include :8443 in the URL.
-       ```
-
-       ### On the iPhone
-       1. Open Safari.
-       2. Navigate to `https://pedro-2023.tailc48d1c.ts.net` (or `:8443` if used).
-       3. Confirm NO cert warning.
-       4. Confirm the page renders 5 green rows.
-
-       ## Strategy B - mkcert (fallback if iPhone is not on tailnet)
-
-       ### Install mkcert (Windows, elevated shell)
-       ```powershell
-       choco install mkcert   # or: scoop install mkcert
-       mkcert -install        # installs the local CA into the system trust store
-       ```
-
-       ### Generate a cert for a stable hostname
-       Pick a hostname reachable from the iPhone. Options:
-       - `rayme.local` (mDNS — works on same Wi-Fi)
-       - The backend's LAN IP (e.g., `192.168.1.42`)
-       - Both, as SANs
-
-       ```powershell
-       cd .planning/phases/00-measurement-gate
-       mkcert rayme.local 192.168.1.42
-       # Produces: rayme.local+1.pem + rayme.local+1-key.pem
-       ```
-
-       ### Install the mkcert root CA on iPhone
-       mkcert stores the CA at `%LOCALAPPDATA%\mkcert\rootCA.pem`. To trust it on iOS:
-       1. Export: `mkcert -CAROOT` to find the CA file.
-       2. Email `rootCA.pem` to yourself, open the attachment on iPhone.
-       3. iPhone prompts "Profile Downloaded" -> Settings -> Profile Downloaded -> Install.
-       4. Settings -> General -> About -> Certificate Trust Settings -> toggle ON for "mkcert <username>".
-       5. Reboot Safari.
 
        ### Running the probe
        ```powershell
@@ -309,14 +261,52 @@ h1{font-size:1.2em}li{margin:.3em 0}</style>
          --host rayme.local `
          --cert rayme.local+1.pem `
          --key  rayme.local+1-key.pem `
-         --bind 192.168.1.42 `
-         --port 443
+         --bind 192.168.1.199 `
+         --port 8443
        ```
 
        ### On the iPhone
-       1. Connect to the same Wi-Fi as the backend.
-       2. Safari -> `https://rayme.local` (or the LAN IP).
-       3. Confirm no cert warning + 5 green rows.
+       1. Open Safari.
+       2. Navigate to `https://rayme.local:8443` (or the direct LAN IP if hostname resolution is not configured).
+       3. Confirm NO cert warning.
+       4. Confirm the page renders 5 green rows.
+
+       ## Strategy B - Tailscale (optional alternate if installed later)
+
+       ### Preconditions
+       - Tailscale installed on the backend machine
+       - Tailscale installed on the iPhone
+       - A valid tailnet hostname + tailnet IP for this backend
+       - `tailscale cert` available on the backend after login to the tailnet
+
+       ```powershell
+       cd .planning/phases/00-measurement-gate
+       tailscale status
+       tailscale ip -4
+       tailscale cert <backend-host>.ts.net
+       # Replace the placeholders below with the actual hostname, tailnet IP,
+       # and cert/key paths produced by tailscale cert.
+       ```
+
+       ### Running the probe
+       No mkcert CA installation is required on the iPhone for this path because
+       the cert is issued for the backend's `.ts.net` hostname.
+
+       ```powershell
+       .venv-phase0\Scripts\python.exe probes\https_serve.py `
+         --host <backend-host>.ts.net `
+         --cert <tailscale-cert.pem> `
+         --key  <tailscale-key.pem> `
+         --bind <tailnet-ip> `
+         --port 8443
+       ```
+
+       ### On the iPhone
+       1. Confirm the iPhone is enrolled in Tailscale and connected to the same tailnet.
+       2. Open Safari.
+       3. Navigate to `https://<backend-host>.ts.net:8443`.
+       4. Confirm NO cert warning.
+       5. Confirm the page renders 5 green rows.
 
        ## Security notes
        - `*.key` / `*-key.pem` / `*.mobileconfig` files are in .gitignore. Never commit.
@@ -328,7 +318,7 @@ h1{font-size:1.2em}li{margin:.3em 0}</style>
 
        | Symptom | Cause | Fix |
        |---|---|---|
-       | iPhone shows "Cannot Connect to Server" | iPhone not on tailnet (Strategy A) or wrong Wi-Fi / mDNS (Strategy B) | Confirm `ping rayme.local` resolves from a desktop on the same Wi-Fi; or enroll iPhone in Tailscale. |
+       | iPhone shows "Cannot Connect to Server" | Wrong Wi-Fi / mDNS issue on Strategy A, or the iPhone is not on the tailnet for Strategy B | Confirm `ping rayme.local` resolves from a desktop on the same Wi-Fi for Strategy A; or confirm the iPhone is connected to Tailscale and use the backend tailnet hostname for Strategy B. |
        | `window.isSecureContext === false` despite valid cert | Served over http://... or mixed scheme | Hit `https://...` explicitly. |
        | `navigator.mediaDevices === undefined` but isSecureContext is true | Safari private browsing restrictions on some builds | Re-open the page in a normal Safari tab. |
        | Port 443 permission denied on Windows | Requires admin | Use `--port 8443` and include `:8443` in the URL. |
@@ -337,14 +327,14 @@ h1{font-size:1.2em}li{margin:.3em 0}</style>
     3. Commit both files.
   </action>
   <verify>
-    <automated>test -f .planning/phases/00-measurement-gate/probes/https_serve.py &amp;&amp; test -f .planning/phases/00-measurement-gate/HTTPS-SETUP.md &amp;&amp; .planning/phases/00-measurement-gate/.venv-phase0/Scripts/python.exe -c "import ast; ast.parse(open('.planning/phases/00-measurement-gate/probes/https_serve.py').read()); print('syntax OK')" &amp;&amp; grep -q "window.isSecureContext" .planning/phases/00-measurement-gate/probes/https_serve.py &amp;&amp; grep -q "load_cert_chain" .planning/phases/00-measurement-gate/probes/https_serve.py &amp;&amp; grep -q "# HTTPS on iPhone - Setup Procedure" .planning/phases/00-measurement-gate/HTTPS-SETUP.md &amp;&amp; grep -q "Strategy A - Tailscale" .planning/phases/00-measurement-gate/HTTPS-SETUP.md &amp;&amp; grep -q "Strategy B - mkcert" .planning/phases/00-measurement-gate/HTTPS-SETUP.md</automated>
+    <automated>test -f .planning/phases/00-measurement-gate/probes/https_serve.py &amp;&amp; test -f .planning/phases/00-measurement-gate/HTTPS-SETUP.md &amp;&amp; .planning/phases/00-measurement-gate/.venv-phase0/Scripts/python.exe -c "import ast; ast.parse(open('.planning/phases/00-measurement-gate/probes/https_serve.py').read()); print('syntax OK')" &amp;&amp; grep -q "window.isSecureContext" .planning/phases/00-measurement-gate/probes/https_serve.py &amp;&amp; grep -q "load_cert_chain" .planning/phases/00-measurement-gate/probes/https_serve.py &amp;&amp; grep -q "# HTTPS on iPhone - Setup Procedure" .planning/phases/00-measurement-gate/HTTPS-SETUP.md &amp;&amp; grep -q "Strategy A - mkcert" .planning/phases/00-measurement-gate/HTTPS-SETUP.md &amp;&amp; grep -q "Strategy B - Tailscale" .planning/phases/00-measurement-gate/HTTPS-SETUP.md</automated>
   </verify>
   <acceptance_criteria>
     - File `.planning/phases/00-measurement-gate/probes/https_serve.py` exists and parses as valid Python (`python -c "import ast; ast.parse(open(...).read())"` exits 0).
     - File contains `window.isSecureContext` (probe HTML) and `load_cert_chain` (cert loading).
     - Script accepts `--host`, `--cert`, `--key`, `--bind`, `--port` flags (grep for each flag in the source).
-    - File `.planning/phases/00-measurement-gate/HTTPS-SETUP.md` exists and documents both Strategy A (Tailscale) and Strategy B (mkcert).
-    - HTTPS-SETUP.md references `tailscale cert pedro-2023.tailc48d1c.ts.net` and `mkcert -install` as the respective one-time commands.
+    - File `.planning/phases/00-measurement-gate/HTTPS-SETUP.md` exists and documents both Strategy A (mkcert) and Strategy B (Tailscale).
+    - HTTPS-SETUP.md references `mkcert -install` as the primary one-time command and documents Tailscale only as an optional alternate path.
   </acceptance_criteria>
   <done>HTTPS probe server and setup doc skeleton are committed.</done>
 </task>
@@ -366,38 +356,36 @@ h1{font-size:1.2em}li{margin:.3em 0}</style>
   <how-to-verify>
     Claude's automated steps first (run on the backend machine, in an elevated PowerShell if needed):
 
-    1. **Try Strategy A (Tailscale).** From `.planning/phases/00-measurement-gate/`:
+    1. **Try Strategy A (mkcert).** From `.planning/phases/00-measurement-gate/`:
        ```powershell
-       tailscale cert pedro-2023.tailc48d1c.ts.net
+       choco install mkcert
+       mkcert -install
+       mkcert rayme.local 192.168.1.199
        ```
-       - If this succeeds and produces `.crt` + `.key` files: proceed.
-       - If it fails with a permission error: re-run in an elevated PowerShell.
-       - If it fails with a "not logged in" error: run `tailscale up` first.
-       - Record the outcome in the results JSON regardless.
+       - If mkcert install or root installation fails, capture the exact stderr and stop.
 
-    2. Start the probe server (Strategy A):
+    2. Start the probe server (Strategy A - mkcert):
        ```powershell
        .venv-phase0\Scripts\python.exe probes\https_serve.py `
-         --host pedro-2023.tailc48d1c.ts.net `
-         --cert pedro-2023.tailc48d1c.ts.net.crt `
-         --key  pedro-2023.tailc48d1c.ts.net.key `
-         --bind 100.100.8.103 `
+         --host rayme.local `
+         --cert rayme.local+1.pem `
+         --key  rayme.local+1-key.pem `
+         --bind 192.168.1.199 `
          --port 8443
        ```
-       (Using port 8443 avoids the admin-required port 443.)
 
     3. **Builder on iPhone:**
-       a. Confirm iPhone is on Tailscale. If not installed: App Store -> "Tailscale" -> sign in with the same account as `pedro-2023`. After sign-in, confirm iPhone appears in `tailscale status` on the backend.
-       b. If iPhone cannot be enrolled in Tailscale, STOP Strategy A, fall through to Strategy B.
-       c. Open Safari. Navigate to `https://pedro-2023.tailc48d1c.ts.net:8443`.
+       a. Install the mkcert root CA on the iPhone via the generated Configuration Profile flow.
+       b. Enable full trust under Settings -> General -> About -> Certificate Trust Settings.
+       c. Open Safari. Navigate to `https://rayme.local:8443`.
        d. Check:
           - No cert warning shown.
           - Page renders with 5 rows.
           - All 5 rows are green (especially the first two: `window.isSecureContext: true` and `navigator.mediaDevices defined: true`).
        e. Screenshot the page.
 
-    4. **Fallback (Strategy B - mkcert) IF Strategy A fails:**
-       Follow HTTPS-SETUP.md Strategy B end-to-end. Install mkcert via choco in an elevated shell, generate a cert for `rayme.local` + LAN IP, install the root CA on the iPhone via the Configuration Profile flow, re-run the probe server with mkcert paths, and test on Safari.
+    4. **Optional alternate (Strategy B - Tailscale) IF the builder later installs Tailscale on both devices:**
+       Follow HTTPS-SETUP.md Strategy B end-to-end. Issue a Tailscale cert for the backend's real tailnet hostname, bind the probe to the tailnet IP, and test on Safari only after confirming the iPhone is on the tailnet.
 
     5. After verification, Ctrl+C the probe server.
 
@@ -405,13 +393,13 @@ h1{font-size:1.2em}li{margin:.3em 0}</style>
        ```json
        {
          "meta": { "timestamp": "<ISO8601>", "builder_confirmed": true },
-         "strategy": "tailscale" | "mkcert",
-         "hostname": "pedro-2023.tailc48d1c.ts.net" | "rayme.local",
-         "bind_ip": "100.100.8.103" | "192.168.x.x",
+         "strategy": "mkcert" | "tailscale",
+         "hostname": "rayme.local" | "<tailscale-hostname>",
+         "bind_ip": "192.168.1.199" | "<tailscale-ip>",
          "port": 8443,
          "cert_path": "<relative path>",
          "key_path": "<relative path, will be gitignored>",
-         "iphone_on_tailnet": true | false,
+         "iphone_on_tailnet": false | true,
          "iphone_safari_isSecureContext": true,
          "iphone_safari_mediaDevices_defined": true,
          "cert_warning_shown": false,
@@ -457,7 +445,7 @@ h1{font-size:1.2em}li{margin:.3em 0}</style>
 |-----------|----------|-----------|-------------|-----------------|
 | T-00-02-01 | Info Disclosure | Private key files (`*.key`, `*-key.pem`) | mitigate | `.gitignore` in plan 01 explicitly excludes `*.key` and `*.pem`. Task 2 acceptance criteria include `git status` check to confirm no key file is staged. |
 | T-00-02-02 | Tampering | mkcert root CA installed on iPhone | accept | Documented in HTTPS-SETUP.md that this trust addition is reversible via iOS Settings. Builder is the sole user and authorized to modify their own device. |
-| T-00-02-03 | Spoofing | Tailscale tailnet domain squatting | accept | `*.tailc48d1c.ts.net` cert is issued by Let's Encrypt and scoped to the tailnet only. Not reachable from the public internet. |
+| T-00-02-03 | Spoofing | Optional Tailscale alternate path | accept | If the Tailscale path is used later, its cert remains scoped to the tailnet only. It is not the default path on this backend. |
 | T-00-02-04 | Denial of Service | Probe server left running unattended | mitigate | HTTPS-SETUP.md "Security notes" explicitly instructs builder to Ctrl+C immediately after verification. Server is a static page with no auth. |
 | T-00-02-05 | Info Disclosure | User-Agent / IP leak in probe page | accept | Probe page exposes only the client's own data back to the client. Not logged beyond stderr which stays local. |
 

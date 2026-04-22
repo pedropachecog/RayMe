@@ -12,10 +12,10 @@ autonomous: false
 requirements: []
 user_setup:
   - service: ollama-model
-    why: "The cancel probe needs a local LLM to stream against. Ollama is installed but has no model loaded at research time."
+    why: "The cancel probe needs a local LLM to stream against. Re-research found neither ollama nor llama-server installed on the backend."
     env_vars: []
     dashboard_config:
-      - task: "Start ollama and pull a small model: `ollama serve` (if not running) + `ollama pull llama3.2:3b`. Confirm `ollama list` shows the model."
+      - task: "Install a local OpenAI-compatible server first. Prefer Ollama if you want the simpler path: install it, start it, and pull a small model like `llama3.2:3b`. Otherwise install/provide `llama-server` plus a GGUF model."
         location: "Any terminal"
 
 must_haves:
@@ -65,7 +65,7 @@ Output: `probes/llm_cancel.py` + `results/llm_cancel.json` with per-trial metric
 @.planning/research/PITFALLS.md
 
 <interfaces>
-From 00-RESEARCH.md §Standard Stack: both `llama-server` (llama.cpp) and `ollama 0.17.0` are installed. Planning guidance says **default to ollama** for simpler API and pull-model UX; support llama-server as alternative.
+From 00-RESEARCH.md §Standard Stack: neither `ollama` nor `llama-server` is installed on the backend today. Planning guidance remains: **prefer Ollama** if you want the simpler install + OpenAI-compatible API path, but support llama-server as the alternative if that is what the builder chooses to install.
 
 Ollama OpenAI-compatible endpoint:
 - Base URL: `http://localhost:11434/v1`
@@ -419,7 +419,7 @@ Phase 4 acceptance: `cancel_to_idle_ms < 200` across p50 of >=5 trials.
     - File `probes/test_llm_cancel.py` has 8 `def test_*` functions.
     - Pytest exits 0 with `8 passed`.
   </acceptance_criteria>
-  <done>Cancel probe + unit-tested parser ready; waiting for ollama model to be pulled.</done>
+  <done>Cancel probe + unit-tested parser ready; waiting for a local LLM server to be installed and a small model to be available.</done>
 </task>
 
 <task type="checkpoint:human-verify" gate="blocking">
@@ -438,11 +438,12 @@ Phase 4 acceptance: `cancel_to_idle_ms < 200` across p50 of >=5 trials.
   <how-to-verify>
     **Builder one-time setup:**
 
-    1. Start ollama if not already running:
+    1. Install/start Ollama if you want the preferred path:
        ```bash
-       # Windows: ollama service may already be installed; confirm with:
+       # If ollama is not installed yet, install it first (official installer or winget),
+       # then confirm the local API answers:
        curl http://localhost:11434/api/tags
-       # If empty response or connection refused, start it:
+       # If connection is refused, start it:
        ollama serve  # leave running in another terminal
        ```
 
@@ -531,7 +532,7 @@ Phase 4 acceptance: `cancel_to_idle_ms < 200` across p50 of >=5 trials.
 | Threat ID | Category | Component | Disposition | Mitigation Plan |
 |-----------|----------|-----------|-------------|-----------------|
 | T-00-06-01 | Info Disclosure | Prompt content sent to local LLM | accept | Prompt is hardcoded benign text ("Write a 500-word essay about gardens"). No user PII or credentials. |
-| T-00-06-02 | DoS | Ollama OOM on too-large model | accept | `llama3.2:3b` (~2 GB) is small; fits comfortably on the 4090 alongside this probe's zero GPU load. |
+| T-00-06-02 | DoS | Ollama OOM on too-large model | accept | `llama3.2:3b` (~2 GB) is a deliberately small starting model for the 3060-class backend. If memory pressure appears, switch to an even smaller local model. |
 | T-00-06-03 | Spoofing | Probe connects to localhost endpoint | accept | Loopback only; no network exposure. |
 
 No high-severity threats. Probe is a short-lived local HTTP client.

@@ -1,0 +1,22 @@
+# Venv and model caches
+.venv-phase0/
+__pycache__/
+*.pyc
+
+# Audio samples (voice PII) and recorded WAVs
+*.wav
+*.mp3
+*.flac
+!probes/fixtures/silence_for_tests.wav
+
+# HTTPS artifacts never committed
+*.key
+*.pem
+*.crt
+*.p12
+iphone-cert.mobileconfig
+
+# Raw nvidia-smi logs and model artifacts
+*.onnx
+*.smi.log
+results/*.log

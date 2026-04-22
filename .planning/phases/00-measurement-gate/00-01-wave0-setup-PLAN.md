@@ -19,7 +19,7 @@ user_setup: []
 
 must_haves:
   truths:
-    - "Python 3.11.5 venv exists at .venv-phase0/ with torch 2.5.1+cu121 importable"
+    - "Python 3.11.x venv exists at .venv-phase0/ with CUDA-enabled torch importable"
     - "All Phase 0 AI packages (faster-whisper, f5-tts, coqui-tts, qwen-tts, jiwer, soundfile, librosa, pynvml) are importable under the venv"
     - "Whisper weights (distil-large-v3, large-v3-turbo, large-v3) are cached locally"
     - "probes/bench_utils.py provides VRAM polling, timing helpers, and JSON result writer shared by every probe"
@@ -76,8 +76,8 @@ Output: A runnable `.venv-phase0/` venv; `requirements-phase0.txt` pinning every
 <interfaces>
 Key facts the executor must use (already verified in 00-RESEARCH.md):
 
-- Python 3.11.5 is the target runtime, invoked on Windows via `py -3.11`. Do NOT use Python 3.12 or 3.13.
-- PyTorch 2.5.1+cu121 is already installed under the system Python 3.11. The venv should inherit it via `--system-site-packages` OR reinstall the exact same torch build inside the venv. Prefer reinstall for isolation (slower but reproducible).
+- The backend currently has only Python 3.10.8. `py -3.11` is NOT available yet. Install Python 3.11 first, then use `py -3.11` for the venv. Do NOT use the system Python 3.10 for the AI measurement environment.
+- PyTorch is NOT installed on the backend. Install a CUDA-enabled torch build inside the venv and record the exact resolved versions in `setup_install.json`.
 - Pinned package versions (all verified from PyPI on 2026-04-18):
     faster-whisper==1.2.1
     f5-tts==1.1.17          # STACK.md mentioned 1.1.19 but PyPI latest is 1.1.17 per research Pitfall #5
@@ -95,7 +95,8 @@ Key facts the executor must use (already verified in 00-RESEARCH.md):
     "distil-large-v3"       (~1.5 GB)
     "large-v3-turbo"        (~0.75 GB)
     "large-v3"              (~3 GB)
-- GPU is RTX 4090 (sm_89, 24 GB) per 00-RESEARCH.md §Summary. Record this metadata in every results JSON.
+- GPU is RTX 3060 (sm_86, 12 GB) per 00-RESEARCH.md §Summary. Record this metadata in every results JSON.
+- Official PyTorch 2.5.1 Windows wheels exist for both cu118 and cu121. Because the host exposes `nvcc` 11.7 on PATH and no CUDA 12.x toolkit was found, start with the cu118 wheel family unless a later install error proves otherwise.
 - Set `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` in bench_utils.py BEFORE importing torch, per PITFALLS.md #7.
 
 Expected bench_utils.py public API (downstream probes will import these):
@@ -175,9 +176,8 @@ def warmup_cuda() -> None:
        # Then: .venv-phase0\Scripts\pip install -r requirements-phase0.txt
        # (On Windows: .venv-phase0\Scripts\activate)
 
-       # Torch MUST already be present at 2.5.1+cu121. If not, run:
-       #   pip install torch==2.5.1+cu121 torchaudio==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121
-       # This file assumes torch is pre-installed (system site-packages or explicit install).
+       # Torch is NOT pre-installed on the real backend.
+       # Install it explicitly inside the venv (see Task 2 for the current command).
 
        faster-whisper==1.2.1
        f5-tts==1.1.17
@@ -248,11 +248,15 @@ def warmup_cuda() -> None:
   <action>
     From `.planning/phases/00-measurement-gate/`:
 
-    1. Create venv:
+    1. Install Python 3.11 if needed, then create the venv:
+       ```bash
+       py -3.11 --version
+       ```
+       If this reports `No suitable Python runtime found`, install Python 3.11 on the backend first (official installer or winget), reopen the shell, and re-run the command above. Then create the venv:
        ```bash
        py -3.11 -m venv .venv-phase0
        ```
-       Confirm `py -3.11 --version` outputs `Python 3.11.5`. If it reports a different 3.11.x, proceed but record the actual version in setup_install.json.
+       Confirm `py -3.11 --version` outputs `Python 3.11.x`. If it reports a different 3.11.x than expected, proceed but record the actual version in `setup_install.json`.
 
     2. Upgrade pip inside the venv (Windows paths):
        ```bash
@@ -263,13 +267,13 @@ def warmup_cuda() -> None:
        ```bash
        .venv-phase0/Scripts/python.exe -c "import sys; print(sys.version); import torch; print(torch.__version__, torch.cuda.is_available(), torch.version.cuda)"
        ```
-       Expected: `Python 3.11.5 ...`, `2.5.1+cu121 True 12.1`.
+       Expected after a successful install: `Python 3.11.x ...`, `2.5.1+cu118 True 11.8` (or another officially supported CUDA wheel if cu118 proves incompatible on this host).
 
-       If torch is NOT found inside the venv (because `python -m venv` does NOT inherit system site-packages by default), install the exact matching build into the venv:
+       If torch is NOT found inside the venv, install the exact matching build into the venv:
        ```bash
-       .venv-phase0/Scripts/python.exe -m pip install torch==2.5.1+cu121 torchaudio==2.5.1+cu121 --index-url https://download.pytorch.org/whl/cu121
+       .venv-phase0/Scripts/python.exe -m pip install torch==2.5.1 torchvision==0.20.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu118
        ```
-       Record in setup_install.json whether torch came from system site-packages or was freshly installed.
+       Record in `setup_install.json` the exact torch and CUDA runtime versions that were actually installed.
 
     4. Install all pinned Phase 0 packages:
        ```bash
@@ -302,8 +306,8 @@ def warmup_cuda() -> None:
            "timestamp": "<ISO8601>",
            "python_version": "3.11.x",
            "gpu": "<from nvidia-smi>",
-           "cuda_version": "12.1",
-           "torch_version": "2.5.1+cu121"
+           "cuda_version": "<from torch.version.cuda>",
+           "torch_version": "<resolved>"
          },
          "venv_path": ".venv-phase0",
          "torch_origin": "system_site_packages" | "reinstalled_in_venv",
@@ -576,7 +580,7 @@ def warmup_cuda() -> None:
 | T-00-01-01 | Tampering | requirements-phase0.txt | accept | Pinned versions verified against PyPI 2026-04-18 in 00-RESEARCH.md; any tampering would be caught by downstream import failures. No supply-chain hash pinning at this spike stage. |
 | T-00-01-02 | Info Disclosure | HF cache (.venv-phase0 + user HF hub) | accept | Contains model weights only, no PII. `.gitignore` excludes `.venv-phase0/` so nothing enters the repo. |
 | T-00-01-03 | Info Disclosure | `*.wav` voice samples (future probes) | mitigate | `.gitignore` excludes `*.wav`/`*.mp3`/`*.flac` by default; downstream plans document retention + deletion. |
-| T-00-01-04 | Denial of Service | Disk space during HF download | accept | ~5 GB one-time download; user has a 4090 workstation with ample space. Download can be re-run if interrupted. |
+| T-00-01-04 | Denial of Service | Disk space during HF download | accept | ~5 GB one-time download; the real backend currently showed ~40 GB free on C:, so Phase 0 still has headroom but should avoid unnecessary duplicate model copies. Download can be re-run if interrupted. |
 
 No high-severity threats. This plan creates no network endpoints, no credentials, no user-facing services.
 </threat_model>
@@ -604,7 +608,7 @@ for m in ('distil-large-v3', 'large-v3-turbo', 'large-v3'):
 </verification>
 
 <success_criteria>
-- [ ] `.venv-phase0/` venv runs Python 3.11 with torch 2.5.1+cu121 + all Phase 0 packages importable
+- [ ] `.venv-phase0/` venv runs Python 3.11 with CUDA-enabled torch + all Phase 0 packages importable
 - [ ] Three Whisper checkpoints are HF-cached locally
 - [ ] `probes/bench_utils.py` exports the declared API (Timer, gpu_info, sample_vram_mb, warmup_cuda, write_results)
 - [ ] `probes/test_smoke.py` passes 5/5 tests inside the venv

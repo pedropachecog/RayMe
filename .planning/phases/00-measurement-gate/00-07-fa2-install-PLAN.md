@@ -13,7 +13,7 @@ user_setup: []
 
 must_haves:
   truths:
-    - "FlashAttention 2 install has been attempted under the Phase 0 venv (Python 3.11 + torch 2.5.1+cu121 + RTX 4090 sm_89)"
+    - "FlashAttention 2 install has been attempted under the Phase 0 venv on the backend's RTX 3060 (sm_86, 12 GB) after plan 01 provisions Python 3.11 + torch"
     - "Outcome (success / fail / timeout) is recorded with the build duration"
     - "If install succeeded: `from flash_attn import flash_attn_func` is verified to import"
     - "If install failed: the stderr tail is captured in the results JSON, and the Qwen3-TTS 1.7B feature flag is set to OFF in the recommendation field"
@@ -38,7 +38,7 @@ must_haves:
 <objective>
 Attempt to install FlashAttention 2 under the Phase 0 venv and record whether the install (and subsequent import) succeeded, along with build duration. This is Phase 0 success criterion #6.
 
-Purpose: Research (00-RESEARCH.md Pitfall #2 + STACK.md §Qwen3-TTS install friction + QWEN3-TTS.md §9.2) shows that FA2 has no prebuilt wheel for the specific combo (Python 3.11 + CUDA 12.1 + torch 2.5.1 + sm_89 RTX 4090) and will build from source — 10–30 min with MSVC toolchain required. The build may silently fail on misconfigured Windows systems. **This plan's outcome directly gates Qwen3-TTS 1.7B adoption:** on 12 GB 3060, 1.7B without FA2 crosses the VRAM budget (QWEN3-TTS.md §3.2). On the 4090 it fits either way, but the roadmap uses 3060 constraints as the gating rule since that is REQ-02's reference hardware.
+Purpose: Research (00-RESEARCH.md Pitfall #4 + STACK.md §Qwen3-TTS install friction + QWEN3-TTS.md §9.2) shows that FA2 will likely require a source build on this backend. The real host state is: Python 3.11 is not preinstalled yet, `nvcc` 11.7 is on PATH, and `cl.exe` is not on PATH. That makes this a realistic Windows tooling gate, not the previously assumed “already-provisioned 4090 workstation” case. **This plan's outcome directly gates Qwen3-TTS 1.7B adoption:** on 12 GB 3060, 1.7B without FA2 crosses the VRAM budget (QWEN3-TTS.md §3.2).
 
 Output: `results/fa2_install.json` with installed flag, version, build_duration_s, failure_reason, and the qwen17b_recommended recommendation.
 </objective>
@@ -57,7 +57,8 @@ Output: `results/fa2_install.json` with installed flag, version, build_duration_
 From 00-RESEARCH.md §Code Examples → FlashAttention 2 Install and Verify:
 
 ```bash
-# On Python 3.11 with CUDA 12.1 (the AI backend env)
+# On the Phase 0 venv after plan 01 installs Python 3.11 + torch
+# Re-research note: the host currently exposes nvcc 11.7 and no cl.exe on PATH
 # First: try to find prebuilt wheel
 .venv-phase0/Scripts/python.exe -m pip install flash-attn==2.8.3 --dry-run 2>&1 | head -20
 
@@ -71,7 +72,7 @@ set FLASH_ATTENTION_SKIP_CUDA_BUILD=FALSE
 
 Timeout: 30 minutes (00-RESEARCH.md §Common Pitfalls #2). If the build has not completed by then, kill the subprocess and record `failure_reason: "build_timeout_30min"`.
 
-Windows MSVC requirement: If the build chain is not present (no `cl.exe` in PATH, no MSVC Build Tools installed), the build will fail with a clear error from setuptools. Capture the last ~50 lines of stderr for diagnosis.
+Windows MSVC requirement: If the build chain is not present (no `cl.exe` in PATH, no MSVC Build Tools installed), the build will fail with a clear error from setuptools. Re-research found `cl.exe` absent on this host today. Capture the last ~50 lines of stderr for diagnosis.
 
 Recommendation rule (QWEN3-TTS.md §3.2 + STACK.md VRAM Budget):
 ```python
