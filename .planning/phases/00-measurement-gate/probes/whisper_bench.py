@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import statistics
 import sys
+import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +20,49 @@ RUNGS: list[tuple[str, str]] = [
 
 DISTIL_WITHIN_PP = 0.02
 TURBO_WITHIN_PP = 0.02
+
+
+class NvmlPeakMonitor:
+    """Track GPU memory used via NVML while CTranslate2 runs outside Torch."""
+
+    def __init__(self, interval_s: float = 0.05) -> None:
+        self.interval_s = interval_s
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._peak_used_mb: float | None = None
+        self._error: str | None = None
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        try:
+            import pynvml
+
+            pynvml.nvmlInit()
+            handle = pynvml.nvmlDeviceGetHandleByIndex(0)
+            try:
+                while not self._stop.is_set():
+                    info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                    used_mb = info.used / (1024 * 1024)
+                    if self._peak_used_mb is None or used_mb > self._peak_used_mb:
+                        self._peak_used_mb = used_mb
+                    time.sleep(self.interval_s)
+                info = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                used_mb = info.used / (1024 * 1024)
+                if self._peak_used_mb is None or used_mb > self._peak_used_mb:
+                    self._peak_used_mb = used_mb
+            finally:
+                pynvml.nvmlShutdown()
+        except Exception as exc:
+            self._error = repr(exc)
+
+    def stop(self) -> tuple[float | None, str | None]:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=2.0)
+        return self._peak_used_mb, self._error
 
 
 def _normalize_transform() -> Any:
@@ -108,32 +153,42 @@ def measure_rung(
     print(f"[bench] Loading {model_name} ({compute_type})...", flush=True)
     torch.cuda.empty_cache()
     torch.cuda.reset_peak_memory_stats()
-
-    model = WhisperModel(model_name, device="cuda", compute_type=compute_type)
-    warmup_cuda()
-
+    baseline_used_mb = sample_vram_mb().get("used_mb_nvml")
+    monitor = NvmlPeakMonitor()
+    monitor.start()
+    model: Any | None = None
     latencies: list[float] = []
-    vram_peaks: list[float] = []
+    torch_vram_peaks: list[float] = []
     hypothesis = ""
 
-    for index in range(trials):
-        torch.cuda.reset_peak_memory_stats()
-        with Timer() as timer:
-            segments, _info = model.transcribe(
-                audio_path,
-                beam_size=5,
-                condition_on_previous_text=False,
-                vad_filter=False,
-                language="en",
-            )
-            parts = [segment.text.strip() for segment in segments]
-        latencies.append(timer.elapsed_ms)
-        vram_peaks.append(sample_vram_mb()["peak_allocated_mb"])
-        if index == 0:
-            hypothesis = " ".join(part for part in parts if part)
-        print(f"[bench]   trial {index + 1}/{trials}: {timer.elapsed_ms:.0f} ms", flush=True)
+    try:
+        model = WhisperModel(model_name, device="cuda", compute_type=compute_type)
+        warmup_cuda()
 
-    del model
+        for index in range(trials):
+            torch.cuda.reset_peak_memory_stats()
+            with Timer() as timer:
+                segments, _info = model.transcribe(
+                    audio_path,
+                    beam_size=5,
+                    condition_on_previous_text=False,
+                    vad_filter=False,
+                    language="en",
+                )
+                parts = [segment.text.strip() for segment in segments]
+            latencies.append(timer.elapsed_ms)
+            torch_vram_peaks.append(sample_vram_mb()["peak_allocated_mb"])
+            if index == 0:
+                hypothesis = " ".join(part for part in parts if part)
+            print(
+                f"[bench]   trial {index + 1}/{trials}: {timer.elapsed_ms:.0f} ms",
+                flush=True,
+            )
+    finally:
+        peak_used_mb, monitor_error = monitor.stop()
+
+    if model is not None:
+        del model
     torch.cuda.empty_cache()
 
     p95_latency = (
@@ -142,15 +197,24 @@ def measure_rung(
         else statistics.quantiles(latencies, n=20, method="inclusive")[-1]
     )
 
+    if peak_used_mb is not None and baseline_used_mb is not None:
+        peak_vram_mb = max(0.0, peak_used_mb - baseline_used_mb)
+    else:
+        peak_vram_mb = max(torch_vram_peaks)
+
     return {
         "model": model_name,
         "compute_type": compute_type,
         "wer": round(compute_wer(reference, hypothesis), 4),
         "p50_latency_ms": round(statistics.median(latencies), 1),
         "p95_latency_ms": round(p95_latency, 1),
-        "peak_vram_mb": round(max(vram_peaks), 1),
+        "peak_vram_mb": round(peak_vram_mb, 1),
         "hypothesis": hypothesis[:4000],
         "trials": trials,
+        "peak_vram_source": "nvml_delta_mb" if peak_used_mb is not None and baseline_used_mb is not None else "torch_peak_allocated_mb",
+        "baseline_used_mb_nvml": round(baseline_used_mb, 1) if baseline_used_mb is not None else None,
+        "peak_used_mb_nvml": round(peak_used_mb, 1) if peak_used_mb is not None else None,
+        "nvml_monitor_error": monitor_error,
     }
 
 

@@ -1,13 +1,13 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-22T16:47:12Z",
+  "timestamp": "2026-04-22T18:58:08Z",
   "phase": "00",
   "phase_name": "measurement-gate",
   "phase_dir": ".planning/phases/00-measurement-gate",
   "plan": 3,
   "task": 2,
   "total_tasks": 2,
-  "status": "blocked_on_builder",
+  "status": "in_progress",
   "completed_tasks": [
     {
       "id": 1,
@@ -56,6 +56,22 @@
       "status": "done",
       "tests": "9 passed",
       "commit": "f207093"
+    },
+    {
+      "id": 32,
+      "name": "Run the real Whisper benchmark on the builder recording",
+      "status": "done",
+      "host": "OMEN-PC",
+      "result_file": ".planning/phases/00-measurement-gate/results/whisper.json",
+      "default_rung": "distil-large-v3"
+    },
+    {
+      "id": 42,
+      "name": "Run the real TTS TTFA benchmark on the builder recording",
+      "status": "done_with_engine_blockers",
+      "host": "OMEN-PC",
+      "result_file": ".planning/phases/00-measurement-gate/results/tts_ttfa.json",
+      "objective_default": "qwen3"
     }
   ],
   "remaining_tasks": [
@@ -65,41 +81,23 @@
       "status": "blocked_on_builder"
     },
     {
-      "id": 32,
-      "name": "Record reference_audio.wav and run the Whisper benchmark",
-      "status": "blocked_on_builder"
-    },
-    {
-      "id": 42,
-      "name": "Record short_ref_audio.wav and run the TTS TTFA benchmark",
-      "status": "blocked_on_builder"
-    },
-    {
       "id": 62,
       "name": "Install a local LLM server on OMEN-PC and run the cancel probe against it",
       "status": "blocked_on_builder"
+    },
+    {
+      "id": 43,
+      "name": "Resolve TTS engine blockers: F5 crash, XTTS license prompt, optional accent listening",
+      "status": "blocked_on_engine_or_user"
     }
   ],
   "blockers": [
-    "Builder recording missing: .planning/phases/00-measurement-gate/probes/fixtures/reference_audio.wav",
-    "Builder recording missing: .planning/phases/00-measurement-gate/probes/fixtures/short_ref_audio.wav",
     "Android browser verification still pending for 00-02 Task 2",
+    "F5-TTS crashes the subprocess on Windows backend OMEN-PC before a TTFA result is produced",
+    "XTTS v2 is blocked on interactive Coqui CPML acceptance and must not be auto-accepted on the user's behalf",
     "Local LLM server install still pending for 00-06 Task 2"
   ],
-  "human_actions_pending": [
-    {
-      "id": "record_reference_audio",
-      "file": ".planning/phases/00-measurement-gate/probes/fixtures/reference_audio.wav",
-      "source_text": ".planning/phases/00-measurement-gate/probes/fixtures/reference_transcript.txt",
-      "requirements": "~10 minutes, quiet room, mono, 16 kHz or higher"
-    },
-    {
-      "id": "record_short_ref_audio",
-      "file": ".planning/phases/00-measurement-gate/probes/fixtures/short_ref_audio.wav",
-      "source_text": ".planning/phases/00-measurement-gate/probes/fixtures/short_ref_transcript.txt",
-      "requirements": "6-12 seconds, quiet room, mono, 24 kHz or higher"
-    }
-  ],
+  "human_actions_pending": [],
   "decisions": [
     {
       "decision": "Use only OMEN-PC at 192.168.1.199 for Phase 0 host commands",
@@ -124,6 +122,16 @@
     {
       "decision": "Persist the voice benchmark fixtures in git before asking for recordings",
       "rationale": "The exact transcript text to read must live in repo state, not in transient chat memory",
+      "phase": "00"
+    },
+    {
+      "decision": "Downgrade ctranslate2 to 3.24.0 on OMEN-PC while Phase 00 uses the CUDA 11.8 Torch stack",
+      "rationale": "Official faster-whisper guidance says current CTranslate2 wheels need CUDA 12, and the CUDA 11 workaround is ctranslate2 3.24.0",
+      "phase": "00"
+    },
+    {
+      "decision": "Do not auto-accept the Coqui XTTS CPML license prompt",
+      "rationale": "That prompt is a real license acknowledgement and should be an explicit user choice, not silently answered by the agent",
       "phase": "00"
     }
   ],
@@ -150,8 +158,8 @@
     ".planning/research/QWEN3-TTS.md",
     "docs/stitch/DESIGN.md"
   ],
-  "next_action": "Wait for the builder to place reference_audio.wav and short_ref_audio.wav under probes/fixtures, then run whisper_bench.py and tts_ttfa.py on OMEN-PC. Until then, continue only non-builder backend work and never run host-sensitive Phase 0 commands on the local workstation.",
-  "context_notes": "SEV-1 process failure and user-trust incident. The voice benchmark fixtures are now persisted in commit f207093 and validated in the backend Phase 0 venv with 17 passing tests.",
+  "next_action": "Commit the new probe code and result JSONs, then continue Phase 00 with non-license, non-phone work. If resuming TTS, keep XTTS blocked on explicit license acceptance and debug the F5 Windows native crash in isolation.",
+  "context_notes": "SEV-1 process failure and user-trust incident. The voice benchmark fixtures are persisted in commit f207093, the live STT/TTS runs have now been executed on OMEN-PC, and the handoff must remember the CTranslate2 CUDA 11 workaround plus the two TTS engine blockers.",
   "incident": {
     "severity": "SEV-1",
     "summary": "Phase 0 execution was attempted on the wrong machine, persistent SSH state was lost by using /tmp, and the user was repeatedly forced into manual recovery loops.",
@@ -195,6 +203,10 @@
       "failure_reason": "windows_build_compile_error",
       "build_duration_s": 56.1,
       "qwen17b_recommended": false
+    },
+    "runtime_overrides": {
+      "ctranslate2": "3.24.0",
+      "setuptools": "75.8.0"
     }
   },
   "voice_probe_state": {
@@ -202,15 +214,44 @@
     "backend_stage_dir": "%USERPROFILE%\\phase0-probes",
     "validation": "17 passed in 0.38s",
     "reference_transcript_words": 1660,
-    "recordings_required": [
-      {
-        "file": ".planning/phases/00-measurement-gate/probes/fixtures/reference_audio.wav",
-        "from_text": ".planning/phases/00-measurement-gate/probes/fixtures/reference_transcript.txt"
-      },
-      {
-        "file": ".planning/phases/00-measurement-gate/probes/fixtures/short_ref_audio.wav",
-        "from_text": ".planning/phases/00-measurement-gate/probes/fixtures/short_ref_transcript.txt"
+    "recordings_required": [],
+    "whisper_result": {
+      "default_rung": "distil-large-v3",
+      "rungs": {
+        "distil-large-v3": {
+          "wer": 0.0627,
+          "p50_latency_ms": 18241.2,
+          "peak_vram_mb": 1731.4
+        },
+        "large-v3-turbo": {
+          "wer": 0.0524,
+          "p50_latency_ms": 23080.7,
+          "peak_vram_mb": 1074.0
+        },
+        "large-v3": {
+          "wer": 0.0452,
+          "p50_latency_ms": 66396.7,
+          "peak_vram_mb": 3538.0
+        }
       }
-    ]
+    },
+    "tts_result": {
+      "objective_default": "qwen3",
+      "qwen3": {
+        "ttfa_ms": 4848.4,
+        "rtf": 3.03,
+        "peak_vram_mb": 2494.1
+      },
+      "f5_error": "subprocess_exit_3221225477",
+      "xtts_error": "interactive_cpml_license_prompt",
+      "qwen_gate": {
+        "accepted": false,
+        "reasons": [
+          "ttfa_too_high",
+          "rtf_too_high",
+          "accent_drift_or_untested"
+        ]
+      }
+    }
   }
 }

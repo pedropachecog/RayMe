@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import json
+import os
+import subprocess
 import sys
 import traceback
 from pathlib import Path
@@ -258,6 +261,83 @@ def measure_qwen3(
     }
 
 
+def run_engine_locally(
+    engine: str,
+    ref_audio: str,
+    ref_text: str,
+    target_text: str,
+    sample_out: Path,
+) -> dict[str, Any]:
+    if engine == "f5":
+        return measure_f5(ref_audio, ref_text, target_text, sample_out)
+    if engine == "xtts":
+        return measure_xtts(ref_audio, target_text, sample_out)
+    if engine == "qwen3":
+        return measure_qwen3(ref_audio, ref_text, target_text, sample_out)
+    raise ValueError(f"Unknown engine: {engine}")
+
+
+def run_engine_subprocess(
+    engine: str,
+    ref_audio: Path,
+    ref_text_path: Path,
+    target_text: str,
+    sample_out: Path,
+) -> dict[str, Any]:
+    """Run one engine in a child process so a fatal import does not kill the driver."""
+    temp_output = OUTPUT_SAMPLE_DIR / f"{engine}.metrics.json"
+    if temp_output.exists():
+        temp_output.unlink()
+
+    command = [
+        sys.executable,
+        str(Path(__file__).resolve()),
+        "--run-engine",
+        engine,
+        "--ref-audio",
+        str(ref_audio),
+        "--ref-text",
+        str(ref_text_path),
+        "--target-text",
+        target_text,
+        "--sample-out",
+        str(sample_out),
+        "--engine-output",
+        str(temp_output),
+    ]
+    env = os.environ.copy()
+    home = Path.home()
+    local_appdata = home / "AppData" / "Local"
+    roaming_appdata = home / "AppData" / "Roaming"
+    tts_home = local_appdata / "rayme-tts-home"
+    local_appdata.mkdir(parents=True, exist_ok=True)
+    roaming_appdata.mkdir(parents=True, exist_ok=True)
+    tts_home.mkdir(parents=True, exist_ok=True)
+    env.setdefault("LOCALAPPDATA", str(local_appdata))
+    env.setdefault("APPDATA", str(roaming_appdata))
+    env.setdefault("TTS_HOME", str(tts_home))
+
+    proc = subprocess.run(
+        command,
+        cwd=Path(__file__).resolve().parent,
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+
+    if proc.returncode == 0 and temp_output.exists():
+        return json.loads(temp_output.read_text(encoding="utf-8"))
+
+    combined_log = "\n".join(part for part in (proc.stdout, proc.stderr) if part).strip()
+    return {
+        "engine": engine,
+        "ttfa_ms": None,
+        "rtf": None,
+        "error": f"subprocess_exit_{proc.returncode}",
+        "stderr": combined_log[:4000] if combined_log else "",
+    }
+
+
 def _read_reference_text(path: Path) -> str:
     lines = []
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -288,11 +368,24 @@ def main() -> int:
         default="Hey, got it.",
         help="Short target utterance to synthesize",
     )
-    parser.add_argument("--output", required=True, help="Results JSON path")
+    parser.add_argument("--output", help="Results JSON path")
     parser.add_argument(
         "--accent-ok",
         action="store_true",
         help="Only set after the builder confirms the Qwen accent test passes",
+    )
+    parser.add_argument(
+        "--run-engine",
+        choices=("f5", "xtts", "qwen3"),
+        help="Internal: run a single engine in an isolated subprocess",
+    )
+    parser.add_argument(
+        "--sample-out",
+        help="Internal: output WAV path for isolated engine runs",
+    )
+    parser.add_argument(
+        "--engine-output",
+        help="Internal: JSON path for isolated engine runs",
     )
     args = parser.parse_args()
 
@@ -309,23 +402,47 @@ def main() -> int:
     ref_text = _read_reference_text(ref_text_path)
     OUTPUT_SAMPLE_DIR.mkdir(parents=True, exist_ok=True)
 
-    engines: dict[str, dict[str, Any]] = {}
-    probe_runs = [
-        ("f5", lambda: measure_f5(str(ref_audio), ref_text, args.target_text, OUTPUT_SAMPLE_DIR / "f5.wav")),
-        ("xtts", lambda: measure_xtts(str(ref_audio), args.target_text, OUTPUT_SAMPLE_DIR / "xtts.wav")),
-        ("qwen3", lambda: measure_qwen3(str(ref_audio), ref_text, args.target_text, OUTPUT_SAMPLE_DIR / "qwen3.wav")),
-    ]
+    if args.run_engine:
+        if not args.sample_out or not args.engine_output:
+            print("ERROR: --run-engine requires --sample-out and --engine-output", file=sys.stderr)
+            return 2
+        metrics = run_engine_locally(
+            args.run_engine,
+            str(ref_audio),
+            ref_text,
+            args.target_text,
+            Path(args.sample_out),
+        )
+        Path(args.engine_output).write_text(json.dumps(metrics, indent=2), encoding="utf-8")
+        return 0
 
-    for name, runner in probe_runs:
+    if not args.output:
+        print("ERROR: --output is required unless --run-engine is set", file=sys.stderr)
+        return 2
+
+    engines: dict[str, dict[str, Any]] = {}
+    for name in ("f5", "xtts", "qwen3"):
+        sample_out = OUTPUT_SAMPLE_DIR / f"{name}.wav"
         try:
-            engines[name] = runner()
-            print(
-                f"[tts] {name}: TTFA={engines[name]['ttfa_ms']} ms, "
-                f"RTF={engines[name]['rtf']}, "
-                f"VRAM={engines[name]['peak_vram_mb']} MB",
-                flush=True,
+            engines[name] = run_engine_subprocess(
+                name,
+                ref_audio,
+                ref_text_path,
+                args.target_text,
+                sample_out,
             )
-        except Exception as exc:
+            if engines[name].get("ttfa_ms") is not None:
+                print(
+                    f"[tts] {name}: TTFA={engines[name]['ttfa_ms']} ms, "
+                    f"RTF={engines[name]['rtf']}, "
+                    f"VRAM={engines[name]['peak_vram_mb']} MB",
+                    flush=True,
+                )
+            else:
+                print(f"[tts] {name}: FAILED {engines[name].get('error')}", file=sys.stderr)
+                if engines[name].get("stderr"):
+                    print(engines[name]["stderr"], file=sys.stderr)
+        except BaseException as exc:
             print(f"[tts] {name}: FAILED {exc!r}", file=sys.stderr)
             traceback.print_exc()
             engines[name] = {
