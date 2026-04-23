@@ -242,9 +242,10 @@ export LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64:/home/pmpg/rayme/.venv-cu121/l
 
 FlashAttention status in WSL on this host:
 
-- `flash-attn 2.8.3` built successfully in `/home/pmpg/rayme/.venv-cu121`.
-- Import failed on Ubuntu `20.04.6 LTS` because the resulting module requires `GLIBC_2.32`, `GLIBCXX_3.4.29`, and `CXXABI_1.3.13`.
-- Practical implication: XTTS + DeepSpeed is now viable in WSL, but the Qwen/FlashAttention path needs a newer WSL distro or distro upgrade before it can be treated as a real backend option.
+- The WSL distro was upgraded in place to Ubuntu `22.04.5 LTS`.
+- glibc is now `2.35` (`ldd (Ubuntu GLIBC 2.35-0ubuntu3.13) 2.35`).
+- `flash-attn 2.8.3` now imports successfully in `/home/pmpg/rayme/.venv-cu121`.
+- Practical implication: both XTTS + DeepSpeed and the Qwen/FlashAttention path are now viable in WSL on this host.
 
 ## WSL Path Rule
 
