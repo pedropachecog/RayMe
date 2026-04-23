@@ -3,7 +3,7 @@ spike: 001
 name: omen-pc-wsl-gpu-path
 type: standard
 validates: "Given OMEN-PC Ubuntu WSL2, when it is probed over SSH as pmpg with a fixed Linux work root, then GPU visibility and baseline build readiness are known."
-verdict: PARTIAL
+verdict: PASS
 related: []
 tags: [wsl, gpu, omen-pc, ssh]
 ---
@@ -54,7 +54,8 @@ Bootstrap the reusable CUDA 12.1 WSL env:
 - Enters the `Ubuntu` WSL distro as `pmpg`.
 - Creates and verifies `/home/pmpg/rayme`.
 - Prints distro, GPU, Python, and baseline toolchain status.
-- Prints whether PyTorch is already installed and whether CUDA is visible from it.
+- Bootstraps the reusable accelerator env with `torch`, `triton`, `deepspeed`, and `flash-attn`.
+- Prints whether CUDA is visible from that env and which accelerator versions are available.
 
 ## Investigation Trail
 
@@ -67,19 +68,20 @@ Bootstrap the reusable CUDA 12.1 WSL env:
 - Installed `deepspeed 0.18.9` in that env and verified that it imports successfully alongside CUDA-enabled PyTorch.
 - Attempted `flash-attn 2.8.3` in the same env with `CUDA_HOME=/usr/local/cuda-12.1` and `MAX_JOBS=4`; wheel build succeeded but import initially failed on Ubuntu 20.04 because the distro runtime floor was too old.
 - Upgraded the WSL distro in place from Ubuntu `20.04.6 LTS` to `22.04.5 LTS`, verified glibc `2.35`, and re-ran the same env import checks.
+- Verified after the upgrade completed that the reusable env imports `torch 2.5.1+cu121`, `triton 3.1.0`, `deepspeed 0.18.9`, and `flash-attn 2.8.3` on the RTX 3060.
 
 ## Results
 
-Verdict: `PARTIAL`
+Verdict: `PASS`
 
 Key findings:
 
 - The remote control path is validated: `ssh rayme-pmpg` can run commands inside `Ubuntu` WSL2.
 - The fixed Linux work root `/home/pmpg/rayme` exists and is the correct location for future Linux-side work.
 - GPU visibility is present inside WSL: `NVIDIA GeForce RTX 3060, 12288 MiB, 560.94`.
-- The distro is `Ubuntu 20.04.6 LTS` with kernel `6.6.87.2-microsoft-standard-WSL2`.
+- The distro started as `Ubuntu 20.04.6 LTS` and is now `Ubuntu 22.04.5 LTS` with kernel `6.6.87.2-microsoft-standard-WSL2`.
 - The system Python is `3.8.10`, but the reusable accelerator env now exists at `/home/pmpg/rayme/.venv-cu121` and uses Python `3.10.9`.
-- That env now contains `torch 2.5.1+cu121`, `torchvision 0.20.1+cu121`, `torchaudio 2.5.1+cu121`, `deepspeed 0.18.9`, `ninja`, and `cmake`.
+- That env now contains `torch 2.5.1+cu121`, `torchvision 0.20.1+cu121`, `torchaudio 2.5.1+cu121`, `triton 3.1.0`, `deepspeed 0.18.9`, `flash-attn 2.8.3`, `ninja`, and `cmake`.
 - CUDA is visible from that env: `torch.cuda.is_available() == true` and the detected device is `NVIDIA GeForce RTX 3060`.
 - XTTS's documented DeepSpeed path is now practical on this host via the WSL env.
 - After the distro upgrade to Ubuntu `22.04.5 LTS`, glibc is now `2.35` and `flash-attn 2.8.3` imports successfully in `/home/pmpg/rayme/.venv-cu121`.
@@ -113,13 +115,13 @@ Impact:
 
 - WSL on `OMEN-PC` is now a viable execution base for both XTTS + DeepSpeed and Qwen + FlashAttention experiments through `/home/pmpg/rayme/.venv-cu121`.
 - The distro upgrade removed the glibc blocker that previously made the built FlashAttention module unusable on this host.
+- `.planning/spikes/001-omen-pc-wsl-gpu-path/bootstrap-cu121-env.sh` now recreates the full validated accelerator stack instead of only the PyTorch + DeepSpeed subset.
 - The next real step is no longer distro surgery. It is to run the actual Linux-side TTS/Qwen optimization probes against this env.
 
 Accelerator env verification:
 
 ```text
-{"cuda_available": true, "device_count": 1, "device_name": "NVIDIA GeForce RTX 3060", "torch_cuda_version": "12.1", "torch_version": "2.5.1+cu121"}
-{"deepspeed_version": "0.18.9", "torch_version": "2.5.1+cu121", "cuda_available": true}
+{"cuda_available": true, "deepspeed_version": "0.18.9", "device_count": 1, "device_name": "NVIDIA GeForce RTX 3060", "flash_attn_version": "2.8.3", "torch_cuda_version": "12.1", "torch_version": "2.5.1+cu121", "triton_version": "3.1.0"}
 ```
 
 FlashAttention failure details:
@@ -135,6 +137,5 @@ Post-upgrade verification:
 ```text
 PRETTY_NAME="Ubuntu 22.04.5 LTS"
 ldd (Ubuntu GLIBC 2.35-0ubuntu3.13) 2.35
-{"cuda_available": true, "device_name": "NVIDIA GeForce RTX 3060", "flash_attn_version": "2.8.3", "torch_version": "2.5.1+cu121"}
-{"cuda_available": true, "deepspeed_version": "0.18.9", "torch_version": "2.5.1+cu121"}
+{"cuda_available": true, "deepspeed_version": "0.18.9", "device_name": "NVIDIA GeForce RTX 3060", "flash_attn_version": "2.8.3", "torch_version": "2.5.1+cu121", "triton_version": "3.1.0"}
 ```

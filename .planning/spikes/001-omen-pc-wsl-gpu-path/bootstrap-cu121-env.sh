@@ -31,15 +31,19 @@ fi
 export CUDA_HOME="$cuda_home"
 export PATH="$cuda_home/bin:$env_dir/bin:$PATH"
 export LD_LIBRARY_PATH="$cuda_home/lib64:$env_dir/lib/python3.10/site-packages/torch/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+export MAX_JOBS="${MAX_JOBS:-4}"
 
 "$env_dir/bin/pip" install --upgrade pip setuptools wheel packaging psutil ninja cmake
 "$env_dir/bin/pip" install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
-"$env_dir/bin/pip" install deepspeed
+"$env_dir/bin/pip" install "deepspeed==0.18.9"
+"$env_dir/bin/pip" install --no-build-isolation "flash-attn==2.8.3"
 
 "$env_dir/bin/python" - <<'PY'
 import json
 import deepspeed
+import flash_attn
 import torch
+import triton
 
 print(
     json.dumps(
@@ -48,8 +52,10 @@ print(
             "cuda_available": bool(torch.cuda.is_available()),
             "device_count": torch.cuda.device_count() if torch.cuda.is_available() else 0,
             "device_name": torch.cuda.get_device_name(0) if torch.cuda.is_available() else None,
+            "flash_attn_version": flash_attn.__version__,
             "torch_cuda_version": torch.version.cuda,
             "torch_version": torch.__version__,
+            "triton_version": triton.__version__,
         },
         sort_keys=True,
     )

@@ -216,7 +216,7 @@ drwxr-xr-x 2 pmpg pmpg 4096 Apr 22 19:09 /home/pmpg/rayme-wsl-probe
 
 Those `Failed to translate ...` lines are PATH translation warnings from Windows environment propagation. They did not block WSL execution.
 
-Verified WSL accelerator env bootstrap on 2026-04-22:
+Verified WSL accelerator env bootstrap on 2026-04-23:
 
 ```bash
 .planning/spikes/001-omen-pc-wsl-gpu-path/bootstrap-cu121-env.sh
@@ -225,15 +225,16 @@ Verified WSL accelerator env bootstrap on 2026-04-22:
 Observed result:
 
 ```text
-{"cuda_available": true, "device_count": 1, "device_name": "NVIDIA GeForce RTX 3060", "torch_cuda_version": "12.1", "torch_version": "2.5.1+cu121"}
-{"deepspeed_version": "0.18.9", "torch_version": "2.5.1+cu121", "cuda_available": true}
+{"cuda_available": true, "deepspeed_version": "0.18.9", "device_count": 1, "device_name": "NVIDIA GeForce RTX 3060", "flash_attn_version": "2.8.3", "torch_cuda_version": "12.1", "torch_version": "2.5.1+cu121", "triton_version": "3.1.0"}
 ```
 
 WSL accelerator env facts:
 
 - Reusable env path: `/home/pmpg/rayme/.venv-cu121`
+- Current validated distro/userspace: Ubuntu `22.04.5 LTS`, glibc `2.35`
 - CUDA toolkit path to pin explicitly: `/usr/local/cuda-12.1`
 - Do not trust the default `nvcc` on `PATH`; `/usr/local/cuda` still resolves to an older CUDA 10.1 toolchain on this host.
+- `triton 3.1.0` is provided through `torch 2.5.1+cu121` in this env.
 - When testing compiled CUDA extensions from the WSL env, include the PyTorch library directory in `LD_LIBRARY_PATH`:
 
 ```bash
@@ -245,7 +246,7 @@ FlashAttention status in WSL on this host:
 - The WSL distro was upgraded in place to Ubuntu `22.04.5 LTS`.
 - glibc is now `2.35` (`ldd (Ubuntu GLIBC 2.35-0ubuntu3.13) 2.35`).
 - `flash-attn 2.8.3` now imports successfully in `/home/pmpg/rayme/.venv-cu121`.
-- Practical implication: both XTTS + DeepSpeed and the Qwen/FlashAttention path are now viable in WSL on this host.
+- Practical implication: both XTTS + DeepSpeed and the Qwen/FlashAttention path are now viable in WSL on this host, and the bootstrap script recreates the validated accelerator stack directly.
 
 ## WSL Path Rule
 

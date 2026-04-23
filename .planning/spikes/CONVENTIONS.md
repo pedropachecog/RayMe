@@ -29,5 +29,5 @@ Patterns and stack choices established across spike sessions. New spikes follow 
 ## Tools & Libraries
 
 - Use `/usr/lib/wsl/lib/nvidia-smi` as a fallback if `nvidia-smi` is not on `PATH` inside WSL.
-- `torch 2.5.1+cu121` and `deepspeed 0.18.9` work in `/home/pmpg/rayme/.venv-cu121`.
+- `torch 2.5.1+cu121`, `triton 3.1.0`, `deepspeed 0.18.9`, and `flash-attn 2.8.3` work in `/home/pmpg/rayme/.venv-cu121`.
 - `flash-attn 2.8.3` imports successfully in `/home/pmpg/rayme/.venv-cu121` after the WSL distro upgrade to Ubuntu `22.04.5 LTS`.

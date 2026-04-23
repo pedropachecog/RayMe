@@ -1,6 +1,6 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-23T00:50:13Z",
+  "timestamp": "2026-04-23T01:01:34Z",
   "phase": "00",
   "phase_name": "measurement-gate",
   "phase_dir": ".planning/phases/00-measurement-gate",
@@ -131,15 +131,13 @@
     "Android browser verification is still pending for 00-02 Task 2.",
     "00-06 no longer needs a new server install, but the cancel probe still needs to run from a shell that can observe the GPU used by the existing endpoint at 192.168.1.190:8001.",
     "WSL access on 192.168.1.199 currently requires the pmpg Windows account; the rayme-ssh account reports no installed WSL distributions and remote WSL work should use direct `wsl -d Ubuntu -e sh -c ...` commands with fixed Linux paths.",
-    "The WSL distro upgrade to Ubuntu 22.04.5 has landed and the reusable env at `/home/pmpg/rayme/.venv-cu121` now imports both `deepspeed 0.18.9` and `flash-attn 2.8.3`; if more package-manager work is needed immediately, wait for the lingering `do-release-upgrade` cleanup process to exit first.",
     "Phase 00 writeback (00-08) is blocked until 00-02, 00-05, and 00-06 provide their missing inputs.",
     "No measured TTS engine clears the v1 latency budget on OMEN-PC: F5 is 517.3 ms via simulated chunk streaming, XTTS native streaming is 534.3 ms, and Qwen3 eager baseline is 5626.8 ms.",
     "FlashAttention 2 still fails to build on OMEN-PC, so Qwen3 remains an eager-attention baseline only."
   ],
   "human_actions_pending": [
     "Run the HTTPS probe from the actual Android device and confirm trusted cert + isSecureContext for 00-02 Task 2.",
-    "Keep the existing OpenAI-compatible server at 192.168.1.190:8001 running and provide the execution path that can observe its GPU with nvidia-smi during 00-06 Task 2.",
-    "If package-manager work on the upgraded WSL distro is needed immediately, let the lingering `do-release-upgrade` cleanup process finish first."
+    "Keep the existing OpenAI-compatible server at 192.168.1.190:8001 running and provide the execution path that can observe its GPU with nvidia-smi during 00-06 Task 2."
   ],
   "decisions": [
     {
@@ -184,7 +182,7 @@
     },
     {
       "decision": "Treat the upgraded OMEN-PC WSL env as both DeepSpeed-capable and FlashAttention-capable for future Linux-side probes.",
-      "rationale": "Verified on 2026-04-23 after the in-place distro upgrade to Ubuntu 22.04.5 and glibc 2.35: `/home/pmpg/rayme/.venv-cu121` imports `deepspeed 0.18.9` and `flash-attn 2.8.3` successfully with `torch 2.5.1+cu121` on the RTX 3060.",
+      "rationale": "Verified on 2026-04-23 after the in-place distro upgrade to Ubuntu 22.04.5 and glibc 2.35: `/home/pmpg/rayme/.venv-cu121` imports `torch 2.5.1+cu121`, `triton 3.1.0`, `deepspeed 0.18.9`, and `flash-attn 2.8.3` successfully on the RTX 3060.",
       "phase": "00"
     },
     {
@@ -195,7 +193,7 @@
   ],
   "uncommitted_files": [],
   "next_action": "If continuing autonomous work, run ./scripts/bootstrap-rayme-ssh.sh restore and execute 00-05-vram-soak on OMEN-PC so Phase 00 has the missing 3060 budget data. The WSL env bootstrap script at .planning/spikes/001-omen-pc-wsl-gpu-path/bootstrap-cu121-env.sh is now ready for both XTTS + DeepSpeed and Qwen + FlashAttention work on `rayme-pmpg`. In parallel or before final writeback, the builder still needs to complete Android HTTPS verification for 00-02 and provide the GPU-observable execution path for 00-06 against `http://192.168.1.190:8001/v1`.",
-  "context_notes": "00-07.1 is now complete. The TTS probe and matrix explicitly label backend support: F5=not_applicable, XTTS=not_applicable, Qwen3=eager baseline with flash_attention_2 unavailable and sdpa not supported by the current probe. Fresh OMEN-PC rerun metrics are F5 517.3 ms / 0.388 RTF / 1990.2 MB, XTTS 534.3 ms / 0.59 RTF / 1897.6 MB, Qwen3 5626.8 ms / 2.705 RTF / 2509.1 MB. Remote unit tests for test_tts_ttfa.py now pass at 12/12 in the Phase 0 backend venv. 00-08 must cite the matrix instead of describing Qwen3 as an unlabeled result. The Phase 0 LLM endpoint is now known: `http://192.168.1.190:8001/v1`, health OK, model `unsloth/Qwen3.5-27B`, OpenAI-compatible, `owned_by: llamacpp`. On 192.168.1.199, WSL access is tied to the pmpg Windows account: `pmpg` sees `Ubuntu` on WSL2, SSH as `omen-pc\\pmpg` now works via `C:\\ProgramData\\ssh\\administrators_authorized_keys`, and `/home/pmpg/rayme-wsl-probe` was created successfully inside Ubuntu. Remote WSL commands should use direct `wsl -d Ubuntu -e sh -c ...` invocations with fixed Linux paths; UNC WSL paths were not reliable from the non-interactive SSH session. The WSL distro upgrade to Ubuntu 22.04.5 has landed, glibc is now 2.35, and the reusable WSL accelerator env `/home/pmpg/rayme/.venv-cu121` imports both `deepspeed 0.18.9` and `flash-attn 2.8.3` with `torch 2.5.1+cu121` on the RTX 3060. A lingering `do-release-upgrade` cleanup process was still present at 2026-04-23T00:50:13Z, so defer fresh apt/dpkg work until it exits, but Python-side accelerator checks are already passing. Hard safety rule: do not use `rm -rf` and do not delete files or directories through variable-expanded paths on any backend or WSL host.",
+  "context_notes": "00-07.1 is now complete. The TTS probe and matrix explicitly label backend support: F5=not_applicable, XTTS=not_applicable, Qwen3=eager baseline with flash_attention_2 unavailable and sdpa not supported by the current probe. Fresh OMEN-PC rerun metrics are F5 517.3 ms / 0.388 RTF / 1990.2 MB, XTTS 534.3 ms / 0.59 RTF / 1897.6 MB, Qwen3 5626.8 ms / 2.705 RTF / 2509.1 MB. Remote unit tests for test_tts_ttfa.py now pass at 12/12 in the Phase 0 backend venv. 00-08 must cite the matrix instead of describing Qwen3 as an unlabeled result. The Phase 0 LLM endpoint is now known: `http://192.168.1.190:8001/v1`, health OK, model `unsloth/Qwen3.5-27B`, OpenAI-compatible, `owned_by: llamacpp`. On 192.168.1.199, WSL access is tied to the pmpg Windows account: `pmpg` sees `Ubuntu` on WSL2, SSH as `omen-pc\\pmpg` now works via `C:\\ProgramData\\ssh\\administrators_authorized_keys`, and `/home/pmpg/rayme-wsl-probe` was created successfully inside Ubuntu. Remote WSL commands should use direct `wsl -d Ubuntu -e sh -c ...` invocations with fixed Linux paths; UNC WSL paths were not reliable from the non-interactive SSH session. The WSL distro upgrade is complete: Ubuntu is now 22.04.5 with glibc 2.35, and the reusable WSL accelerator env `/home/pmpg/rayme/.venv-cu121` imports `torch 2.5.1+cu121`, `triton 3.1.0`, `deepspeed 0.18.9`, and `flash-attn 2.8.3` on the RTX 3060. `.planning/spikes/001-omen-pc-wsl-gpu-path/bootstrap-cu121-env.sh` now recreates that stack directly. Hard safety rule: do not use `rm -rf` and do not delete files or directories through variable-expanded paths on any backend or WSL host.",
   "incident": {
     "severity": "SEV-1",
     "summary": "Phase 0 execution previously ran on the wrong machine and lost SSH persistence, forcing repeated recovery loops.",
