@@ -7,6 +7,7 @@ Patterns and stack choices established across spike sessions. New spikes follow 
 - Remote Linux probes run from the repo via Bash, `scripts/bootstrap-rayme-ssh.sh`, Windows OpenSSH, and direct `wsl -d Ubuntu -e ...` commands.
 - Linux-side work roots live in Ubuntu under `/home/pmpg/...`.
 - The reusable CUDA env for `OMEN-PC` WSL work lives at `/home/pmpg/rayme/.venv-cu121`.
+- The current validated WSL userspace for accelerator work on `OMEN-PC` is Ubuntu `22.04.5 LTS` with glibc `2.35`.
 
 ## Structure
 
@@ -29,4 +30,4 @@ Patterns and stack choices established across spike sessions. New spikes follow 
 
 - Use `/usr/lib/wsl/lib/nvidia-smi` as a fallback if `nvidia-smi` is not on `PATH` inside WSL.
 - `torch 2.5.1+cu121` and `deepspeed 0.18.9` work in `/home/pmpg/rayme/.venv-cu121`.
-- `flash-attn 2.8.3` builds on this host but does not import on Ubuntu 20.04 because the distro runtime is too old.
+- `flash-attn 2.8.3` imports successfully in `/home/pmpg/rayme/.venv-cu121` after the WSL distro upgrade to Ubuntu `22.04.5 LTS`.
