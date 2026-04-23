@@ -67,7 +67,8 @@ ensure_persist_dir() {
 }
 
 write_runtime_config() {
-  local temp_config="$RUNTIME_DIR/config.rayme-phase0.tmp"
+  local temp_config
+  temp_config="$(mktemp "$RUNTIME_DIR/config.rayme-phase0.XXXXXX")"
 
   if [[ -f "$RUNTIME_CONFIG" ]]; then
     awk -v begin="$CONFIG_BEGIN" -v end="$CONFIG_END" '
