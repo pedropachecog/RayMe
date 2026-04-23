@@ -241,6 +241,27 @@ WSL accelerator env facts:
 export LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64:/home/pmpg/rayme/.venv-cu121/lib/python3.10/site-packages/torch/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 ```
 
+Validated F5 Triton/TensorRT-LLM path on 2026-04-23:
+
+- Runtime image: `soar97/triton-f5-tts:24.12`
+- Fixed workspace: `/home/pmpg/rayme/f5-triton-runtime/F5-TTS`
+- Safe model repo: `/home/pmpg/rayme/f5-triton-runtime/model_repo_cpuipc_18000`
+- Live host ports: `18000` HTTP, `18001` gRPC, `18002` metrics
+- End-to-end smoke output: `/home/pmpg/rayme/f5-triton-runtime/client_http_out.wav`
+- Repro scripts:
+  - `.planning/spikes/002-f5-triton-trtllm-wsl-path/build-runtime-artifacts.sh`
+  - `.planning/spikes/002-f5-triton-trtllm-wsl-path/assemble-model-repo.sh`
+  - `.planning/spikes/002-f5-triton-trtllm-wsl-path/launch-runtime-server.sh`
+  - `.planning/spikes/002-f5-triton-trtllm-wsl-path/client-http-smoke.sh`
+
+Known runtime quirks on this host:
+
+- The prebuilt F5 image is missing `vocos` for stage `2`, so the artifact build path installs it ad hoc before exporting the vocoder plan.
+- The prebuilt F5 image is missing `rjieba`, so the launch path installs it ad hoc before starting `tritonserver`.
+- The unpatched Python backend fails on the BLS hop into `vocoder` with `Failed to open the cudaIpcHandle. error: invalid resource handle` under WSL.
+- The safe model repo works around that by forcing the `vocoder` BLS response to `preferred_memory=pb_utils.PreferredMemory(pb_utils.TRITONSERVER_MEMORY_CPU, 0)`.
+- Avoid the stock F5 `run.sh` stage `3` because it contains `rm -r $MODEL_REPO`; the safe assembled repo replaces that destructive path.
+
 FlashAttention status in WSL on this host:
 
 - The WSL distro was upgraded in place to Ubuntu `22.04.5 LTS`.

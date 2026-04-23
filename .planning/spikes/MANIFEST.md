@@ -16,3 +16,4 @@ Validate whether `OMEN-PC`'s Ubuntu WSL2 environment, accessed remotely through 
 | # | Name | Type | Validates | Verdict | Tags |
 |---|------|------|-----------|---------|------|
 | 001 | omen-pc-wsl-gpu-path | standard | Given `OMEN-PC` Ubuntu WSL2, when it is probed over SSH as `pmpg` with a fixed Linux work root, then GPU visibility and baseline build readiness are known. | PARTIAL | wsl, gpu, omen-pc, ssh |
+| 002 | f5-triton-trtllm-wsl-path | standard | Given `OMEN-PC` Ubuntu WSL2 with Docker Desktop available, when the F5 Triton/TensorRT-LLM runtime path is staged from WSL, then the exact viable launch path and blockers are known. | PASS | f5, triton, tensorrt-llm, docker, wsl |
