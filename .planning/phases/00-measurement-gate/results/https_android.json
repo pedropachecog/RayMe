@@ -1,0 +1,20 @@
+{
+  "meta": {
+    "timestamp": "2026-04-23T03:36:25Z",
+    "builder_confirmed": true
+  },
+  "strategy": "mkcert",
+  "hostname": "192.168.1.199",
+  "requested_hostname": "rayme.local",
+  "bind_ip": "192.168.1.199",
+  "port": 8443,
+  "probe_url": "https://192.168.1.199:8443",
+  "cert_path": "rayme.local+1.pem",
+  "key_path": "rayme.local+1-key.pem",
+  "browser": "Chrome",
+  "android_browser_isSecureContext": true,
+  "android_browser_mediaDevices_defined": true,
+  "cert_warning_shown": false,
+  "screenshot_path": null,
+  "notes": "Android Chrome passed after the mkcert root CA was installed on the phone. The passing verification used the direct LAN IP because local hostname resolution for rayme.local was not configured. A temporary plain-HTTP helper on port 8081 was used only to transfer mkcert-rootCA.crt to the phone and was removed immediately after verification."
+}

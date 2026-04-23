@@ -1,0 +1,13 @@
+runtime,engine,profile,scenario,sample_folder,sample_file,intelligibility_1_5,voice_match_1_5,prosody_1_5,acceptance,notes
+windows_native,luxtts,optimized,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,luxtts__optimized__short_reply.wav,,,,,
+windows_native,luxtts,optimized,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,luxtts__optimized__medium_reply.wav,,,,,
+windows_native,luxtts,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,luxtts__optimized__long_reply.wav,,,,,
+wsl_python,luxtts,optimized,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,luxtts__optimized__short_reply.wav,,,,,
+wsl_python,luxtts,optimized,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,luxtts__optimized__medium_reply.wav,,,,,
+wsl_python,luxtts,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,luxtts__optimized__long_reply.wav,,,,,
+wsl_python,xtts,optimized,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,xtts__optimized__medium_reply.wav,,,,,
+wsl_python,f5,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,f5__optimized__long_reply.wav,,,,,
+windows_native,chatterbox_turbo,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,chatterbox_turbo__optimized__long_reply.wav,,,,reject,user reported long sample gibberish
+wsl_python,chatterbox_turbo,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,chatterbox_turbo__optimized__long_reply.wav,,,,reject,user reported long sample gibberish
+wsl_python,tada_1b,optimized,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,tada_1b__optimized__medium_reply.wav,,,,,
+wsl_python,tada_1b,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,tada_1b__optimized__long_reply.wav,,,,,

@@ -1,0 +1,299 @@
+{
+  "probe": "vram_soak",
+  "engine": "f5",
+  "peak_vram_mb": 1990.2,
+  "peak_reserved_mb": 796.0,
+  "peak_allocated_mb": 1990.2,
+  "peak_used_mb_nvml": 3848.2,
+  "baseline_used_mb_nvml": 3170.2,
+  "peak_used_mb_nvml_delta": 678.0,
+  "growth_detected": false,
+  "growth_slope_mb_per_min": -1.25,
+  "cycles_completed": 180,
+  "duration_s": 1800.1,
+  "samples": [
+    {
+      "t": 0.0,
+      "v": 728.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3170.23,
+      "free_mb_nvml": 9117.77,
+      "cycle": 0
+    },
+    {
+      "t": 61.4,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 7
+    },
+    {
+      "t": 131.4,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 14
+    },
+    {
+      "t": 191.4,
+      "v": 728.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3780.23,
+      "free_mb_nvml": 8507.77,
+      "cycle": 20
+    },
+    {
+      "t": 261.4,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 27
+    },
+    {
+      "t": 331.3,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 34
+    },
+    {
+      "t": 391.4,
+      "v": 728.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3780.23,
+      "free_mb_nvml": 8507.77,
+      "cycle": 40
+    },
+    {
+      "t": 461.3,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 47
+    },
+    {
+      "t": 531.2,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 54
+    },
+    {
+      "t": 591.5,
+      "v": 728.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3780.23,
+      "free_mb_nvml": 8507.77,
+      "cycle": 60
+    },
+    {
+      "t": 661.4,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 67
+    },
+    {
+      "t": 721.4,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 73
+    },
+    {
+      "t": 791.4,
+      "v": 728.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3780.23,
+      "free_mb_nvml": 8507.77,
+      "cycle": 80
+    },
+    {
+      "t": 861.4,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 87
+    },
+    {
+      "t": 931.3,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 94
+    },
+    {
+      "t": 991.4,
+      "v": 728.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3780.23,
+      "free_mb_nvml": 8507.77,
+      "cycle": 100
+    },
+    {
+      "t": 1051.4,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 106
+    },
+    {
+      "t": 1121.5,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 113
+    },
+    {
+      "t": 1191.5,
+      "v": 728.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3780.23,
+      "free_mb_nvml": 8507.77,
+      "cycle": 120
+    },
+    {
+      "t": 1261.5,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 127
+    },
+    {
+      "t": 1331.3,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 134
+    },
+    {
+      "t": 1391.4,
+      "v": 728.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3780.23,
+      "free_mb_nvml": 8507.77,
+      "cycle": 140
+    },
+    {
+      "t": 1461.4,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 147
+    },
+    {
+      "t": 1531.3,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 154
+    },
+    {
+      "t": 1591.6,
+      "v": 728.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3780.23,
+      "free_mb_nvml": 8507.77,
+      "cycle": 160
+    },
+    {
+      "t": 1661.5,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 167
+    },
+    {
+      "t": 1721.5,
+      "v": 796.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3848.23,
+      "free_mb_nvml": 8439.77,
+      "cycle": 173
+    },
+    {
+      "t": 1791.5,
+      "v": 728.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3780.23,
+      "free_mb_nvml": 8507.77,
+      "cycle": 180
+    },
+    {
+      "t": 1800.1,
+      "v": 728.0,
+      "allocated_mb": 711.91,
+      "peak_allocated_mb": 1990.21,
+      "used_mb_nvml": 3780.23,
+      "free_mb_nvml": 8507.77,
+      "cycle": 180
+    }
+  ],
+  "fits_3060_budget": true,
+  "whisper_default": {
+    "model": "distil-large-v3",
+    "compute_type": "int8_float16"
+  },
+  "vad_backend": "silero_vad_cpu",
+  "sample_interval_s": 60,
+  "cycle_interval_s": 10,
+  "meta": {
+    "timestamp": "2026-04-23T04:58:39+00:00",
+    "python_version": "3.11.15",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "gpu": {
+      "cuda_available": true,
+      "name": "NVIDIA GeForce RTX 3060",
+      "vram_total_mb": 12287,
+      "compute_capability": "8.6",
+      "driver_version": "560.94",
+      "cuda_version": "11.8",
+      "torch_version": "2.5.1+cu118"
+    }
+  }
+}

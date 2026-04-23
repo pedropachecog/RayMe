@@ -13,14 +13,14 @@ from tts_ttfa import (
 )
 
 
-def test_pick_v1_default_f5_wins_when_under_400ms() -> None:
+def test_pick_v1_default_fastest_budget_clearer_wins() -> None:
     engines = {
         "f5": {"ttfa_ms": 320, "rtf": 0.08},
         "xtts": {"ttfa_ms": 180, "rtf": 0.3},
         "qwen3": {"ttfa_ms": 600, "rtf": 1.1},
     }
 
-    assert pick_v1_default(engines) == "f5"
+    assert pick_v1_default(engines) == "xtts"
 
 
 def test_pick_v1_default_xtts_wins_when_f5_misses() -> None:
@@ -43,14 +43,27 @@ def test_pick_v1_default_qwen_wins_when_only_budget_clearer() -> None:
     assert pick_v1_default(engines) == "qwen3"
 
 
+def test_pick_v1_default_new_engine_can_win() -> None:
+    engines = {
+        "f5": {"ttfa_ms": 550, "rtf": 0.15},
+        "xtts": {"ttfa_ms": 450, "rtf": 0.4},
+        "luxtts": {"ttfa_ms": 210, "rtf": 0.12},
+        "chatterbox_turbo": {"ttfa_ms": 260, "rtf": 0.2},
+        "tada_1b": {"ttfa_ms": 900, "rtf": 0.7},
+    }
+
+    assert pick_v1_default(engines) == "luxtts"
+
+
 def test_pick_v1_default_best_ttfa_when_all_miss() -> None:
     engines = {
         "f5": {"ttfa_ms": 600},
         "xtts": {"ttfa_ms": 500},
+        "luxtts": {"ttfa_ms": 430},
         "qwen3": {"ttfa_ms": 700},
     }
 
-    assert pick_v1_default(engines) == "xtts"
+    assert pick_v1_default(engines) == "luxtts"
 
 
 def test_pick_v1_default_none_when_all_errored() -> None:

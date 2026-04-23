@@ -1,0 +1,65 @@
+{
+  "meta": {
+    "timestamp": "2026-04-23T06:02:49Z",
+    "phase": "00-measurement-gate"
+  },
+  "inputs": {
+    "https_android": "results/https_android.json",
+    "whisper": "results/whisper.json",
+    "tts_ttfa": "results/tts_ttfa.json",
+    "tts_attention_matrix": "results/tts_attention_matrix.json",
+    "tts_runtime_matrix": "results/tts_runtime_matrix.json",
+    "tts_runtime_matrix_v2": "results/tts_runtime_matrix_v2.json",
+    "vram_soak_f5": "results/vram_soak_f5.json",
+    "vram_soak_xtts": "results/vram_soak_xtts.json",
+    "vram_soak_qwen3": "results/vram_soak_qwen3.json",
+    "fa2_install": "results/fa2_install.json"
+  },
+  "measured_on": {
+    "gpu": "NVIDIA GeForce RTX 3060",
+    "vram_total_mb": 12287,
+    "compute_capability": "8.6",
+    "python": "3.11.15",
+    "torch": "2.5.1+cu118"
+  },
+  "decisions": {
+    "https_strategy": "mkcert",
+    "whisper_default_rung": "distil-large-v3",
+    "whisper_default_compute_type": "int8_float16",
+    "tts_v1_default": "f5",
+    "qwen3_v1_accepted": false,
+    "qwen3_v1_variant": "0.6B-Base",
+    "qwen3_v1_override_included": true,
+    "fa2_installed": false,
+    "tts_shared_chunk_planner_required": true
+  },
+  "cascades_triggered": {
+    "resolved_tension_2_whisper_fp16_forces_xtts": false,
+    "resolved_tension_3_f5_demoted": false,
+    "qwen3_gate_rejected": true,
+    "fa2_install_failed": true,
+    "runtime_matrix_completed": true,
+    "all_tts_engines_fit_3060": true,
+    "longform_tts_chunking_required": true
+  },
+  "vram_budget_3060": {
+    "f5_fits": true,
+    "xtts_fits": true,
+    "qwen3_0_6b_fits": true,
+    "notes": "Measured directly on RTX 3060 (12 GB); fits_3060 is based on the observed soak peak_vram_mb < 11000."
+  },
+  "required_followups": {
+    "tts_chunk_planner": {
+      "status": "required_before_final_longform_tts_comparison",
+      "reason": "XTTS long-form native streaming hit the inference_stream 400-token cap and fell back to full-render timing; non-streaming engines also need best-practical chunked playback instead of raw whole-generation fallback.",
+      "requirements": [
+        "prefer natural sentence boundaries",
+        "enforce engine-specific token/character caps",
+        "avoid tiny unnatural fragments",
+        "use native streaming inside safe chunks when available",
+        "use chunked playback for non-streaming engines",
+        "measure first-chunk TTFA, total stitched playback time, inter-chunk gaps, and stitched WAV quality"
+      ]
+    }
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "engine": "luxtts",
+  "mode": "non_streaming_clone",
+  "streaming_support": "none",
+  "true_streaming": false,
+  "ttfa_ms": 866.4,
+  "rtf": 1.31,
+  "audio_duration_s": 0.661,
+  "synthesis_time_s": 0.866,
+  "peak_vram_mb": 876.5,
+  "sample_rate": 48000,
+  "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\luxtts.wav",
+  "optimization_backend": "not_applicable",
+  "optimization_backend_reason": "LuxTTS probe used the upstream ZipVoice PyTorch path; the main speed knobs are prompt caching, num_steps, and CPU/ONNX runtime selection rather than selectable attention backends.",
+  "supported_optimization_backends": [
+    "not_applicable"
+  ],
+  "unsupported_optimization_backends": [],
+  "optimization_modes": {
+    "eager": {
+      "status": "not_applicable",
+      "reason": "LuxTTS probe used the upstream ZipVoice PyTorch path; the main speed knobs are prompt caching, num_steps, and CPU/ONNX runtime selection rather than selectable attention backends."
+    },
+    "sdpa": {
+      "status": "not_applicable",
+      "reason": "LuxTTS probe used the upstream ZipVoice PyTorch path; the main speed knobs are prompt caching, num_steps, and CPU/ONNX runtime selection rather than selectable attention backends."
+    },
+    "flash_attention_2": {
+      "status": "not_applicable",
+      "reason": "LuxTTS probe used the upstream ZipVoice PyTorch path; the main speed knobs are prompt caching, num_steps, and CPU/ONNX runtime selection rather than selectable attention backends."
+    }
+  }
+}

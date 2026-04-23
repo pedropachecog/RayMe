@@ -1,0 +1,34 @@
+{
+  "engine": "tada_1b",
+  "mode": "non_streaming_clone",
+  "streaming_support": "none",
+  "true_streaming": false,
+  "variant": "1B",
+  "ttfa_ms": 1329.4,
+  "rtf": 0.25,
+  "audio_duration_s": 5.32,
+  "synthesis_time_s": 1.329,
+  "peak_vram_mb": 10431.8,
+  "sample_rate": 24000,
+  "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\tada_1b.wav",
+  "optimization_backend": "not_applicable",
+  "optimization_backend_reason": "TADA 1B probe used the upstream bf16/fp32 PyTorch path; acceleration comes from dtype and cached prompt encoding, not a selectable attention backend in this harness.",
+  "supported_optimization_backends": [
+    "not_applicable"
+  ],
+  "unsupported_optimization_backends": [],
+  "optimization_modes": {
+    "eager": {
+      "status": "not_applicable",
+      "reason": "TADA 1B probe used the upstream bf16/fp32 PyTorch path; acceleration comes from dtype and cached prompt encoding, not a selectable attention backend in this harness."
+    },
+    "sdpa": {
+      "status": "not_applicable",
+      "reason": "TADA 1B probe used the upstream bf16/fp32 PyTorch path; acceleration comes from dtype and cached prompt encoding, not a selectable attention backend in this harness."
+    },
+    "flash_attention_2": {
+      "status": "not_applicable",
+      "reason": "TADA 1B probe used the upstream bf16/fp32 PyTorch path; acceleration comes from dtype and cached prompt encoding, not a selectable attention backend in this harness."
+    }
+  }
+}

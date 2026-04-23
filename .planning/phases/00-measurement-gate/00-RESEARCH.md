@@ -27,7 +27,7 @@ The backend is also much less provisioned than the prior research assumed:
 
 That changes the six Phase 0 questions materially:
 
-1. **HTTPS on iPhone**: this backend cannot use the previously assumed Tailscale cert flow today because there is no Tailscale install or `.ts.net` hostname. The default path is now **mkcert over direct LAN**.
+1. **HTTPS on Android**: this backend cannot use the previously assumed Tailscale cert flow today because there is no Tailscale install or `.ts.net` hostname. The default path is now **mkcert over direct LAN**.
 2. **Whisper WER**: the hardware target is finally correct (RTX 3060 12 GB), but the Python/torch stack must be installed first.
 3. **TTS TTFA**: measurements will be on the intended 3060, but only after Python 3.11, torch, and the TTS packages are installed.
 4. **VRAM soak**: the 11 GB budget gate is now a real hardware constraint instead of an extrapolation.
@@ -50,7 +50,7 @@ Phase 0 still produces no application tiers. It only answers the six empirical q
 
 | Measurement | Informs Tier | Downstream Decision |
 |---|---|---|
-| HTTPS / cert trust on iPhone | Web UI host + LAN networking | Phase 1 HTTPS implementation choice (mkcert primary, Tailscale optional if later installed) |
+| HTTPS / cert trust on Android | Web UI host + LAN networking | Phase 1 HTTPS implementation choice (mkcert on LAN) |
 | Whisper WER on Spanish-accented English | AI Backend — STT | Default STT model frozen before Phase 2 |
 | TTS TTFA (F5, XTTS, Qwen3-TTS) | AI Backend — TTS | Default TTS engine frozen; Qwen3-TTS v1 inclusion/exclusion decided |
 | VRAM 30-min soak | AI Backend — GPU resident | 3060-fit rule verified on the actual target hardware |
@@ -125,7 +125,7 @@ Measurement Spike (Phase 0)
           |
           |--- [M1] HTTPS Probe
           |      Browser -> https://rayme.local or https://192.168.1.199:8443
-          |      iPhone Safari -> window.isSecureContext check
+          |      Android Chrome -> window.isSecureContext check
           |      Transport trust via mkcert-installed root CA
           |
           |--- [M2] STT WER Measurement
@@ -163,7 +163,7 @@ Measurement Spike (Phase 0)
     fa2_check.py
   results/
     setup_install.json
-    https_iphone.json
+    https_android.json
     whisper.json
     tts.json
     vram_soak.json
@@ -277,7 +277,7 @@ The important backend correction is that the machine has no Tailscale today, so 
 | Problem | Don't Build | Use Instead | Why |
 |---|---|---|---|
 | WER calculation | Custom edit-distance code | `jiwer` | Standard, normalized WER metrics |
-| HTTPS trust | Self-signed ad hoc cert workflow | `mkcert` | Simple LAN trust path for iPhone Safari |
+| HTTPS trust | Self-signed ad hoc cert workflow | `mkcert` | Simple LAN trust path for Android Chrome |
 | VRAM monitoring | Manual spreadsheet logging | `torch.cuda` + `nvidia-smi` | Captures allocator state plus device totals |
 | Local LLM API | Custom shim over raw model binaries | `ollama` or `llama-server` | OpenAI-compatible endpoint is what plan 06 needs |
 | FA2 build logic | Custom C++ build steps | `pip install flash-attn --no-build-isolation` | Fastest way to measure whether the host supports it |
@@ -408,7 +408,7 @@ If `cl.exe` is absent, expect plan 07 to fail until MSVC Build Tools are install
 
 | Old Approach | Current Approach | Impact on RayMe |
 |---|---|---|
-| Trust mobile Safari via Tailscale-only assumptions | Trust mobile Safari via mkcert on LAN; add Tailscale later if desired | Matches the actual backend state |
+| Trust Android Chrome via Tailscale-only assumptions | Trust Android Chrome via mkcert on LAN; add Tailscale later if desired | Matches the actual backend state |
 | Extrapolate 3060 behavior from a 4090 dev box | Measure directly on the real 3060 | Removes the main Phase 0 hardware uncertainty |
 | Assume backend is pre-provisioned | Treat backend as fresh Windows host | Makes setup steps explicit and reproducible |
 | Assume local LLM server already exists | Install or choose one before the cancel probe | Prevents plan 06 from failing on missing binaries |
@@ -507,7 +507,7 @@ Phase 0 still delivers no shipped REQ IDs. Validation remains probe-driven.
 
 | Spike Item | Behavior | Test Type | Automated? |
 |---|---|---|---|
-| HTTPS probe | `window.isSecureContext === true` on iPhone Safari | Manual iPhone verification + automated local server | Partial |
+| HTTPS probe | `window.isSecureContext === true` on Android Chrome | Manual Android verification + automated local server | Partial |
 | STT WER | WER, latency, VRAM logged for 3 models | Automated probe | YES |
 | TTS TTFA | TTFA and RTF logged for 3 engines | Automated probe | YES |
 | VRAM soak | Peak VRAM < 11 GB and no unbounded growth | Automated 30-min probe | YES |

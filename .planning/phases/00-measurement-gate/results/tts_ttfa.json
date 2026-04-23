@@ -8,10 +8,10 @@
       "mode": "simulated_streaming",
       "streaming_support": "simulated",
       "true_streaming": false,
-      "ttfa_ms": 517.3,
-      "rtf": 0.388,
+      "ttfa_ms": 519.9,
+      "rtf": 0.39,
       "audio_duration_s": 1.333,
-      "synthesis_time_s": 0.517,
+      "synthesis_time_s": 0.52,
       "peak_vram_mb": 1990.2,
       "sample_rate": 24000,
       "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\f5.wav",
@@ -43,11 +43,11 @@
       "streaming_support": "native",
       "true_streaming": true,
       "fallback_to_non_streaming": false,
-      "ttfa_ms": 534.3,
-      "rtf": 0.59,
-      "audio_duration_s": 2.176,
-      "synthesis_time_s": 1.284,
-      "peak_vram_mb": 1897.6,
+      "ttfa_ms": 555.1,
+      "rtf": 0.577,
+      "audio_duration_s": 3.712,
+      "synthesis_time_s": 2.143,
+      "peak_vram_mb": 1946.0,
       "sample_rate": 24000,
       "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\xtts.wav",
       "streaming_error": null,
@@ -72,6 +72,106 @@
         }
       }
     },
+    "luxtts": {
+      "engine": "luxtts",
+      "mode": "non_streaming_clone",
+      "streaming_support": "none",
+      "true_streaming": false,
+      "ttfa_ms": 866.4,
+      "rtf": 1.31,
+      "audio_duration_s": 0.661,
+      "synthesis_time_s": 0.866,
+      "peak_vram_mb": 876.5,
+      "sample_rate": 48000,
+      "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\luxtts.wav",
+      "optimization_backend": "not_applicable",
+      "optimization_backend_reason": "LuxTTS probe used the upstream ZipVoice PyTorch path; the main speed knobs are prompt caching, num_steps, and CPU/ONNX runtime selection rather than selectable attention backends.",
+      "supported_optimization_backends": [
+        "not_applicable"
+      ],
+      "unsupported_optimization_backends": [],
+      "optimization_modes": {
+        "eager": {
+          "status": "not_applicable",
+          "reason": "LuxTTS probe used the upstream ZipVoice PyTorch path; the main speed knobs are prompt caching, num_steps, and CPU/ONNX runtime selection rather than selectable attention backends."
+        },
+        "sdpa": {
+          "status": "not_applicable",
+          "reason": "LuxTTS probe used the upstream ZipVoice PyTorch path; the main speed knobs are prompt caching, num_steps, and CPU/ONNX runtime selection rather than selectable attention backends."
+        },
+        "flash_attention_2": {
+          "status": "not_applicable",
+          "reason": "LuxTTS probe used the upstream ZipVoice PyTorch path; the main speed knobs are prompt caching, num_steps, and CPU/ONNX runtime selection rather than selectable attention backends."
+        }
+      }
+    },
+    "chatterbox_turbo": {
+      "engine": "chatterbox_turbo",
+      "mode": "non_streaming_clone",
+      "streaming_support": "none",
+      "true_streaming": false,
+      "ttfa_ms": 964.9,
+      "rtf": 0.71,
+      "audio_duration_s": 1.36,
+      "synthesis_time_s": 0.965,
+      "peak_vram_mb": 4838.7,
+      "sample_rate": 24000,
+      "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\chatterbox_turbo.wav",
+      "optimization_backend": "not_applicable",
+      "optimization_backend_reason": "Chatterbox Turbo probe used the default CUDA PyTorch path; upstream generation relies on its built-in sampler configuration rather than a selectable attention backend.",
+      "supported_optimization_backends": [
+        "not_applicable"
+      ],
+      "unsupported_optimization_backends": [],
+      "optimization_modes": {
+        "eager": {
+          "status": "not_applicable",
+          "reason": "Chatterbox Turbo probe used the default CUDA PyTorch path; upstream generation relies on its built-in sampler configuration rather than a selectable attention backend."
+        },
+        "sdpa": {
+          "status": "not_applicable",
+          "reason": "Chatterbox Turbo probe used the default CUDA PyTorch path; upstream generation relies on its built-in sampler configuration rather than a selectable attention backend."
+        },
+        "flash_attention_2": {
+          "status": "not_applicable",
+          "reason": "Chatterbox Turbo probe used the default CUDA PyTorch path; upstream generation relies on its built-in sampler configuration rather than a selectable attention backend."
+        }
+      }
+    },
+    "tada_1b": {
+      "engine": "tada_1b",
+      "mode": "non_streaming_clone",
+      "streaming_support": "none",
+      "true_streaming": false,
+      "variant": "1B",
+      "ttfa_ms": 1329.4,
+      "rtf": 0.25,
+      "audio_duration_s": 5.32,
+      "synthesis_time_s": 1.329,
+      "peak_vram_mb": 10431.8,
+      "sample_rate": 24000,
+      "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\tada_1b.wav",
+      "optimization_backend": "not_applicable",
+      "optimization_backend_reason": "TADA 1B probe used the upstream bf16/fp32 PyTorch path; acceleration comes from dtype and cached prompt encoding, not a selectable attention backend in this harness.",
+      "supported_optimization_backends": [
+        "not_applicable"
+      ],
+      "unsupported_optimization_backends": [],
+      "optimization_modes": {
+        "eager": {
+          "status": "not_applicable",
+          "reason": "TADA 1B probe used the upstream bf16/fp32 PyTorch path; acceleration comes from dtype and cached prompt encoding, not a selectable attention backend in this harness."
+        },
+        "sdpa": {
+          "status": "not_applicable",
+          "reason": "TADA 1B probe used the upstream bf16/fp32 PyTorch path; acceleration comes from dtype and cached prompt encoding, not a selectable attention backend in this harness."
+        },
+        "flash_attention_2": {
+          "status": "not_applicable",
+          "reason": "TADA 1B probe used the upstream bf16/fp32 PyTorch path; acceleration comes from dtype and cached prompt encoding, not a selectable attention backend in this harness."
+        }
+      }
+    },
     "qwen3": {
       "engine": "qwen3",
       "mode": "simulated_streaming_text",
@@ -79,11 +179,11 @@
       "true_streaming": false,
       "variant": "0.6B-Base",
       "flash_attention": "eager",
-      "ttfa_ms": 5626.8,
-      "rtf": 2.705,
-      "audio_duration_s": 2.08,
-      "synthesis_time_s": 5.627,
-      "peak_vram_mb": 2509.1,
+      "ttfa_ms": 3236.2,
+      "rtf": 2.697,
+      "audio_duration_s": 1.2,
+      "synthesis_time_s": 3.236,
+      "peak_vram_mb": 2483.1,
       "sample_rate": 24000,
       "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\qwen3.wav",
       "streaming_notes": "Qwen3-TTS non_streaming_mode=False simulates streaming text input but still returns audio after full generation.",
@@ -130,7 +230,7 @@
   },
   "accent_ok_passed_to_probe": false,
   "meta": {
-    "timestamp": "2026-04-22T22:32:49+00:00",
+    "timestamp": "2026-04-23T12:57:51+00:00",
     "python_version": "3.11.15",
     "platform": "Windows-10-10.0.26200-SP0",
     "gpu": {

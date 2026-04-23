@@ -1,0 +1,74 @@
+{
+  "probe": "vram_soak",
+  "engine": "tada_1b",
+  "peak_vram_mb": 10648.0,
+  "peak_reserved_mb": 10648.0,
+  "peak_allocated_mb": 10430.3,
+  "peak_used_mb_nvml": 12232.7,
+  "baseline_used_mb_nvml": 12222.5,
+  "peak_used_mb_nvml_delta": 10.3,
+  "growth_detected": false,
+  "growth_slope_mb_per_min": -1563.21,
+  "cycles_completed": 18,
+  "duration_s": 180.1,
+  "samples": [
+    {
+      "t": 0.0,
+      "v": 10648.0,
+      "allocated_mb": 6459.75,
+      "peak_allocated_mb": 10430.29,
+      "used_mb_nvml": 12222.45,
+      "free_mb_nvml": 65.55,
+      "cycle": 0
+    },
+    {
+      "t": 66.0,
+      "v": 10648.0,
+      "allocated_mb": 6459.75,
+      "peak_allocated_mb": 10430.29,
+      "used_mb_nvml": 12232.72,
+      "free_mb_nvml": 55.28,
+      "cycle": 7
+    },
+    {
+      "t": 131.6,
+      "v": 6736.0,
+      "allocated_mb": 6459.75,
+      "peak_allocated_mb": 10430.29,
+      "used_mb_nvml": 8623.97,
+      "free_mb_nvml": 3664.03,
+      "cycle": 14
+    },
+    {
+      "t": 180.1,
+      "v": 6736.0,
+      "allocated_mb": 6459.75,
+      "peak_allocated_mb": 10430.29,
+      "used_mb_nvml": 8911.97,
+      "free_mb_nvml": 3376.03,
+      "cycle": 18
+    }
+  ],
+  "fits_3060_budget": true,
+  "whisper_default": {
+    "model": "distil-large-v3",
+    "compute_type": "int8_float16"
+  },
+  "vad_backend": "silero_vad_cpu",
+  "sample_interval_s": 60,
+  "cycle_interval_s": 10,
+  "meta": {
+    "timestamp": "2026-04-23T13:02:12+00:00",
+    "python_version": "3.11.15",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "gpu": {
+      "cuda_available": true,
+      "name": "NVIDIA GeForce RTX 3060",
+      "vram_total_mb": 12287,
+      "compute_capability": "8.6",
+      "driver_version": "560.94",
+      "cuda_version": "11.8",
+      "torch_version": "2.5.1+cu118"
+    }
+  }
+}

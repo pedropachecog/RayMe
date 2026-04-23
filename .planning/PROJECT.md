@@ -26,10 +26,11 @@ It must feel like an actual phone call with an AI — low-latency full-duplex au
 - [ ] A "chat" thread holds typed messages AND call transcripts interleaved
 - [ ] Calls run full-duplex with barge-in via VAD
 - [ ] Live captions show both user STT and AI response text during a call
+- [ ] TTS playback uses a shared best-in-class chunk planner for every engine, including non-streaming engines and engines with token limits
 - [ ] Text chat and call from a character can be started/resumed from the same thread
 - [ ] LLM is OpenAI-compatible — works with the official OpenAI API or a local server (e.g., `llama-server`)
 - [ ] STT is fast and accurate for accented English (Spanish-accented English specifically)
-- [ ] TTS supports two engines in v1: F5-TTS and XTTS v2, selectable per voice
+- [ ] TTS supports three engines in v1: F5-TTS, XTTS v2, and Qwen3-TTS 0.6B-Base, selectable per voice
 - [ ] Voice Lab: upload a voice sample, STT auto-generates the reference transcript, user can edit and save the voice
 - [ ] Character creator/editor supports the SillyTavern character-card field set plus a picture
 - [ ] Character importer accepts SillyTavern v2 and v3 card formats (JSON and PNG-embedded)
@@ -67,9 +68,10 @@ It must feel like an actual phone call with an AI — low-latency full-duplex au
 
 - **Hardware**: AI backend runs on a single NVIDIA RTX 3060 (12 GB VRAM) — STT, TTS, and VAD model choices must fit inside that budget simultaneously.
 - **Latency**: End-to-end turn latency (user stops speaking → AI starts speaking) must be low enough to feel like a phone call — the entire stack is budgeted against this.
+- **TTS chunking**: Long-form TTS must be segmented by a shared planner that respects model-specific token/character limits, prefers natural sentence boundaries, avoids tiny fragments, and measures first-chunk latency, total stitched playback time, and inter-chunk gaps.
 - **Topology**: Three endpoints (Web UI, AI backend, LLM) must be independently configurable and connectable over LAN. No assumption that they share a host.
 - **LLM contract**: The LLM must be reachable via an OpenAI-compatible Chat Completions API (streaming).
-- **Browsers**: Must work on modern mobile Safari and Chrome, including mic capture, output routing, and full-duplex streaming — not just desktop.
+- **Browsers**: Must work on desktop Chrome and Chrome on Android, including mic capture, output routing, and full-duplex streaming.
 - **Language**: English only for STT and TTS in v1.
 - **Tech stack**: No strong a-priori preference — research picks the stack.
 - **Design**: UI aligns with the "Ethereal Core / True Dark" design system and the canonical Stitch screen set in `docs/stitch/` as a strong reference; deviations allowed only when functional needs demand.
@@ -90,9 +92,24 @@ It must feel like an actual phone call with an AI — low-latency full-duplex au
 | AI-generated audio saved by default; mic audio off by default; both togglable | Privacy default for the user's own voice; replay value for the character's output | — Pending |
 | SillyTavern v2 + v3 card import | Rides existing character ecosystem instead of inventing a format | — Pending |
 | TTS engines in v1: F5-TTS and XTTS v2 | Both zero-shot clone from short samples; trade-offs between them handled via per-voice selection | — Pending |
+| Engine-agnostic TTS chunk planner is required | Native streaming is inconsistent and some engines have hard token limits; benchmarks and runtime behavior must use the best chunked path per engine, not raw whole-generation fallbacks | — Pending |
 | 3060 (12 GB) as the backend GPU target | Constrains model size choices across STT, TTS, and VAD | — Pending |
 | Text chat and calls share one chat thread | "Continue a conversation" is the story, regardless of modality | — Pending |
 | UI honors the existing Stitch "Ethereal Core / True Dark" design system as a strong reference | Visual language and screen set are already designed; rebuilding without it wastes prior work | — Pending |
+
+## Phase 0 Key Decisions
+
+*Frozen 2026-04-23 from `.planning/phases/00-measurement-gate/KEY_DECISIONS.md`
+(machine-readable: `.planning/phases/00-measurement-gate/results/phase0_summary.json`).*
+
+- **HTTPS strategy (REQ-A1):** `mkcert` on LAN. The passing Android validation used `https://192.168.1.199:8443` because `rayme.local` name resolution was not configured on the phone. Setup: see `.planning/phases/00-measurement-gate/HTTPS-SETUP.md`.
+- **STT default (REQ-A3):** faster-whisper `distil-large-v3` (`int8_float16`). WER on the builder's Spanish-accented English sample = `0.0627`. Peak VRAM = `1731.4` MB.
+- **TTS v1 default (Resolved Tension #3):** `f5`. TTFA = `517.3` ms, RTF = `0.388`. `results/tts_runtime_matrix.json` kept native Windows as the fastest measured F5 runtime for both short-ack and long-form paths.
+- **TTS v1 engine roster (REQ-22):** `F5-TTS`, `XTTS v2`, `Qwen3-TTS 0.6B-Base`. Qwen3-TTS is explicitly **not** the default: it failed the acceptance gate on TTFA/RTF and still lacks approved accent quality, but it remains included as an opt-in engine.
+- **TTS chunking requirement (REQ-45):** all engines need a shared chunk planner before final long-form decisions. The planner must enforce model-specific limits such as XTTS `inference_stream`'s 400-token cap, preserve natural sentence boundaries where possible, and benchmark first chunk, total stitched playback, inter-chunk gaps, and the stitched WAV.
+- **FA2 (Qwen3-TTS 1.7B eligibility):** not installed; reason: `windows_build_compile_error`. Qwen3-TTS 1.7B is ineligible for v1, so the included Qwen path is `0.6B-Base` only.
+- **Hardware note:** measured directly on the target RTX 3060; no 4090-to-3060 extrapolation was needed. Per-engine 3060 fit: F5=`yes`, XTTS=`yes`, Qwen3-0.6B=`yes`.
+- **Overrides:** none.
 
 ## Evolution
 

@@ -27,8 +27,8 @@
         "streaming_mode": "simulated_streaming",
         "streaming_support": "simulated",
         "true_streaming": false,
-        "ttfa_ms": 517.3,
-        "rtf": 0.388,
+        "ttfa_ms": 519.9,
+        "rtf": 0.39,
         "peak_vram_mb": 1990.2
       }
     },
@@ -58,9 +58,102 @@
         "streaming_mode": "streaming",
         "streaming_support": "native",
         "true_streaming": true,
-        "ttfa_ms": 534.3,
-        "rtf": 0.59,
-        "peak_vram_mb": 1897.6
+        "ttfa_ms": 555.1,
+        "rtf": 0.577,
+        "peak_vram_mb": 1946.0
+      }
+    },
+    "luxtts": {
+      "measured_backend": "not_applicable",
+      "measured_backend_reason": "LuxTTS probe used the upstream ZipVoice PyTorch path; the main speed knobs are prompt caching, num_steps, and CPU/ONNX runtime selection rather than selectable attention backends.",
+      "supported_optimization_backends": [
+        "not_applicable"
+      ],
+      "unsupported_optimization_backends": [],
+      "optimization_modes": {
+        "eager": {
+          "status": "not_applicable",
+          "reason": "LuxTTS probe used the upstream ZipVoice PyTorch path; the main speed knobs are prompt caching, num_steps, and CPU/ONNX runtime selection rather than selectable attention backends."
+        },
+        "sdpa": {
+          "status": "not_applicable",
+          "reason": "LuxTTS probe used the upstream ZipVoice PyTorch path; the main speed knobs are prompt caching, num_steps, and CPU/ONNX runtime selection rather than selectable attention backends."
+        },
+        "flash_attention_2": {
+          "status": "not_applicable",
+          "reason": "LuxTTS probe used the upstream ZipVoice PyTorch path; the main speed knobs are prompt caching, num_steps, and CPU/ONNX runtime selection rather than selectable attention backends."
+        }
+      },
+      "measurement": {
+        "backend": "not_applicable",
+        "streaming_mode": "non_streaming_clone",
+        "streaming_support": "none",
+        "true_streaming": false,
+        "ttfa_ms": 866.4,
+        "rtf": 1.31,
+        "peak_vram_mb": 876.5
+      }
+    },
+    "chatterbox_turbo": {
+      "measured_backend": "not_applicable",
+      "measured_backend_reason": "Chatterbox Turbo probe used the default CUDA PyTorch path; upstream generation relies on its built-in sampler configuration rather than a selectable attention backend.",
+      "supported_optimization_backends": [
+        "not_applicable"
+      ],
+      "unsupported_optimization_backends": [],
+      "optimization_modes": {
+        "eager": {
+          "status": "not_applicable",
+          "reason": "Chatterbox Turbo probe used the default CUDA PyTorch path; upstream generation relies on its built-in sampler configuration rather than a selectable attention backend."
+        },
+        "sdpa": {
+          "status": "not_applicable",
+          "reason": "Chatterbox Turbo probe used the default CUDA PyTorch path; upstream generation relies on its built-in sampler configuration rather than a selectable attention backend."
+        },
+        "flash_attention_2": {
+          "status": "not_applicable",
+          "reason": "Chatterbox Turbo probe used the default CUDA PyTorch path; upstream generation relies on its built-in sampler configuration rather than a selectable attention backend."
+        }
+      },
+      "measurement": {
+        "backend": "not_applicable",
+        "streaming_mode": "non_streaming_clone",
+        "streaming_support": "none",
+        "true_streaming": false,
+        "ttfa_ms": 964.9,
+        "rtf": 0.71,
+        "peak_vram_mb": 4838.7
+      }
+    },
+    "tada_1b": {
+      "measured_backend": "not_applicable",
+      "measured_backend_reason": "TADA 1B probe used the upstream bf16/fp32 PyTorch path; acceleration comes from dtype and cached prompt encoding, not a selectable attention backend in this harness.",
+      "supported_optimization_backends": [
+        "not_applicable"
+      ],
+      "unsupported_optimization_backends": [],
+      "optimization_modes": {
+        "eager": {
+          "status": "not_applicable",
+          "reason": "TADA 1B probe used the upstream bf16/fp32 PyTorch path; acceleration comes from dtype and cached prompt encoding, not a selectable attention backend in this harness."
+        },
+        "sdpa": {
+          "status": "not_applicable",
+          "reason": "TADA 1B probe used the upstream bf16/fp32 PyTorch path; acceleration comes from dtype and cached prompt encoding, not a selectable attention backend in this harness."
+        },
+        "flash_attention_2": {
+          "status": "not_applicable",
+          "reason": "TADA 1B probe used the upstream bf16/fp32 PyTorch path; acceleration comes from dtype and cached prompt encoding, not a selectable attention backend in this harness."
+        }
+      },
+      "measurement": {
+        "backend": "not_applicable",
+        "streaming_mode": "non_streaming_clone",
+        "streaming_support": "none",
+        "true_streaming": false,
+        "ttfa_ms": 1329.4,
+        "rtf": 0.25,
+        "peak_vram_mb": 10431.8
       }
     },
     "qwen3": {
@@ -93,9 +186,9 @@
         "streaming_mode": "simulated_streaming_text",
         "streaming_support": "simulated",
         "true_streaming": false,
-        "ttfa_ms": 5626.8,
-        "rtf": 2.705,
-        "peak_vram_mb": 2509.1
+        "ttfa_ms": 3236.2,
+        "rtf": 2.697,
+        "peak_vram_mb": 2483.1
       },
       "variant": "0.6B-Base",
       "flash_attn_probe": {
@@ -105,14 +198,9 @@
       }
     }
   },
-  "fa2_install": {
-    "installed": false,
-    "failure_reason": "windows_build_compile_error",
-    "build_duration_s": 56.1,
-    "qwen17b_recommended": false
-  },
+  "fa2_install": null,
   "meta": {
-    "timestamp": "2026-04-22T22:33:43+00:00",
+    "timestamp": "2026-04-23T12:57:54+00:00",
     "python_version": "3.11.15",
     "platform": "Windows-10-10.0.26200-SP0",
     "gpu": {

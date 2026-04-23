@@ -18,7 +18,7 @@ RayMe ships in **seven phases**: one measurement spike (Phase 0) followed by six
 The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. This includes:
 
 - Three-service topology (Web UI host, AI backend, LLM endpoint), independently configurable over LAN.
-- Mobile-browser support over HTTPS with a trusted cert workflow (iOS Safari + Android Chrome).
+- Mobile-browser support over HTTPS with a trusted cert workflow (Android Chrome on LAN).
 - Full SillyTavern character management: v2/v3 import (JSON + PNG), v2 JSON export, CRUD, full editor field set, per-character default voice, alternate-greeting picker, lorebook preserved-not-injected.
 - Voice Lab with STT-auto-transcribed reference, three TTS engines (F5-TTS, XTTS v2, Qwen3-TTS — the last Phase-0-conditional), test-play, library management.
 - Unified thread: single messages table with `message_kind` discriminator; text and call turns interleave chronologically.
@@ -26,7 +26,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 - Full-duplex voice calls with VAD-driven barge-in, sentence-streamed TTS, streaming STT with live captions, streaming LLM with live AI captions, Voice Visualizer three-state, call-end summary row.
 - Per-chat voice override on top of per-character default.
 - AI audio saved per turn by default; mic audio off by default; both togglable in Settings.
-- PWA manifest + icons for add-to-home-screen on iOS and Android.
+- PWA manifest + icons for add-to-home-screen on Android.
 - Settings with three-endpoint config + connection tests, VAD sensitivity, device defaults, save-audio toggles, clear-data.
 - Ethereal Core / True Dark design system applied across the canonical Stitch screen set.
 
@@ -38,19 +38,19 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 
 ### Single acceptance statement
 
-**v1 ships when the builder can, on their iPhone over LAN with a mkcert-trusted cert and AirPods connected, import a SillyTavern v3 PNG card, record a voice in Voice Lab, assign that voice as the character default, start a call from a chat thread, have a back-and-forth conversation with mid-sentence barge-in that feels like a phone call, and later reopen the same thread on desktop to see the call transcripts interleaved with any prior text messages.**
+**v1 ships when the builder can, on their Android phone over LAN with a mkcert-trusted cert and a Bluetooth headset connected, import a SillyTavern v3 PNG card, record a voice in Voice Lab, assign that voice as the character default, start a call from a chat thread, have a back-and-forth conversation with mid-sentence barge-in that feels like a phone call, and later reopen the same thread on desktop to see the call transcripts interleaved with any prior text messages.**
 
 ---
 
 ## Phases
 
-- [ ] **Phase 0: Measurement Gate** — 2–3 day spike that validates VRAM, STT WER, TTS TTFA, HTTPS-on-iPhone, and LLM cancel semantics before Phase 1 freezes stack commitments.
+- [ ] **Phase 0: Measurement Gate** — 2–3 day spike that validates VRAM, STT WER, TTS TTFA, HTTPS-on-Android, and FA2 viability before Phase 1 freezes stack commitments.
 - [ ] **Phase 1: Foundations & Text Chat** — Three-service skeleton with HTTPS, the unified `messages` schema, SillyTavern card CRUD + import/export, and full-featured text chat end-to-end against a streaming LLM.
 - [ ] **Phase 2: AI Backend Skeleton & Voice Lab** — FastAPI + aiortc signaling, resident Whisper + Silero VAD + one-hot TTS engine on the GPU, Voice Lab upload → auto-transcript → edit → synth-preview → save, Settings with three-endpoint connection tests.
 - [ ] **Phase 3: First Working Call (MVP)** — Voice Call screen with `RTCPeerConnection`, AudioContext gesture unlock, orchestrator FSM skeleton, one-sentence non-streaming reply. Proves the media plumbing end-to-end.
 - [ ] **Phase 4: Call Feel** — Sentence-chunked streaming TTS, VAD-driven barge-in with LIFO cancel and mid-stream LLM abort, live bidirectional captions over data channel, echo-loop mitigation, Voice Visualizer three-state. The core-value phase.
 - [ ] **Phase 5: Voice Breadth & Unified Thread Polish** — Both TTS engines with cold-swap UX, per-character default + per-chat override, saved-audio toggles + inline replay, unified thread visual treatment, full SillyTavern text-UX parity (Regenerate / Edit / Swipes / Continue / alternate greetings / virtualization).
-- [ ] **Phase 6: Mobile Hardening & Ship Polish** — Full iOS Safari pass (Bluetooth routing, Wake Lock, visibility change), PWA manifest + icons, storage housekeeping (orphan reaper, retention), full Settings surface, error states, soak-test acceptance. v1 ships.
+- [ ] **Phase 6: Mobile Hardening & Ship Polish** — Full Android Chrome pass (Bluetooth routing, Wake Lock, visibility change), PWA manifest + icons, storage housekeeping (orphan reaper, retention), full Settings surface, error states, soak-test acceptance. v1 ships.
 
 ---
 
@@ -65,29 +65,27 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 **Requirements delivered:** None from the REQ set (this is a spike — outputs become Key Decisions in `PROJECT.md`, not shipped features). Establishes the empirical baseline for REQ-02, REQ-45, REQ-46, REQ-A1, REQ-A3.
 
 **Pitfalls owned:**
-- **#2 HTTPS / cert trust on mobile** — mkcert root CA installed on builder's iPhone, `https://rayme.local` loads in Safari, reproducible doc produced.
+- **#2 HTTPS / cert trust on mobile** — mkcert root CA installed on the builder's Android phone, `https://rayme.local` loads in Chrome, reproducible doc produced.
 - **#7 VRAM budget on 12 GB** — 30-minute soak with Whisper + Silero + each of the three TTS engines (F5, XTTS, Qwen3-TTS 0.6B-Base) under realistic cycling, peak tracked per engine.
-- **#8 LLM mid-stream cancel** — verified with `nvidia-smi` on the chosen LLM server that stream-close aborts generation.
 - Informs **#4 F5 streaming** (first-sentence TTFA measured), **#5/#6 Whisper WER on Spanish-accented English** (default STT rung picked from measurement), and **Qwen3-TTS acceptance gate** (TTFA + RTF + accent-preservation + FA2-Windows install — see `.planning/research/QWEN3-TTS.md` §7).
 
 **Success criteria** (observable, testable):
-1. The builder can load `https://rayme.local` on their iPhone with no cert warnings and `window.isSecureContext === true`, following a documented one-time setup procedure.
+1. The builder can load `https://rayme.local` on their Android phone with no cert warnings and `window.isSecureContext === true`, following a documented one-time setup procedure.
 2. A measurement rig has logged WER, latency, and peak VRAM for `distil-large-v3 INT8`, `large-v3-turbo INT8`, and `large-v3 FP16` on a 10-minute read-aloud of the builder's Spanish-accented English voice, and the team has picked a default rung.
 3. **TTS TTFA on the actual 3060** measured for: (a) F5-TTS with 7-step Sway sampling on a 3–5 word acknowledgment; (b) XTTS v2 first-chunk streaming; (c) Qwen3-TTS 0.6B-Base with the actual attention backend explicitly labeled (`eager`, `sdpa`, or `flash_attention_2` when available). If F5 TTFA >400 ms, XTTS or Qwen3-TTS is promoted to the v1 default (Resolved Tension #3 trigger). **Qwen3-TTS acceptance gate**: promoted to v1 third-engine status if TTFA <400 ms AND RTF <1 AND 30-min soak <11 GB AND builder's subjective listening test on Spanish-accented-English clone is acceptable; otherwise feature-flagged off for v1.
 4. A 30-minute cycling soak test of `{Whisper default + Silero + one TTS engine}` stays under 11 GB peak VRAM and shows no unbounded growth — run once per engine: F5, XTTS, Qwen3-TTS 0.6B-Base (and 1.7B-Base if FA2 installs cleanly on Windows).
-5. A 20-line LLM-cancel probe verifies that closing a streaming Chat Completions request to the chosen local LLM server causes GPU work to drop to idle within ~200 ms, logged in `nvidia-smi` output.
-6. **FlashAttention 2 install verified** on the builder's Windows 11 + Python 3.11/3.12 + CUDA 12.1 + RTX 3060 (Ampere sm_86). If install fails, Qwen3-TTS adoption is restricted to 0.6B-Base only (1.7B without FA2 blows the VRAM budget).
+5. **FlashAttention 2 install verified** on the builder's Windows 11 + Python 3.11/3.12 + CUDA 12.1 + RTX 3060 (Ampere sm_86). If install fails, Qwen3-TTS adoption is restricted to 0.6B-Base only (1.7B without FA2 blows the VRAM budget).
 
 **Plans:** 9 plans
 - [ ] 00-01-wave0-setup-PLAN.md - Python 3.11 venv, pinned Phase 0 packages, Whisper weight cache, probes/ scaffolding + bench_utils (Wave 1)
-- [ ] 00-02-https-iphone-PLAN.md - HTTPS on iPhone via Tailscale (primary) or mkcert (fallback), reproducible doc (Wave 2)
+- [ ] 00-02-https-android-PLAN.md - HTTPS on Android via mkcert on LAN, reproducible doc (Wave 2)
 - [ ] 00-03-whisper-wer-PLAN.md - Whisper WER/latency/VRAM across 3 rungs on builder voice, pick default rung (Wave 2)
 - [ ] 00-04-tts-ttfa-PLAN.md - F5/XTTS/Qwen3 TTFA+RTF, Qwen3 accent gate, pick v1 default (Wave 2)
 - [ ] 00-05-vram-soak-PLAN.md - 30-min VRAM soak per TTS engine F5/XTTS/Qwen3-0.6B (Wave 2)
-- [ ] 00-06-llm-cancel-PLAN.md - Streaming LLM cancel probe with nvidia-smi GPU-idle polling, p50 (Wave 2)
 - [ ] 00-07-fa2-install-PLAN.md - FlashAttention 2 install verification (gates Qwen3-1.7B eligibility) (Wave 2)
 - [ ] 00-07.1-attention-backend-matrix-PLAN.md - Benchmark per-engine optimization backends (`eager` / `sdpa` / `flash_attention_2` where supported) and separate no-FA2 baselines from optimized runs before final TTS writeback (Wave 3) (INSERTED)
-- [ ] 00-08-synthesis-writeback-PLAN.md - Key Decisions roll-up + PROJECT.md/STATE.md writeback (Wave 3)
+- [ ] 00-07.2-runtime-acceleration-matrix-PLAN.md - Benchmark the omitted cross-runtime TTS matrix: native Windows, WSL Python, WSL Triton, XTTS DeepSpeed, and Qwen eager vs FlashAttention 2 before final writeback (Wave 3) (INSERTED)
+- [ ] 00-08-synthesis-writeback-PLAN.md - Key Decisions roll-up + PROJECT.md/STATE.md writeback (Wave 4)
 
 **UI hint:** no
 
@@ -99,7 +97,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 
 **Goal:** Stand up the three-service skeleton on HTTPS and deliver a full-featured text-chat loop against the streaming LLM, with the unified `messages` schema committed on day one so nothing migrates later.
 
-**Depends on:** Phase 0 (HTTPS path proven, LLM cancel server choice confirmed, stack defaults frozen).
+**Depends on:** Phase 0 (HTTPS path proven, stack defaults frozen).
 
 **Requirements delivered:** REQ-01, REQ-03, REQ-04, REQ-10, REQ-11, REQ-12, REQ-13, REQ-14, REQ-16, REQ-17, REQ-30, REQ-31, REQ-32, REQ-33, REQ-34, REQ-35, REQ-36, REQ-60, REQ-70, REQ-71, REQ-72, REQ-90 (partial: design tokens + Home + Gallery + Editor screens), REQ-A0 (partial: desktop + mobile text-chat reachability), REQ-A1.
 
@@ -113,7 +111,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 - **#20 Audio storage atomicity (pattern only, no audio yet)** — establish the atomic-temp-rename + orphan-reaper pattern for avatars now, audio reuses it later.
 
 **Success criteria** (observable, testable):
-1. The builder can hit `https://rayme.local` from both desktop Chrome and mobile Safari on LAN; the three services (Web UI host, AI-backend health stub, LLM server) each answer `/health` and the Web UI Settings screen shows connection-test green for each.
+1. The builder can hit `https://rayme.local` from both desktop Chrome and Android Chrome on LAN; the three services (Web UI host, AI-backend health stub, LLM server) each answer `/health` and the Web UI Settings screen shows connection-test green for each.
 2. The builder can import a SillyTavern character card in any of four formats (v2 JSON, v3 JSON, v2 PNG, v3 PNG), see it in the Gallery with a portrait, open it in the Editor with all v2+v3 fields populated and a "Lorebook present — not used in v1" indicator where applicable, and export it back out as v2 JSON.
 3. The builder can start a new chat with an imported character, see its `first_mes` (or pick an alternate greeting from the v3 picker) as the opening AI turn, send a typed message, and watch the LLM reply stream in token-by-token.
 4. On any AI turn the builder can Regenerate, Edit (with downstream-stale flagging and truncate-or-keep choice), Swipe across N alternates, or Continue the turn using composer content — and stored messages round-trip through the unified `messages` table with a `kind` discriminator that can distinguish `user_text` / `ai_text` / `user_speech` / `ai_speech` / `call_start` / `call_end` (the last three still unused but schema-ready).
@@ -160,7 +158,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 
 ### Phase 3: First Working Call (MVP)
 
-**Goal:** Establish the media plumbing end-to-end — browser `RTCPeerConnection` to aiortc, AudioContext unlocked correctly on iOS, orchestrator FSM skeleton, a single-sentence non-streaming reply — so that the harder semantics of Phase 4 layer on known-working transport.
+**Goal:** Establish the media plumbing end-to-end — browser `RTCPeerConnection` to aiortc, AudioContext unlocked correctly on Android, orchestrator FSM skeleton, a single-sentence non-streaming reply — so that the harder semantics of Phase 4 layer on known-working transport.
 
 **Depends on:** Phase 2 (voices exist, one TTS engine is warm, STT resident). Phase 1 (threads + characters exist).
 
@@ -169,11 +167,11 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 **Pitfalls owned:**
 - **#3 AudioContext gesture unlock** — canonical idiom (create/resume inside tap, play 1-sample silent buffer), `statechange` handler for foreground resume.
 - **#11 TTS/user-turn boundary race (foundation)** — end-to-end timing instrumentation added to every call-session object (shared clock); exercised in Phase 4.
-- **#24 Mobile parity** — iOS Safari on the builder's phone is in every acceptance check from this phase onward.
+- **#24 Mobile parity** — Android Chrome on the builder's phone is in every acceptance check from this phase onward.
 
 **Success criteria** (observable, testable):
 1. The builder can tap "Call" on a chat thread on desktop Chrome, grant mic permission on first attempt, hear a clear AI response read out by the assigned voice, and end the call; a `call_start` + one `user_speech` turn + one `ai_speech` turn + `call_end` row are written to the unified `messages` table with a call-summary row rendering in the thread.
-2. The same flow works on mobile Safari on iPhone: mic permission prompt surfaces, AudioContext unlocks on the Start-Call tap with `state === 'running'` verified, TTS audio plays through `<audio>` / `MediaStreamAudioDestinationNode`.
+2. The same flow works on Android Chrome: mic permission prompt surfaces, AudioContext unlocks on the Start-Call tap with `state === 'running'` verified, TTS audio plays through `<audio>` / `MediaStreamAudioDestinationNode`.
 3. Muting on the call toolbar stops server-side audio consumption (not just local silencing), verified by inspecting server logs for incoming frame-rate drop.
 4. Ending a call drops the user back into the thread's text composer with the call-summary row visible in scrollback.
 5. A 5-minute call on desktop speakers does not exhibit catastrophic behavior (no ping-pong, no uncaught exceptions); call-feel polish is Phase 4's job, but the loop holds.
@@ -196,16 +194,17 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 
 **Pitfalls owned:**
 - **#1 Echo loop** — TTS routed through `<audio>` / `MediaStreamAudioDestinationNode` so browser AEC sees the reference; server-side playback gate keyed to the TTS sample-accurate timeline.
-- **#4 F5 non-streaming** — sentence-chunk streaming on the LLM token stream; system-prompt bias toward short acknowledgments.
+- **#4 TTS streaming/chunking across engines** — shared chunk planner on the LLM token stream; native streaming where available, chunked playback where not; enforce engine-specific limits such as XTTS's 400-token stream cap; system-prompt bias toward short acknowledgments.
 - **#5 STT endpointing** — Silero VAD endpoint with tuned silence window (500–700 ms default, adaptive shrink during AI playback for aggressive barge-in).
 - **#8 LLM mid-stream cancel** — verified GPU-drop on barge-in via `nvidia-smi`; wasted-token-count logged per cancel.
 - **#10 False barge-in** — minimum-duration (≥250–400 ms) + word-count (≥1 confident word) + energy-threshold gates before cancel fires; optional TTS ducking as a first tier.
 - **#11 TTS/user-turn race** — perceived-playback-end clock from browser; server-side VAD suppression during jitter-buffer tail.
-- **#23 Sentence boundary extraction** — abbreviation-aware splitter (`Dr.` `Mr.` `i.e.` etc.), short-first-sentence 150 ms flush.
+- **#23 Sentence boundary extraction / chunk planning** — abbreviation-aware splitter (`Dr.` `Mr.` `i.e.` etc.), short-first-sentence 150 ms flush, minimum useful chunk sizing, model-specific token/character caps, stitched-audio gap measurement, and fallback chunking for non-streaming engines.
 
 **Success criteria** (observable, testable):
 1. The builder can hold a 5-minute back-and-forth call on laptop speakers (no headphones) in Spanish-accented English with **no** self-interrupt ping-pongs, **no** false barge-in on breath or back-channel "mm-hmm", and confident barge-in when they genuinely interrupt a sentence.
 2. Time-to-first-audio measured end-to-end (user stops speaking → first TTS sample plays) lands under 800 ms in the warm pipeline on the 3060, with <500 ms as a stretch; numbers logged and tracked.
+2a. Long-form TTS is measured through the shared chunk planner for every enabled engine. Metrics include first-chunk TTFA, total stitched playback time, inter-chunk gaps, and a stitched WAV for listening; raw whole-generation fallback numbers are not accepted as final long-form engine comparisons.
 3. During a call, the Voice Call screen shows the user's STT partial captions updating within ~500 ms of speech and streaming AI tokens rendering ahead of TTS playback; interim vs final STT state is visually distinct per the DESIGN.md Transcription Chips treatment.
 4. On a barge-in, `nvidia-smi` shows the LLM server's GPU utilization drop to idle within ~200 ms and the wasted-token-count log is non-empty (confirming cancel reaches the GPU, not just the client).
 5. The Voice Visualizer cleanly transitions across listening (user RMS pulse) → thinking (indeterminate shimmer) → speaking (AI TTS waveform) with no flickers on the state transitions, matching DESIGN.md §5.
@@ -247,24 +246,24 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 
 ### Phase 6: Mobile Hardening & Ship Polish
 
-**Goal:** Close out the iOS Safari long tail, install the PWA surface, finish storage housekeeping, and sign off on the single-sentence v1 acceptance. v1 ships.
+**Goal:** Close out the Android Chrome long tail, install the PWA surface, finish storage housekeeping, and sign off on the single-sentence v1 acceptance. v1 ships.
 
 **Depends on:** Phase 5 (feature-complete MVP).
 
-**Requirements delivered:** REQ-A2 (PWA manifest + icons + `theme-color`), REQ-A0 (full mobile parity verified across AirPods, Wake Lock, visibilitychange), REQ-80 (full Settings surface complete including clear-all-data danger zone, VAD sensitivity tuned on real speech, retention/size indicator). Closes any remaining REQ gaps surfaced during the phase.
+**Requirements delivered:** REQ-A2 (PWA manifest + icons + `theme-color`), REQ-A0 (full mobile parity verified across the builder's Bluetooth headset, Wake Lock, visibilitychange), REQ-80 (full Settings surface complete including clear-all-data danger zone, VAD sensitivity tuned on real speech, retention/size indicator). Closes any remaining REQ gaps surfaced during the phase.
 
 **Pitfalls owned:**
-- **#21 Bluetooth / AirPods routing on iOS** — known-limitation banner where appropriate, `devicechange` event handling, no `setSinkId()` on mobile.
+- **#21 Bluetooth routing on Android** — known-limitation banner where appropriate and `devicechange` event handling on mobile.
 - **#22 Screen-off / visibilitychange** — Wake Lock during active call, "call paused — tap to resume" overlay on background, clean end-on-background fallback.
-- **#24 Mobile parity (final gate)** — full checklist run on the builder's actual devices with the actual hardware (iPhone + AirPods + desktop Chrome).
+- **#24 Mobile parity (final gate)** — full checklist run on the builder's actual devices with the actual hardware (Android phone + Bluetooth headset + desktop Chrome).
 - **#20 Audio storage (final)** — retention policy configurable in Settings, storage-size indicator live, tested across months-of-use simulation.
 
 **Success criteria** (observable, testable):
-1. The builder can add RayMe to their iPhone home screen via "Add to Home Screen", launching it in standalone-launcher mode with the correct `theme-color` chrome, and successfully place a call from the installed PWA.
-2. An active call with AirPods connected routes audio correctly (or, if not, surfaces the documented known-limitation banner rather than failing silently); disconnecting AirPods mid-call triggers a `devicechange`-driven warning with a reconnect affordance.
-3. Locking the iPhone screen during a call triggers Wake Lock where supported; backgrounding the tab shows a "Call paused — tap to resume" overlay instead of silent death, and returning to foreground either resumes cleanly or ends the call gracefully with the transcript intact.
+1. The builder can add RayMe to their Android home screen, launching it in standalone-launcher mode with the correct `theme-color` chrome, and successfully place a call from the installed PWA.
+2. An active call with the builder's Bluetooth headset connected routes audio correctly (or, if not, surfaces the documented known-limitation banner rather than failing silently); disconnecting the headset mid-call triggers a `devicechange`-driven warning with a reconnect affordance.
+3. Locking the Android phone screen during a call triggers Wake Lock where supported; backgrounding the tab shows a "Call paused — tap to resume" overlay instead of silent death, and returning to foreground either resumes cleanly or ends the call gracefully with the transcript intact.
 4. Settings shows current storage footprint and a configurable retention policy; the danger-zone clear-all-data flow requires confirmation and leaves no dangling blob files.
-5. The v1 acceptance statement runs end-to-end on the builder's iPhone: import a v3 PNG card, record a voice in Voice Lab, assign it, start a call from a chat thread, have a barge-in-capable conversation, reopen the thread on desktop and see interleaved text + call turns. All other v1 success criteria from prior phases still hold.
+5. The v1 acceptance statement runs end-to-end on the builder's Android phone: import a v3 PNG card, record a voice in Voice Lab, assign it, start a call from a chat thread, have a barge-in-capable conversation, reopen the thread on desktop and see interleaved text + call turns. All other v1 success criteria from prior phases still hold.
 
 **Plans:** TBD
 
@@ -350,7 +349,7 @@ Every v1 requirement from `REQUIREMENTS.md` is covered. Phase-0 requirements are
 
 ## Sequencing Rationale
 
-1. **Phase 0 first because three of four Resolved Tensions in `SUMMARY.md` have quantitative revisit triggers.** Without Phase 0, Phase 2 may freeze F5-as-default only for Phase 4 to discover XTTS should have been the pin. Without Phase 0's mkcert-on-iPhone verification, Phase 3 may be the first time we discover iOS won't trust the cert — a catastrophically expensive failure at that stage. Phase 0 outputs become the first Key Decision rows in `PROJECT.md`.
+1. **Phase 0 first because three of four Resolved Tensions in `SUMMARY.md` have quantitative revisit triggers.** Without Phase 0, Phase 2 may freeze F5-as-default only for Phase 4 to discover XTTS should have been the pin. Without Phase 0's mkcert-on-Android verification, Phase 3 may be the first time we discover the mobile browser won't trust the cert — a catastrophically expensive failure at that stage. Phase 0 outputs become the first Key Decision rows in `PROJECT.md`.
 
 2. **Text chat before voice in Phase 1.** Shared LLM integration and sliding-window assembly shake out in a non-realtime path, which halves the bug surface when voice arrives. The unified `messages` schema lands here — researchers explicitly flagged this as "change it later and pay the migration tax," so it must be chosen at Phase 1, not Phase 3. The three-service topology is the Phase 1 skeleton so everything after drops into a stable bones.
 
@@ -362,7 +361,7 @@ Every v1 requirement from `REQUIREMENTS.md` is covered. Phase-0 requirements are
 
 6. **Voice breadth in Phase 5 after Phase 4 proves one engine works.** Doing the hard semantic work with a single engine first prevents multiplying the bug surface during tuning. Cold-swap between calls is an additive feature; it's not the load-bearing path. With three engines (up from two) the swap test matrix scales from 2 paths to 6 — Phase 5 scope was re-checked 2026-04-17 when Qwen3-TTS was added; M remains the right signal.
 
-7. **Mobile hardening last in Phase 6 because iOS quirks are discrete and many can only be verified once the call loop works.** Mobile Safari is on every prior phase's test checklist, but the AirPods / Wake Lock / visibilitychange long tail is its own phase rather than a distraction layered across every feature phase.
+7. **Mobile hardening last in Phase 6 because mobile-browser quirks are discrete and many can only be verified once the call loop works.** Android Chrome is on every prior phase's test checklist, but the Bluetooth routing / Wake Lock / visibilitychange long tail is its own phase rather than a distraction layered across every feature phase.
 
 ---
 
@@ -383,6 +382,8 @@ Roadmap-level decisions that remain open after Phase-0 resolves the empirical qu
 5. **VAD sensitivity tuning (REQ-80 slider) is empirical on the builder's actual speech and hardware.** Phase 4 ships a tuned default; Phase 6 may need a second tuning pass after real-world call hours accumulate. No fixed threshold is committed in the roadmap — only the gate pattern (minimum-duration + word-count + energy) is. **Owner: Phase 4 initial, Phase 6 re-tune.**
 
 6. **`coqui-tts[server]` streaming to aiortc without Docker is not explicitly documented in upstream Pipecat docs** (flagged in `STACK.md` as a Phase-0-ish verification item). If the in-process Python path has issues, Phase 2 may need to run XTTS in a subprocess with its own CUDA context — which changes the "one-hot engine" implementation without changing the rule. **Owner: Phase 2 spike during AI-backend bringup.**
+
+6a. **Long-form TTS measurements are invalid if model limits are ignored.** Phase 0 follow-up found XTTS long-form streaming hit the 400-token `inference_stream` cap and fell back to full-render timing. Going forward, benchmarks and runtime code must implement a shared chunk planner before comparing long-form engines. The planner must enforce each model's token/character caps, preserve natural boundaries where possible, and measure first-chunk TTFA, total stitched playback time, inter-chunk gaps, and stitched audio quality. **Owner: Phase 4 implementation checkpoint; Phase 2 may scaffold shared utilities.**
 
 7. **Requirements traceability flagged no gaps between `PROJECT.md` Active bullets and `REQUIREMENTS.md` v1 set** — see the coverage table at the end of `REQUIREMENTS.md`. If any Phase-0 output (e.g., "XTTS is the v1 default") materially changes a `PROJECT.md` Key Decision row, the roadmapper-owned traceability must update `PROJECT.md` first, not this roadmap. **Owner: Phase-0 closeout; `/gsd-transition` at Phase-0 boundary.**
 

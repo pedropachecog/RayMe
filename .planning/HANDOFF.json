@@ -1,13 +1,13 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-23T02:45:00Z",
+  "timestamp": "2026-04-23T19:45:03Z",
   "phase": "00",
   "phase_name": "measurement-gate",
   "phase_dir": ".planning/phases/00-measurement-gate",
   "plan": "07.1",
   "task": 4,
   "total_tasks": 4,
-  "status": "in_progress",
+  "status": "paused",
   "completed_tasks": [
     {
       "id": 1,
@@ -36,6 +36,13 @@
       "name": "Write HTTPS probe server and HTTPS setup doc skeleton",
       "status": "done",
       "commit": "831f7a1"
+    },
+    {
+      "id": 22,
+      "name": "Verify trusted HTTPS from the actual Android device",
+      "status": "done",
+      "host": "OMEN-PC",
+      "result_file": ".planning/phases/00-measurement-gate/results/https_android.json"
     },
     {
       "id": 31,
@@ -98,46 +105,61 @@
       "id": 73,
       "name": "Update handoff/writeback inputs to cite backend-labeled numbers",
       "status": "done"
+    },
+    {
+      "id": 90,
+      "name": "Run warm-model TTS scenario matrix for F5, XTTS, LuxTTS, Chatterbox Turbo, TADA 1B, and Qwen3 on Windows and WSL",
+      "status": "done_with_quality_blockers",
+      "result_file": ".planning/phases/00-measurement-gate/results/tts_runtime_matrix_v2.json",
+      "audio_root": ".planning/phases/00-measurement-gate/results/tts_scenario_audio"
     }
   ],
   "remaining_tasks": [
     {
-      "id": 22,
-      "name": "Verify trusted HTTPS from the actual Android device",
-      "status": "blocked_on_builder"
-    },
-    {
-      "id": 51,
-      "name": "Build vram_soak.py + unit tests for the growth detector",
+      "id": 91,
+      "name": "Implement shared TTS chunk planner in tts_scenario_matrix.py",
       "status": "not_started"
     },
     {
-      "id": 52,
-      "name": "Run 30-minute VRAM soak for F5, XTTS, and Qwen3 on OMEN-PC",
+      "id": 92,
+      "name": "Rerun Windows plus WSL TTS scenario matrix after chunking is implemented",
       "status": "not_started"
     },
     {
-      "id": 62,
-      "name": "Run the cancel probe against the existing LLM endpoint at 192.168.1.190:8001 from a shell that can observe its GPU",
-      "status": "blocked_on_gpu_observation_path"
+      "id": 93,
+      "name": "Manual listening pass over tts_scenario_audio samples",
+      "status": "not_started"
     },
     {
-      "id": 81,
-      "name": "Write final Phase 0 synthesis and write back PROJECT.md / STATE.md",
-      "status": "blocked_on_prior_results"
+      "id": 94,
+      "name": "Create structured manual quality sidecar keyed by runtime, engine, profile, and scenario",
+      "status": "not_started"
+    },
+    {
+      "id": 95,
+      "name": "Decide whether LuxTTS should become a supported experimental engine after quality scoring",
+      "status": "not_started"
+    },
+    {
+      "id": 96,
+      "name": "Optional: debug native Windows TADA 1B CUDA failure",
+      "status": "not_started"
     }
   ],
   "blockers": [
-    "Android browser verification is still pending for 00-02 Task 2.",
-    "00-06 no longer needs a new server install, but the cancel probe still needs to run from a shell that can observe the GPU used by the existing endpoint at 192.168.1.190:8001.",
-    "WSL access on 192.168.1.199 currently requires the pmpg Windows account; the rayme-ssh account reports no installed WSL distributions and remote WSL work should use direct `wsl -d Ubuntu -e sh -c ...` commands with fixed Linux paths.",
-    "Phase 00 writeback (00-08) is blocked until 00-02, 00-05, and 00-06 provide their missing inputs.",
-    "No measured TTS engine clears the v1 latency budget on OMEN-PC: F5 is 517.3 ms via simulated chunk streaming, XTTS native streaming is 534.3 ms, and Qwen3 eager baseline is 5626.8 ms.",
-    "FlashAttention 2 still fails to build on OMEN-PC, so Qwen3 remains an eager-attention baseline only."
+    "Final long-form TTS comparisons are blocked on a shared chunk planner. XTTS long-form must be split below its 400-token streaming cap, and non-streaming engines must be benchmarked through chunked playback rather than raw whole-generation fallback.",
+    "Manual listening is now a hard gate for new TTS engines because the warm-model matrix found fast outputs that may be low quality.",
+    "User listening on 2026-04-23 found Chatterbox Turbo long samples are pure gibberish; treat Chatterbox long-form as rejected until reproduced or fixed.",
+    "Native Windows TADA 1B failed during warmup/generation with a CUDA error; WSL TADA rows are valid, but Windows TADA is not.",
+    "The current scenario harness uses fixed canned text scenarios, not a corpus of real RayMe LLM answers.",
+    "WSL access on 192.168.1.199 currently requires the pmpg Windows account; the rayme-ssh account reports no installed WSL distributions and remote WSL work should use direct `wsl -d Ubuntu -e sh -c ...` commands with fixed Linux paths."
   ],
   "human_actions_pending": [
-    "Run the HTTPS probe from the actual Android device and confirm trusted cert + isSecureContext for 00-02 Task 2.",
-    "Keep the existing OpenAI-compatible server at 192.168.1.190:8001 running and provide the execution path that can observe its GPU with nvidia-smi during 00-06 Task 2."
+    {
+      "action": "Manual listening pass over generated TTS samples",
+      "context": "Do this after the shared chunk planner is implemented and the Windows plus WSL matrix is rerun; latency alone is insufficient and the user already found Chatterbox Turbo long-form output is gibberish.",
+      "blocking": true
+    }
   ],
   "decisions": [
     {
@@ -158,11 +180,6 @@
     {
       "decision": "Use tts_attention_matrix.json as the source of truth for optimization backend labeling in future writeback.",
       "rationale": "The old tts_ttfa.json schema could be misread as an optimized Qwen result; the dedicated matrix makes the backend status explicit per engine.",
-      "phase": "00"
-    },
-    {
-      "decision": "Use `http://192.168.1.190:8001/v1` with model `unsloth/Qwen3.5-27B` as the current Phase 0 LLM endpoint for plan 00-06.",
-      "rationale": "The endpoint is now reachable from the current workspace, returns healthy status, and exposes an OpenAI-compatible models list.",
       "phase": "00"
     },
     {
@@ -199,11 +216,30 @@
       "decision": "Do not replace the native Windows F5 short-response path with the current OMEN-PC WSL Triton path for v1 latency-sensitive acknowledgments.",
       "rationale": "Measured on 2026-04-23 with the same builder reference fixture and target text `Hey, got it.`: native Windows F5 median TTFA is 521.8 ms, while WSL Triton gRPC median TTFA is 1813.4 ms.",
       "phase": "00"
+    },
+    {
+      "decision": "Treat LuxTTS as the leading new experimental TTS candidate after warm-model scenario testing, but do not promote it until manual quality scoring is recorded.",
+      "rationale": "Warm-model optimized results show LuxTTS winning short total time and medium/long total time, but manual listening found quality failures in the broader sample set and the harness does not yet score intelligibility or voice similarity.",
+      "phase": "00"
+    },
+    {
+      "decision": "Treat Chatterbox Turbo as quality-blocked for long-form output.",
+      "rationale": "The user listened to the generated samples on 2026-04-23 and reported that Chatterbox long samples are pure gibberish.",
+      "phase": "00"
+    },
+    {
+      "decision": "Keep TADA 1B as WSL-only experimental until the native Windows CUDA failure is debugged.",
+      "rationale": "WSL rows produced measurable samples, but the Windows path failed during warmup/generation with a CUDA error.",
+      "phase": "00"
     }
   ],
-  "uncommitted_files": [],
-  "next_action": "If continuing autonomous work on Phase 00, run ./scripts/bootstrap-rayme-ssh.sh restore and execute 00-05-vram-soak on OMEN-PC so Phase 00 has the missing 3060 budget data. For F5, keep native Windows as the short-response latency path; the WSL Triton runtime is validated as a deployment option but not as the TTFA winner. In parallel or before final writeback, the builder still needs to complete Android HTTPS verification for 00-02 and provide the GPU-observable execution path for 00-06 against `http://192.168.1.190:8001/v1`.",
-  "context_notes": "00-07.1 is now complete. The TTS probe and matrix explicitly label backend support: F5=not_applicable, XTTS=not_applicable, Qwen3=eager baseline with flash_attention_2 unavailable and sdpa not supported by the current probe. Fresh OMEN-PC rerun metrics are F5 517.3 ms / 0.388 RTF / 1990.2 MB, XTTS 534.3 ms / 0.59 RTF / 1897.6 MB, Qwen3 5626.8 ms / 2.705 RTF / 2509.1 MB. Remote unit tests for test_tts_ttfa.py now pass at 12/12 in the Phase 0 backend venv. 00-08 must cite the matrix instead of describing Qwen3 as an unlabeled result. The Phase 0 LLM endpoint is now known: `http://192.168.1.190:8001/v1`, health OK, model `unsloth/Qwen3.5-27B`, OpenAI-compatible, `owned_by: llamacpp`. On 192.168.1.199, WSL access is tied to the pmpg Windows account: `pmpg` sees `Ubuntu` on WSL2, SSH as `omen-pc\\pmpg` now works via `C:\\ProgramData\\ssh\\administrators_authorized_keys`, and `/home/pmpg/rayme-wsl-probe` was created successfully inside Ubuntu. Remote WSL commands should use direct `wsl -d Ubuntu -e sh -c ...` invocations with fixed Linux paths; UNC WSL paths were not reliable from the non-interactive SSH session. The WSL distro upgrade is complete: Ubuntu is now 22.04.5 with glibc 2.35, and the reusable WSL accelerator env `/home/pmpg/rayme/.venv-cu121` imports `torch 2.5.1+cu121`, `triton 3.1.0`, `deepspeed 0.18.9`, and `flash-attn 2.8.3` on the RTX 3060. `.planning/spikes/001-omen-pc-wsl-gpu-path/bootstrap-cu121-env.sh` now recreates that stack directly. The F5 Triton/TensorRT-LLM WSL path also now passes end to end: image `soar97/triton-f5-tts:24.12`, workspace `/home/pmpg/rayme/f5-triton-runtime/F5-TTS`, safe model repo `/home/pmpg/rayme/f5-triton-runtime/model_repo_cpuipc_18000`, host ports `18000/18001/18002`, and output `/home/pmpg/rayme/f5-triton-runtime/client_http_out.wav`. The stock prebuilt image still needs ad hoc `vocos` for stage 2 and `rjieba` for runtime launch, and the generated model repo copy must force the `vocoder` BLS response to CPU preferred memory to avoid the WSL CUDA IPC failure. Apples-to-apples short-response comparison for target text `Hey, got it.` is now captured in `.planning/spikes/002-f5-triton-trtllm-wsl-path/results/f5_short_ttfa_comparison.json`: native Windows F5 trials 524.5/520.1/521.8 ms (median 521.8 ms) versus WSL Triton gRPC trials 2801.2/1806.2/1813.4 ms (median 1813.4 ms), so the WSL Triton path is currently 3.475x slower for short acknowledgments. Hard safety rule: do not use `rm -rf` and do not delete files or directories through variable-expanded paths on any backend or WSL host.",
+  "uncommitted_files": [
+    "Worktree is dirty with broad planning-doc edits, generated Phase 0 artifacts, probe files, and spike files. Run `git status --short` before staging anything.",
+    "Do not commit with `git add .`; stage only the intended files after inspecting `git diff --cached --name-only` and `git diff --cached --stat`."
+  ],
+  "pause_commit": "not_created_dirty_worktree",
+  "next_action": "Implement the shared TTS chunk planner in `.planning/phases/00-measurement-gate/probes/tts_scenario_matrix.py`, then rerun `.planning/phases/00-measurement-gate/probes/tts_runtime_matrix_v2.py`. Manual listening and `MANUAL-QUALITY.csv` scoring come after regenerated chunked WAVs exist.",
+  "context_notes": "00-02 is now complete on the real Android device. The trusted HTTPS pass used Android Chrome against `https://192.168.1.199:8443` after installing the mkcert root CA on the phone; `window.isSecureContext === true`, `navigator.mediaDevices` was defined, and no certificate warning remained. The cert SANs covered both `rayme.local` and `192.168.1.199`, but the passing Phase 0 verification used the direct LAN IP because local hostname resolution was not configured. The temporary HTTP helper on port 8081 that was used only to transfer `mkcert-rootCA.crt` to the phone was removed immediately after verification. 00-07.1 is now complete for backend labeling only. The TTS probe and matrix explicitly label backend support on the current OMEN-PC native-Windows path: F5=not_applicable, XTTS=not_applicable, Qwen3=eager baseline with flash_attention_2 unavailable and sdpa not supported by the current probe. Fresh OMEN-PC rerun metrics are F5 517.3 ms / 0.388 RTF / 1990.2 MB, XTTS 534.3 ms / 0.59 RTF / 1897.6 MB, Qwen3 5626.8 ms / 2.705 RTF / 2509.1 MB. Remote unit tests for test_tts_ttfa.py now pass at 12/12 in the Phase 0 backend venv. `00-08` must cite the backend matrix for current-path claims and must not imply that WSL Python, WSL Triton long-form, XTTS DeepSpeed, or Qwen eager-vs-FA2 comparisons were already measured; that work is now tracked as `00-07.2`. On 192.168.1.199, WSL access is tied to the pmpg Windows account: `pmpg` sees `Ubuntu` on WSL2, SSH as `omen-pc\\pmpg` now works via `C:\\ProgramData\\ssh\\administrators_authorized_keys`, and `/home/pmpg/rayme-wsl-probe` was created successfully inside Ubuntu. Remote WSL commands should use direct `wsl -d Ubuntu -e sh -c ...` invocations with fixed Linux paths; UNC WSL paths were not reliable from the non-interactive SSH session. The WSL distro upgrade is complete: Ubuntu is now 22.04.5 with glibc 2.35, and the reusable WSL accelerator env `/home/pmpg/rayme/.venv-cu121` imports `torch 2.5.1+cu121`, `triton 3.1.0`, `deepspeed 0.18.9`, and `flash-attn 2.8.3` on the RTX 3060. `.planning/spikes/001-omen-pc-wsl-gpu-path/bootstrap-cu121-env.sh` now recreates that stack directly. The F5 Triton/TensorRT-LLM WSL path also now passes end to end: image `soar97/triton-f5-tts:24.12`, workspace `/home/pmpg/rayme/f5-triton-runtime/F5-TTS`, safe model repo `/home/pmpg/rayme/f5-triton-runtime/model_repo_cpuipc_18000`, host ports `18000/18001/18002`, and output `/home/pmpg/rayme/f5-triton-runtime/client_http_out.wav`. The stock prebuilt image still needs ad hoc `vocos` for stage 2 and `rjieba` for runtime launch, and the generated model repo copy must force the `vocoder` BLS response to CPU preferred memory to avoid the WSL CUDA IPC failure. Apples-to-apples short-response comparison for target text `Hey, got it.` is now captured in `.planning/spikes/002-f5-triton-trtllm-wsl-path/results/f5_short_ttfa_comparison.json`: native Windows F5 trials 524.5/520.1/521.8 ms (median 521.8 ms) versus WSL Triton gRPC trials 2801.2/1806.2/1813.4 ms (median 1813.4 ms), so the WSL Triton path is currently 3.475x slower for short acknowledgments. Hard safety rule: do not use `rm -rf` and do not delete files or directories through variable-expanded paths on any backend or WSL host.",
   "incident": {
     "severity": "SEV-1",
     "summary": "Phase 0 execution previously ran on the wrong machine and lost SSH persistence, forcing repeated recovery loops.",
@@ -263,5 +299,63 @@
       },
       "matrix_file": ".planning/phases/00-measurement-gate/results/tts_attention_matrix.json"
     }
+  },
+  "tts_scenario_matrix_v2": {
+    "status": "measured_quality_pending",
+    "matrix_file": ".planning/phases/00-measurement-gate/results/tts_runtime_matrix_v2.json",
+    "windows_file": ".planning/phases/00-measurement-gate/results/tts_scenario_matrix_windows_native.json",
+    "wsl_file": ".planning/phases/00-measurement-gate/results/tts_scenario_matrix_wsl_python.json",
+    "audio_root": ".planning/phases/00-measurement-gate/results/tts_scenario_audio",
+    "manual_quality_template": ".planning/spikes/003-tts-engine-extension-luxtts-chatterbox-tada/MANUAL-QUALITY.csv",
+    "full_result_matrix_csv": ".planning/spikes/003-tts-engine-extension-luxtts-chatterbox-tada/RESULT-MATRIX.csv",
+    "harness": ".planning/phases/00-measurement-gate/probes/tts_scenario_matrix.py",
+    "driver": ".planning/phases/00-measurement-gate/probes/tts_runtime_matrix_v2.py",
+    "best_optimized": {
+      "short_reply_request_ttfa": {
+        "engine": "luxtts",
+        "runtime": "wsl_python",
+        "ms": 289.8
+      },
+      "medium_reply_request_ttfa": {
+        "engine": "xtts",
+        "runtime": "wsl_python",
+        "ms": 439.6
+      },
+      "medium_reply_request_total": {
+        "engine": "luxtts",
+        "runtime": "windows_native",
+        "ms": 508.3
+      },
+      "long_reply_request_ttfa": {
+        "engine": "f5",
+        "runtime": "wsl_python",
+        "ms": 980.6
+      },
+      "long_reply_request_total": {
+        "engine": "luxtts",
+        "runtime": "windows_native",
+        "ms": 1678.6
+      }
+    },
+    "manual_quality_findings": [
+      "User reported Chatterbox Turbo long samples are pure gibberish.",
+      "User reported some samples are subjectively atrocious.",
+      "Structured manual listening scores have not yet been recorded."
+    ],
+    "streaming_caveats": [
+      "XTTS native streaming was measured for short_reply and medium_reply on Windows and WSL.",
+      "XTTS long_reply fell back to full-render timing because inference_stream hit the 400-token limit.",
+      "F5 optimized rows are simulated chunk streaming, not true incremental model streaming.",
+      "Qwen3 rows are simulated text streaming, not real audio streaming.",
+      "LuxTTS, Chatterbox Turbo, and TADA 1B rows are whole-generation raw baselines, not optimized chunked runtime paths.",
+      "Future benchmarks need a shared best-in-class chunk planner for all engines, including non-streaming engines."
+    ],
+    "required_harness_fixes": [
+      "Implement token-aware XTTS long-text splitting so no inference_stream segment reaches the 400-token cap.",
+      "Implement shared long-form chunking for all engines, preferring sentence boundaries, enforcing engine-specific caps, avoiding tiny fragments, and measuring first-chunk TTFA, total stitched time, inter-chunk gaps, and stitched WAV quality.",
+      "Rerun the Windows plus WSL matrix after chunking is implemented before final long-form TTS decisions."
+    ],
+    "next_run": "python3 .planning/phases/00-measurement-gate/probes/tts_runtime_matrix_v2.py --output .planning/phases/00-measurement-gate/results/tts_runtime_matrix_v2.json",
+    "pause_note": "Do not treat current XTTS long-form rows or non-streaming whole-generation rows as final long-form comparisons. Implement shared chunking first."
   }
 }

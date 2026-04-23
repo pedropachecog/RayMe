@@ -48,7 +48,7 @@
   - *Source*: PROJECT.md Active.
 - **REQ-21** `[v1]` — Uploaded samples are transcribed by the STT engine into an editable reference transcript. User can edit before saving — the stored transcript is what F5-TTS and Qwen3-TTS consume (XTTS v2 does not require a transcript, but the same editable transcript is still captured for portability between engines).
   - *Source*: PROJECT.md Active (F5 and Qwen3 require transcript, STT auto-generates).
-- **REQ-22** `[v1]` — Voice save captures: name, engine (**F5-TTS**, **XTTS v2**, or **Qwen3-TTS** — user-selected per voice), sample audio path, reference transcript, timestamps. All three engines are available in v1 conditional on Phase 0 acceptance of Qwen3-TTS (TTFA <400 ms, RTF <1, FA2 install, accent-preservation subjective test). If Phase 0 rejects Qwen3-TTS, REQ-22 falls back to two engines (F5 + XTTS) and the Qwen path is feature-flagged off for v1. See `.planning/research/QWEN3-TTS.md` §7 for triggers.
+- **REQ-22** `[v1]` — Voice save captures: name, engine (**F5-TTS**, **XTTS v2**, or **Qwen3-TTS** — user-selected per voice), sample audio path, reference transcript, timestamps. The Phase 0 measurements keep `F5-TTS` as the default, keep `XTTS v2` as the second engine, and include **Qwen3-TTS `0.6B-Base`** as an explicit opt-in builder override even though its acceptance gate failed on TTFA/RTF and accent approval. `1.7B` remains out of scope for v1 because FA2 did not install on Windows. See `.planning/research/QWEN3-TTS.md` §7 for the original gate criteria.
   - *Source*: PROJECT.md Active + Key Decisions; amended 2026-04-17 to add Qwen3-TTS.
 - **REQ-23** `[v1]` — Voice Library supports list / rename / delete / test-play. Test-play synthesizes a stock phrase (and optional custom text) using the voice, routed to the configured output device.
 - **REQ-24** `[v1]` — Deleting a voice that is referenced by a character default or chat override must not leave dangling references. Either cascade-reassign to a default or block with a clear error listing referents.
@@ -80,8 +80,8 @@
   - *Source*: PROJECT.md Active.
 - **REQ-44** `[v1]` — **Streaming LLM with live AI captions**: tokens render in real time as the LLM produces them, ahead of TTS playback.
   - *Source*: PROJECT.md Active.
-- **REQ-45** `[v1]` — **Streaming TTS with sentence-boundary chunking**: the orchestrator segments the LLM stream at sentence boundaries and feeds each sentence to TTS as it lands, so the first audio starts on the first complete sentence (not after full LLM completion).
-  - *Source*: ARCHITECTURE.md; FEATURES.md differentiators; PITFALLS.md critical item (F5 lacks native streaming).
+- **REQ-45** `[v1]` — **Streaming/chunked TTS playback for every engine**: the orchestrator uses a shared chunk planner for all TTS engines. It must prefer natural sentence boundaries, enforce engine-specific token/character caps (for example XTTS `inference_stream` must never receive a segment at or above its 400-token limit), avoid tiny unnatural fragments, start playback from the first viable chunk, stitch later chunks cleanly, and log first-chunk TTFA, total stitched playback time, and inter-chunk gaps. Engines with native streaming use it inside each safe chunk; engines without native streaming still use chunked playback instead of waiting for full-response synthesis.
+  - *Source*: ARCHITECTURE.md; FEATURES.md differentiators; PITFALLS.md critical item (F5 lacks native streaming); Phase 0 TTS matrix follow-up 2026-04-23.
 - **REQ-46** `[v1]` — End-to-end turn latency (user finishes speaking → AI starts speaking) is targeted at **<800 ms** (stretch: <500 ms). This is a design budget, not a blocking acceptance gate — Phase 0 measurement sets the achievable floor.
   - *Source*: PROJECT.md constraints; FEATURES.md differentiators.
 - **REQ-47** `[v1]` — Call toolbar provides: mute (must also stop server-side audio consumption, not just silence locally), end-call (unambiguous destructive affordance), audio input device picker, audio output device picker.
@@ -108,7 +108,7 @@
 
 ### Settings
 
-- **REQ-80** `[v1]` — Settings consolidates: three-endpoint configuration + tests (REQ-05); STT model dropdown (when multiple loaded); TTS engine default (**F5 / XTTS / Qwen3-TTS** — per-voice still overrides; Qwen3-TTS option is hidden if Phase 0 rejected it); VAD sensitivity slider (threshold + end-of-utterance silence duration); default audio input/output device; save-AI-audio toggle (default ON); save-mic-audio toggle (default OFF); clear-all-data danger zone.
+- **REQ-80** `[v1]` — Settings consolidates: three-endpoint configuration + tests (REQ-05); STT model dropdown (when multiple loaded); TTS engine default (**F5 / XTTS / Qwen3-TTS** — per-voice still overrides; Qwen3-TTS is present but should be labeled as a non-default/experimental `0.6B-Base` path because Phase 0 did not clear it for default use); VAD sensitivity slider (threshold + end-of-utterance silence duration); default audio input/output device; save-AI-audio toggle (default ON); save-mic-audio toggle (default OFF); clear-all-data danger zone.
   - *Source*: PROJECT.md Active + constraints.
 
 ### Design System
@@ -118,11 +118,11 @@
 
 ### Platform
 
-- **REQ-A0** `[v1]` — The Web UI is fully usable from a mobile browser on LAN: modern mobile Safari (iOS 14.3+) and Chrome Android. Mic capture, output routing, and full-duplex audio work on both.
+- **REQ-A0** `[v1]` — The Web UI is fully usable from a mobile browser on LAN: Chrome on Android. Mic capture, output routing, and full-duplex audio work on the builder's phone.
   - *Source*: PROJECT.md Active + constraints.
-- **REQ-A1** `[v1]` — The Web UI is served over HTTPS with a trusted certificate on LAN (self-signed + mobile device trust workflow documented on the Settings/first-launch screen). Mobile Safari mic capture requires HTTPS; this is non-negotiable.
+- **REQ-A1** `[v1]` — The Web UI is served over HTTPS with a trusted certificate on LAN (mobile-device trust workflow documented on the Settings/first-launch screen). Mobile mic capture requires HTTPS; this is non-negotiable.
   - *Source*: PITFALLS.md critical item; FEATURES.md mobile dependency note.
-- **REQ-A2** `[v1]` — PWA manifest + icons + `theme-color` are served so that "Add to Home Screen" on iOS and Android produces a standalone-launcher experience. Full offline-shell polish is v1.x; the manifest itself is v1.
+- **REQ-A2** `[v1]` — PWA manifest + icons + `theme-color` are served so that "Add to Home Screen" on Android produces a standalone-launcher experience. Full offline-shell polish is v1.x; the manifest itself is v1.
   - *Source*: user scoping decision 2026-04-17.
 - **REQ-A3** `[v1]` — English-only STT and TTS in v1. Spanish-accented English is a quality bar for STT — Phase 0 measures WER on the builder's voice to confirm model selection.
   - *Source*: PROJECT.md Active + Key Decisions + constraints.

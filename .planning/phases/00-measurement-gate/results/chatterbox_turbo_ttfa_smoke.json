@@ -1,0 +1,33 @@
+{
+  "engine": "chatterbox_turbo",
+  "mode": "non_streaming_clone",
+  "streaming_support": "none",
+  "true_streaming": false,
+  "ttfa_ms": 964.9,
+  "rtf": 0.71,
+  "audio_duration_s": 1.36,
+  "synthesis_time_s": 0.965,
+  "peak_vram_mb": 4838.7,
+  "sample_rate": 24000,
+  "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\chatterbox_turbo.wav",
+  "optimization_backend": "not_applicable",
+  "optimization_backend_reason": "Chatterbox Turbo probe used the default CUDA PyTorch path; upstream generation relies on its built-in sampler configuration rather than a selectable attention backend.",
+  "supported_optimization_backends": [
+    "not_applicable"
+  ],
+  "unsupported_optimization_backends": [],
+  "optimization_modes": {
+    "eager": {
+      "status": "not_applicable",
+      "reason": "Chatterbox Turbo probe used the default CUDA PyTorch path; upstream generation relies on its built-in sampler configuration rather than a selectable attention backend."
+    },
+    "sdpa": {
+      "status": "not_applicable",
+      "reason": "Chatterbox Turbo probe used the default CUDA PyTorch path; upstream generation relies on its built-in sampler configuration rather than a selectable attention backend."
+    },
+    "flash_attention_2": {
+      "status": "not_applicable",
+      "reason": "Chatterbox Turbo probe used the default CUDA PyTorch path; upstream generation relies on its built-in sampler configuration rather than a selectable attention backend."
+    }
+  }
+}

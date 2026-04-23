@@ -3,7 +3,7 @@ phase: 00-measurement-gate
 plan: 08
 type: execute
 wave: 4
-depends_on: [02, 03, 04, 05, 06, 07, "07.1"]
+depends_on: [02, 03, 04, 05, 07, "07.1", "07.2"]
 files_modified:
   - .planning/phases/00-measurement-gate/KEY_DECISIONS.md
   - .planning/phases/00-measurement-gate/results/phase0_summary.json
@@ -17,9 +17,10 @@ must_haves:
   truths:
     - "KEY_DECISIONS.md is a human-readable summary of every results/*.json file from plans 02-07"
     - "phase0_summary.json is a machine-readable consolidation with pointers to each source JSON and the final decisions"
-    - "PROJECT.md has a new 'Phase 0 Key Decisions' section committing: chosen Whisper rung, chosen v1 TTS engine, Qwen3-TTS v1 disposition, FA2 verdict, LLM server choice, HTTPS strategy"
+    - "PROJECT.md has a new 'Phase 0 Key Decisions' section committing: chosen Whisper rung, chosen v1 TTS engine, Qwen3-TTS v1 disposition, FA2 verdict, and HTTPS strategy"
     - "STATE.md reflects Phase 0 complete with a Key Decisions summary and next-phase pointer"
     - "Any cascade triggers (Resolved Tension #2 or #3) are explicitly flagged with their downstream Phase 2 implications"
+    - "Any TTS runtime or acceleration claim cites `results/tts_runtime_matrix.json` when that artifact exists; backend labels alone are not treated as proof of cross-runtime parity"
   artifacts:
     - path: ".planning/phases/00-measurement-gate/KEY_DECISIONS.md"
       provides: "Builder-facing summary: every decision from Phase 0 with the quantitative reason"
@@ -35,9 +36,9 @@ must_haves:
       contains: "Phase 0 complete"
   key_links:
     - from: ".planning/phases/00-measurement-gate/KEY_DECISIONS.md"
-      to: "results/{whisper,tts_ttfa,vram_soak_*,llm_cancel,fa2_install,https_iphone}.json"
+      to: "results/{whisper,tts_ttfa,tts_runtime_matrix,vram_soak_*,fa2_install,https_android}.json"
       via: "human-readable rendering of each JSON payload"
-      pattern: "whisper\\.json|tts_ttfa\\.json|fa2_install\\.json|llm_cancel\\.json|https_iphone\\.json|vram_soak"
+      pattern: "whisper\\.json|tts_ttfa\\.json|tts_runtime_matrix\\.json|fa2_install\\.json|https_android\\.json|vram_soak"
     - from: ".planning/PROJECT.md"
       to: ".planning/phases/00-measurement-gate/KEY_DECISIONS.md"
       via: "reference link from the updated Key Decisions section"
@@ -47,7 +48,7 @@ must_haves:
 <objective>
 Consolidate every Phase 0 measurement into a single Key Decisions document, write the empirical outcomes back to PROJECT.md and STATE.md so Phase 1+ freezes the stack on data, and render a machine-readable summary JSON for tooling.
 
-Purpose: Phase 0's deliverables are Key Decisions, not shipped features (per roadmap). Every downstream phase needs a single authoritative answer for: "what Whisper rung?", "what TTS engine?", "is Qwen3-TTS shipping in v1?", "which LLM server?", "what HTTPS strategy?", "is FA2 installed?". Without this writeback, the measurements exist in isolated JSON files and Phase 2 must re-discover them.
+Purpose: Phase 0's deliverables are Key Decisions, not shipped features (per roadmap). Every downstream phase needs a single authoritative answer for: "what Whisper rung?", "what TTS engine?", "is Qwen3-TTS shipping in v1?", "what HTTPS strategy?", "is FA2 installed?". Without this writeback, the measurements exist in isolated JSON files and Phase 2 must re-discover them.
 
 Output: `KEY_DECISIONS.md` (human-readable), `results/phase0_summary.json` (machine-readable roll-up), updated `PROJECT.md` + `STATE.md`.
 </objective>
@@ -58,15 +59,15 @@ Output: `KEY_DECISIONS.md` (human-readable), `results/phase0_summary.json` (mach
 </execution_context>
 
 <context>
-@.planning/phases/00-measurement-gate/results/https_iphone.json
+@.planning/phases/00-measurement-gate/results/https_android.json
 @.planning/phases/00-measurement-gate/results/whisper.json
 @.planning/phases/00-measurement-gate/results/tts_ttfa.json
 @.planning/phases/00-measurement-gate/results/vram_soak_f5.json
 @.planning/phases/00-measurement-gate/results/vram_soak_xtts.json
 @.planning/phases/00-measurement-gate/results/vram_soak_qwen3.json
-@.planning/phases/00-measurement-gate/results/llm_cancel.json
 @.planning/phases/00-measurement-gate/results/fa2_install.json
 @.planning/phases/00-measurement-gate/results/tts_attention_matrix.json
+@.planning/phases/00-measurement-gate/results/tts_runtime_matrix.json
 @.planning/ROADMAP.md
 @.planning/REQUIREMENTS.md
 
@@ -91,16 +92,16 @@ The synthesis must resolve every quantitative cascade trigger from the roadmap:
 - `tts_attention_matrix.json` is the source of truth for which backend was actually measured per engine (`eager`, `sdpa`, `flash_attention_2`, `not_supported`, `not_applicable`).
 - The writeback must not present Qwen3 eager-baseline numbers as if they were FlashAttention-optimized results.
 
+**TTS runtime / acceleration matrix:**
+- `tts_runtime_matrix.json` is the source of truth for cross-runtime claims such as native Windows vs WSL Python vs WSL Triton for F5, XTTS baseline vs DeepSpeed-enabled paths, and Qwen eager vs FlashAttention 2 runs.
+- If `tts_runtime_matrix.json` is missing, the writeback must explicitly say that the phase did not complete the requested runtime-matrix comparison and must avoid implying those permutations were measured.
+
 **FA2 / Qwen3-TTS 1.7B:**
 - 1.7B eligible iff `fa2_install.json["qwen17b_recommended"] == true`.
 - Even if FA2 installed: only plan 1.7B if Qwen3-TTS passed its v1 acceptance gate in the first place.
 
-**LLM server pin:**
-- From `llm_cancel.json["base_url"]`. If `meets_phase4_budget_200ms == true`, pin this server in PROJECT.md's "LLM endpoint" row.
-- If false: open question flagged for Phase 4 — may need to pin OpenAI API as v1 LLM.
-
 **HTTPS strategy:**
-- From `https_iphone.json["strategy"]` — tailscale or mkcert. Pin in PROJECT.md.
+- From `https_android.json["strategy"]` — expected to be `mkcert`. Pin in PROJECT.md.
 
 **Hardware discrepancy note (per 00-RESEARCH.md Open Q #1):**
 - All measurements were made on RTX 4090 (sm_89, 24 GB).
@@ -119,13 +120,12 @@ The synthesis must resolve every quantitative cascade trigger from the roadmap:
     .planning/phases/00-measurement-gate/KEY_DECISIONS.md
   </files>
   <read_first>
-    .planning/phases/00-measurement-gate/results/https_iphone.json
+    .planning/phases/00-measurement-gate/results/https_android.json
     .planning/phases/00-measurement-gate/results/whisper.json
     .planning/phases/00-measurement-gate/results/tts_ttfa.json
     .planning/phases/00-measurement-gate/results/vram_soak_f5.json
     .planning/phases/00-measurement-gate/results/vram_soak_xtts.json
     .planning/phases/00-measurement-gate/results/vram_soak_qwen3.json
-    .planning/phases/00-measurement-gate/results/llm_cancel.json
     .planning/phases/00-measurement-gate/results/fa2_install.json
     .planning/research/QWEN3-TTS.md (§7 acceptance gate for cross-referencing)
     .planning/ROADMAP.md (Phase 0 success criteria)
@@ -139,13 +139,13 @@ The synthesis must resolve every quantitative cascade trigger from the roadmap:
        {
          "meta": { "timestamp": "<ISO8601>", "phase": "00-measurement-gate" },
          "inputs": {
-           "https_iphone":    "results/https_iphone.json",
+           "https_android":   "results/https_android.json",
            "whisper":         "results/whisper.json",
            "tts_ttfa":        "results/tts_ttfa.json",
+           "tts_runtime_matrix": "results/tts_runtime_matrix.json",
            "vram_soak_f5":    "results/vram_soak_f5.json",
            "vram_soak_xtts":  "results/vram_soak_xtts.json",
            "vram_soak_qwen3": "results/vram_soak_qwen3.json",
-           "llm_cancel":      "results/llm_cancel.json",
            "fa2_install":     "results/fa2_install.json"
          },
          "measured_on": {
@@ -156,23 +156,19 @@ The synthesis must resolve every quantitative cascade trigger from the roadmap:
            "torch": "2.5.1+cu121"
          },
          "decisions": {
-           "https_strategy":       "tailscale" | "mkcert",
+           "https_strategy":       "mkcert" | null,
            "whisper_default_rung": "distil-large-v3" | "large-v3-turbo" | "large-v3",
            "whisper_default_compute_type": "int8_float16" | "float16",
            "tts_v1_default":       "f5" | "xtts" | "qwen3" | null,
            "qwen3_v1_accepted":    true | false,
            "qwen3_v1_variant":     "0.6B-Base" | "1.7B-Base" | null,
-           "fa2_installed":        true | false,
-           "llm_server":           "ollama" | "llama-server" | null,
-           "llm_model":            "<e.g. llama3.2:3b>",
-           "llm_cancel_meets_budget": true | false
+           "fa2_installed":        true | false
          },
          "cascades_triggered": {
            "resolved_tension_2_whisper_fp16_forces_xtts":  true | false,
            "resolved_tension_3_f5_demoted":                 true | false,
            "qwen3_gate_rejected":                            true | false,
-           "fa2_install_failed":                             true | false,
-           "llm_cancel_over_200ms":                          true | false
+           "fa2_install_failed":                             true | false
          },
          "vram_budget_3060": {
            "f5_fits":    true | false,
@@ -200,13 +196,13 @@ The synthesis must resolve every quantitative cascade trigger from the roadmap:
                return None
            return json.loads(path.read_text())
 
-       https = _load("https_iphone.json") or {}
+       https = _load("https_android.json") or {}
        whisp = _load("whisper.json") or {}
        tts   = _load("tts_ttfa.json") or {}
+       tts_runtime = _load("tts_runtime_matrix.json") or {}
        soak_f5   = _load("vram_soak_f5.json")   or {}
        soak_xtts = _load("vram_soak_xtts.json") or {}
        soak_qwen = _load("vram_soak_qwen3.json") or {}
-       cancel = _load("llm_cancel.json") or {}
        fa2    = _load("fa2_install.json") or {}
 
        # Derive decisions
@@ -231,12 +227,6 @@ The synthesis must resolve every quantitative cascade trigger from the roadmap:
        # Cascade: Resolved Tension #3 (F5 demoted)
        rt3_triggered = (tts_default in ("xtts", "qwen3"))
 
-       # LLM server label
-       base_url = cancel.get("base_url", "")
-       llm_server = ("ollama" if "11434" in base_url
-                     else "llama-server" if "8080" in base_url
-                     else None)
-
        # 3060 fit per engine
        def fits(d): return bool(d.get("fits_3060_budget"))
 
@@ -246,13 +236,13 @@ The synthesis must resolve every quantitative cascade trigger from the roadmap:
                "phase": "00-measurement-gate",
            },
            "inputs": {
-               "https_iphone":    "results/https_iphone.json",
+               "https_android":   "results/https_android.json",
                "whisper":         "results/whisper.json",
                "tts_ttfa":        "results/tts_ttfa.json",
+               "tts_runtime_matrix": "results/tts_runtime_matrix.json",
                "vram_soak_f5":    "results/vram_soak_f5.json",
                "vram_soak_xtts":  "results/vram_soak_xtts.json",
                "vram_soak_qwen3": "results/vram_soak_qwen3.json",
-               "llm_cancel":      "results/llm_cancel.json",
                "fa2_install":     "results/fa2_install.json",
            },
            "measured_on": (whisp.get("meta", {}).get("gpu")
@@ -266,16 +256,12 @@ The synthesis must resolve every quantitative cascade trigger from the roadmap:
                "qwen3_v1_accepted":    qwen_accepted,
                "qwen3_v1_variant":     qwen_variant,
                "fa2_installed":        fa2_installed,
-               "llm_server":           llm_server,
-               "llm_model":            cancel.get("model"),
-               "llm_cancel_meets_budget": bool(cancel.get("meets_phase4_budget_200ms")),
            },
            "cascades_triggered": {
                "resolved_tension_2_whisper_fp16_forces_xtts": rt2_triggered,
                "resolved_tension_3_f5_demoted":                rt3_triggered,
                "qwen3_gate_rejected":                          (not qwen_accepted),
                "fa2_install_failed":                           (not fa2_installed),
-               "llm_cancel_over_200ms":                        (not bool(cancel.get("meets_phase4_budget_200ms"))),
            },
            "vram_budget_3060": {
                "f5_fits":         fits(soak_f5),
@@ -303,18 +289,16 @@ The synthesis must resolve every quantitative cascade trigger from the roadmap:
 
        | Decision | Value | Source |
        |---|---|---|
-       | HTTPS strategy | `{tailscale|mkcert}` | results/https_iphone.json |
+       | HTTPS strategy | `{mkcert}` | results/https_android.json |
        | Whisper default rung | `{distil-large-v3|large-v3-turbo|large-v3}` @ `{compute_type}` | results/whisper.json |
        | v1 TTS default engine | `{f5|xtts|qwen3}` | results/tts_ttfa.json |
        | Qwen3-TTS v1 disposition | `{accepted|rejected}` | results/tts_ttfa.json + vram_soak_qwen3.json |
        | Qwen3-TTS variant (if accepted) | `{0.6B-Base|1.7B-Base}` | derived from fa2_install.json |
        | FlashAttention 2 installed | `{yes|no}` (build: `{duration}`s) | results/fa2_install.json |
-       | LLM server | `{ollama|llama-server}` | results/llm_cancel.json |
-       | LLM cancel p50 | `{N}` ms (budget 200) | results/llm_cancel.json |
 
-       ## 1. HTTPS on iPhone
+       ## 1. HTTPS on Android
 
-       *(Summarize https_iphone.json — which strategy, exact URL that worked, iPhone model/iOS if recorded, any notes.)*
+       *(Summarize https_android.json — exact URL that worked, Android browser, and any notes.)*
 
        ## 2. Whisper WER
 
@@ -328,11 +312,7 @@ The synthesis must resolve every quantitative cascade trigger from the roadmap:
 
        *(Table of the 3 engines with peak_vram_mb / growth_detected / fits_3060_budget; flag any engine that exceeded 11 GB on the 3060-constrained basis.)*
 
-       ## 5. LLM mid-stream cancel
-
-       *(p50 cancel_to_idle_ms, chosen server+model, pass/fail for 200 ms budget; if fail, recommend pinning a specific server for v1.)*
-
-       ## 6. FlashAttention 2
+       ## 5. FlashAttention 2
 
        *(Install outcome, build duration, version if installed, failure_reason if not; recommendation on Qwen3-TTS 1.7B eligibility.)*
 
@@ -349,33 +329,31 @@ The synthesis must resolve every quantitative cascade trigger from the roadmap:
        - STT default: `{rung}` (@ `{compute_type}`)
        - TTS v1 default: `{engine}`
        - Engines shipping in v1 Voice Lab: `{two-engine-list|three-engine-list}`
-       - LLM server: `{server}` at `{model}` — v1 LLM contract
        - HTTPS: `{strategy}` documented in `HTTPS-SETUP.md`
        - PROJECT.md Key Decisions section updated (see that file).
 
        ## Source JSONs
 
-       - [HTTPS iPhone](results/https_iphone.json)
+       - [HTTPS Android](results/https_android.json)
        - [Whisper WER](results/whisper.json)
        - [TTS TTFA](results/tts_ttfa.json)
        - [VRAM soak F5](results/vram_soak_f5.json)
        - [VRAM soak XTTS](results/vram_soak_xtts.json)
        - [VRAM soak Qwen3](results/vram_soak_qwen3.json)
-       - [LLM cancel](results/llm_cancel.json)
        - [FA2 install](results/fa2_install.json)
        ```
 
        Render the actual values from phase0_summary.json. Use the Phase 0 venv's Python for the render — a simple templating pass is fine; do not add new dependencies.
   </action>
   <verify>
-    <automated>test -f .planning/phases/00-measurement-gate/results/phase0_summary.json &amp;&amp; test -f .planning/phases/00-measurement-gate/KEY_DECISIONS.md &amp;&amp; .planning/phases/00-measurement-gate/.venv-phase0/Scripts/python.exe -c "import json; d = json.load(open('.planning/phases/00-measurement-gate/results/phase0_summary.json')); assert 'decisions' in d and 'cascades_triggered' in d and 'vram_budget_3060' in d; assert set(d['decisions'].keys()) &gt;= {'https_strategy','whisper_default_rung','tts_v1_default','qwen3_v1_accepted','fa2_installed','llm_server'}; print('OK')" &amp;&amp; grep -q "# Phase 0 Key Decisions" .planning/phases/00-measurement-gate/KEY_DECISIONS.md &amp;&amp; grep -q "Hardware Note" .planning/phases/00-measurement-gate/KEY_DECISIONS.md</automated>
+    <automated>test -f .planning/phases/00-measurement-gate/results/phase0_summary.json &amp;&amp; test -f .planning/phases/00-measurement-gate/KEY_DECISIONS.md &amp;&amp; .planning/phases/00-measurement-gate/.venv-phase0/Scripts/python.exe -c "import json; d = json.load(open('.planning/phases/00-measurement-gate/results/phase0_summary.json')); assert 'decisions' in d and 'cascades_triggered' in d and 'vram_budget_3060' in d; assert set(d['decisions'].keys()) &gt;= {'https_strategy','whisper_default_rung','tts_v1_default','qwen3_v1_accepted','fa2_installed'}; print('OK')" &amp;&amp; grep -q "# Phase 0 Key Decisions" .planning/phases/00-measurement-gate/KEY_DECISIONS.md &amp;&amp; grep -q "Hardware Note" .planning/phases/00-measurement-gate/KEY_DECISIONS.md</automated>
   </verify>
   <acceptance_criteria>
     - File `results/phase0_summary.json` exists with valid JSON.
     - JSON has top-level keys `meta`, `inputs`, `measured_on`, `decisions`, `cascades_triggered`, `vram_budget_3060`.
-    - `decisions` has all 11 expected keys (see interfaces).
+    - `decisions` has all expected keys from the current interfaces.
     - File `KEY_DECISIONS.md` exists with a level-1 heading `# Phase 0 Key Decisions`.
-    - KEY_DECISIONS.md references every source JSON (grep: `whisper.json`, `tts_ttfa.json`, `vram_soak_f5.json`, `vram_soak_xtts.json`, `vram_soak_qwen3.json`, `llm_cancel.json`, `fa2_install.json`, `https_iphone.json`).
+    - KEY_DECISIONS.md references every source JSON (grep: `whisper.json`, `tts_ttfa.json`, `vram_soak_f5.json`, `vram_soak_xtts.json`, `vram_soak_qwen3.json`, `fa2_install.json`, `https_android.json`).
     - KEY_DECISIONS.md has a "Hardware Note" section calling out the 4090 vs 3060 discrepancy.
     - KEY_DECISIONS.md has a "Cascades triggered" section (even if no cascades fired, the section exists with "none triggered" text).
   </acceptance_criteria>
@@ -398,13 +376,12 @@ The synthesis must resolve every quantitative cascade trigger from the roadmap:
     The builder reviews `KEY_DECISIONS.md` and approves (or rejects) the propagation of its decisions into `PROJECT.md` and `STATE.md`. Rejection paths exist because a measurement may have produced a clear result that the builder is willing to override (e.g., "Whisper picked distil but I want to pay the 2pp WER for better accent handling").
   </decision>
   <context>
-    KEY_DECISIONS.md proposes 6 decisions to pin in PROJECT.md's Key Decisions section:
+    KEY_DECISIONS.md proposes 5 decisions to pin in PROJECT.md's Key Decisions section:
     - HTTPS strategy
     - Whisper default rung
     - v1 TTS default engine
     - Qwen3-TTS v1 disposition (accepted/rejected) + variant
     - FA2 status + Qwen3-TTS 1.7B eligibility
-    - LLM server + model
 
     Each decision has a quantitative backing. Rejection should come with a reason (recorded in STATE.md blockers or RETROSPECTIVE.md).
   </context>
@@ -451,12 +428,11 @@ The synthesis must resolve every quantitative cascade trigger from the roadmap:
     *Frozen <ISO date> from `.planning/phases/00-measurement-gate/KEY_DECISIONS.md`
     (machine-readable: `.planning/phases/00-measurement-gate/results/phase0_summary.json`).*
 
-    - **HTTPS strategy (REQ-A1):** {tailscale | mkcert}. Setup: see `.planning/phases/00-measurement-gate/HTTPS-SETUP.md`.
+    - **HTTPS strategy (REQ-A1):** `mkcert` on LAN. Setup: see `.planning/phases/00-measurement-gate/HTTPS-SETUP.md`.
     - **STT default (REQ-A3):** faster-whisper `{model}` (`{compute_type}`). WER on builder's Spanish-accented English = `{wer}`. Peak VRAM = `{mb}` MB.
     - **TTS v1 default (Resolved Tension #3):** `{engine}`. TTFA = `{ms}` ms, RTF = `{rtf}`.
     - **TTS v1 engine roster (REQ-22):** {F5-TTS, XTTS v2} or {F5-TTS, XTTS v2, Qwen3-TTS 0.6B-Base} — depending on Qwen gate outcome.
     - **FA2 (Qwen3-TTS 1.7B eligibility):** {installed v{x.y.z} | not installed; reason: {...}}. Qwen3-TTS 1.7B is { eligible | ineligible } for v1.
-    - **LLM server (REQ-03):** `{ollama | llama-server}` at `{base_url}` with model `{model}`. p50 cancel-to-idle = `{ms}` ms (budget 200 ms, {pass | fail}).
     - **Hardware discrepancy note:** measured on RTX 4090; REQ-02 assumes RTX 3060. Per-engine 3060-fit: F5={yes|no}, XTTS={yes|no}, Qwen3-0.6B={yes|no}.
     - **Overrides (if any):** {list of decisions the builder manually overrode and why, else "none"}.
     ```
@@ -478,7 +454,7 @@ The synthesis must resolve every quantitative cascade trigger from the roadmap:
   </action>
   <acceptance_criteria>
     - `.planning/PROJECT.md` contains a section heading `## Phase 0 Key Decisions`.
-    - That section contains all six decision bullets (HTTPS, STT, TTS default, TTS roster, FA2, LLM server).
+    - That section contains all five decision bullets (HTTPS, STT, TTS default, TTS roster, FA2).
     - `.planning/STATE.md` references "Phase 0 complete" or equivalent status marker.
     - `.planning/STATE.md` has a Current Decisions block that matches the PROJECT.md section's values.
     - Git commit contains both files.
@@ -537,7 +513,7 @@ print('OK: decisions consistent between summary JSON and PROJECT.md')
 - [ ] PROJECT.md has an approved "Phase 0 Key Decisions" section
 - [ ] STATE.md reflects Phase 0 complete + current decisions
 - [ ] Any builder overrides are explicitly listed with reasons
-- [ ] Cascades (Resolved Tension #2/#3, Qwen gate, FA2, LLM cancel) are flagged for Phase 2+
+- [ ] Cascades (Resolved Tension #2/#3, Qwen gate, FA2) are flagged for Phase 2+
 </success_criteria>
 
 <output>

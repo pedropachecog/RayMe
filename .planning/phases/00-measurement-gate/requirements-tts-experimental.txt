@@ -1,0 +1,31 @@
+# Experimental TTS extensions for the existing Phase 0 venv.
+# Keep these separate from requirements-phase0.txt so the frozen Phase 0
+# baseline can stay stable.
+#
+# Install strategy:
+# 1. Install this file into .venv-phase0
+# 2. Install chatterbox-tts and hume-tada with --no-deps so pip does not
+#    replace the validated torch stack.
+#
+# Example:
+#   .venv-phase0\Scripts\python.exe -m pip install -r requirements-tts-experimental.txt
+#   .venv-phase0\Scripts\python.exe -m pip install --no-deps chatterbox-tts
+#   .venv-phase0\Scripts\python.exe -m pip install --no-deps hume-tada
+
+accelerate>=0.26.0
+huggingface_hub>=0.20.0
+
+# LuxTTS / ZipVoice
+--find-links https://k2-fsa.github.io/icefall/piper_phonemize.html
+linacodec @ git+https://github.com/ysharma3501/LinaCodec.git
+Zipvoice @ git+https://github.com/ysharma3501/LuxTTS.git
+
+# Chatterbox Turbo and TADA sub-dependencies
+conformer>=0.3.2
+diffusers>=0.29.0
+omegaconf
+pykakasi
+resemble-perth>=1.0.1
+s3tokenizer
+spacy-pkuseg
+pyloudnorm

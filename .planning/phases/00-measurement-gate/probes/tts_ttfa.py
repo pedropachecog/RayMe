@@ -19,6 +19,11 @@ TTFA_TARGET_MS = 400
 RTF_TARGET = 1.0
 OUTPUT_SAMPLE_DIR = Path(__file__).resolve().parent / "fixtures" / "tts_samples"
 OPTIMIZATION_MODES = ("eager", "sdpa", "flash_attention_2")
+DEFAULT_ENGINE_ORDER = ("f5", "xtts", "luxtts", "chatterbox_turbo", "tada_1b", "qwen3")
+ENGINE_TIEBREAK = {name: index for index, name in enumerate(DEFAULT_ENGINE_ORDER)}
+TADA_CODEC_REPO = "HumeAI/tada-codec"
+TADA_1B_REPO = "HumeAI/tada-1b"
+TADA_LLAMA_TOKENIZER_REPO = "unsloth/Llama-3.2-1B"
 
 
 def detect_flash_attn_install() -> dict[str, Any]:
@@ -162,7 +167,7 @@ def compute_rtf(audio_duration_s: float, synthesis_time_s: float) -> float:
 
 
 def pick_v1_default(engines: dict[str, dict[str, Any]]) -> str | None:
-    """Pick the v1 default using the priority order from Resolved Tension #3."""
+    """Pick the fastest measured engine that clears the Phase 0 latency budget."""
 
     def clears_budget(engine: dict[str, Any]) -> bool:
         ttfa_ms = engine.get("ttfa_ms")
@@ -174,10 +179,18 @@ def pick_v1_default(engines: dict[str, dict[str, Any]]) -> str | None:
             and rtf < RTF_TARGET
         )
 
-    for name in ("f5", "xtts", "qwen3"):
-        engine = engines.get(name)
-        if engine and clears_budget(engine):
-            return name
+    def rank(name: str, engine: dict[str, Any]) -> tuple[float, float, int]:
+        ttfa_ms = float(engine.get("ttfa_ms", float("inf")))
+        rtf = float(engine.get("rtf", float("inf")))
+        return (ttfa_ms, rtf, ENGINE_TIEBREAK.get(name, len(ENGINE_TIEBREAK)))
+
+    clearers = [
+        (name, engine)
+        for name, engine in engines.items()
+        if engine.get("ttfa_ms") is not None and engine.get("rtf") is not None and clears_budget(engine)
+    ]
+    if clearers:
+        return min(clearers, key=lambda item: rank(item[0], item[1]))[0]
 
     measured = {
         name: engine
@@ -186,7 +199,7 @@ def pick_v1_default(engines: dict[str, dict[str, Any]]) -> str | None:
     }
     if not measured:
         return None
-    return min(measured, key=lambda name: measured[name]["ttfa_ms"])
+    return min(measured, key=lambda name: rank(name, measured[name]))
 
 
 def qwen_gate_disposition(
@@ -263,6 +276,248 @@ def _install_f5_runtime_shims() -> None:
 
     trainer_mod.Trainer = Trainer
     sys.modules["f5_tts.model.trainer"] = trainer_mod
+
+
+def _patch_chatterbox_f32(model: Any) -> None:
+    """Patch float64 reference-audio paths in upstream chatterbox."""
+    import types
+
+    tokzr = model.s3gen.tokenizer
+    orig_log_mel = tokzr.log_mel_spectrogram.__func__
+
+    def f32_log_mel(self_tokzr: Any, audio: Any, padding: int = 0) -> Any:
+        import torch as _torch
+
+        if _torch.is_tensor(audio):
+            audio = audio.float()
+        return orig_log_mel(self_tokzr, audio, padding)
+
+    tokzr.log_mel_spectrogram = types.MethodType(f32_log_mel, tokzr)
+
+    voice_encoder = model.ve
+    orig_ve_forward = voice_encoder.forward.__func__
+
+    def f32_ve_forward(self_ve: Any, mels: Any) -> Any:
+        return orig_ve_forward(self_ve, mels.float())
+
+    voice_encoder.forward = types.MethodType(f32_ve_forward, voice_encoder)
+
+
+def _install_dac_shim() -> None:
+    """Install the minimal DAC shim required by TADA when DAC is absent."""
+    try:
+        import dac  # type: ignore  # noqa: F401
+        return
+    except ImportError:
+        pass
+
+    import torch
+    import torch.nn as nn
+
+    def snake(x: torch.Tensor, alpha: torch.Tensor) -> torch.Tensor:
+        shape = x.shape
+        x = x.reshape(shape[0], shape[1], -1)
+        x = x + (alpha + 1e-9).reciprocal() * torch.sin(alpha * x).pow(2)
+        return x.reshape(shape)
+
+    class Snake1d(nn.Module):
+        def __init__(self, channels: int):
+            super().__init__()
+            self.alpha = nn.Parameter(torch.ones(1, channels, 1))
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            return snake(x, self.alpha)
+
+    dac_pkg = types.ModuleType("dac")
+    dac_pkg.__path__ = []
+    dac_pkg.__package__ = "dac"
+
+    dac_nn = types.ModuleType("dac.nn")
+    dac_nn.__path__ = []
+    dac_nn.__package__ = "dac.nn"
+
+    dac_nn_layers = types.ModuleType("dac.nn.layers")
+    dac_nn_layers.__package__ = "dac.nn"
+    dac_nn_layers.Snake1d = Snake1d
+    dac_nn_layers.snake = snake
+
+    dac_model = types.ModuleType("dac.model")
+    dac_model.__path__ = []
+    dac_model.__package__ = "dac.model"
+
+    dac_model_dac = types.ModuleType("dac.model.dac")
+    dac_model_dac.__package__ = "dac.model"
+    dac_model_dac.Snake1d = Snake1d
+
+    dac_pkg.nn = dac_nn
+    dac_pkg.model = dac_model
+    dac_nn.layers = dac_nn_layers
+    dac_model.dac = dac_model_dac
+
+    sys.modules["dac"] = dac_pkg
+    sys.modules["dac.nn"] = dac_nn
+    sys.modules["dac.nn.layers"] = dac_nn_layers
+    sys.modules["dac.model"] = dac_model
+    sys.modules["dac.model.dac"] = dac_model_dac
+
+
+def _load_luxtts_model() -> Any:
+    from zipvoice.luxvoice import LuxTTS
+
+    return LuxTTS(model_path="YatharthS/LuxTTS", device="cuda")
+
+
+def _encode_luxtts_prompt(model: Any, ref_audio: str, ref_text: str) -> dict[str, Any]:
+    import librosa
+    import torch
+    from zipvoice.utils.infer import rms_norm
+
+    prompt_wav, _ = librosa.load(ref_audio, sr=24000, duration=5)
+    prompt_text = ref_text.strip()
+
+    prompt_wav_t = torch.from_numpy(prompt_wav).unsqueeze(0)
+    prompt_wav_t, prompt_rms = rms_norm(prompt_wav_t, 0.01)
+    prompt_features = model.feature_extractor.extract(
+        prompt_wav_t,
+        sampling_rate=24000,
+    ).to(model.device)
+    prompt_features = prompt_features.unsqueeze(0) * 0.1
+    prompt_features_lens = torch.tensor([prompt_features.size(1)], device=model.device)
+    prompt_tokens = model.tokenizer.texts_to_token_ids([prompt_text])
+
+    return {
+        "prompt_tokens": prompt_tokens,
+        "prompt_features_lens": prompt_features_lens,
+        "prompt_features": prompt_features,
+        "prompt_rms": prompt_rms,
+    }
+
+
+def _generate_luxtts_audio(model: Any, prompt: dict[str, Any], text: str) -> tuple[Any, int]:
+    wav = model.generate_speech(
+        text=text,
+        encode_dict=prompt,
+        num_steps=4,
+        guidance_scale=3.0,
+        t_shift=0.5,
+        speed=1.0,
+        return_smooth=False,
+    )
+    return wav, 48000
+
+
+def _load_chatterbox_turbo_model() -> Any:
+    from chatterbox.tts_turbo import ChatterboxTurboTTS
+
+    model = ChatterboxTurboTTS.from_pretrained(device="cuda")
+    _patch_chatterbox_f32(model)
+    return model
+
+
+def _generate_chatterbox_turbo_audio(model: Any, ref_audio: str, text: str) -> tuple[Any, int]:
+    wav = model.generate(
+        text,
+        audio_prompt_path=ref_audio,
+        temperature=0.8,
+        top_k=1000,
+        top_p=0.95,
+        repetition_penalty=1.2,
+    )
+    sample_rate = int(getattr(model, "sr", None) or getattr(model, "sample_rate", 24000))
+    return wav, sample_rate
+
+
+def _load_tada_1b() -> tuple[Any, Any]:
+    import torch
+    from huggingface_hub import snapshot_download
+
+    _install_dac_shim()
+    from tada.modules.aligner import AlignerConfig
+    from tada.modules.encoder import Encoder
+    from tada.modules.tada import TadaConfig, TadaForCausalLM
+
+    snapshot_download(
+        repo_id=TADA_CODEC_REPO,
+        token=None,
+        allow_patterns=["*.safetensors", "*.json", "*.txt", "*.bin"],
+    )
+    tokenizer_dir = Path.home() / "rayme-tada-tokenizers" / "llama-3.2-1b"
+    tokenizer_dir.mkdir(parents=True, exist_ok=True)
+    tokenizer_path = snapshot_download(
+        repo_id=TADA_LLAMA_TOKENIZER_REPO,
+        token=None,
+        allow_patterns=["tokenizer*", "special_tokens*"],
+        local_dir=str(tokenizer_dir),
+        local_dir_use_symlinks=False,
+    )
+
+    device = "cuda"
+    model_dtype = torch.bfloat16 if torch.cuda.is_available() and torch.cuda.is_bf16_supported() else torch.float32
+    AlignerConfig.tokenizer_name = tokenizer_path
+
+    encoder = Encoder.from_pretrained(TADA_CODEC_REPO, subfolder="encoder").to(device)
+    encoder.eval()
+
+    config = TadaConfig.from_pretrained(TADA_1B_REPO)
+    config.tokenizer_name = tokenizer_path
+    model = TadaForCausalLM.from_pretrained(
+        TADA_1B_REPO,
+        config=config,
+        torch_dtype=model_dtype,
+    ).to(device)
+    model.eval()
+    return encoder, model
+
+
+def _create_tada_prompt(encoder: Any, ref_audio: str, ref_text: str) -> dict[str, Any]:
+    import soundfile as sf
+    import torch
+
+    audio_np, sample_rate = sf.read(str(ref_audio), dtype="float32")
+    audio = torch.from_numpy(audio_np).float()
+    if audio.ndim == 1:
+        audio = audio.unsqueeze(0)
+    else:
+        audio = audio.T
+    audio = audio.to(next(encoder.parameters()).device)
+    text_arg = [ref_text] if ref_text else None
+    prompt = encoder(audio, text=text_arg, sample_rate=sample_rate)
+
+    prompt_dict: dict[str, Any] = {}
+    for field_name in prompt.__dataclass_fields__:
+        value = getattr(prompt, field_name)
+        if isinstance(value, torch.Tensor):
+            prompt_dict[field_name] = value.detach().cpu()
+        else:
+            prompt_dict[field_name] = value
+    return prompt_dict
+
+
+def _generate_tada_audio(model: Any, voice_prompt: dict[str, Any], text: str) -> tuple[Any, int]:
+    import numpy as np
+    import torch
+    from tada.modules.encoder import EncoderOutput
+
+    restored: dict[str, Any] = {}
+    model_dtype = next(model.parameters()).dtype
+    model_device = next(model.parameters()).device
+
+    for key, value in voice_prompt.items():
+        if isinstance(value, torch.Tensor):
+            if value.is_floating_point():
+                restored[key] = value.to(device=model_device, dtype=model_dtype)
+            else:
+                restored[key] = value.to(device=model_device)
+        else:
+            restored[key] = value
+
+    prompt = EncoderOutput(**restored)
+    output = model.generate(prompt=prompt, text=text)
+    if output.audio and output.audio[0] is not None:
+        audio = output.audio[0].detach().cpu().numpy().squeeze().astype(np.float32)
+    else:
+        audio = np.zeros(24000, dtype=np.float32)
+    return audio, 24000
 
 
 def measure_f5(ref_audio: str, ref_text: str, target_text: str, sample_out: Path) -> dict[str, Any]:
@@ -530,6 +785,150 @@ def measure_qwen3(
     }
 
 
+def measure_luxtts(ref_audio: str, ref_text: str, target_text: str, sample_out: Path) -> dict[str, Any]:
+    import soundfile as sf
+    import torch
+
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+
+    print("[tts] Loading LuxTTS...", flush=True)
+    model = _load_luxtts_model()
+    warmup_cuda()
+    _ = _encode_luxtts_prompt(model, ref_audio, ref_text)
+    _ = _generate_luxtts_audio(model, _encode_luxtts_prompt(model, ref_audio, ref_text), "Warm.")
+    _maybe_cuda_sync(torch)
+
+    with Timer() as timer:
+        prompt = _encode_luxtts_prompt(model, ref_audio, ref_text)
+        wav, sample_rate = _generate_luxtts_audio(model, prompt, target_text)
+        _maybe_cuda_sync(torch)
+
+    sample = wav.detach().cpu().numpy().astype("float32").flatten()
+    audio_duration_s = len(sample) / float(sample_rate)
+    sample_out.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(sample_out, sample, int(sample_rate))
+    peak_vram_mb = sample_vram_mb()["peak_allocated_mb"]
+
+    del model
+    torch.cuda.empty_cache()
+
+    return {
+        "engine": "luxtts",
+        "mode": "non_streaming_clone",
+        "streaming_support": "none",
+        "true_streaming": False,
+        "ttfa_ms": round(timer.elapsed_s * 1000, 1),
+        "rtf": round(compute_rtf(audio_duration_s, timer.elapsed_s), 3),
+        "audio_duration_s": round(audio_duration_s, 3),
+        "synthesis_time_s": round(timer.elapsed_s, 3),
+        "peak_vram_mb": round(peak_vram_mb, 1),
+        "sample_rate": int(sample_rate),
+        "output_wav": str(sample_out),
+        **not_applicable_optimization_metadata(
+            "LuxTTS probe used the upstream ZipVoice PyTorch path; the main speed knobs are prompt caching, num_steps, and CPU/ONNX runtime selection rather than selectable attention backends."
+        ),
+    }
+
+
+def measure_chatterbox_turbo(ref_audio: str, target_text: str, sample_out: Path) -> dict[str, Any]:
+    import numpy as np
+    import soundfile as sf
+    import torch
+
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+
+    print("[tts] Loading Chatterbox Turbo...", flush=True)
+    model = _load_chatterbox_turbo_model()
+    warmup_cuda()
+    _ = _generate_chatterbox_turbo_audio(model, ref_audio, "Warm.")
+    _maybe_cuda_sync(torch)
+
+    with Timer() as timer:
+        wav, sample_rate = _generate_chatterbox_turbo_audio(model, ref_audio, target_text)
+        _maybe_cuda_sync(torch)
+
+    if isinstance(wav, torch.Tensor):
+        sample = wav.squeeze().detach().cpu().numpy().astype(np.float32)
+    else:
+        sample = np.asarray(wav, dtype=np.float32).flatten()
+    audio_duration_s = len(sample) / float(sample_rate)
+    sample_out.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(sample_out, sample, int(sample_rate))
+    peak_vram_mb = sample_vram_mb()["peak_allocated_mb"]
+
+    del model
+    torch.cuda.empty_cache()
+
+    return {
+        "engine": "chatterbox_turbo",
+        "mode": "non_streaming_clone",
+        "streaming_support": "none",
+        "true_streaming": False,
+        "ttfa_ms": round(timer.elapsed_s * 1000, 1),
+        "rtf": round(compute_rtf(audio_duration_s, timer.elapsed_s), 3),
+        "audio_duration_s": round(audio_duration_s, 3),
+        "synthesis_time_s": round(timer.elapsed_s, 3),
+        "peak_vram_mb": round(peak_vram_mb, 1),
+        "sample_rate": int(sample_rate),
+        "output_wav": str(sample_out),
+        **not_applicable_optimization_metadata(
+            "Chatterbox Turbo probe used the default CUDA PyTorch path; upstream generation relies on its built-in sampler configuration rather than a selectable attention backend."
+        ),
+    }
+
+
+def measure_tada_1b(
+    ref_audio: str, ref_text: str, target_text: str, sample_out: Path
+) -> dict[str, Any]:
+    import soundfile as sf
+    import torch
+
+    torch.cuda.empty_cache()
+    torch.cuda.reset_peak_memory_stats()
+
+    print("[tts] Loading TADA 1B...", flush=True)
+    encoder, model = _load_tada_1b()
+    warmup_cuda()
+    prompt = _create_tada_prompt(encoder, ref_audio, ref_text)
+    _ = _generate_tada_audio(model, prompt, "Warm.")
+    _maybe_cuda_sync(torch)
+
+    with Timer() as timer:
+        prompt = _create_tada_prompt(encoder, ref_audio, ref_text)
+        wav, sample_rate = _generate_tada_audio(model, prompt, target_text)
+        _maybe_cuda_sync(torch)
+
+    sample = wav.astype("float32").flatten()
+    audio_duration_s = len(sample) / float(sample_rate)
+    sample_out.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(sample_out, sample, int(sample_rate))
+    peak_vram_mb = sample_vram_mb()["peak_allocated_mb"]
+
+    del encoder
+    del model
+    torch.cuda.empty_cache()
+
+    return {
+        "engine": "tada_1b",
+        "mode": "non_streaming_clone",
+        "streaming_support": "none",
+        "true_streaming": False,
+        "variant": "1B",
+        "ttfa_ms": round(timer.elapsed_s * 1000, 1),
+        "rtf": round(compute_rtf(audio_duration_s, timer.elapsed_s), 3),
+        "audio_duration_s": round(audio_duration_s, 3),
+        "synthesis_time_s": round(timer.elapsed_s, 3),
+        "peak_vram_mb": round(peak_vram_mb, 1),
+        "sample_rate": int(sample_rate),
+        "output_wav": str(sample_out),
+        **not_applicable_optimization_metadata(
+            "TADA 1B probe used the upstream bf16/fp32 PyTorch path; acceleration comes from dtype and cached prompt encoding, not a selectable attention backend in this harness."
+        ),
+    }
+
+
 def run_engine_locally(
     engine: str,
     ref_audio: str,
@@ -541,6 +940,12 @@ def run_engine_locally(
         return measure_f5(ref_audio, ref_text, target_text, sample_out)
     if engine == "xtts":
         return measure_xtts(ref_audio, target_text, sample_out)
+    if engine == "luxtts":
+        return measure_luxtts(ref_audio, ref_text, target_text, sample_out)
+    if engine == "chatterbox_turbo":
+        return measure_chatterbox_turbo(ref_audio, target_text, sample_out)
+    if engine == "tada_1b":
+        return measure_tada_1b(ref_audio, ref_text, target_text, sample_out)
     if engine == "qwen3":
         return measure_qwen3(ref_audio, ref_text, target_text, sample_out)
     raise ValueError(f"Unknown engine: {engine}")
@@ -661,7 +1066,7 @@ def main() -> int:
     )
     parser.add_argument(
         "--run-engine",
-        choices=("f5", "xtts", "qwen3"),
+        choices=DEFAULT_ENGINE_ORDER,
         help="Internal: run a single engine in an isolated subprocess",
     )
     parser.add_argument(
@@ -713,7 +1118,7 @@ def main() -> int:
         return 2
 
     engines: dict[str, dict[str, Any]] = {}
-    for name in ("f5", "xtts", "qwen3"):
+    for name in DEFAULT_ENGINE_ORDER:
         sample_out = OUTPUT_SAMPLE_DIR / f"{name}.wav"
         try:
             engines[name] = run_engine_subprocess(

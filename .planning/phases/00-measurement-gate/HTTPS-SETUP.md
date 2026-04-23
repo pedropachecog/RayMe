@@ -8,12 +8,9 @@ defined when the Android phone loads the served URL.
 
 ## Chosen Strategy
 
-Filled in by the verification task after the Android check is complete.
+- [x] mkcert on LAN (the only supported Phase 0 path)
 
-- [ ] mkcert (primary)
-- [ ] Tailscale (optional alternate)
-
-## Strategy A - mkcert (primary on the real backend)
+## mkcert on LAN
 
 ### Prerequisites
 
@@ -37,7 +34,7 @@ mkcert rayme.local 192.168.1.199
 
 ```powershell
 .venv-phase0\Scripts\python.exe probes\https_serve.py `
-  --host rayme.local `
+  --host 192.168.1.199 `
   --cert rayme.local+1.pem `
   --key rayme.local+1-key.pem `
   --bind 192.168.1.199 `
@@ -47,49 +44,13 @@ mkcert rayme.local 192.168.1.199
 ### On the Android Phone
 
 1. Open Chrome first. If Chrome behaves differently on your Android build, try another Android browser as a fallback and record which one worked.
-2. Navigate to `https://rayme.local:8443` or the direct LAN IP if hostname resolution is not configured.
+2. Navigate to `https://192.168.1.199:8443` first. Use `https://rayme.local:8443` only if local hostname resolution is configured on the LAN.
 3. Confirm there is no certificate warning.
 4. Confirm the page shows all green rows.
 
-## Strategy B - Tailscale (optional alternate if installed later)
-
-### Preconditions
-
-- Tailscale installed on the backend machine.
-- Tailscale installed on the Android phone.
-- A valid tailnet hostname and tailnet IP for this backend.
-- `tailscale cert` available on the backend after login to the tailnet.
-
-```powershell
-cd .planning/phases/00-measurement-gate
-tailscale status
-tailscale ip -4
-tailscale cert <backend-host>.ts.net
-```
-
-### Running the probe
-
-```powershell
-.venv-phase0\Scripts\python.exe probes\https_serve.py `
-  --host <backend-host>.ts.net `
-  --cert <tailscale-cert.pem> `
-  --key <tailscale-key.pem> `
-  --bind <tailnet-ip> `
-  --port 8443
-```
-
-### On the Android Phone
-
-1. Confirm the Android phone is enrolled in Tailscale and connected to the same tailnet.
-2. Open Chrome first.
-3. Navigate to `https://<backend-host>.ts.net:8443`.
-4. Confirm there is no certificate warning.
-5. Confirm the page shows all green rows.
-
 ## Security Notes
 
-- `*.key`, `*-key.pem`, `*.mobileconfig`, and cert material remain gitignored. Never commit them.
-- Tailscale certs are valid public certs for a `.ts.net` subdomain; leaking the key would let an attacker on the tailnet impersonate the backend.
+- `*.key`, `*.pem`, `*.crt`, and other cert material remain gitignored. Never commit them.
 - mkcert's root CA is trusted by every device it is installed on. Its private key lives in `%LOCALAPPDATA%\mkcert\`. Do not share it.
 - Stop the probe server immediately after verification. It is only a Phase 0 acceptance probe.
 
@@ -100,17 +61,15 @@ tailscale cert <backend-host>.ts.net
 | Android browser shows a cert warning | Root CA not trusted, wrong hostname, or wrong cert/key pair | Recreate the cert, reinstall the root CA if using mkcert, and load the exact hostname the cert covers |
 | `window.isSecureContext` is `false` | Wrong origin, wrong hostname, or an HTTP fallback | Load the HTTPS URL again and confirm the hostname matches the certificate |
 | `navigator.mediaDevices` is undefined | The Android browser does not trust the origin yet | Fix the certificate trust problem first; `mediaDevices` is the real acceptance signal |
-| Probe server fails to bind | Port 443 requires elevation or the IP is wrong | Use `--port 8443` first and confirm the bind IP is `192.168.1.199` or a valid tailnet IP |
+| Probe server fails to bind | Port 443 requires elevation or the IP is wrong | Use `--port 8443` first and confirm the bind IP is `192.168.1.199` |
 | Android phone cannot resolve `rayme.local` | LAN hostname resolution is missing | Use the direct LAN IP first, or add local DNS/Bonjour resolution later |
 
 ## What Actually Worked
 
-Filled in by Task 2 after the real Android verification:
-
-- Chosen path:
-- Probe URL:
-- Browser:
-- Certificate source:
-- `window.isSecureContext`:
-- `navigator.mediaDevices`:
-- Notes:
+- Chosen path: mkcert on LAN
+- Probe URL: `https://192.168.1.199:8443`
+- Browser: Android Chrome
+- Certificate source: `mkcert rayme.local 192.168.1.199`, with the mkcert root CA installed on the Android phone
+- `window.isSecureContext`: `true`
+- `navigator.mediaDevices`: defined / `true`
+- Notes: `rayme.local` was included in the cert SANs, but the actual passing verification used the direct LAN IP because local hostname resolution was not configured. A temporary HTTP file-transfer helper on `8081` was used only to move `mkcert-rootCA.crt` onto the phone and was removed immediately after the certificate import and HTTPS pass.

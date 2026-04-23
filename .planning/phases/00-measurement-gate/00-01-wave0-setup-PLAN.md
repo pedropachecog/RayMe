@@ -213,7 +213,7 @@ def warmup_cuda() -> None:
        *.pem
        *.crt
        *.p12
-       iphone-cert.mobileconfig
+       mkcert-root-ca.crt
 
        # Raw nvidia-smi logs (verbose; summaries in results/*.json are the artifact)
        *.smi.log
