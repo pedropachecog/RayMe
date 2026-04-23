@@ -204,7 +204,11 @@ def build_combined_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if scenario and scenario not in scenarios:
             scenarios.append(scenario)
 
-    summary: dict[str, Any] = {"best_request_ttfa": {}, "best_request_total": {}}
+    summary: dict[str, Any] = {
+        "best_request_ttfa": {},
+        "best_request_total": {},
+        "best_stitched_playback": {},
+    }
     for scenario in scenarios:
         measured = [
             row
@@ -241,6 +245,22 @@ def build_combined_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
             "request_total_ms": best_total["request_total_ms"],
             "output_wav": best_total["output_wav"],
         }
+        stitched_candidates = [row for row in measured if row.get("stitched_playback_ms") is not None]
+        if stitched_candidates:
+            best_stitched = min(
+                stitched_candidates,
+                key=lambda row: (
+                    float(row["stitched_playback_ms"]),
+                    float(row.get("request_rtf") or float("inf")),
+                ),
+            )
+            summary["best_stitched_playback"][scenario] = {
+                "engine": best_stitched["engine"],
+                "runtime": best_stitched["runtime"],
+                "profile": best_stitched["profile"],
+                "stitched_playback_ms": best_stitched["stitched_playback_ms"],
+                "output_wav": best_stitched["output_wav"],
+            }
     return summary
 
 

@@ -16,17 +16,17 @@
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 79850.3,
-      "warmup_ms": 2142.8,
+      "model_load_ms": 17221.1,
+      "warmup_ms": 1923.1,
       "cached_prompt_build_ms": null,
-      "request_prompt_prep_ms": 194.3,
-      "generate_ttfa_ms": 2358.6,
-      "generate_total_ms": 2358.6,
-      "request_ttfa_ms": 2552.9,
-      "request_total_ms": 2552.9,
-      "audio_duration_s": 5.44,
-      "generation_rtf": 0.434,
-      "request_rtf": 0.469,
+      "request_prompt_prep_ms": 185.0,
+      "generate_ttfa_ms": 2656.8,
+      "generate_total_ms": 2656.8,
+      "request_ttfa_ms": 2841.8,
+      "request_total_ms": 2841.8,
+      "audio_duration_s": 5.84,
+      "generation_rtf": 0.455,
+      "request_rtf": 0.487,
       "peak_vram_mb": 4804.0,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/chatterbox_turbo__baseline__short_reply.wav",
@@ -46,18 +46,18 @@
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 79850.3,
-      "warmup_ms": 2142.8,
+      "model_load_ms": 17221.1,
+      "warmup_ms": 1923.1,
       "cached_prompt_build_ms": null,
-      "request_prompt_prep_ms": 146.1,
-      "generate_ttfa_ms": 6551.9,
-      "generate_total_ms": 6551.9,
-      "request_ttfa_ms": 6697.9,
-      "request_total_ms": 6697.9,
-      "audio_duration_s": 15.56,
-      "generation_rtf": 0.421,
-      "request_rtf": 0.43,
-      "peak_vram_mb": 4885.2,
+      "request_prompt_prep_ms": 178.6,
+      "generate_ttfa_ms": 5865.5,
+      "generate_total_ms": 5865.5,
+      "request_ttfa_ms": 6044.1,
+      "request_total_ms": 6044.1,
+      "audio_duration_s": 13.52,
+      "generation_rtf": 0.434,
+      "request_rtf": 0.447,
+      "peak_vram_mb": 4829.2,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/chatterbox_turbo__baseline__medium_reply.wav",
       "optimizations_applied": [],
@@ -76,18 +76,18 @@
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 79850.3,
-      "warmup_ms": 2142.8,
+      "model_load_ms": 17221.1,
+      "warmup_ms": 1923.1,
       "cached_prompt_build_ms": null,
-      "request_prompt_prep_ms": 131.4,
-      "generate_ttfa_ms": 19147.8,
-      "generate_total_ms": 19147.8,
-      "request_ttfa_ms": 19279.2,
-      "request_total_ms": 19279.2,
-      "audio_duration_s": 39.04,
-      "generation_rtf": 0.49,
-      "request_rtf": 0.494,
-      "peak_vram_mb": 5849.7,
+      "request_prompt_prep_ms": 168.4,
+      "generate_ttfa_ms": 17293.2,
+      "generate_total_ms": 17293.2,
+      "request_ttfa_ms": 17461.6,
+      "request_total_ms": 17461.6,
+      "audio_duration_s": 40.16,
+      "generation_rtf": 0.431,
+      "request_rtf": 0.435,
+      "peak_vram_mb": 5910.4,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/chatterbox_turbo__baseline__long_reply.wav",
       "optimizations_applied": [],
@@ -102,28 +102,73 @@
       "scenario_description": "One concise assistant reply.",
       "scenario_word_count": 18,
       "backend": "turbo_native",
-      "mode": "non_streaming_clone",
+      "mode": "shared_chunked_playback",
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 79850.3,
-      "warmup_ms": 2142.8,
-      "cached_prompt_build_ms": 156.6,
+      "model_load_ms": 17221.1,
+      "warmup_ms": 1923.1,
+      "cached_prompt_build_ms": 136.8,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 2368.2,
-      "generate_total_ms": 2368.2,
-      "request_ttfa_ms": 2368.2,
-      "request_total_ms": 2368.2,
-      "audio_duration_s": 5.52,
-      "generation_rtf": 0.429,
-      "request_rtf": 0.429,
-      "peak_vram_mb": 4652.5,
+      "generate_ttfa_ms": 712.2,
+      "generate_total_ms": 2437.6,
+      "request_ttfa_ms": 712.2,
+      "request_total_ms": 2437.6,
+      "audio_duration_s": 5.16,
+      "generation_rtf": 0.472,
+      "request_rtf": 0.472,
+      "peak_vram_mb": 4626.7,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/chatterbox_turbo__optimized__short_reply.wav",
       "optimizations_applied": [
-        "conditioning_cache"
+        "conditioning_cache",
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Prepared speaker conditionals cached once per session and reused across replies."
+      "optimization_notes": "Prepared speaker conditionals cached once per session and text is split by the shared chunk planner.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 240,
+      "chunk_max_chars": 480,
+      "chunk_char_lengths": [
+        14,
+        70
+      ],
+      "chunk_word_counts": [
+        4,
+        14
+      ],
+      "chunk_estimated_tokens": [
+        12,
+        42
+      ],
+      "chunk_text_preview": [
+        "I can do that.",
+        "The quickest fix is to keep the model warm and reuse the voice prompt."
+      ],
+      "chunk_generate_ttfa_ms": [
+        712.2,
+        1725.4
+      ],
+      "chunk_generate_total_ms": [
+        712.2,
+        1725.4
+      ],
+      "chunk_audio_duration_s": [
+        1.16,
+        4.0
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        712.2,
+        2437.6
+      ],
+      "inter_chunk_gap_ms": [
+        565.4
+      ],
+      "max_inter_chunk_gap_ms": 565.4,
+      "total_generation_ms": 2437.6,
+      "stitched_audio_duration_s": 5.16,
+      "stitched_playback_ms": 6437.6,
+      "seed": null
     },
     {
       "engine": "chatterbox_turbo",
@@ -134,28 +179,73 @@
       "scenario_description": "A practical multi-sentence assistant answer.",
       "scenario_word_count": 41,
       "backend": "turbo_native",
-      "mode": "non_streaming_clone",
+      "mode": "shared_chunked_playback",
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 79850.3,
-      "warmup_ms": 2142.8,
-      "cached_prompt_build_ms": 156.6,
+      "model_load_ms": 17221.1,
+      "warmup_ms": 1923.1,
+      "cached_prompt_build_ms": 136.8,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 6483.6,
-      "generate_total_ms": 6483.6,
-      "request_ttfa_ms": 6483.6,
-      "request_total_ms": 6483.6,
-      "audio_duration_s": 14.96,
-      "generation_rtf": 0.433,
-      "request_rtf": 0.433,
-      "peak_vram_mb": 4868.3,
+      "generate_ttfa_ms": 1954.6,
+      "generate_total_ms": 6072.9,
+      "request_ttfa_ms": 1954.6,
+      "request_total_ms": 6072.9,
+      "audio_duration_s": 13.8,
+      "generation_rtf": 0.44,
+      "request_rtf": 0.44,
+      "peak_vram_mb": 4728.8,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/chatterbox_turbo__optimized__medium_reply.wav",
       "optimizations_applied": [
-        "conditioning_cache"
+        "conditioning_cache",
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Prepared speaker conditionals cached once per session and reused across replies."
+      "optimization_notes": "Prepared speaker conditionals cached once per session and text is split by the shared chunk planner.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 240,
+      "chunk_max_chars": 480,
+      "chunk_char_lengths": [
+        76,
+        165
+      ],
+      "chunk_word_counts": [
+        13,
+        29
+      ],
+      "chunk_estimated_tokens": [
+        40,
+        88
+      ],
+      "chunk_text_preview": [
+        "The main latency win comes from separating one-time setup from request work.",
+        "Load the model once at startup, precompute the voice conditioning when the speaker is chosen, an"
+      ],
+      "chunk_generate_ttfa_ms": [
+        1954.6,
+        4118.4
+      ],
+      "chunk_generate_total_ms": [
+        1954.6,
+        4118.4
+      ],
+      "chunk_audio_duration_s": [
+        4.44,
+        9.36
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        1954.6,
+        6072.9
+      ],
+      "inter_chunk_gap_ms": [
+        0.0
+      ],
+      "max_inter_chunk_gap_ms": 0.0,
+      "total_generation_ms": 6072.9,
+      "stitched_audio_duration_s": 13.8,
+      "stitched_playback_ms": 15754.6,
+      "seed": null
     },
     {
       "engine": "chatterbox_turbo",
@@ -166,28 +256,325 @@
       "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
       "scenario_word_count": 162,
       "backend": "turbo_native",
-      "mode": "non_streaming_clone",
+      "mode": "shared_chunked_playback",
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 79850.3,
-      "warmup_ms": 2142.8,
-      "cached_prompt_build_ms": 156.6,
+      "model_load_ms": 17221.1,
+      "warmup_ms": 1923.1,
+      "cached_prompt_build_ms": 136.8,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 15353.8,
-      "generate_total_ms": 15353.8,
-      "request_ttfa_ms": 15353.8,
-      "request_total_ms": 15353.8,
-      "audio_duration_s": 36.08,
-      "generation_rtf": 0.426,
-      "request_rtf": 0.426,
-      "peak_vram_mb": 5695.7,
+      "generate_ttfa_ms": 2994.2,
+      "generate_total_ms": 24157.6,
+      "request_ttfa_ms": 2994.2,
+      "request_total_ms": 24157.6,
+      "audio_duration_s": 55.48,
+      "generation_rtf": 0.435,
+      "request_rtf": 0.435,
+      "peak_vram_mb": 5257.3,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/chatterbox_turbo__optimized__long_reply.wav",
       "optimizations_applied": [
-        "conditioning_cache"
+        "conditioning_cache",
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Prepared speaker conditionals cached once per session and reused across replies."
+      "optimization_notes": "Prepared speaker conditionals cached once per session and text is split by the shared chunk planner.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 3,
+      "chunk_max_estimated_tokens": 240,
+      "chunk_max_chars": 480,
+      "chunk_char_lengths": [
+        97,
+        403,
+        416
+      ],
+      "chunk_word_counts": [
+        21,
+        68,
+        73
+      ],
+      "chunk_estimated_tokens": [
+        64,
+        208,
+        223
+      ],
+      "chunk_text_preview": [
+        "Hey, I wanted to leave a fuller note so we can hear how the voice holds up over a longer stretch",
+        "The short samples are useful for latency, but they do not tell us much about consistency, pacing",
+        "I also want enough material to expose awkward transitions, repeated prosody, or the sort of flat"
+      ],
+      "chunk_generate_ttfa_ms": [
+        2994.2,
+        9589.6,
+        11573.8
+      ],
+      "chunk_generate_total_ms": [
+        2994.2,
+        9589.6,
+        11573.8
+      ],
+      "chunk_audio_duration_s": [
+        6.52,
+        22.56,
+        26.4
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        2994.2,
+        12583.8,
+        24157.6
+      ],
+      "inter_chunk_gap_ms": [
+        3069.6,
+        0.0
+      ],
+      "max_inter_chunk_gap_ms": 3069.6,
+      "total_generation_ms": 24157.6,
+      "stitched_audio_duration_s": 55.48,
+      "stitched_playback_ms": 61543.8,
+      "seed": null
+    },
+    {
+      "engine": "chatterbox_turbo",
+      "runtime": "wsl_python",
+      "host_account": "rayme-pmpg",
+      "profile": "optimized_seed_1337",
+      "scenario": "short_reply",
+      "scenario_description": "One concise assistant reply.",
+      "scenario_word_count": 18,
+      "backend": "turbo_native",
+      "mode": "shared_chunked_playback",
+      "streaming_support": "none",
+      "true_streaming": false,
+      "status": "measured",
+      "model_load_ms": 17221.1,
+      "warmup_ms": 1923.1,
+      "cached_prompt_build_ms": 136.8,
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 689.4,
+      "generate_total_ms": 3038.6,
+      "request_ttfa_ms": 689.4,
+      "request_total_ms": 3038.6,
+      "audio_duration_s": 6.24,
+      "generation_rtf": 0.487,
+      "request_rtf": 0.487,
+      "peak_vram_mb": 4646.9,
+      "sample_rate": 24000,
+      "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/chatterbox_turbo__optimized_seed_1337__short_reply.wav",
+      "optimizations_applied": [
+        "conditioning_cache",
+        "shared_chunk_planner",
+        "alternate_seed"
+      ],
+      "optimization_notes": "Prepared speaker conditionals cached once per session and text is split by the shared chunk planner. Alternate deterministic seed 1337 applied via model seed parameter when available, otherwise via Python/NumPy/Torch RNGs.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 240,
+      "chunk_max_chars": 480,
+      "chunk_char_lengths": [
+        14,
+        70
+      ],
+      "chunk_word_counts": [
+        4,
+        14
+      ],
+      "chunk_estimated_tokens": [
+        12,
+        42
+      ],
+      "chunk_text_preview": [
+        "I can do that.",
+        "The quickest fix is to keep the model warm and reuse the voice prompt."
+      ],
+      "chunk_generate_ttfa_ms": [
+        689.4,
+        2349.2
+      ],
+      "chunk_generate_total_ms": [
+        689.4,
+        2349.2
+      ],
+      "chunk_audio_duration_s": [
+        1.04,
+        5.2
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        689.4,
+        3038.6
+      ],
+      "inter_chunk_gap_ms": [
+        1309.2
+      ],
+      "max_inter_chunk_gap_ms": 1309.2,
+      "total_generation_ms": 3038.6,
+      "stitched_audio_duration_s": 6.24,
+      "stitched_playback_ms": 8238.6,
+      "seed": 1337
+    },
+    {
+      "engine": "chatterbox_turbo",
+      "runtime": "wsl_python",
+      "host_account": "rayme-pmpg",
+      "profile": "optimized_seed_1337",
+      "scenario": "medium_reply",
+      "scenario_description": "A practical multi-sentence assistant answer.",
+      "scenario_word_count": 41,
+      "backend": "turbo_native",
+      "mode": "shared_chunked_playback",
+      "streaming_support": "none",
+      "true_streaming": false,
+      "status": "measured",
+      "model_load_ms": 17221.1,
+      "warmup_ms": 1923.1,
+      "cached_prompt_build_ms": 136.8,
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 1901.2,
+      "generate_total_ms": 6398.1,
+      "request_ttfa_ms": 1901.2,
+      "request_total_ms": 6398.1,
+      "audio_duration_s": 14.48,
+      "generation_rtf": 0.442,
+      "request_rtf": 0.442,
+      "peak_vram_mb": 4743.9,
+      "sample_rate": 24000,
+      "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/chatterbox_turbo__optimized_seed_1337__medium_reply.wav",
+      "optimizations_applied": [
+        "conditioning_cache",
+        "shared_chunk_planner",
+        "alternate_seed"
+      ],
+      "optimization_notes": "Prepared speaker conditionals cached once per session and text is split by the shared chunk planner. Alternate deterministic seed 1337 applied via model seed parameter when available, otherwise via Python/NumPy/Torch RNGs.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 240,
+      "chunk_max_chars": 480,
+      "chunk_char_lengths": [
+        76,
+        165
+      ],
+      "chunk_word_counts": [
+        13,
+        29
+      ],
+      "chunk_estimated_tokens": [
+        40,
+        88
+      ],
+      "chunk_text_preview": [
+        "The main latency win comes from separating one-time setup from request work.",
+        "Load the model once at startup, precompute the voice conditioning when the speaker is chosen, an"
+      ],
+      "chunk_generate_ttfa_ms": [
+        1901.2,
+        4496.9
+      ],
+      "chunk_generate_total_ms": [
+        1901.2,
+        4496.9
+      ],
+      "chunk_audio_duration_s": [
+        4.44,
+        10.04
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        1901.2,
+        6398.1
+      ],
+      "inter_chunk_gap_ms": [
+        56.9
+      ],
+      "max_inter_chunk_gap_ms": 56.9,
+      "total_generation_ms": 6398.1,
+      "stitched_audio_duration_s": 14.48,
+      "stitched_playback_ms": 16438.1,
+      "seed": 1337
+    },
+    {
+      "engine": "chatterbox_turbo",
+      "runtime": "wsl_python",
+      "host_account": "rayme-pmpg",
+      "profile": "optimized_seed_1337",
+      "scenario": "long_reply",
+      "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
+      "scenario_word_count": 162,
+      "backend": "turbo_native",
+      "mode": "shared_chunked_playback",
+      "streaming_support": "none",
+      "true_streaming": false,
+      "status": "measured",
+      "model_load_ms": 17221.1,
+      "warmup_ms": 1923.1,
+      "cached_prompt_build_ms": 136.8,
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 3167.1,
+      "generate_total_ms": 24607.7,
+      "request_ttfa_ms": 3167.1,
+      "request_total_ms": 24607.7,
+      "audio_duration_s": 56.96,
+      "generation_rtf": 0.432,
+      "request_rtf": 0.432,
+      "peak_vram_mb": 5219.3,
+      "sample_rate": 24000,
+      "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/chatterbox_turbo__optimized_seed_1337__long_reply.wav",
+      "optimizations_applied": [
+        "conditioning_cache",
+        "shared_chunk_planner",
+        "alternate_seed"
+      ],
+      "optimization_notes": "Prepared speaker conditionals cached once per session and text is split by the shared chunk planner. Alternate deterministic seed 1337 applied via model seed parameter when available, otherwise via Python/NumPy/Torch RNGs.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 3,
+      "chunk_max_estimated_tokens": 240,
+      "chunk_max_chars": 480,
+      "chunk_char_lengths": [
+        97,
+        403,
+        416
+      ],
+      "chunk_word_counts": [
+        21,
+        68,
+        73
+      ],
+      "chunk_estimated_tokens": [
+        64,
+        208,
+        223
+      ],
+      "chunk_text_preview": [
+        "Hey, I wanted to leave a fuller note so we can hear how the voice holds up over a longer stretch",
+        "The short samples are useful for latency, but they do not tell us much about consistency, pacing",
+        "I also want enough material to expose awkward transitions, repeated prosody, or the sort of flat"
+      ],
+      "chunk_generate_ttfa_ms": [
+        3167.1,
+        10826.6,
+        10613.9
+      ],
+      "chunk_generate_total_ms": [
+        3167.1,
+        10826.6,
+        10613.9
+      ],
+      "chunk_audio_duration_s": [
+        6.52,
+        25.44,
+        25.0
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        3167.1,
+        13993.8,
+        24607.7
+      ],
+      "inter_chunk_gap_ms": [
+        4306.6,
+        0.0
+      ],
+      "max_inter_chunk_gap_ms": 4306.6,
+      "total_generation_ms": 24607.7,
+      "stitched_audio_duration_s": 56.96,
+      "stitched_playback_ms": 64433.8,
+      "seed": 1337
     }
   ]
 }

@@ -1,13 +1,13 @@
 {
   "version": "1.0",
-  "timestamp": "2026-04-23T19:51:40Z",
+  "timestamp": "2026-04-23T22:56:38Z",
   "phase": "00",
   "phase_name": "measurement-gate",
   "phase_dir": ".planning/phases/00-measurement-gate",
-  "plan": "07.1",
-  "task": 4,
-  "total_tasks": 4,
-  "status": "paused",
+  "plan": "07.2-followup",
+  "task": 93,
+  "total_tasks": 96,
+  "status": "ready_to_move_on_from_tts_spike",
   "completed_tasks": [
     {
       "id": 1,
@@ -112,55 +112,63 @@
       "status": "done_with_quality_blockers",
       "result_file": ".planning/phases/00-measurement-gate/results/tts_runtime_matrix_v2.json",
       "audio_root": ".planning/phases/00-measurement-gate/results/tts_scenario_audio"
-    }
-  ],
-  "remaining_tasks": [
+    },
     {
       "id": 91,
       "name": "Implement shared TTS chunk planner in tts_scenario_matrix.py",
-      "status": "not_started"
+      "status": "done",
+      "result": "Shared sentence-aware planner implemented for all engines; XTTS optimized long-form stays under conservative token cap."
     },
     {
       "id": 92,
       "name": "Rerun Windows plus WSL TTS scenario matrix after chunking is implemented",
-      "status": "not_started"
+      "status": "done",
+      "result_file": ".planning/phases/00-measurement-gate/results/tts_runtime_matrix_v2.json"
     },
     {
-      "id": 93,
-      "name": "Manual listening pass over tts_scenario_audio samples",
-      "status": "not_started"
+      "id": 92.1,
+      "name": "Add Chatterbox Turbo alternate seed samples",
+      "status": "done",
+      "seed": 1337,
+      "result": "optimized_seed_1337 rows and WAVs generated for Windows and WSL."
     },
     {
       "id": 94,
       "name": "Create structured manual quality sidecar keyed by runtime, engine, profile, and scenario",
-      "status": "not_started"
+      "status": "done",
+      "result_file": ".planning/spikes/003-tts-engine-extension-luxtts-chatterbox-tada/MANUAL-QUALITY.csv",
+      "rows": 66
+    },
+    {
+      "id": 93,
+      "name": "Manual listening pass over regenerated chunked TTS samples",
+      "status": "done_enough_to_close_with_caveats",
+      "result": "16 MANUAL-QUALITY.csv rows scored: Chatterbox long, LuxTTS optimized, TADA optimized long, WSL XTTS optimized long, and Windows F5 optimized long."
     },
     {
       "id": 95,
       "name": "Decide whether LuxTTS should become a supported experimental engine after quality scoring",
-      "status": "not_started"
-    },
+      "status": "done_with_caveats",
+      "result": "Keep LuxTTS in future implementation as a fast experimental engine, but do not use current user-sample results to make it a default. Retest with better-padded references and other speakers/accents."
+    }
+  ],
+  "remaining_tasks": [
     {
       "id": 96,
-      "name": "Optional: debug native Windows TADA 1B CUDA failure",
-      "status": "not_started"
+      "name": "Optional: debug or further tune Chatterbox/TADA/F5/LuxTTS quality issues during implementation",
+      "status": "deferred",
+      "result": "Not blocking move-on. Keep all engine paths available; tune defaults/caveats from quality policy."
     }
   ],
   "blockers": [
-    "Final long-form TTS comparisons are blocked on a shared chunk planner. XTTS long-form must be split below its 400-token streaming cap, and non-streaming engines must be benchmarked through chunked playback rather than raw whole-generation fallback.",
-    "Manual listening is now a hard gate for new TTS engines because the warm-model matrix found fast outputs that may be low quality.",
-    "User listening on 2026-04-23 found Chatterbox Turbo long samples are pure gibberish; treat Chatterbox long-form as rejected until reproduced or fixed.",
-    "Native Windows TADA 1B failed during warmup/generation with a CUDA error; WSL TADA rows are valid, but Windows TADA is not.",
-    "The current scenario harness uses fixed canned text scenarios, not a corpus of real RayMe LLM answers.",
-    "WSL access on 192.168.1.199 currently requires the pmpg Windows account; the rayme-ssh account reports no installed WSL distributions and remote WSL work should use direct `wsl -d Ubuntu -e sh -c ...` commands with fixed Linux paths."
+    "No hard blocker remains for moving on from Spike 003.",
+    "Quality scoring is partial, so default choices must use caveats rather than treating latency winners as automatically acceptable.",
+    "LuxTTS optimized samples have current user-sample quality failures, but the engine must remain available for future retesting and implementation.",
+    "Chatterbox Turbo baseline long-form is gibberish on both runtimes; optimized long-form normal and seed-1337 are fine on both runtimes, so the issue is not primarily seed-sensitive.",
+    "F5 optimized long-form needs stretch/duration tuning; the listened sample suggests the 1.5 setting is too aggressive.",
+    "TADA WSL optimized long-form needs caution/retest; TADA Windows optimized long-form sounded acceptable with some hiccups."
   ],
-  "human_actions_pending": [
-    {
-      "action": "Manual listening pass over generated TTS samples",
-      "context": "Do this after the shared chunk planner is implemented and the Windows plus WSL matrix is rerun; latency alone is insufficient and the user already found Chatterbox Turbo long-form output is gibberish.",
-      "blocking": true
-    }
-  ],
+  "human_actions_pending": [],
   "decisions": [
     {
       "decision": "Keep OMEN-PC as the only valid Phase 0 execution host and restore SSH from the repo-persisted key each session.",
@@ -218,25 +226,50 @@
       "phase": "00"
     },
     {
-      "decision": "Treat LuxTTS as the leading new experimental TTS candidate after warm-model scenario testing, but do not promote it until manual quality scoring is recorded.",
-      "rationale": "Warm-model optimized results show LuxTTS winning short total time and medium/long total time, but manual listening found quality failures in the broader sample set and the harness does not yet score intelligibility or voice similarity.",
+      "decision": "Keep LuxTTS in future implementation as a fast experimental engine, but do not choose it as a default from current user-sample quality results.",
+      "rationale": "Warm-model optimized results show LuxTTS winning several latency rows, but user listening on 2026-04-23 found sample-level quality failures. The user explicitly said this could be a bad sample and asked not to leave any engine out.",
       "phase": "00"
     },
     {
-      "decision": "Treat Chatterbox Turbo as quality-blocked for long-form output.",
-      "rationale": "The user listened to the generated samples on 2026-04-23 and reported that Chatterbox long samples are pure gibberish.",
+      "decision": "Treat Chatterbox Turbo baseline long-form as quality-blocked, while keeping optimized long-form under consideration.",
+      "rationale": "User listening on 2026-04-23 found baseline long-form gibberish on Windows and WSL, but normal optimized and optimized_seed_1337 long-form samples were fine on both runtimes.",
       "phase": "00"
     },
     {
       "decision": "Keep TADA 1B as WSL-only experimental until the native Windows CUDA failure is debugged.",
       "rationale": "WSL rows produced measurable samples, but the Windows path failed during warmup/generation with a CUDA error.",
       "phase": "00"
+    },
+    {
+      "decision": "Treat the shared chunk planner and rerun matrix as the current source of truth for long-form TTS methodology.",
+      "rationale": "XTTS long-form no longer falls back to whole-render timing; non-streaming engines now have optimized chunked-playback rows with stitched playback metrics.",
+      "phase": "00"
+    },
+    {
+      "decision": "Do not use Chatterbox Turbo baseline/raw long-form; keep optimized chunked Chatterbox Turbo available and score short/medium before default decisions.",
+      "rationale": "The alternate seed did not explain the failure: both normal optimized and seed-1337 optimized long-form samples passed manual listening, while baseline long-form failed.",
+      "phase": "00"
+    },
+    {
+      "decision": "Keep every measured TTS engine path available in future implementation.",
+      "rationale": "The user explicitly requested that no engine be left out; quality evaluations should influence defaults, warnings, labels, and retesting plans rather than removing engines entirely.",
+      "phase": "00"
+    },
+    {
+      "decision": "Close Spike 003 as pass-with-caveats and move on.",
+      "rationale": "The spike has enough measured latency and manual quality signal to guide implementation without dropping engines: keep all paths, avoid bad defaults, tune F5 stretch/duration, retest LuxTTS samples, use Chatterbox optimized long-form only, and caution TADA WSL.",
+      "phase": "00"
+    },
+    {
+      "decision": "TADA 1B did not use an explicit fixed seed in the scenario harness.",
+      "rationale": "The harness calls TADA model.generate(prompt=..., text=...) without setting or passing a seed; only Chatterbox has an alternate deterministic seed profile. Windows/WSL differences may come from stochastic state, runtime differences, or WSL model.compile.",
+      "phase": "00"
     }
   ],
   "uncommitted_files": [],
-  "pause_commit": "04badd1",
-  "next_action": "Implement the shared TTS chunk planner in `.planning/phases/00-measurement-gate/probes/tts_scenario_matrix.py`, then rerun `.planning/phases/00-measurement-gate/probes/tts_runtime_matrix_v2.py`. Manual listening and `MANUAL-QUALITY.csv` scoring come after regenerated chunked WAVs exist.",
-  "context_notes": "00-02 is now complete on the real Android device. The trusted HTTPS pass used Android Chrome against `https://192.168.1.199:8443` after installing the mkcert root CA on the phone; `window.isSecureContext === true`, `navigator.mediaDevices` was defined, and no certificate warning remained. The cert SANs covered both `rayme.local` and `192.168.1.199`, but the passing Phase 0 verification used the direct LAN IP because local hostname resolution was not configured. The temporary HTTP helper on port 8081 that was used only to transfer `mkcert-rootCA.crt` to the phone was removed immediately after verification. 00-07.1 is now complete for backend labeling only. The TTS probe and matrix explicitly label backend support on the current OMEN-PC native-Windows path: F5=not_applicable, XTTS=not_applicable, Qwen3=eager baseline with flash_attention_2 unavailable and sdpa not supported by the current probe. Fresh OMEN-PC rerun metrics are F5 517.3 ms / 0.388 RTF / 1990.2 MB, XTTS 534.3 ms / 0.59 RTF / 1897.6 MB, Qwen3 5626.8 ms / 2.705 RTF / 2509.1 MB. Remote unit tests for test_tts_ttfa.py now pass at 12/12 in the Phase 0 backend venv. `00-08` must cite the backend matrix for current-path claims and must not imply that WSL Python, WSL Triton long-form, XTTS DeepSpeed, or Qwen eager-vs-FA2 comparisons were already measured; that work is now tracked as `00-07.2`. On 192.168.1.199, WSL access is tied to the pmpg Windows account: `pmpg` sees `Ubuntu` on WSL2, SSH as `omen-pc\\pmpg` now works via `C:\\ProgramData\\ssh\\administrators_authorized_keys`, and `/home/pmpg/rayme-wsl-probe` was created successfully inside Ubuntu. Remote WSL commands should use direct `wsl -d Ubuntu -e sh -c ...` invocations with fixed Linux paths; UNC WSL paths were not reliable from the non-interactive SSH session. The WSL distro upgrade is complete: Ubuntu is now 22.04.5 with glibc 2.35, and the reusable WSL accelerator env `/home/pmpg/rayme/.venv-cu121` imports `torch 2.5.1+cu121`, `triton 3.1.0`, `deepspeed 0.18.9`, and `flash-attn 2.8.3` on the RTX 3060. `.planning/spikes/001-omen-pc-wsl-gpu-path/bootstrap-cu121-env.sh` now recreates that stack directly. The F5 Triton/TensorRT-LLM WSL path also now passes end to end: image `soar97/triton-f5-tts:24.12`, workspace `/home/pmpg/rayme/f5-triton-runtime/F5-TTS`, safe model repo `/home/pmpg/rayme/f5-triton-runtime/model_repo_cpuipc_18000`, host ports `18000/18001/18002`, and output `/home/pmpg/rayme/f5-triton-runtime/client_http_out.wav`. The stock prebuilt image still needs ad hoc `vocos` for stage 2 and `rjieba` for runtime launch, and the generated model repo copy must force the `vocoder` BLS response to CPU preferred memory to avoid the WSL CUDA IPC failure. Apples-to-apples short-response comparison for target text `Hey, got it.` is now captured in `.planning/spikes/002-f5-triton-trtllm-wsl-path/results/f5_short_ttfa_comparison.json`: native Windows F5 trials 524.5/520.1/521.8 ms (median 521.8 ms) versus WSL Triton gRPC trials 2801.2/1806.2/1813.4 ms (median 1813.4 ms), so the WSL Triton path is currently 3.475x slower for short acknowledgments. Hard safety rule: do not use `rm -rf` and do not delete files or directories through variable-expanded paths on any backend or WSL host.",
+  "pause_commit": null,
+  "next_action": "Move on from Spike 003. Resume the main roadmap/Phase 1 work; future TTS implementation should keep all engine paths and use the recorded quality evaluations for defaults, labels, warnings, and retest priorities.",
+  "context_notes": "Spike 003 is closed as PASS_WITH_CAVEATS. Shared TTS chunk planner is implemented and the full Windows plus WSL matrix reran on OMEN-PC. Sixteen manual quality rows are recorded. Keep every measured engine path in future implementation. LuxTTS is fastest but poor for the current sample; Chatterbox baseline long is gibberish but optimized long is fine; TADA Windows long is acceptable while WSL long is caution; XTTS WSL long is metallic/hiccupy and sample-sensitive; F5 Windows long likely suffers from an over-aggressive 1.5 stretch/duration setting.",
   "incident": {
     "severity": "SEV-1",
     "summary": "Phase 0 execution previously ran on the wrong machine and lost SSH persistence, forcing repeated recovery loops.",
@@ -298,7 +331,7 @@
     }
   },
   "tts_scenario_matrix_v2": {
-    "status": "measured_quality_pending",
+    "status": "closed_pass_with_caveats",
     "matrix_file": ".planning/phases/00-measurement-gate/results/tts_runtime_matrix_v2.json",
     "windows_file": ".planning/phases/00-measurement-gate/results/tts_scenario_matrix_windows_native.json",
     "wsl_file": ".planning/phases/00-measurement-gate/results/tts_scenario_matrix_wsl_python.json",
@@ -311,48 +344,73 @@
       "short_reply_request_ttfa": {
         "engine": "luxtts",
         "runtime": "wsl_python",
-        "ms": 289.8
+        "ms": 300.5
+      },
+      "short_reply_request_total": {
+        "engine": "luxtts",
+        "runtime": "wsl_python",
+        "ms": 635.8
+      },
+      "short_reply_stitched_playback": {
+        "engine": "luxtts",
+        "runtime": "wsl_python",
+        "ms": 4535.1
       },
       "medium_reply_request_ttfa": {
-        "engine": "xtts",
-        "runtime": "wsl_python",
-        "ms": 439.6
+        "engine": "luxtts",
+        "runtime": "windows_native",
+        "ms": 320.4
       },
       "medium_reply_request_total": {
         "engine": "luxtts",
+        "runtime": "wsl_python",
+        "ms": 738.9
+      },
+      "medium_reply_stitched_playback": {
+        "engine": "luxtts",
         "runtime": "windows_native",
-        "ms": 508.3
+        "ms": 12075.0
       },
       "long_reply_request_ttfa": {
-        "engine": "f5",
-        "runtime": "wsl_python",
-        "ms": 980.6
+        "engine": "luxtts",
+        "runtime": "windows_native",
+        "ms": 352.9
       },
       "long_reply_request_total": {
         "engine": "luxtts",
         "runtime": "windows_native",
-        "ms": 1678.6
+        "ms": 1869.6
+      },
+      "long_reply_stitched_playback": {
+        "engine": "xtts",
+        "runtime": "wsl_python",
+        "ms": 43606.1
       }
     },
     "manual_quality_findings": [
-      "User reported Chatterbox Turbo long samples are pure gibberish.",
-      "User reported some samples are subjectively atrocious.",
-      "Structured manual listening scores have not yet been recorded."
+      "User reported Chatterbox Turbo baseline long-form is gibberish on Windows and WSL.",
+      "User reported Chatterbox Turbo optimized long-form is fine on Windows and WSL.",
+      "User reported Chatterbox Turbo optimized_seed_1337 long-form is fine on Windows and WSL.",
+      "User reported LuxTTS optimized short/medium/long on Windows and WSL has quality failures: sample-tail repetition, metallic noise, too-fast delivery, sample phrase/word leakage, poor speaker match, and accent loss.",
+      "User reported TADA 1B Windows optimized long sounds acceptable with some hiccups.",
+      "User reported TADA 1B WSL optimized long sounds worse than Windows, less steady, with voice morphing and hiccups.",
+      "User reported WSL XTTS optimized long sounds metallic and hiccupy, with incomplete voice likeness; XTTS is known from prior user testing to be sample-sensitive.",
+      "User reported Windows F5 optimized long sounds stretched/slow and hiccupy, degrading into mumbling/silence before recovery; the 1.5 multiplier is likely too much.",
+      "User explicitly asked to keep every engine in future implementation; treat quality results as defaults/caveats/retest inputs, not removal decisions."
     ],
     "streaming_caveats": [
-      "XTTS native streaming was measured for short_reply and medium_reply on Windows and WSL.",
-      "XTTS long_reply fell back to full-render timing because inference_stream hit the 400-token limit.",
-      "F5 optimized rows are simulated chunk streaming, not true incremental model streaming.",
-      "Qwen3 rows are simulated text streaming, not real audio streaming.",
-      "LuxTTS, Chatterbox Turbo, and TADA 1B rows are whole-generation raw baselines, not optimized chunked runtime paths.",
-      "Future benchmarks need a shared best-in-class chunk planner for all engines, including non-streaming engines."
+      "XTTS optimized rows use native streaming where available; optimized long-form is measured over planner chunks and no longer falls back because of the 400-token cap.",
+      "F5, LuxTTS, Chatterbox Turbo, TADA 1B, and Qwen optimized rows use shared chunked playback, not true incremental decoder streaming.",
+      "Qwen3 rows are simulated text/chunk playback and remain far too slow for product default use.",
+      "Quality findings must override raw latency for defaults and user-facing recommendations."
     ],
     "required_harness_fixes": [
-      "Implement token-aware XTTS long-text splitting so no inference_stream segment reaches the 400-token cap.",
-      "Implement shared long-form chunking for all engines, preferring sentence boundaries, enforcing engine-specific caps, avoiding tiny fragments, and measuring first-chunk TTFA, total stitched time, inter-chunk gaps, and stitched WAV quality.",
-      "Rerun the Windows plus WSL matrix after chunking is implemented before final long-form TTS decisions."
+      "Teach future TTS decision logic to read MANUAL-QUALITY.csv or an equivalent quality policy so quality findings override raw latency wins for defaults while preserving all engine paths.",
+      "Tune or disable the F5 long-form 1.5 stretch/duration multiplier and rerun/listen before relying on that optimized path.",
+      "Retest LuxTTS with better-padded reference audio and other speakers/accents before treating current sample failures as engine-wide behavior.",
+      "If TADA determinism matters, add explicit seed support around the TADA generation path and compare Windows vs WSL again."
     ],
-    "next_run": "python3 .planning/phases/00-measurement-gate/probes/tts_runtime_matrix_v2.py --output .planning/phases/00-measurement-gate/results/tts_runtime_matrix_v2.json",
-    "pause_note": "Do not treat current XTTS long-form rows or non-streaming whole-generation rows as final long-form comparisons. Implement shared chunking first."
+    "next_run": "No immediate rerun required to move on. Future targeted reruns: F5 with lower/no stretch multiplier, LuxTTS with better-padded references, and TADA with explicit seeding if reproducibility matters.",
+    "pause_note": "Closed pass-with-caveats. Keep all TTS engines in future implementation; quality findings shape defaults and caveats."
   }
 }

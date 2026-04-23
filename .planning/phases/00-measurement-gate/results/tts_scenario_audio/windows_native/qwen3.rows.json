@@ -16,18 +16,18 @@
       "streaming_support": "simulated",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 6203.8,
-      "warmup_ms": 7771.9,
+      "model_load_ms": 6231.9,
+      "warmup_ms": 6614.8,
       "cached_prompt_build_ms": null,
-      "request_prompt_prep_ms": 71.4,
-      "generate_ttfa_ms": 16908.7,
-      "generate_total_ms": 16908.7,
-      "request_ttfa_ms": 16980.1,
-      "request_total_ms": 16980.1,
-      "audio_duration_s": 6.08,
-      "generation_rtf": 2.781,
-      "request_rtf": 2.793,
-      "peak_vram_mb": 2627.1,
+      "request_prompt_prep_ms": 76.4,
+      "generate_ttfa_ms": 15886.1,
+      "generate_total_ms": 15886.1,
+      "request_ttfa_ms": 15962.5,
+      "request_total_ms": 15962.5,
+      "audio_duration_s": 5.68,
+      "generation_rtf": 2.797,
+      "request_rtf": 2.81,
+      "peak_vram_mb": 2615.0,
       "sample_rate": 24000,
       "output_wav": "results\\tts_scenario_audio\\windows_native\\qwen3__baseline__short_reply.wav",
       "optimizations_applied": [],
@@ -47,18 +47,18 @@
       "streaming_support": "simulated",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 6203.8,
-      "warmup_ms": 7771.9,
+      "model_load_ms": 6231.9,
+      "warmup_ms": 6614.8,
       "cached_prompt_build_ms": null,
-      "request_prompt_prep_ms": 64.4,
-      "generate_ttfa_ms": 46871.4,
-      "generate_total_ms": 46871.4,
-      "request_ttfa_ms": 46935.8,
-      "request_total_ms": 46935.8,
-      "audio_duration_s": 17.12,
-      "generation_rtf": 2.738,
-      "request_rtf": 2.742,
-      "peak_vram_mb": 2820.0,
+      "request_prompt_prep_ms": 86.9,
+      "generate_ttfa_ms": 39362.1,
+      "generate_total_ms": 39362.1,
+      "request_ttfa_ms": 39449.0,
+      "request_total_ms": 39449.0,
+      "audio_duration_s": 14.48,
+      "generation_rtf": 2.718,
+      "request_rtf": 2.724,
+      "peak_vram_mb": 2819.9,
       "sample_rate": 24000,
       "output_wav": "results\\tts_scenario_audio\\windows_native\\qwen3__baseline__medium_reply.wav",
       "optimizations_applied": [],
@@ -78,18 +78,18 @@
       "streaming_support": "simulated",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 6203.8,
-      "warmup_ms": 7771.9,
+      "model_load_ms": 6231.9,
+      "warmup_ms": 6614.8,
       "cached_prompt_build_ms": null,
-      "request_prompt_prep_ms": 90.0,
-      "generate_ttfa_ms": 157821.1,
-      "generate_total_ms": 157821.1,
-      "request_ttfa_ms": 157911.2,
-      "request_total_ms": 157911.2,
-      "audio_duration_s": 57.76,
+      "request_prompt_prep_ms": 67.5,
+      "generate_ttfa_ms": 146205.1,
+      "generate_total_ms": 146205.1,
+      "request_ttfa_ms": 146272.5,
+      "request_total_ms": 146272.5,
+      "audio_duration_s": 53.52,
       "generation_rtf": 2.732,
-      "request_rtf": 2.734,
-      "peak_vram_mb": 2880.5,
+      "request_rtf": 2.733,
+      "peak_vram_mb": 2880.3,
       "sample_rate": 24000,
       "output_wav": "results\\tts_scenario_audio\\windows_native\\qwen3__baseline__long_reply.wav",
       "optimizations_applied": [],
@@ -105,29 +105,73 @@
       "scenario_description": "One concise assistant reply.",
       "scenario_word_count": 18,
       "backend": "eager",
-      "mode": "simulated_streaming_text",
+      "mode": "shared_chunked_playback",
       "streaming_support": "simulated",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 3524.6,
-      "warmup_ms": 5096.8,
-      "cached_prompt_build_ms": 78.5,
+      "model_load_ms": 3749.2,
+      "warmup_ms": 4250.4,
+      "cached_prompt_build_ms": 78.7,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 16317.4,
-      "generate_total_ms": 16317.4,
-      "request_ttfa_ms": 16317.4,
-      "request_total_ms": 16317.4,
-      "audio_duration_s": 5.92,
-      "generation_rtf": 2.756,
-      "request_rtf": 2.756,
-      "peak_vram_mb": 2621.9,
+      "generate_ttfa_ms": 3754.2,
+      "generate_total_ms": 18909.9,
+      "request_ttfa_ms": 3754.2,
+      "request_total_ms": 18909.9,
+      "audio_duration_s": 6.72,
+      "generation_rtf": 2.814,
+      "request_rtf": 2.814,
+      "peak_vram_mb": 2608.0,
       "sample_rate": 24000,
       "output_wav": "results\\tts_scenario_audio\\windows_native\\qwen3__optimized__short_reply.wav",
       "optimizations_applied": [
-        "prompt_cache"
+        "prompt_cache",
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Voice clone prompt cached once per session. Requested flash_attention_2 but fell back to eager (Traceback (most recent call last):\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\tts_scenario_matrix.py\", line 1008, in load_model\n    model = Qwen3TTSModel.from_pretrained(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\qwen_tts\\inference\\qwen3_tts_model.py\", line 112, in from_pretrained\n    model = AutoModel.from_pretrained(pretrai).",
-      "variant": "0.6B-Base"
+      "optimization_notes": "Voice clone prompt cached once per session. Requested flash_attention_2 but fell back to eager (Traceback (most recent call last):\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\tts_scenario_matrix.py\", line 1597, in load_model\n    model = Qwen3TTSModel.from_pretrained(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\qwen_tts\\inference\\qwen3_tts_model.py\", line 112, in from_pretrained\n    model = AutoModel.from_pretrained(pretrai).",
+      "variant": "0.6B-Base",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 220,
+      "chunk_max_chars": 440,
+      "chunk_char_lengths": [
+        14,
+        70
+      ],
+      "chunk_word_counts": [
+        4,
+        14
+      ],
+      "chunk_estimated_tokens": [
+        12,
+        42
+      ],
+      "chunk_text_preview": [
+        "I can do that.",
+        "The quickest fix is to keep the model warm and reuse the voice prompt."
+      ],
+      "chunk_generate_ttfa_ms": [
+        3754.2,
+        15155.7
+      ],
+      "chunk_generate_total_ms": [
+        3754.2,
+        15155.7
+      ],
+      "chunk_audio_duration_s": [
+        1.28,
+        5.44
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        3754.2,
+        18909.9
+      ],
+      "inter_chunk_gap_ms": [
+        13875.7
+      ],
+      "max_inter_chunk_gap_ms": 13875.7,
+      "total_generation_ms": 18909.9,
+      "stitched_audio_duration_s": 6.72,
+      "stitched_playback_ms": 24349.9
     },
     {
       "engine": "qwen3",
@@ -138,29 +182,73 @@
       "scenario_description": "A practical multi-sentence assistant answer.",
       "scenario_word_count": 41,
       "backend": "eager",
-      "mode": "simulated_streaming_text",
+      "mode": "shared_chunked_playback",
       "streaming_support": "simulated",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 3524.6,
-      "warmup_ms": 5096.8,
-      "cached_prompt_build_ms": 78.5,
+      "model_load_ms": 3749.2,
+      "warmup_ms": 4250.4,
+      "cached_prompt_build_ms": 78.7,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 47060.4,
-      "generate_total_ms": 47060.4,
-      "request_ttfa_ms": 47060.4,
-      "request_total_ms": 47060.4,
-      "audio_duration_s": 17.28,
-      "generation_rtf": 2.723,
-      "request_rtf": 2.723,
-      "peak_vram_mb": 2820.7,
+      "generate_ttfa_ms": 18181.0,
+      "generate_total_ms": 47061.3,
+      "request_ttfa_ms": 18181.0,
+      "request_total_ms": 47061.3,
+      "audio_duration_s": 17.12,
+      "generation_rtf": 2.749,
+      "request_rtf": 2.749,
+      "peak_vram_mb": 2756.1,
       "sample_rate": 24000,
       "output_wav": "results\\tts_scenario_audio\\windows_native\\qwen3__optimized__medium_reply.wav",
       "optimizations_applied": [
-        "prompt_cache"
+        "prompt_cache",
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Voice clone prompt cached once per session. Requested flash_attention_2 but fell back to eager (Traceback (most recent call last):\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\tts_scenario_matrix.py\", line 1008, in load_model\n    model = Qwen3TTSModel.from_pretrained(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\qwen_tts\\inference\\qwen3_tts_model.py\", line 112, in from_pretrained\n    model = AutoModel.from_pretrained(pretrai).",
-      "variant": "0.6B-Base"
+      "optimization_notes": "Voice clone prompt cached once per session. Requested flash_attention_2 but fell back to eager (Traceback (most recent call last):\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\tts_scenario_matrix.py\", line 1597, in load_model\n    model = Qwen3TTSModel.from_pretrained(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\qwen_tts\\inference\\qwen3_tts_model.py\", line 112, in from_pretrained\n    model = AutoModel.from_pretrained(pretrai).",
+      "variant": "0.6B-Base",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 220,
+      "chunk_max_chars": 440,
+      "chunk_char_lengths": [
+        76,
+        165
+      ],
+      "chunk_word_counts": [
+        13,
+        29
+      ],
+      "chunk_estimated_tokens": [
+        40,
+        88
+      ],
+      "chunk_text_preview": [
+        "The main latency win comes from separating one-time setup from request work.",
+        "Load the model once at startup, precompute the voice conditioning when the speaker is chosen, an"
+      ],
+      "chunk_generate_ttfa_ms": [
+        18181.0,
+        28880.2
+      ],
+      "chunk_generate_total_ms": [
+        18181.0,
+        28880.2
+      ],
+      "chunk_audio_duration_s": [
+        6.64,
+        10.48
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        18181.0,
+        47061.3
+      ],
+      "inter_chunk_gap_ms": [
+        22240.2
+      ],
+      "max_inter_chunk_gap_ms": 22240.2,
+      "total_generation_ms": 47061.3,
+      "stitched_audio_duration_s": 17.12,
+      "stitched_playback_ms": 57541.3
     },
     {
       "engine": "qwen3",
@@ -171,29 +259,91 @@
       "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
       "scenario_word_count": 162,
       "backend": "eager",
-      "mode": "simulated_streaming_text",
+      "mode": "shared_chunked_playback",
       "streaming_support": "simulated",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 3524.6,
-      "warmup_ms": 5096.8,
-      "cached_prompt_build_ms": 78.5,
+      "model_load_ms": 3749.2,
+      "warmup_ms": 4250.4,
+      "cached_prompt_build_ms": 78.7,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 145258.5,
-      "generate_total_ms": 145258.5,
-      "request_ttfa_ms": 145258.5,
-      "request_total_ms": 145258.5,
-      "audio_duration_s": 52.88,
-      "generation_rtf": 2.747,
-      "request_rtf": 2.747,
-      "peak_vram_mb": 2881.4,
+      "generate_ttfa_ms": 19150.3,
+      "generate_total_ms": 156058.6,
+      "request_ttfa_ms": 19150.3,
+      "request_total_ms": 156058.6,
+      "audio_duration_s": 56.72,
+      "generation_rtf": 2.751,
+      "request_rtf": 2.751,
+      "peak_vram_mb": 2820.9,
       "sample_rate": 24000,
       "output_wav": "results\\tts_scenario_audio\\windows_native\\qwen3__optimized__long_reply.wav",
       "optimizations_applied": [
-        "prompt_cache"
+        "prompt_cache",
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Voice clone prompt cached once per session. Requested flash_attention_2 but fell back to eager (Traceback (most recent call last):\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\tts_scenario_matrix.py\", line 1008, in load_model\n    model = Qwen3TTSModel.from_pretrained(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\qwen_tts\\inference\\qwen3_tts_model.py\", line 112, in from_pretrained\n    model = AutoModel.from_pretrained(pretrai).",
-      "variant": "0.6B-Base"
+      "optimization_notes": "Voice clone prompt cached once per session. Requested flash_attention_2 but fell back to eager (Traceback (most recent call last):\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\tts_scenario_matrix.py\", line 1597, in load_model\n    model = Qwen3TTSModel.from_pretrained(\n            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\Users\\rayme-ssh.OMEN-PC\\.venv-phase0\\Lib\\site-packages\\qwen_tts\\inference\\qwen3_tts_model.py\", line 112, in from_pretrained\n    model = AutoModel.from_pretrained(pretrai).",
+      "variant": "0.6B-Base",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 4,
+      "chunk_max_estimated_tokens": 220,
+      "chunk_max_chars": 440,
+      "chunk_char_lengths": [
+        97,
+        403,
+        385,
+        30
+      ],
+      "chunk_word_counts": [
+        21,
+        68,
+        66,
+        7
+      ],
+      "chunk_estimated_tokens": [
+        64,
+        208,
+        202,
+        22
+      ],
+      "chunk_text_preview": [
+        "Hey, I wanted to leave a fuller note so we can hear how the voice holds up over a longer stretch",
+        "The short samples are useful for latency, but they do not tell us much about consistency, pacing",
+        "I also want enough material to expose awkward transitions, repeated prosody, or the sort of flat",
+        "That is the point of this run."
+      ],
+      "chunk_generate_ttfa_ms": [
+        19150.3,
+        64669.8,
+        63517.9,
+        8720.7
+      ],
+      "chunk_generate_total_ms": [
+        19150.3,
+        64669.8,
+        63517.9,
+        8720.7
+      ],
+      "chunk_audio_duration_s": [
+        6.96,
+        23.44,
+        23.2,
+        3.12
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        19150.3,
+        83820.1,
+        147338.0,
+        156058.6
+      ],
+      "inter_chunk_gap_ms": [
+        57709.8,
+        40077.9,
+        0.0
+      ],
+      "max_inter_chunk_gap_ms": 57709.8,
+      "total_generation_ms": 156058.6,
+      "stitched_audio_duration_s": 56.72,
+      "stitched_playback_ms": 173658.0
     }
   ]
 }

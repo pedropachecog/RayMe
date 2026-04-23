@@ -23,7 +23,9 @@ progress:
 - STT default: `distil-large-v3` (`int8_float16`), WER `0.0627`.
 - TTS v1 default: `f5`.
 - TTS v1 roster: `F5-TTS`, `XTTS v2`, `Qwen3-TTS 0.6B-Base`.
-- TTS long-form implementation: requires a shared engine-agnostic chunk planner before final engine comparisons; raw whole-generation fallback rows are not sufficient.
+- TTS future implementation policy: keep all measured engine paths available, including `LuxTTS`, `Chatterbox Turbo`, and `TADA 1B`; use quality evaluations to choose defaults, labels, warnings, and retesting priorities.
+- TTS long-form implementation: shared engine-agnostic chunk planner is now implemented in the scenario harness; raw whole-generation fallback rows are no longer the only comparison.
+- TTS quality notes: Spike 003 is closed as `PASS_WITH_CAVEATS`. LuxTTS optimized is very fast but has current user-sample quality failures; Chatterbox Turbo baseline long-form is gibberish, while optimized long-form normal and seed 1337 are fine on the listened long samples; TADA Windows optimized long is acceptable while WSL is caution; XTTS/F5 long samples need sample/tuning caveats.
 - Qwen3-TTS: included as an opt-in/non-default engine despite failing the acceptance gate; latency and accent-quality caveats still apply.
 - FlashAttention 2: not installed on Windows, so Qwen 1.7B is ineligible for v1.
 - VRAM soak: F5 `1990.2 MB`, XTTS `2104.0 MB`, Qwen3 `3010.0 MB`; all stable and within budget.
@@ -41,10 +43,16 @@ progress:
 
 - Plan 00-07.1 inserted into `00-measurement-gate`: benchmark TTS attention/optimization backends per engine before final writeback.
 - Plan 00-07.2 completed: benchmarked native Windows vs WSL runtime permutations before Phase 0 writeback.
-- 2026-04-23 TTS follow-up: XTTS long-form streaming was under-tested because `inference_stream` hit its 400-token cap and fell back to full-render timing. Phase 4 must implement shared chunking for all engines and remeasure long-form paths through that planner.
+- 2026-04-23 TTS follow-up: shared chunking has been implemented and the Windows plus WSL matrix reran. Manual listening is partially scored but sufficient to close the spike with caveats: keep all engines, avoid raw latency-only defaults, tune F5 long-form stretch/duration, retest LuxTTS with better references, and keep Chatterbox optimized long-form while avoiding baseline/raw long-form.
 
 ### Phase 0 Completion Notes
 
 - Android HTTPS passed with mkcert after installing the root CA on the phone.
 - The checked-in measurement artifacts were captured directly on the RTX 3060 target hardware.
 - Phase 1 should start from the frozen decisions in PROJECT.md rather than re-opening model-selection debates.
+
+## Session Continuity
+
+Last session: 2026-04-23T22:56:38Z
+Stopped at: Spike 003 closed as pass-with-caveats; shared TTS chunk planner implemented, Windows plus WSL matrix rerun, 16 manual quality verdicts recorded, and all engine paths kept for future implementation.
+Resume file: `.planning/HANDOFF.json` and `.planning/phases/00-measurement-gate/.continue-here.md`

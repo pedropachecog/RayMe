@@ -16,18 +16,18 @@
       "streaming_support": "native",
       "true_streaming": true,
       "status": "measured",
-      "model_load_ms": 15087.4,
-      "warmup_ms": 2914.0,
+      "model_load_ms": 15430.8,
+      "warmup_ms": 1976.5,
       "cached_prompt_build_ms": null,
-      "request_prompt_prep_ms": 117.4,
-      "generate_ttfa_ms": 451.5,
-      "generate_total_ms": 4295.0,
-      "request_ttfa_ms": 568.9,
-      "request_total_ms": 4412.4,
-      "audio_duration_s": 8.075,
-      "generation_rtf": 0.532,
-      "request_rtf": 0.546,
-      "peak_vram_mb": 2047.5,
+      "request_prompt_prep_ms": 122.4,
+      "generate_ttfa_ms": 489.1,
+      "generate_total_ms": 3865.5,
+      "request_ttfa_ms": 611.5,
+      "request_total_ms": 3987.9,
+      "audio_duration_s": 7.243,
+      "generation_rtf": 0.534,
+      "request_rtf": 0.551,
+      "peak_vram_mb": 2023.5,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/xtts__baseline__short_reply.wav",
       "optimizations_applied": [],
@@ -47,18 +47,18 @@
       "streaming_support": "native",
       "true_streaming": true,
       "status": "measured",
-      "model_load_ms": 15087.4,
-      "warmup_ms": 2914.0,
+      "model_load_ms": 15430.8,
+      "warmup_ms": 1976.5,
       "cached_prompt_build_ms": null,
-      "request_prompt_prep_ms": 186.1,
-      "generate_ttfa_ms": 410.2,
-      "generate_total_ms": 10860.1,
-      "request_ttfa_ms": 596.2,
-      "request_total_ms": 11046.2,
-      "audio_duration_s": 18.112,
-      "generation_rtf": 0.6,
-      "request_rtf": 0.61,
-      "peak_vram_mb": 2342.0,
+      "request_prompt_prep_ms": 150.8,
+      "generate_ttfa_ms": 422.0,
+      "generate_total_ms": 9637.6,
+      "request_ttfa_ms": 572.8,
+      "request_total_ms": 9788.4,
+      "audio_duration_s": 17.504,
+      "generation_rtf": 0.551,
+      "request_rtf": 0.559,
+      "peak_vram_mb": 2318.0,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/xtts__baseline__medium_reply.wav",
       "optimizations_applied": [],
@@ -78,23 +78,23 @@
       "streaming_support": "native_fallback",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 15087.4,
-      "warmup_ms": 2914.0,
+      "model_load_ms": 15430.8,
+      "warmup_ms": 1976.5,
       "cached_prompt_build_ms": null,
-      "request_prompt_prep_ms": 133.6,
-      "generate_ttfa_ms": 28699.3,
-      "generate_total_ms": 28699.3,
-      "request_ttfa_ms": 28832.9,
-      "request_total_ms": 28832.9,
-      "audio_duration_s": 64.794,
-      "generation_rtf": 0.443,
-      "request_rtf": 0.445,
-      "peak_vram_mb": 2071.7,
+      "request_prompt_prep_ms": 67.0,
+      "generate_ttfa_ms": 27288.0,
+      "generate_total_ms": 27288.0,
+      "request_ttfa_ms": 27355.0,
+      "request_total_ms": 27355.0,
+      "audio_duration_s": 62.405,
+      "generation_rtf": 0.437,
+      "request_rtf": 0.438,
+      "peak_vram_mb": 2058.2,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/xtts__baseline__long_reply.wav",
       "optimizations_applied": [],
       "optimization_notes": "Warm model only. Each request recomputes XTTS conditioning latents from the reference clip.",
-      "streaming_error": "Traceback (most recent call last):\n  File \"/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/tts_scenario_matrix.py\", line 516, in synthesize\n    for chunk in xtts_model.inference_stream(\n  File \"/home/pmpg/rayme/.venv-cu121/lib/python3.10/site-packages/torch/utils/_contextlib.py\", line 36, in generator_context\n    response = gen.send(None)\n  File \"/home/pmpg/rayme/.venv-cu121/lib/python3.10/site-packages/TTS/tts/models/xtts.py\", line 625, in inference_stream\n    assert text_tokens.shape[-1] < self.args.gpt_max_text_tokens, (\nAssertionError:  \u2757 XTTS can only generate text with a maximum of 400 tokens.\n"
+      "streaming_error": "Traceback (most recent call last):\n  File \"/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/tts_scenario_matrix.py\", line 914, in synthesize\n    for chunk in xtts_model.inference_stream(\n  File \"/home/pmpg/rayme/.venv-cu121/lib/python3.10/site-packages/torch/utils/_contextlib.py\", line 36, in generator_context\n    response = gen.send(None)\n  File \"/home/pmpg/rayme/.venv-cu121/lib/python3.10/site-packages/TTS/tts/models/xtts.py\", line 625, in inference_stream\n    assert text_tokens.shape[-1] < self.args.gpt_max_text_tokens, (\nAssertionError:  \u2757 XTTS can only generate text with a maximum of 400 tokens.\n"
     },
     {
       "engine": "xtts",
@@ -105,28 +105,76 @@
       "scenario_description": "One concise assistant reply.",
       "scenario_word_count": 18,
       "backend": "native_stream",
-      "mode": "streaming",
+      "mode": "shared_chunked_streaming",
       "streaming_support": "native",
       "true_streaming": true,
       "status": "measured",
-      "model_load_ms": 15087.4,
-      "warmup_ms": 2914.0,
-      "cached_prompt_build_ms": 66.7,
+      "model_load_ms": 15430.8,
+      "warmup_ms": 1976.5,
+      "cached_prompt_build_ms": 92.9,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 379.6,
-      "generate_total_ms": 4314.4,
-      "request_ttfa_ms": 379.6,
-      "request_total_ms": 4314.4,
-      "audio_duration_s": 8.64,
-      "generation_rtf": 0.499,
-      "request_rtf": 0.499,
-      "peak_vram_mb": 2071.7,
+      "generate_ttfa_ms": 426.2,
+      "generate_total_ms": 5803.8,
+      "request_ttfa_ms": 426.2,
+      "request_total_ms": 5803.8,
+      "audio_duration_s": 11.797,
+      "generation_rtf": 0.492,
+      "request_rtf": 0.492,
+      "peak_vram_mb": 2044.1,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/xtts__optimized__short_reply.wav",
       "optimizations_applied": [
-        "conditioning_cache"
+        "conditioning_cache",
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Conditioning latents cached once per session and reused across replies.",
+      "optimization_notes": "Conditioning latents cached once per session; text is split by the shared planner before XTTS streaming.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 300,
+      "chunk_max_chars": 640,
+      "chunk_char_lengths": [
+        14,
+        70
+      ],
+      "chunk_word_counts": [
+        4,
+        14
+      ],
+      "chunk_estimated_tokens": [
+        12,
+        42
+      ],
+      "chunk_text_preview": [
+        "I can do that.",
+        "The quickest fix is to keep the model warm and reuse the voice prompt."
+      ],
+      "chunk_generate_ttfa_ms": [
+        426.2,
+        442.9
+      ],
+      "chunk_generate_total_ms": [
+        1698.4,
+        4105.4
+      ],
+      "chunk_audio_duration_s": [
+        3.531,
+        8.267
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        426.2,
+        2141.3
+      ],
+      "inter_chunk_gap_ms": [
+        0.0
+      ],
+      "max_inter_chunk_gap_ms": 0.0,
+      "total_generation_ms": 5803.8,
+      "stitched_audio_duration_s": 11.797,
+      "stitched_playback_ms": 12223.5,
+      "chunk_streaming_ok": [
+        true,
+        true
+      ],
       "streaming_error": null
     },
     {
@@ -138,28 +186,76 @@
       "scenario_description": "A practical multi-sentence assistant answer.",
       "scenario_word_count": 41,
       "backend": "native_stream",
-      "mode": "streaming",
+      "mode": "shared_chunked_streaming",
       "streaming_support": "native",
       "true_streaming": true,
       "status": "measured",
-      "model_load_ms": 15087.4,
-      "warmup_ms": 2914.0,
-      "cached_prompt_build_ms": 66.7,
+      "model_load_ms": 15430.8,
+      "warmup_ms": 1976.5,
+      "cached_prompt_build_ms": 92.9,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 439.6,
-      "generate_total_ms": 9861.1,
-      "request_ttfa_ms": 439.6,
-      "request_total_ms": 9861.1,
+      "generate_ttfa_ms": 411.2,
+      "generate_total_ms": 9103.4,
+      "request_ttfa_ms": 411.2,
+      "request_total_ms": 9103.4,
       "audio_duration_s": 17.877,
-      "generation_rtf": 0.552,
-      "request_rtf": 0.552,
-      "peak_vram_mb": 2342.1,
+      "generation_rtf": 0.509,
+      "request_rtf": 0.509,
+      "peak_vram_mb": 2135.1,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/xtts__optimized__medium_reply.wav",
       "optimizations_applied": [
-        "conditioning_cache"
+        "conditioning_cache",
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Conditioning latents cached once per session and reused across replies.",
+      "optimization_notes": "Conditioning latents cached once per session; text is split by the shared planner before XTTS streaming.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 300,
+      "chunk_max_chars": 640,
+      "chunk_char_lengths": [
+        76,
+        165
+      ],
+      "chunk_word_counts": [
+        13,
+        29
+      ],
+      "chunk_estimated_tokens": [
+        40,
+        88
+      ],
+      "chunk_text_preview": [
+        "The main latency win comes from separating one-time setup from request work.",
+        "Load the model once at startup, precompute the voice conditioning when the speaker is chosen, an"
+      ],
+      "chunk_generate_ttfa_ms": [
+        411.2,
+        429.5
+      ],
+      "chunk_generate_total_ms": [
+        3536.8,
+        5566.7
+      ],
+      "chunk_audio_duration_s": [
+        7.147,
+        10.731
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        411.2,
+        3966.2
+      ],
+      "inter_chunk_gap_ms": [
+        0.0
+      ],
+      "max_inter_chunk_gap_ms": 0.0,
+      "total_generation_ms": 9103.4,
+      "stitched_audio_duration_s": 17.877,
+      "stitched_playback_ms": 18288.5,
+      "chunk_streaming_ok": [
+        true,
+        true
+      ],
       "streaming_error": null
     },
     {
@@ -171,29 +267,87 @@
       "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
       "scenario_word_count": 162,
       "backend": "native_stream",
-      "mode": "non_streaming_fallback",
-      "streaming_support": "native_fallback",
-      "true_streaming": false,
+      "mode": "shared_chunked_streaming",
+      "streaming_support": "native",
+      "true_streaming": true,
       "status": "measured",
-      "model_load_ms": 15087.4,
-      "warmup_ms": 2914.0,
-      "cached_prompt_build_ms": 66.7,
+      "model_load_ms": 15430.8,
+      "warmup_ms": 1976.5,
+      "cached_prompt_build_ms": 92.9,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 27184.6,
-      "generate_total_ms": 27184.6,
-      "request_ttfa_ms": 27184.6,
-      "request_total_ms": 27184.6,
-      "audio_duration_s": 61.583,
-      "generation_rtf": 0.441,
-      "request_rtf": 0.441,
-      "peak_vram_mb": 2044.9,
+      "generate_ttfa_ms": 427.4,
+      "generate_total_ms": 23525.3,
+      "request_ttfa_ms": 427.4,
+      "request_total_ms": 23525.3,
+      "audio_duration_s": 43.179,
+      "generation_rtf": 0.545,
+      "request_rtf": 0.545,
+      "peak_vram_mb": 2415.9,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/xtts__optimized__long_reply.wav",
       "optimizations_applied": [
-        "conditioning_cache"
+        "conditioning_cache",
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Conditioning latents cached once per session and reused across replies.",
-      "streaming_error": "Traceback (most recent call last):\n  File \"/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/tts_scenario_matrix.py\", line 516, in synthesize\n    for chunk in xtts_model.inference_stream(\n  File \"/home/pmpg/rayme/.venv-cu121/lib/python3.10/site-packages/torch/utils/_contextlib.py\", line 36, in generator_context\n    response = gen.send(None)\n  File \"/home/pmpg/rayme/.venv-cu121/lib/python3.10/site-packages/TTS/tts/models/xtts.py\", line 625, in inference_stream\n    assert text_tokens.shape[-1] < self.args.gpt_max_text_tokens, (\nAssertionError:  \u2757 XTTS can only generate text with a maximum of 400 tokens.\n"
+      "optimization_notes": "Conditioning latents cached once per session; text is split by the shared planner before XTTS streaming.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 3,
+      "chunk_max_estimated_tokens": 300,
+      "chunk_max_chars": 640,
+      "chunk_char_lengths": [
+        97,
+        574,
+        245
+      ],
+      "chunk_word_counts": [
+        21,
+        97,
+        44
+      ],
+      "chunk_estimated_tokens": [
+        64,
+        297,
+        134
+      ],
+      "chunk_text_preview": [
+        "Hey, I wanted to leave a fuller note so we can hear how the voice holds up over a longer stretch",
+        "The short samples are useful for latency, but they do not tell us much about consistency, pacing",
+        "If the identity stays recognizable, the phrasing remains clear, and the overall delivery still s"
+      ],
+      "chunk_generate_ttfa_ms": [
+        427.4,
+        451.9,
+        416.2
+      ],
+      "chunk_generate_total_ms": [
+        3119.9,
+        8708.2,
+        11697.1
+      ],
+      "chunk_audio_duration_s": [
+        6.315,
+        16.064,
+        20.8
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        427.4,
+        3571.8,
+        12244.4
+      ],
+      "inter_chunk_gap_ms": [
+        0.0,
+        0.0
+      ],
+      "max_inter_chunk_gap_ms": 0.0,
+      "total_generation_ms": 23525.3,
+      "stitched_audio_duration_s": 43.179,
+      "stitched_playback_ms": 43606.1,
+      "chunk_streaming_ok": [
+        true,
+        true,
+        true
+      ],
+      "streaming_error": null
     }
   ]
 }

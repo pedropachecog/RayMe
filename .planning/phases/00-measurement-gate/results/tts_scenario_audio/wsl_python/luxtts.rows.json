@@ -16,18 +16,18 @@
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 35195.0,
-      "warmup_ms": 2557.3,
+      "model_load_ms": 9502.9,
+      "warmup_ms": 2309.6,
       "cached_prompt_build_ms": null,
-      "request_prompt_prep_ms": 53.8,
-      "generate_ttfa_ms": 774.2,
-      "generate_total_ms": 774.2,
-      "request_ttfa_ms": 827.9,
-      "request_total_ms": 827.9,
+      "request_prompt_prep_ms": 42.2,
+      "generate_ttfa_ms": 746.0,
+      "generate_total_ms": 746.0,
+      "request_ttfa_ms": 788.2,
+      "request_total_ms": 788.2,
       "audio_duration_s": 4.245,
-      "generation_rtf": 0.182,
-      "request_rtf": 0.195,
-      "peak_vram_mb": 892.1,
+      "generation_rtf": 0.176,
+      "request_rtf": 0.186,
+      "peak_vram_mb": 871.8,
       "sample_rate": 48000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/luxtts__baseline__short_reply.wav",
       "optimizations_applied": [],
@@ -46,17 +46,17 @@
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 35195.0,
-      "warmup_ms": 2557.3,
+      "model_load_ms": 9502.9,
+      "warmup_ms": 2309.6,
       "cached_prompt_build_ms": null,
-      "request_prompt_prep_ms": 45.7,
-      "generate_ttfa_ms": 555.6,
-      "generate_total_ms": 555.6,
-      "request_ttfa_ms": 601.3,
-      "request_total_ms": 601.3,
+      "request_prompt_prep_ms": 45.2,
+      "generate_ttfa_ms": 569.9,
+      "generate_total_ms": 569.9,
+      "request_ttfa_ms": 615.2,
+      "request_total_ms": 615.2,
       "audio_duration_s": 11.765,
-      "generation_rtf": 0.047,
-      "request_rtf": 0.051,
+      "generation_rtf": 0.048,
+      "request_rtf": 0.052,
       "peak_vram_mb": 982.1,
       "sample_rate": 48000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/luxtts__baseline__medium_reply.wav",
@@ -76,17 +76,17 @@
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 35195.0,
-      "warmup_ms": 2557.3,
+      "model_load_ms": 9502.9,
+      "warmup_ms": 2309.6,
       "cached_prompt_build_ms": null,
-      "request_prompt_prep_ms": 38.4,
-      "generate_ttfa_ms": 1729.3,
-      "generate_total_ms": 1729.3,
-      "request_ttfa_ms": 1767.7,
-      "request_total_ms": 1767.7,
+      "request_prompt_prep_ms": 50.1,
+      "generate_ttfa_ms": 1751.2,
+      "generate_total_ms": 1751.2,
+      "request_ttfa_ms": 1801.3,
+      "request_total_ms": 1801.3,
       "audio_duration_s": 43.296,
       "generation_rtf": 0.04,
-      "request_rtf": 0.041,
+      "request_rtf": 0.042,
       "peak_vram_mb": 2112.4,
       "sample_rate": 48000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/luxtts__baseline__long_reply.wav",
@@ -102,28 +102,72 @@
       "scenario_description": "One concise assistant reply.",
       "scenario_word_count": 18,
       "backend": "zipvoice_pytorch",
-      "mode": "non_streaming_clone",
+      "mode": "shared_chunked_playback",
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 35195.0,
-      "warmup_ms": 2557.3,
-      "cached_prompt_build_ms": 44.4,
+      "model_load_ms": 9502.9,
+      "warmup_ms": 2309.6,
+      "cached_prompt_build_ms": 45.5,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 289.8,
-      "generate_total_ms": 289.8,
-      "request_ttfa_ms": 289.8,
-      "request_total_ms": 289.8,
-      "audio_duration_s": 4.245,
-      "generation_rtf": 0.068,
-      "request_rtf": 0.068,
-      "peak_vram_mb": 875.5,
+      "generate_ttfa_ms": 300.5,
+      "generate_total_ms": 635.8,
+      "request_ttfa_ms": 300.5,
+      "request_total_ms": 635.8,
+      "audio_duration_s": 4.235,
+      "generation_rtf": 0.15,
+      "request_rtf": 0.15,
+      "peak_vram_mb": 870.2,
       "sample_rate": 48000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/luxtts__optimized__short_reply.wav",
       "optimizations_applied": [
-        "prompt_cache"
+        "prompt_cache",
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Prompt cache reused across replies. Generation settings stay on the official 4-step efficient path."
+      "optimization_notes": "Prompt cache reused across replies and long text is split by the shared chunk planner.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 300,
+      "chunk_max_chars": 640,
+      "chunk_char_lengths": [
+        14,
+        70
+      ],
+      "chunk_word_counts": [
+        4,
+        14
+      ],
+      "chunk_estimated_tokens": [
+        12,
+        42
+      ],
+      "chunk_text_preview": [
+        "I can do that.",
+        "The quickest fix is to keep the model warm and reuse the voice prompt."
+      ],
+      "chunk_generate_ttfa_ms": [
+        300.5,
+        335.3
+      ],
+      "chunk_generate_total_ms": [
+        300.5,
+        335.3
+      ],
+      "chunk_audio_duration_s": [
+        0.747,
+        3.488
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        300.5,
+        635.8
+      ],
+      "inter_chunk_gap_ms": [
+        0.0
+      ],
+      "max_inter_chunk_gap_ms": 0.0,
+      "total_generation_ms": 635.8,
+      "stitched_audio_duration_s": 4.235,
+      "stitched_playback_ms": 4535.1
     },
     {
       "engine": "luxtts",
@@ -134,28 +178,72 @@
       "scenario_description": "A practical multi-sentence assistant answer.",
       "scenario_word_count": 41,
       "backend": "zipvoice_pytorch",
-      "mode": "non_streaming_clone",
+      "mode": "shared_chunked_playback",
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 35195.0,
-      "warmup_ms": 2557.3,
-      "cached_prompt_build_ms": 44.4,
+      "model_load_ms": 9502.9,
+      "warmup_ms": 2309.6,
+      "cached_prompt_build_ms": 45.5,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 519.4,
-      "generate_total_ms": 519.4,
-      "request_ttfa_ms": 519.4,
-      "request_total_ms": 519.4,
-      "audio_duration_s": 11.765,
-      "generation_rtf": 0.044,
-      "request_rtf": 0.044,
-      "peak_vram_mb": 985.4,
+      "generate_ttfa_ms": 324.5,
+      "generate_total_ms": 738.9,
+      "request_ttfa_ms": 324.5,
+      "request_total_ms": 738.9,
+      "audio_duration_s": 11.755,
+      "generation_rtf": 0.063,
+      "request_rtf": 0.063,
+      "peak_vram_mb": 922.1,
       "sample_rate": 48000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/luxtts__optimized__medium_reply.wav",
       "optimizations_applied": [
-        "prompt_cache"
+        "prompt_cache",
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Prompt cache reused across replies. Generation settings stay on the official 4-step efficient path."
+      "optimization_notes": "Prompt cache reused across replies and long text is split by the shared chunk planner.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 300,
+      "chunk_max_chars": 640,
+      "chunk_char_lengths": [
+        76,
+        165
+      ],
+      "chunk_word_counts": [
+        13,
+        29
+      ],
+      "chunk_estimated_tokens": [
+        40,
+        88
+      ],
+      "chunk_text_preview": [
+        "The main latency win comes from separating one-time setup from request work.",
+        "Load the model once at startup, precompute the voice conditioning when the speaker is chosen, an"
+      ],
+      "chunk_generate_ttfa_ms": [
+        324.5,
+        414.4
+      ],
+      "chunk_generate_total_ms": [
+        324.5,
+        414.4
+      ],
+      "chunk_audio_duration_s": [
+        3.755,
+        8.0
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        324.5,
+        738.9
+      ],
+      "inter_chunk_gap_ms": [
+        0.0
+      ],
+      "max_inter_chunk_gap_ms": 0.0,
+      "total_generation_ms": 738.9,
+      "stitched_audio_duration_s": 11.755,
+      "stitched_playback_ms": 12079.2
     },
     {
       "engine": "luxtts",
@@ -166,28 +254,81 @@
       "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
       "scenario_word_count": 162,
       "backend": "zipvoice_pytorch",
-      "mode": "non_streaming_clone",
+      "mode": "shared_chunked_playback",
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 35195.0,
-      "warmup_ms": 2557.3,
-      "cached_prompt_build_ms": 44.4,
+      "model_load_ms": 9502.9,
+      "warmup_ms": 2309.6,
+      "cached_prompt_build_ms": 45.5,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 1726.7,
-      "generate_total_ms": 1726.7,
-      "request_ttfa_ms": 1726.7,
-      "request_total_ms": 1726.7,
-      "audio_duration_s": 43.296,
-      "generation_rtf": 0.04,
-      "request_rtf": 0.04,
-      "peak_vram_mb": 2112.6,
+      "generate_ttfa_ms": 380.3,
+      "generate_total_ms": 1930.8,
+      "request_ttfa_ms": 380.3,
+      "request_total_ms": 1930.8,
+      "audio_duration_s": 43.285,
+      "generation_rtf": 0.045,
+      "request_rtf": 0.045,
+      "peak_vram_mb": 1393.0,
       "sample_rate": 48000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/luxtts__optimized__long_reply.wav",
       "optimizations_applied": [
-        "prompt_cache"
+        "prompt_cache",
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Prompt cache reused across replies. Generation settings stay on the official 4-step efficient path."
+      "optimization_notes": "Prompt cache reused across replies and long text is split by the shared chunk planner.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 3,
+      "chunk_max_estimated_tokens": 300,
+      "chunk_max_chars": 640,
+      "chunk_char_lengths": [
+        97,
+        574,
+        245
+      ],
+      "chunk_word_counts": [
+        21,
+        97,
+        44
+      ],
+      "chunk_estimated_tokens": [
+        64,
+        297,
+        134
+      ],
+      "chunk_text_preview": [
+        "Hey, I wanted to leave a fuller note so we can hear how the voice holds up over a longer stretch",
+        "The short samples are useful for latency, but they do not tell us much about consistency, pacing",
+        "If the identity stays recognizable, the phrasing remains clear, and the overall delivery still s"
+      ],
+      "chunk_generate_ttfa_ms": [
+        380.3,
+        1030.2,
+        520.3
+      ],
+      "chunk_generate_total_ms": [
+        380.3,
+        1030.2,
+        520.3
+      ],
+      "chunk_audio_duration_s": [
+        4.768,
+        26.891,
+        11.627
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        380.3,
+        1410.5,
+        1930.8
+      ],
+      "inter_chunk_gap_ms": [
+        0.0,
+        0.0
+      ],
+      "max_inter_chunk_gap_ms": 0.0,
+      "total_generation_ms": 1930.8,
+      "stitched_audio_duration_s": 43.285,
+      "stitched_playback_ms": 43665.6
     }
   ]
 }

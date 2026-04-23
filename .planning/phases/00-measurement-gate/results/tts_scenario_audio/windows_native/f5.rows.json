@@ -16,14 +16,14 @@
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 4921.0,
-      "warmup_ms": 2354.7,
+      "model_load_ms": 4724.3,
+      "warmup_ms": 1542.1,
       "cached_prompt_build_ms": null,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 942.4,
-      "generate_total_ms": 942.4,
-      "request_ttfa_ms": 942.4,
-      "request_total_ms": 942.4,
+      "generate_ttfa_ms": 943.5,
+      "generate_total_ms": 943.5,
+      "request_ttfa_ms": 943.5,
+      "request_total_ms": 943.5,
       "audio_duration_s": 9.504,
       "generation_rtf": 0.099,
       "request_rtf": 0.099,
@@ -46,17 +46,17 @@
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 4921.0,
-      "warmup_ms": 2354.7,
+      "model_load_ms": 4724.3,
+      "warmup_ms": 1542.1,
       "cached_prompt_build_ms": null,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 2634.8,
-      "generate_total_ms": 2634.8,
-      "request_ttfa_ms": 2634.8,
-      "request_total_ms": 2634.8,
+      "generate_ttfa_ms": 2610.2,
+      "generate_total_ms": 2610.2,
+      "request_ttfa_ms": 2610.2,
+      "request_total_ms": 2610.2,
       "audio_duration_s": 26.548,
-      "generation_rtf": 0.099,
-      "request_rtf": 0.099,
+      "generation_rtf": 0.098,
+      "request_rtf": 0.098,
       "peak_vram_mb": 788.5,
       "sample_rate": 24000,
       "output_wav": "results\\tts_scenario_audio\\windows_native\\f5__baseline__medium_reply.wav",
@@ -76,17 +76,17 @@
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 4921.0,
-      "warmup_ms": 2354.7,
+      "model_load_ms": 4724.3,
+      "warmup_ms": 1542.1,
       "cached_prompt_build_ms": null,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 10366.0,
-      "generate_total_ms": 10366.0,
-      "request_ttfa_ms": 10366.0,
-      "request_total_ms": 10366.0,
+      "generate_ttfa_ms": 10267.4,
+      "generate_total_ms": 10267.4,
+      "request_ttfa_ms": 10267.4,
+      "request_total_ms": 10267.4,
       "audio_duration_s": 99.79,
-      "generation_rtf": 0.104,
-      "request_rtf": 0.104,
+      "generation_rtf": 0.103,
+      "request_rtf": 0.103,
       "peak_vram_mb": 790.2,
       "sample_rate": 24000,
       "output_wav": "results\\tts_scenario_audio\\windows_native\\f5__baseline__long_reply.wav",
@@ -102,29 +102,72 @@
       "scenario_description": "One concise assistant reply.",
       "scenario_word_count": 18,
       "backend": "native_pytorch_chunked",
-      "mode": "simulated_streaming",
+      "mode": "shared_chunked_playback",
       "streaming_support": "simulated",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 4921.0,
-      "warmup_ms": 2354.7,
+      "model_load_ms": 4724.3,
+      "warmup_ms": 1542.1,
       "cached_prompt_build_ms": 4.4,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 932.0,
-      "generate_total_ms": 932.4,
-      "request_ttfa_ms": 932.0,
-      "request_total_ms": 932.4,
-      "audio_duration_s": 9.504,
-      "generation_rtf": 0.098,
-      "request_rtf": 0.098,
-      "peak_vram_mb": 785.1,
+      "generate_ttfa_ms": 524.3,
+      "generate_total_ms": 1346.5,
+      "request_ttfa_ms": 524.3,
+      "request_total_ms": 1346.5,
+      "audio_duration_s": 9.387,
+      "generation_rtf": 0.143,
+      "request_rtf": 0.143,
+      "peak_vram_mb": 780.2,
       "sample_rate": 24000,
       "output_wav": "results\\tts_scenario_audio\\windows_native\\f5__optimized__short_reply.wav",
       "optimizations_applied": [
         "prepared_ref_cache",
-        "text_chunking"
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Prepared reference cached once per session and long replies are chunked before F5 synthesis."
+      "optimization_notes": "Prepared reference cached once per session and replies use the shared sentence-aware chunk planner.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 260,
+      "chunk_max_chars": 520,
+      "chunk_char_lengths": [
+        14,
+        70
+      ],
+      "chunk_word_counts": [
+        4,
+        14
+      ],
+      "chunk_estimated_tokens": [
+        12,
+        42
+      ],
+      "chunk_text_preview": [
+        "I can do that.",
+        "The quickest fix is to keep the model warm and reuse the voice prompt."
+      ],
+      "chunk_generate_ttfa_ms": [
+        524.3,
+        821.8
+      ],
+      "chunk_generate_total_ms": [
+        524.4,
+        822.1
+      ],
+      "chunk_audio_duration_s": [
+        1.557,
+        7.829
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        524.3,
+        1346.2
+      ],
+      "inter_chunk_gap_ms": [
+        0.0
+      ],
+      "max_inter_chunk_gap_ms": 0.0,
+      "total_generation_ms": 1346.5,
+      "stitched_audio_duration_s": 9.387,
+      "stitched_playback_ms": 9910.9
     },
     {
       "engine": "f5",
@@ -135,29 +178,72 @@
       "scenario_description": "A practical multi-sentence assistant answer.",
       "scenario_word_count": 41,
       "backend": "native_pytorch_chunked",
-      "mode": "simulated_streaming",
+      "mode": "shared_chunked_playback",
       "streaming_support": "simulated",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 4921.0,
-      "warmup_ms": 2354.7,
+      "model_load_ms": 4724.3,
+      "warmup_ms": 1542.1,
       "cached_prompt_build_ms": 4.4,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 846.8,
-      "generate_total_ms": 2637.1,
-      "request_ttfa_ms": 846.8,
-      "request_total_ms": 2637.1,
-      "audio_duration_s": 26.848,
-      "generation_rtf": 0.098,
-      "request_rtf": 0.098,
-      "peak_vram_mb": 788.5,
+      "generate_ttfa_ms": 839.3,
+      "generate_total_ms": 2250.5,
+      "request_ttfa_ms": 839.3,
+      "request_total_ms": 2250.5,
+      "audio_duration_s": 26.976,
+      "generation_rtf": 0.083,
+      "request_rtf": 0.083,
+      "peak_vram_mb": 818.8,
       "sample_rate": 24000,
       "output_wav": "results\\tts_scenario_audio\\windows_native\\f5__optimized__medium_reply.wav",
       "optimizations_applied": [
         "prepared_ref_cache",
-        "text_chunking"
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Prepared reference cached once per session and long replies are chunked before F5 synthesis."
+      "optimization_notes": "Prepared reference cached once per session and replies use the shared sentence-aware chunk planner.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 260,
+      "chunk_max_chars": 520,
+      "chunk_char_lengths": [
+        76,
+        165
+      ],
+      "chunk_word_counts": [
+        13,
+        29
+      ],
+      "chunk_estimated_tokens": [
+        40,
+        88
+      ],
+      "chunk_text_preview": [
+        "The main latency win comes from separating one-time setup from request work.",
+        "Load the model once at startup, precompute the voice conditioning when the speaker is chosen, an"
+      ],
+      "chunk_generate_ttfa_ms": [
+        839.3,
+        1410.2
+      ],
+      "chunk_generate_total_ms": [
+        839.5,
+        1410.9
+      ],
+      "chunk_audio_duration_s": [
+        8.501,
+        18.475
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        839.3,
+        2249.8
+      ],
+      "inter_chunk_gap_ms": [
+        0.0
+      ],
+      "max_inter_chunk_gap_ms": 0.0,
+      "total_generation_ms": 2250.5,
+      "stitched_audio_duration_s": 26.976,
+      "stitched_playback_ms": 27815.3
     },
     {
       "engine": "f5",
@@ -168,29 +254,81 @@
       "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
       "scenario_word_count": 162,
       "backend": "native_pytorch_chunked",
-      "mode": "simulated_streaming",
+      "mode": "shared_chunked_playback",
       "streaming_support": "simulated",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 4921.0,
-      "warmup_ms": 2354.7,
+      "model_load_ms": 4724.3,
+      "warmup_ms": 1542.1,
       "cached_prompt_build_ms": 4.4,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 989.6,
-      "generate_total_ms": 10359.1,
-      "request_ttfa_ms": 989.6,
-      "request_total_ms": 10359.1,
-      "audio_duration_s": 101.44,
-      "generation_rtf": 0.102,
-      "request_rtf": 0.102,
-      "peak_vram_mb": 790.2,
+      "generate_ttfa_ms": 981.2,
+      "generate_total_ms": 8119.7,
+      "request_ttfa_ms": 981.2,
+      "request_total_ms": 8119.7,
+      "audio_duration_s": 102.603,
+      "generation_rtf": 0.079,
+      "request_rtf": 0.079,
+      "peak_vram_mb": 928.0,
       "sample_rate": 24000,
       "output_wav": "results\\tts_scenario_audio\\windows_native\\f5__optimized__long_reply.wav",
       "optimizations_applied": [
         "prepared_ref_cache",
-        "text_chunking"
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Prepared reference cached once per session and long replies are chunked before F5 synthesis."
+      "optimization_notes": "Prepared reference cached once per session and replies use the shared sentence-aware chunk planner.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 3,
+      "chunk_max_estimated_tokens": 260,
+      "chunk_max_chars": 520,
+      "chunk_char_lengths": [
+        97,
+        403,
+        416
+      ],
+      "chunk_word_counts": [
+        21,
+        68,
+        73
+      ],
+      "chunk_estimated_tokens": [
+        64,
+        208,
+        223
+      ],
+      "chunk_text_preview": [
+        "Hey, I wanted to leave a fuller note so we can hear how the voice holds up over a longer stretch",
+        "The short samples are useful for latency, but they do not tell us much about consistency, pacing",
+        "I also want enough material to expose awkward transitions, repeated prosody, or the sort of flat"
+      ],
+      "chunk_generate_ttfa_ms": [
+        981.2,
+        3515.3,
+        3619.6
+      ],
+      "chunk_generate_total_ms": [
+        981.5,
+        3516.8,
+        3621.4
+      ],
+      "chunk_audio_duration_s": [
+        10.859,
+        45.141,
+        46.603
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        981.2,
+        4496.7,
+        8117.9
+      ],
+      "inter_chunk_gap_ms": [
+        0.0,
+        0.0
+      ],
+      "max_inter_chunk_gap_ms": 0.0,
+      "total_generation_ms": 8119.7,
+      "stitched_audio_duration_s": 102.603,
+      "stitched_playback_ms": 103583.8
     }
   ]
 }

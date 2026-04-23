@@ -1,13 +1,67 @@
 runtime,engine,profile,scenario,sample_folder,sample_file,intelligibility_1_5,voice_match_1_5,prosody_1_5,acceptance,notes
-windows_native,luxtts,optimized,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,luxtts__optimized__short_reply.wav,,,,,
-windows_native,luxtts,optimized,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,luxtts__optimized__medium_reply.wav,,,,,
-windows_native,luxtts,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,luxtts__optimized__long_reply.wav,,,,,
-wsl_python,luxtts,optimized,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,luxtts__optimized__short_reply.wav,,,,,
-wsl_python,luxtts,optimized,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,luxtts__optimized__medium_reply.wav,,,,,
-wsl_python,luxtts,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,luxtts__optimized__long_reply.wav,,,,,
+windows_native,luxtts,optimized,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,luxtts__optimized__short_reply.wav,3,2,2,reject,user verdict 2026-04-23: repeats tail of reference/sample audio; metallic noise; low quality; possible missing reference padding; sample-level reject; keep engine for future retest
+windows_native,luxtts,optimized,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,luxtts__optimized__medium_reply.wav,2,1,1,reject,user verdict 2026-04-23: too fast; intersperses phrases/words from sample; likely sample leakage; sample-level reject; keep engine for future retest
+windows_native,luxtts,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,luxtts__optimized__long_reply.wav,2,1,1,reject,user verdict 2026-04-23: same as medium; voice does not sound like user and accent not preserved; sample-level reject; keep engine for future retest
+windows_native,luxtts,baseline,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,luxtts__baseline__short_reply.wav,,,,,
+windows_native,luxtts,baseline,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,luxtts__baseline__medium_reply.wav,,,,,
+windows_native,luxtts,baseline,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,luxtts__baseline__long_reply.wav,,,,,
+wsl_python,luxtts,optimized,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,luxtts__optimized__short_reply.wav,3,2,2,reject,user verdict 2026-04-23: same as Windows short; repeats sample tail; metallic noise; low quality; sample-level reject; keep engine for future retest
+wsl_python,luxtts,optimized,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,luxtts__optimized__medium_reply.wav,2,1,1,reject,user verdict 2026-04-23: same as Windows medium; too fast and sample phrase/word leakage; sample-level reject; keep engine for future retest
+wsl_python,luxtts,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,luxtts__optimized__long_reply.wav,2,1,1,reject,user verdict 2026-04-23: same as Windows long; poor voice match and accent not preserved; sample-level reject; keep engine for future retest
+wsl_python,luxtts,baseline,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,luxtts__baseline__short_reply.wav,,,,,
+wsl_python,luxtts,baseline,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,luxtts__baseline__medium_reply.wav,,,,,
+wsl_python,luxtts,baseline,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,luxtts__baseline__long_reply.wav,,,,,
+windows_native,xtts,optimized,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,xtts__optimized__short_reply.wav,,,,,
+windows_native,xtts,optimized,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,xtts__optimized__medium_reply.wav,,,,,
+windows_native,xtts,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,xtts__optimized__long_reply.wav,,,,,
+windows_native,xtts,baseline,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,xtts__baseline__short_reply.wav,,,,,
+windows_native,xtts,baseline,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,xtts__baseline__medium_reply.wav,,,,,
+windows_native,xtts,baseline,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,xtts__baseline__long_reply.wav,,,,,
+wsl_python,xtts,optimized,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,xtts__optimized__short_reply.wav,,,,,
 wsl_python,xtts,optimized,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,xtts__optimized__medium_reply.wav,,,,,
+wsl_python,xtts,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,xtts__optimized__long_reply.wav,3,2,2,caution,user verdict 2026-04-23: metallic and hiccupy; voice likeness incomplete; known from prior user testing to be sample-sensitive
+wsl_python,xtts,baseline,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,xtts__baseline__short_reply.wav,,,,,
+wsl_python,xtts,baseline,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,xtts__baseline__medium_reply.wav,,,,,
+wsl_python,xtts,baseline,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,xtts__baseline__long_reply.wav,,,,,
+windows_native,f5,optimized,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,f5__optimized__short_reply.wav,,,,,
+windows_native,f5,optimized,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,f5__optimized__medium_reply.wav,,,,,
+windows_native,f5,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,f5__optimized__long_reply.wav,3,3,2,caution,"user verdict 2026-04-23: slow/stretched in parts, hiccupy, degrades into mumbling and gradual silence then recovers; likely 1.5 multiplier is too much; F5 known good with good sample/transcription"
+windows_native,f5,baseline,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,f5__baseline__short_reply.wav,,,,,
+windows_native,f5,baseline,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,f5__baseline__medium_reply.wav,,,,,
+windows_native,f5,baseline,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,f5__baseline__long_reply.wav,,,,,
+wsl_python,f5,optimized,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,f5__optimized__short_reply.wav,,,,,
+wsl_python,f5,optimized,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,f5__optimized__medium_reply.wav,,,,,
 wsl_python,f5,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,f5__optimized__long_reply.wav,,,,,
-windows_native,chatterbox_turbo,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,chatterbox_turbo__optimized__long_reply.wav,,,,reject,user reported long sample gibberish
-wsl_python,chatterbox_turbo,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,chatterbox_turbo__optimized__long_reply.wav,,,,reject,user reported long sample gibberish
+wsl_python,f5,baseline,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,f5__baseline__short_reply.wav,,,,,
+wsl_python,f5,baseline,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,f5__baseline__medium_reply.wav,,,,,
+wsl_python,f5,baseline,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,f5__baseline__long_reply.wav,,,,,
+windows_native,chatterbox_turbo,optimized,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,chatterbox_turbo__optimized__short_reply.wav,,,,,
+windows_native,chatterbox_turbo,optimized,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,chatterbox_turbo__optimized__medium_reply.wav,,,,,
+windows_native,chatterbox_turbo,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,chatterbox_turbo__optimized__long_reply.wav,5,,,accept,user verdict 2026-04-23: fine
+windows_native,chatterbox_turbo,optimized_seed_1337,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,chatterbox_turbo__optimized_seed_1337__short_reply.wav,,,,,
+windows_native,chatterbox_turbo,optimized_seed_1337,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,chatterbox_turbo__optimized_seed_1337__medium_reply.wav,,,,,
+windows_native,chatterbox_turbo,optimized_seed_1337,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,chatterbox_turbo__optimized_seed_1337__long_reply.wav,5,,,accept,user verdict 2026-04-23: fine
+windows_native,chatterbox_turbo,baseline,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,chatterbox_turbo__baseline__short_reply.wav,,,,,
+windows_native,chatterbox_turbo,baseline,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,chatterbox_turbo__baseline__medium_reply.wav,,,,,
+windows_native,chatterbox_turbo,baseline,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,chatterbox_turbo__baseline__long_reply.wav,1,,,reject,user verdict 2026-04-23: absolute gibberish
+wsl_python,chatterbox_turbo,optimized,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,chatterbox_turbo__optimized__short_reply.wav,,,,,
+wsl_python,chatterbox_turbo,optimized,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,chatterbox_turbo__optimized__medium_reply.wav,,,,,
+wsl_python,chatterbox_turbo,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,chatterbox_turbo__optimized__long_reply.wav,5,,,accept,user verdict 2026-04-23: fine
+wsl_python,chatterbox_turbo,optimized_seed_1337,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,chatterbox_turbo__optimized_seed_1337__short_reply.wav,,,,,
+wsl_python,chatterbox_turbo,optimized_seed_1337,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,chatterbox_turbo__optimized_seed_1337__medium_reply.wav,,,,,
+wsl_python,chatterbox_turbo,optimized_seed_1337,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,chatterbox_turbo__optimized_seed_1337__long_reply.wav,5,,,accept,user verdict 2026-04-23: fine
+wsl_python,chatterbox_turbo,baseline,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,chatterbox_turbo__baseline__short_reply.wav,,,,,
+wsl_python,chatterbox_turbo,baseline,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,chatterbox_turbo__baseline__medium_reply.wav,,,,,
+wsl_python,chatterbox_turbo,baseline,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,chatterbox_turbo__baseline__long_reply.wav,1,,,reject,user verdict 2026-04-23: gibberish
+windows_native,tada_1b,optimized,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,tada_1b__optimized__short_reply.wav,,,,,
+windows_native,tada_1b,optimized,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,tada_1b__optimized__medium_reply.wav,,,,,
+windows_native,tada_1b,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,tada_1b__optimized__long_reply.wav,4,4,3,accept,user verdict 2026-04-23: optimized long sounds acceptable; some hiccups but less than WSL
+windows_native,tada_1b,baseline,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,tada_1b__baseline__short_reply.wav,,,,,
+windows_native,tada_1b,baseline,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,tada_1b__baseline__medium_reply.wav,,,,,
+windows_native,tada_1b,baseline,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/windows_native,tada_1b__baseline__long_reply.wav,,,,,
+wsl_python,tada_1b,optimized,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,tada_1b__optimized__short_reply.wav,,,,,
 wsl_python,tada_1b,optimized,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,tada_1b__optimized__medium_reply.wav,,,,,
-wsl_python,tada_1b,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,tada_1b__optimized__long_reply.wav,,,,,
+wsl_python,tada_1b,optimized,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,tada_1b__optimized__long_reply.wav,3,2,2,caution,user verdict 2026-04-23: a little worse than Windows; voice morphs to another voice; less steady; some hiccups
+wsl_python,tada_1b,baseline,short_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,tada_1b__baseline__short_reply.wav,,,,,
+wsl_python,tada_1b,baseline,medium_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,tada_1b__baseline__medium_reply.wav,,,,,
+wsl_python,tada_1b,baseline,long_reply,.planning/phases/00-measurement-gate/results/tts_scenario_audio/wsl_python,tada_1b__baseline__long_reply.wav,,,,,

@@ -5,6 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import random
+import re
 import subprocess
 import sys
 import time
@@ -30,11 +32,33 @@ from tts_ttfa import (
 )
 
 ENGINE_ORDER = ("f5", "xtts", "luxtts", "chatterbox_turbo", "tada_1b", "qwen3")
-PROFILE_ORDER = ("baseline", "optimized")
+PROFILE_ORDER = ("baseline", "optimized", "optimized_seed_1337")
 PHASE_DIR = Path(".planning/phases/00-measurement-gate")
 RESULT_PATH = PHASE_DIR / "results" / "tts_scenario_matrix_local.json"
 OUTPUT_SAMPLE_DIR = PHASE_DIR / "results" / "tts_scenario_audio"
 LONG_REPLY_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "target_text_1min.txt"
+CHATTERBOX_ALT_SEED = 1337
+ABBREVIATIONS = {
+    "dr",
+    "mr",
+    "mrs",
+    "ms",
+    "jr",
+    "sr",
+    "st",
+    "vs",
+    "etc",
+    "e.g",
+    "i.e",
+}
+ENGINE_CHUNK_LIMITS = {
+    "f5": {"max_estimated_tokens": 260, "max_chars": 520, "min_words": 8, "first_words": 28},
+    "xtts": {"max_estimated_tokens": 300, "max_chars": 640, "min_words": 8, "first_words": 28},
+    "luxtts": {"max_estimated_tokens": 300, "max_chars": 640, "min_words": 8, "first_words": 28},
+    "chatterbox_turbo": {"max_estimated_tokens": 240, "max_chars": 480, "min_words": 8, "first_words": 24},
+    "tada_1b": {"max_estimated_tokens": 240, "max_chars": 480, "min_words": 8, "first_words": 24},
+    "qwen3": {"max_estimated_tokens": 220, "max_chars": 440, "min_words": 8, "first_words": 24},
+}
 SHORT_REPLY_TEXT = (
     "I can do that. The quickest fix is to keep the model warm and reuse the voice prompt."
 )
@@ -54,6 +78,27 @@ class ScenarioSpec:
     @property
     def word_count(self) -> int:
         return len(self.text.split())
+
+
+@dataclass(frozen=True)
+class ChunkPlan:
+    engine: str
+    chunks: list[str]
+    max_estimated_tokens: int
+    max_chars: int
+    strategy: str
+
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "chunking_strategy": self.strategy,
+            "chunk_count": len(self.chunks),
+            "chunk_max_estimated_tokens": self.max_estimated_tokens,
+            "chunk_max_chars": self.max_chars,
+            "chunk_char_lengths": [len(chunk) for chunk in self.chunks],
+            "chunk_word_counts": [_word_count(chunk) for chunk in self.chunks],
+            "chunk_estimated_tokens": [_estimate_tts_tokens(chunk) for chunk in self.chunks],
+            "chunk_text_preview": [chunk[:96] for chunk in self.chunks],
+        }
 
 
 def scenario_specs() -> list[ScenarioSpec]:
@@ -80,6 +125,257 @@ def _round_or_none(value: float | None, digits: int = 1) -> float | None:
     if value is None:
         return None
     return round(float(value), digits)
+
+
+def _word_count(text: str) -> int:
+    return len(re.findall(r"\b[\w']+\b", text))
+
+
+def _estimate_tts_tokens(text: str) -> int:
+    """Conservative token estimate for planner caps without importing model tokenizers."""
+    words = _word_count(text)
+    punctuation = len(re.findall(r"[,.!?;:]", text))
+    return max(1, int(round(words * 3.0 + punctuation * 0.5)))
+
+
+def _last_word_fragment(text: str) -> str:
+    match = re.search(r"([A-Za-z](?:[A-Za-z]|\.)*)[\"')\]]*$", text.strip())
+    return match.group(1).lower().rstrip(".") if match else ""
+
+
+def _is_sentence_boundary(text: str, index: int) -> bool:
+    char = text[index]
+    if char not in ".!?\n":
+        return False
+    if char == "\n":
+        return True
+    prefix = text[:index]
+    token = _last_word_fragment(prefix)
+    if token in ABBREVIATIONS:
+        return False
+    if char == ".":
+        local = text[max(0, index - 3) : min(len(text), index + 4)].lower()
+        if "e.g." in local or "i.e." in local:
+            return False
+    if char == "." and index > 0 and index + 1 < len(text) and text[index - 1].isdigit() and text[index + 1].isdigit():
+        return False
+    return True
+
+
+def _split_sentence_units(text: str) -> list[str]:
+    units: list[str] = []
+    start = 0
+    index = 0
+    while index < len(text):
+        if _is_sentence_boundary(text, index):
+            end = index + 1
+            while end < len(text) and text[end] in "\"')]}":
+                end += 1
+            unit = " ".join(text[start:end].strip().split())
+            if unit:
+                units.append(unit)
+            start = end
+        index += 1
+    tail = " ".join(text[start:].strip().split())
+    if tail:
+        units.append(tail)
+    return units
+
+
+def _fits_chunk(text: str, *, max_estimated_tokens: int, max_chars: int) -> bool:
+    return len(text) <= max_chars and _estimate_tts_tokens(text) < max_estimated_tokens
+
+
+def _split_oversize_unit(
+    unit: str,
+    *,
+    max_estimated_tokens: int,
+    max_chars: int,
+) -> list[str]:
+    phrase_parts = [
+        part.strip()
+        for part in re.split(r"(?<=[,;:])\s+|\s+-\s+|\s+--\s+", unit)
+        if part.strip()
+    ]
+    if len(phrase_parts) <= 1:
+        phrase_parts = unit.split()
+
+    chunks: list[str] = []
+    current = ""
+    for part in phrase_parts:
+        candidate = part if not current else f"{current} {part}"
+        if current and not _fits_chunk(
+            candidate,
+            max_estimated_tokens=max_estimated_tokens,
+            max_chars=max_chars,
+        ):
+            chunks.append(current.strip())
+            current = part
+        elif not current and not _fits_chunk(
+            candidate,
+            max_estimated_tokens=max_estimated_tokens,
+            max_chars=max_chars,
+        ):
+            words = part.split()
+            word_chunk = ""
+            for word in words:
+                word_candidate = word if not word_chunk else f"{word_chunk} {word}"
+                if word_chunk and not _fits_chunk(
+                    word_candidate,
+                    max_estimated_tokens=max_estimated_tokens,
+                    max_chars=max_chars,
+                ):
+                    chunks.append(word_chunk.strip())
+                    word_chunk = word
+                else:
+                    word_chunk = word_candidate
+            current = word_chunk
+        else:
+            current = candidate
+    if current.strip():
+        chunks.append(current.strip())
+    return chunks
+
+
+def build_chunk_plan(engine: str, text: str) -> ChunkPlan:
+    limits = ENGINE_CHUNK_LIMITS.get(engine, ENGINE_CHUNK_LIMITS["f5"])
+    max_estimated_tokens = int(limits["max_estimated_tokens"])
+    max_chars = int(limits["max_chars"])
+    min_words = int(limits["min_words"])
+    first_words = int(limits["first_words"])
+    units = _split_sentence_units(text)
+    chunks: list[str] = []
+    current = ""
+
+    for unit in units:
+        oversized = not _fits_chunk(
+            unit,
+            max_estimated_tokens=max_estimated_tokens,
+            max_chars=max_chars,
+        )
+        unit_parts = (
+            _split_oversize_unit(
+                unit,
+                max_estimated_tokens=max_estimated_tokens,
+                max_chars=max_chars,
+            )
+            if oversized
+            else [unit]
+        )
+        for part in unit_parts:
+            if not current:
+                current = part
+                if not chunks and _word_count(current) <= first_words:
+                    chunks.append(current.strip())
+                    current = ""
+                continue
+
+            candidate = f"{current} {part}".strip()
+            if _fits_chunk(
+                candidate,
+                max_estimated_tokens=max_estimated_tokens,
+                max_chars=max_chars,
+            ):
+                current = candidate
+            else:
+                chunks.append(current.strip())
+                current = part
+
+    if current.strip():
+        chunks.append(current.strip())
+
+    merged: list[str] = []
+    for chunk in chunks:
+        if (
+            merged
+            and _word_count(chunk) < min_words
+            and _fits_chunk(
+                f"{merged[-1]} {chunk}",
+                max_estimated_tokens=max_estimated_tokens,
+                max_chars=max_chars,
+            )
+        ):
+            merged[-1] = f"{merged[-1]} {chunk}".strip()
+        else:
+            merged.append(chunk)
+
+    return ChunkPlan(
+        engine=engine,
+        chunks=merged or [" ".join(text.strip().split())],
+        max_estimated_tokens=max_estimated_tokens,
+        max_chars=max_chars,
+        strategy="sentence_boundary_token_cap_v1",
+    )
+
+
+def _to_float_np(sample: Any) -> Any:
+    import numpy as np
+    import torch
+
+    if isinstance(sample, torch.Tensor):
+        sample = sample.detach().cpu().numpy()
+    return np.asarray(sample, dtype=np.float32).flatten()
+
+
+def _chunk_playback_metadata(
+    *,
+    plan: ChunkPlan,
+    chunk_ttfa_ms: list[float],
+    chunk_total_ms: list[float],
+    chunk_audio_duration_s: list[float],
+) -> dict[str, Any]:
+    ready_offsets: list[float] = []
+    generated_ms = 0.0
+    playback_end_ms = 0.0
+    inter_chunk_gaps: list[float] = []
+
+    for index, total_ms in enumerate(chunk_total_ms):
+        ready_ms = generated_ms + chunk_ttfa_ms[index]
+        ready_offsets.append(ready_ms)
+        if index == 0:
+            start_ms = ready_ms
+        else:
+            gap_ms = max(0.0, ready_ms - playback_end_ms)
+            inter_chunk_gaps.append(gap_ms)
+            start_ms = max(ready_ms, playback_end_ms)
+        playback_end_ms = start_ms + chunk_audio_duration_s[index] * 1000.0
+        generated_ms += total_ms
+
+    metadata = plan.metadata()
+    metadata.update(
+        {
+            "chunk_generate_ttfa_ms": [_round_or_none(value) for value in chunk_ttfa_ms],
+            "chunk_generate_total_ms": [_round_or_none(value) for value in chunk_total_ms],
+            "chunk_audio_duration_s": [_round_or_none(value, 3) for value in chunk_audio_duration_s],
+            "chunk_audio_ready_offsets_ms": [_round_or_none(value) for value in ready_offsets],
+            "inter_chunk_gap_ms": [_round_or_none(value) for value in inter_chunk_gaps],
+            "max_inter_chunk_gap_ms": _round_or_none(max(inter_chunk_gaps) if inter_chunk_gaps else 0.0),
+            "total_generation_ms": _round_or_none(sum(chunk_total_ms)),
+            "stitched_audio_duration_s": _round_or_none(sum(chunk_audio_duration_s), 3),
+            "stitched_playback_ms": _round_or_none(playback_end_ms),
+        }
+    )
+    return metadata
+
+
+def _set_generation_seed(seed: int | None) -> None:
+    if seed is None:
+        return
+    random.seed(seed)
+    try:
+        import numpy as np
+
+        np.random.seed(seed)
+    except Exception:
+        pass
+    try:
+        import torch
+
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+    except Exception:
+        pass
 
 
 def _configure_user_cache_env(env: dict[str, str] | None = None) -> dict[str, str]:
@@ -263,9 +559,11 @@ def build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
     best_request_ttfa: dict[str, Any] = {}
     best_request_total: dict[str, Any] = {}
+    best_stitched_playback: dict[str, Any] = {}
     for scenario in scenarios:
         best_ttfa = _best_row(rows, scenario, "request_ttfa_ms")
         best_total = _best_row(rows, scenario, "request_total_ms")
+        best_stitched = _best_row(rows, scenario, "stitched_playback_ms")
         if best_ttfa:
             best_request_ttfa[scenario] = {
                 "engine": best_ttfa["engine"],
@@ -282,25 +580,27 @@ def build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
                 "request_total_ms": best_total["request_total_ms"],
                 "output_wav": best_total["output_wav"],
             }
+        if best_stitched:
+            best_stitched_playback[scenario] = {
+                "engine": best_stitched["engine"],
+                "runtime": best_stitched["runtime"],
+                "profile": best_stitched["profile"],
+                "stitched_playback_ms": best_stitched["stitched_playback_ms"],
+                "output_wav": best_stitched["output_wav"],
+            }
 
     return {
         "best_request_ttfa": best_request_ttfa,
         "best_request_total": best_request_total,
+        "best_stitched_playback": best_stitched_playback,
     }
 
 
 def _write_audio_sample(sample_out: Path, sample: Any, sample_rate: int) -> None:
-    import numpy as np
     import soundfile as sf
-    import torch
 
-    if isinstance(sample, torch.Tensor):
-        sample_np = sample.detach().cpu().numpy()
-    else:
-        sample_np = np.asarray(sample)
-    sample_np = sample_np.astype("float32").flatten()
     sample_out.parent.mkdir(parents=True, exist_ok=True)
-    sf.write(sample_out, sample_np, int(sample_rate))
+    sf.write(sample_out, _to_float_np(sample), int(sample_rate))
 
 
 def _run_f5_engine(
@@ -318,9 +618,8 @@ def _run_f5_engine(
 
     _install_f5_runtime_shims()
 
-    from f5_production_chunking import _max_chars_for_batches
     from f5_tts.api import F5TTS
-    from f5_tts.infer.utils_infer import chunk_text, infer_batch_process, preprocess_ref_audio_text
+    from f5_tts.infer.utils_infer import infer_batch_process, preprocess_ref_audio_text
 
     torch.cuda.empty_cache()
     with Timer() as load_timer:
@@ -340,13 +639,8 @@ def _run_f5_engine(
             ref_wave, ref_sample_rate = torchaudio.load(prepared_ref_audio)
         return prep_timer.elapsed_ms, (ref_wave, ref_sample_rate, prepared_ref_text)
 
-    def synthesize(prepared: tuple[Any, int, str], text: str, *, chunked: bool) -> tuple[float, float, float, float, int, np.ndarray]:
+    def synthesize(prepared: tuple[Any, int, str], text: str) -> tuple[float, float, float, float, int, np.ndarray]:
         ref_wave, ref_sample_rate, prepared_ref_text = prepared
-        batch_text = [text]
-        if chunked:
-            max_chars = _max_chars_for_batches(ref_wave, ref_sample_rate, prepared_ref_text, 1.0)
-            batch_text = chunk_text(text, max_chars=max_chars)
-
         chunks: list[np.ndarray] = []
         sample_rate = model.target_sample_rate
         first_chunk_s: float | None = None
@@ -355,7 +649,7 @@ def _run_f5_engine(
             for chunk, sample_rate in infer_batch_process(
                 (ref_wave, ref_sample_rate),
                 prepared_ref_text,
-                batch_text,
+                [text],
                 model.ema_model,
                 model.vocoder,
                 mel_spec_type=model.mel_spec_type,
@@ -481,15 +775,36 @@ def _run_f5_engine(
         )
 
     optimized_notes = (
-        "Prepared reference cached once per session and long replies are chunked before F5 synthesis."
+        "Prepared reference cached once per session and replies use the shared sentence-aware chunk planner."
     )
     for scenario in scenarios:
         try:
             torch.cuda.reset_peak_memory_stats()
-            ttfa_ms, total_ms, audio_duration_s, peak_vram_mb, sample_rate, wav = synthesize(
-                prepared_cached,
-                scenario.text,
-                chunked=True,
+            plan = build_chunk_plan("f5", scenario.text)
+            chunk_ttfa_ms: list[float] = []
+            chunk_total_ms: list[float] = []
+            chunk_audio_duration_s: list[float] = []
+            chunk_peak_vram_mb: list[float] = []
+            chunk_wavs: list[np.ndarray] = []
+            sample_rate = model.target_sample_rate
+            for chunk_text in plan.chunks:
+                ttfa_ms, total_ms, audio_duration_s, peak_vram_mb, sample_rate, wav = synthesize(
+                    prepared_cached,
+                    chunk_text,
+                )
+                chunk_ttfa_ms.append(ttfa_ms)
+                chunk_total_ms.append(total_ms)
+                chunk_audio_duration_s.append(audio_duration_s)
+                chunk_peak_vram_mb.append(peak_vram_mb)
+                chunk_wavs.append(wav)
+            wav = np.concatenate(chunk_wavs) if chunk_wavs else np.zeros(1, dtype=np.float32)
+            audio_duration_s = len(wav) / float(sample_rate)
+            peak_vram_mb = max(chunk_peak_vram_mb) if chunk_peak_vram_mb else 0.0
+            chunk_extra = _chunk_playback_metadata(
+                plan=plan,
+                chunk_ttfa_ms=chunk_ttfa_ms,
+                chunk_total_ms=chunk_total_ms,
+                chunk_audio_duration_s=chunk_audio_duration_s,
             )
             sample_out = _sample_path(sample_root, "f5", "optimized", scenario.name)
             _write_audio_sample(sample_out, wav, sample_rate)
@@ -501,21 +816,22 @@ def _run_f5_engine(
                     profile="optimized",
                     scenario=scenario,
                     backend="native_pytorch_chunked",
-                    mode="simulated_streaming",
+                    mode="non_streaming_clone",
                     streaming_support="simulated",
                     true_streaming=False,
                     model_load_ms=model_load_ms,
                     warmup_ms=warmup_ms,
                     cached_prompt_build_ms=cached_prompt_build_ms,
                     request_prompt_prep_ms=0.0,
-                    generate_ttfa_ms=ttfa_ms,
-                    generate_total_ms=total_ms,
+                    generate_ttfa_ms=chunk_ttfa_ms[0] if chunk_ttfa_ms else None,
+                    generate_total_ms=sum(chunk_total_ms),
                     audio_duration_s=audio_duration_s,
                     peak_vram_mb=peak_vram_mb,
                     sample_rate=sample_rate,
                     output_wav=sample_out,
-                    optimizations_applied=["prepared_ref_cache", "text_chunking"],
+                    optimizations_applied=["prepared_ref_cache", "shared_chunk_planner"],
                     optimization_notes=optimized_notes,
+                    extra=chunk_extra,
                 )
             )
         except Exception:
@@ -527,7 +843,7 @@ def _run_f5_engine(
                     profile="optimized",
                     scenario=scenario,
                     backend="native_pytorch_chunked",
-                    mode="simulated_streaming",
+                    mode="shared_chunked_playback",
                     streaming_support="simulated",
                     true_streaming=False,
                     model_load_ms=model_load_ms,
@@ -540,7 +856,7 @@ def _run_f5_engine(
                     peak_vram_mb=None,
                     sample_rate=None,
                     output_wav=None,
-                    optimizations_applied=["prepared_ref_cache", "text_chunking"],
+                    optimizations_applied=["prepared_ref_cache", "shared_chunk_planner"],
                     optimization_notes=optimized_notes,
                     status="failed",
                     reason=traceback.format_exc(limit=12),
@@ -679,12 +995,48 @@ def _run_xtts_engine(
         )
 
     cached_prompt_build_ms, cached_conditioning = prepare_conditioning()
-    optimized_notes = "Conditioning latents cached once per session and reused across replies."
+    optimized_notes = (
+        "Conditioning latents cached once per session; text is split by the shared planner before XTTS streaming."
+    )
     for scenario in scenarios:
         torch.cuda.reset_peak_memory_stats()
-        ttfa_ms, total_ms, audio_duration_s, peak_vram_mb, rate, wav, streaming_ok, streaming_error = synthesize(
-            cached_conditioning,
-            scenario.text,
+        plan = build_chunk_plan("xtts", scenario.text)
+        chunk_ttfa_ms: list[float] = []
+        chunk_total_ms: list[float] = []
+        chunk_audio_duration_s: list[float] = []
+        chunk_peak_vram_mb: list[float] = []
+        chunk_wavs: list[np.ndarray] = []
+        chunk_streaming_ok: list[bool] = []
+        streaming_errors: list[str] = []
+        rate = sample_rate
+        for chunk_text in plan.chunks:
+            ttfa_ms, total_ms, audio_duration_s, peak_vram_mb, rate, wav, streaming_ok, streaming_error = synthesize(
+                cached_conditioning,
+                chunk_text,
+            )
+            chunk_ttfa_ms.append(ttfa_ms)
+            chunk_total_ms.append(total_ms)
+            chunk_audio_duration_s.append(audio_duration_s)
+            chunk_peak_vram_mb.append(peak_vram_mb)
+            chunk_wavs.append(wav)
+            chunk_streaming_ok.append(streaming_ok)
+            if streaming_error:
+                streaming_errors.append(streaming_error)
+        wav = np.concatenate(chunk_wavs) if chunk_wavs else np.zeros(1, dtype=np.float32)
+        audio_duration_s = len(wav) / float(rate)
+        peak_vram_mb = max(chunk_peak_vram_mb) if chunk_peak_vram_mb else 0.0
+        all_streaming_ok = all(chunk_streaming_ok) if chunk_streaming_ok else False
+        chunk_extra = _chunk_playback_metadata(
+            plan=plan,
+            chunk_ttfa_ms=chunk_ttfa_ms,
+            chunk_total_ms=chunk_total_ms,
+            chunk_audio_duration_s=chunk_audio_duration_s,
+        )
+        chunk_extra.update(
+            {
+                "chunk_streaming_ok": chunk_streaming_ok,
+                "streaming_error": "\n--- chunk fallback ---\n".join(streaming_errors) if streaming_errors else None,
+            }
         )
         sample_out = _sample_path(sample_root, "xtts", "optimized", scenario.name)
         _write_audio_sample(sample_out, wav, rate)
@@ -696,22 +1048,22 @@ def _run_xtts_engine(
                 profile="optimized",
                 scenario=scenario,
                 backend="native_stream",
-                mode="streaming" if streaming_ok else "non_streaming_fallback",
-                streaming_support="native" if streaming_ok else "native_fallback",
-                true_streaming=streaming_ok,
+                mode="shared_chunked_streaming" if all_streaming_ok else "shared_chunked_native_fallback",
+                streaming_support="native" if all_streaming_ok else "native_partial_fallback",
+                true_streaming=all_streaming_ok,
                 model_load_ms=model_load_ms,
                 warmup_ms=warmup_ms,
                 cached_prompt_build_ms=cached_prompt_build_ms,
                 request_prompt_prep_ms=0.0,
-                generate_ttfa_ms=ttfa_ms,
-                generate_total_ms=total_ms,
+                generate_ttfa_ms=chunk_ttfa_ms[0] if chunk_ttfa_ms else None,
+                generate_total_ms=sum(chunk_total_ms),
                 audio_duration_s=audio_duration_s,
                 peak_vram_mb=peak_vram_mb,
                 sample_rate=rate,
                 output_wav=sample_out,
-                optimizations_applied=["conditioning_cache"],
+                optimizations_applied=["conditioning_cache", "shared_chunk_planner"],
                 optimization_notes=optimized_notes,
-                extra={"streaming_error": streaming_error},
+                extra=chunk_extra,
             )
         )
 
@@ -729,6 +1081,7 @@ def _run_luxtts_engine(
     scenarios: list[ScenarioSpec],
     sample_root: Path,
 ) -> list[dict[str, Any]]:
+    import numpy as np
     import torch
 
     torch.cuda.empty_cache()
@@ -790,16 +1143,37 @@ def _run_luxtts_engine(
 
     cached_prompt_build_ms, cached_prompt = prepare_prompt()
     optimized_notes = (
-        "Prompt cache reused across replies. Generation settings stay on the official 4-step efficient path."
+        "Prompt cache reused across replies and long text is split by the shared chunk planner."
     )
     for scenario in scenarios:
         torch.cuda.reset_peak_memory_stats()
-        with Timer() as timer:
-            wav, sample_rate = _generate_luxtts_audio(model, cached_prompt, scenario.text)
-            _maybe_cuda_sync(torch)
+        plan = build_chunk_plan("luxtts", scenario.text)
+        chunk_ttfa_ms: list[float] = []
+        chunk_total_ms: list[float] = []
+        chunk_audio_duration_s: list[float] = []
+        chunk_peak_vram_mb: list[float] = []
+        chunk_wavs: list[np.ndarray] = []
+        sample_rate = 48000
+        for chunk_text in plan.chunks:
+            with Timer() as timer:
+                wav, sample_rate = _generate_luxtts_audio(model, cached_prompt, chunk_text)
+                _maybe_cuda_sync(torch)
+            wav_np = _to_float_np(wav)
+            chunk_ttfa_ms.append(timer.elapsed_ms)
+            chunk_total_ms.append(timer.elapsed_ms)
+            chunk_audio_duration_s.append(len(wav_np) / float(sample_rate))
+            chunk_peak_vram_mb.append(float(sample_vram_mb()["peak_allocated_mb"]))
+            chunk_wavs.append(wav_np)
+        wav = np.concatenate(chunk_wavs) if chunk_wavs else np.zeros(1, dtype=np.float32)
         sample_out = _sample_path(sample_root, "luxtts", "optimized", scenario.name)
         _write_audio_sample(sample_out, wav, sample_rate)
-        audio_duration_s = len(wav.detach().cpu().numpy().flatten()) / float(sample_rate)
+        audio_duration_s = len(wav) / float(sample_rate)
+        chunk_extra = _chunk_playback_metadata(
+            plan=plan,
+            chunk_ttfa_ms=chunk_ttfa_ms,
+            chunk_total_ms=chunk_total_ms,
+            chunk_audio_duration_s=chunk_audio_duration_s,
+        )
         rows.append(
             build_result_row(
                 engine="luxtts",
@@ -808,21 +1182,22 @@ def _run_luxtts_engine(
                 profile="optimized",
                 scenario=scenario,
                 backend="zipvoice_pytorch",
-                mode="non_streaming_clone",
+                mode="shared_chunked_playback",
                 streaming_support="none",
                 true_streaming=False,
                 model_load_ms=model_load_ms,
                 warmup_ms=warmup_ms,
                 cached_prompt_build_ms=cached_prompt_build_ms,
                 request_prompt_prep_ms=0.0,
-                generate_ttfa_ms=timer.elapsed_ms,
-                generate_total_ms=timer.elapsed_ms,
+                generate_ttfa_ms=chunk_ttfa_ms[0] if chunk_ttfa_ms else None,
+                generate_total_ms=sum(chunk_total_ms),
                 audio_duration_s=audio_duration_s,
-                peak_vram_mb=float(sample_vram_mb()["peak_allocated_mb"]),
+                peak_vram_mb=max(chunk_peak_vram_mb) if chunk_peak_vram_mb else 0.0,
                 sample_rate=int(sample_rate),
                 output_wav=sample_out,
-                optimizations_applied=["prompt_cache"],
+                optimizations_applied=["prompt_cache", "shared_chunk_planner"],
                 optimization_notes=optimized_notes,
+                extra=chunk_extra,
             )
         )
 
@@ -839,6 +1214,8 @@ def _run_chatterbox_turbo_engine(
     scenarios: list[ScenarioSpec],
     sample_root: Path,
 ) -> list[dict[str, Any]]:
+    import inspect
+    import numpy as np
     import torch
 
     torch.cuda.empty_cache()
@@ -851,9 +1228,19 @@ def _run_chatterbox_turbo_engine(
             model.prepare_conditionals(ref_audio, exaggeration=0.0, norm_loudness=True)
         return prep_timer.elapsed_ms
 
+    def generate_text(text: str, seed: int | None = None) -> Any:
+        _set_generation_seed(seed)
+        kwargs: dict[str, Any] = {"audio_prompt_path": None}
+        try:
+            if seed is not None and "seed" in inspect.signature(model.generate).parameters:
+                kwargs["seed"] = seed
+        except Exception:
+            pass
+        return model.generate(text, **kwargs)
+
     with Timer() as warm_timer:
         _ = prepare_conditionals()
-        _ = model.generate("Warm.", audio_prompt_path=None)
+        _ = generate_text("Warm.")
         _maybe_cuda_sync(torch)
 
     rows: list[dict[str, Any]] = []
@@ -867,7 +1254,7 @@ def _run_chatterbox_turbo_engine(
         torch.cuda.reset_peak_memory_stats()
         prompt_ms = prepare_conditionals()
         with Timer() as timer:
-            wav = model.generate(scenario.text, audio_prompt_path=None)
+            wav = generate_text(scenario.text)
             _maybe_cuda_sync(torch)
         sample_rate = int(getattr(model, "sr", None) or getattr(model, "sample_rate", 24000))
         sample_out = _sample_path(sample_root, "chatterbox_turbo", "baseline", scenario.name)
@@ -900,41 +1287,73 @@ def _run_chatterbox_turbo_engine(
         )
 
     cached_prompt_build_ms = prepare_conditionals()
-    optimized_notes = "Prepared speaker conditionals cached once per session and reused across replies."
-    for scenario in scenarios:
-        torch.cuda.reset_peak_memory_stats()
-        with Timer() as timer:
-            wav = model.generate(scenario.text, audio_prompt_path=None)
-            _maybe_cuda_sync(torch)
-        sample_rate = int(getattr(model, "sr", None) or getattr(model, "sample_rate", 24000))
-        sample_out = _sample_path(sample_root, "chatterbox_turbo", "optimized", scenario.name)
-        _write_audio_sample(sample_out, wav, sample_rate)
-        audio_duration_s = len(wav.squeeze().detach().cpu().numpy().flatten()) / float(sample_rate)
-        rows.append(
-            build_result_row(
-                engine="chatterbox_turbo",
-                runtime=runtime,
-                host_account=host_account,
-                profile="optimized",
-                scenario=scenario,
-                backend="turbo_native",
-                mode="non_streaming_clone",
-                streaming_support="none",
-                true_streaming=False,
-                model_load_ms=model_load_ms,
-                warmup_ms=warmup_ms,
-                cached_prompt_build_ms=cached_prompt_build_ms,
-                request_prompt_prep_ms=0.0,
-                generate_ttfa_ms=timer.elapsed_ms,
-                generate_total_ms=timer.elapsed_ms,
-                audio_duration_s=audio_duration_s,
-                peak_vram_mb=float(sample_vram_mb()["peak_allocated_mb"]),
-                sample_rate=sample_rate,
-                output_wav=sample_out,
-                optimizations_applied=["conditioning_cache"],
-                optimization_notes=optimized_notes,
-            )
+    for profile, seed in (("optimized", None), ("optimized_seed_1337", CHATTERBOX_ALT_SEED)):
+        seed_note = (
+            f" Alternate deterministic seed {seed} applied via model seed parameter when available, otherwise via Python/NumPy/Torch RNGs."
+            if seed is not None
+            else ""
         )
+        optimized_notes = (
+            "Prepared speaker conditionals cached once per session and text is split by the shared chunk planner."
+            + seed_note
+        ).strip()
+        for scenario in scenarios:
+            torch.cuda.reset_peak_memory_stats()
+            plan = build_chunk_plan("chatterbox_turbo", scenario.text)
+            chunk_ttfa_ms: list[float] = []
+            chunk_total_ms: list[float] = []
+            chunk_audio_duration_s: list[float] = []
+            chunk_peak_vram_mb: list[float] = []
+            chunk_wavs: list[np.ndarray] = []
+            sample_rate = int(getattr(model, "sr", None) or getattr(model, "sample_rate", 24000))
+            for index, chunk_text in enumerate(plan.chunks):
+                with Timer() as timer:
+                    wav = generate_text(chunk_text, None if seed is None else seed + index)
+                    _maybe_cuda_sync(torch)
+                wav_np = _to_float_np(wav.squeeze() if hasattr(wav, "squeeze") else wav)
+                chunk_ttfa_ms.append(timer.elapsed_ms)
+                chunk_total_ms.append(timer.elapsed_ms)
+                chunk_audio_duration_s.append(len(wav_np) / float(sample_rate))
+                chunk_peak_vram_mb.append(float(sample_vram_mb()["peak_allocated_mb"]))
+                chunk_wavs.append(wav_np)
+            stitched_wav = np.concatenate(chunk_wavs) if chunk_wavs else np.zeros(1, dtype=np.float32)
+            sample_out = _sample_path(sample_root, "chatterbox_turbo", profile, scenario.name)
+            _write_audio_sample(sample_out, stitched_wav, sample_rate)
+            audio_duration_s = len(stitched_wav) / float(sample_rate)
+            chunk_extra = _chunk_playback_metadata(
+                plan=plan,
+                chunk_ttfa_ms=chunk_ttfa_ms,
+                chunk_total_ms=chunk_total_ms,
+                chunk_audio_duration_s=chunk_audio_duration_s,
+            )
+            chunk_extra["seed"] = seed
+            rows.append(
+                build_result_row(
+                    engine="chatterbox_turbo",
+                    runtime=runtime,
+                    host_account=host_account,
+                    profile=profile,
+                    scenario=scenario,
+                    backend="turbo_native",
+                    mode="shared_chunked_playback",
+                    streaming_support="none",
+                    true_streaming=False,
+                    model_load_ms=model_load_ms,
+                    warmup_ms=warmup_ms,
+                    cached_prompt_build_ms=cached_prompt_build_ms,
+                    request_prompt_prep_ms=0.0,
+                    generate_ttfa_ms=chunk_ttfa_ms[0] if chunk_ttfa_ms else None,
+                    generate_total_ms=sum(chunk_total_ms),
+                    audio_duration_s=audio_duration_s,
+                    peak_vram_mb=max(chunk_peak_vram_mb) if chunk_peak_vram_mb else 0.0,
+                    sample_rate=sample_rate,
+                    output_wav=sample_out,
+                    optimizations_applied=["conditioning_cache", "shared_chunk_planner"]
+                    + (["alternate_seed"] if seed is not None else []),
+                    optimization_notes=optimized_notes,
+                    extra=chunk_extra,
+                )
+            )
 
     del model
     torch.cuda.empty_cache()
@@ -1062,17 +1481,38 @@ def _run_tada_engine(
 
     cached_prompt_build_ms, cached_prompt = prepare_prompt()
     optimized_notes = (
-        "Prompt cache reused across replies." + compile_note
+        "Prompt cache reused across replies and text is split by the shared chunk planner." + compile_note
     ).strip()
     for scenario in scenarios:
         try:
             torch.cuda.reset_peak_memory_stats()
-            with Timer() as timer:
-                wav, sample_rate = _generate_tada_audio(model, cached_prompt, scenario.text)
-                _maybe_cuda_sync(torch)
+            plan = build_chunk_plan("tada_1b", scenario.text)
+            chunk_ttfa_ms: list[float] = []
+            chunk_total_ms: list[float] = []
+            chunk_audio_duration_s: list[float] = []
+            chunk_peak_vram_mb: list[float] = []
+            chunk_wavs: list[np.ndarray] = []
+            sample_rate = 24000
+            for chunk_text in plan.chunks:
+                with Timer() as timer:
+                    wav, sample_rate = _generate_tada_audio(model, cached_prompt, chunk_text)
+                    _maybe_cuda_sync(torch)
+                wav_np = _to_float_np(wav)
+                chunk_ttfa_ms.append(timer.elapsed_ms)
+                chunk_total_ms.append(timer.elapsed_ms)
+                chunk_audio_duration_s.append(len(wav_np) / float(sample_rate))
+                chunk_peak_vram_mb.append(float(sample_vram_mb()["peak_allocated_mb"]))
+                chunk_wavs.append(wav_np)
+            wav = np.concatenate(chunk_wavs) if chunk_wavs else np.zeros(1, dtype=np.float32)
             sample_out = _sample_path(sample_root, "tada_1b", "optimized", scenario.name)
             _write_audio_sample(sample_out, wav, sample_rate)
-            audio_duration_s = len(np.asarray(wav).flatten()) / float(sample_rate)
+            audio_duration_s = len(wav) / float(sample_rate)
+            chunk_extra = _chunk_playback_metadata(
+                plan=plan,
+                chunk_ttfa_ms=chunk_ttfa_ms,
+                chunk_total_ms=chunk_total_ms,
+                chunk_audio_duration_s=chunk_audio_duration_s,
+            )
             rows.append(
                 build_result_row(
                     engine="tada_1b",
@@ -1081,21 +1521,22 @@ def _run_tada_engine(
                     profile="optimized",
                     scenario=scenario,
                     backend="native_bf16_compiled" if "model.compile" in optimized_applied else "native_bf16",
-                    mode="non_streaming_clone",
+                    mode="shared_chunked_playback",
                     streaming_support="none",
                     true_streaming=False,
                     model_load_ms=model_load_ms,
                     warmup_ms=(warmup_ms + (compile_ms or 0.0)),
                     cached_prompt_build_ms=cached_prompt_build_ms,
                     request_prompt_prep_ms=0.0,
-                    generate_ttfa_ms=timer.elapsed_ms,
-                    generate_total_ms=timer.elapsed_ms,
+                    generate_ttfa_ms=chunk_ttfa_ms[0] if chunk_ttfa_ms else None,
+                    generate_total_ms=sum(chunk_total_ms),
                     audio_duration_s=audio_duration_s,
-                    peak_vram_mb=float(sample_vram_mb()["peak_allocated_mb"]),
+                    peak_vram_mb=max(chunk_peak_vram_mb) if chunk_peak_vram_mb else 0.0,
                     sample_rate=int(sample_rate),
                     output_wav=sample_out,
-                    optimizations_applied=optimized_applied,
+                    optimizations_applied=optimized_applied + ["shared_chunk_planner"],
                     optimization_notes=optimized_notes,
+                    extra=chunk_extra,
                     variant="1B",
                 )
             )
@@ -1108,7 +1549,7 @@ def _run_tada_engine(
                     profile="optimized",
                     scenario=scenario,
                     backend="native_bf16_compiled" if "model.compile" in optimized_applied else "native_bf16",
-                    mode="non_streaming_clone",
+                    mode="shared_chunked_playback",
                     streaming_support="none",
                     true_streaming=False,
                     model_load_ms=model_load_ms,
@@ -1121,7 +1562,7 @@ def _run_tada_engine(
                     peak_vram_mb=None,
                     sample_rate=None,
                     output_wav=None,
-                    optimizations_applied=optimized_applied,
+                    optimizations_applied=optimized_applied + ["shared_chunk_planner"],
                     optimization_notes=optimized_notes,
                     status="failed",
                     reason=traceback.format_exc(limit=12),
@@ -1144,6 +1585,7 @@ def _run_qwen3_engine(
     scenarios: list[ScenarioSpec],
     sample_root: Path,
 ) -> list[dict[str, Any]]:
+    import numpy as np
     import torch
     from qwen_tts import Qwen3TTSModel
 
@@ -1223,21 +1665,64 @@ def _run_qwen3_engine(
             if prompt is None:
                 request_prompt_ms, prompt = prepare_prompt(model)
 
-            with Timer() as timer:
-                wavs, sample_rate = model.generate_voice_clone(
-                    text=scenario.text,
-                    voice_clone_prompt=prompt,
-                    language="English",
-                    non_streaming_mode=False,
+            extra: dict[str, Any] | None = None
+            if profile == "optimized":
+                plan = build_chunk_plan("qwen3", scenario.text)
+                chunk_ttfa_ms: list[float] = []
+                chunk_total_ms: list[float] = []
+                chunk_audio_duration_s: list[float] = []
+                chunk_peak_vram_mb: list[float] = []
+                chunk_wavs: list[np.ndarray] = []
+                sample_rate = 24000
+                for chunk_text in plan.chunks:
+                    with Timer() as timer:
+                        wavs, sample_rate = model.generate_voice_clone(
+                            text=chunk_text,
+                            voice_clone_prompt=prompt,
+                            language="English",
+                            non_streaming_mode=False,
+                        )
+                        _maybe_cuda_sync(torch)
+                    wav = wavs[0] if hasattr(wavs, "__len__") and len(wavs) > 0 else wavs
+                    wav_np = _to_float_np(wav)
+                    chunk_ttfa_ms.append(timer.elapsed_ms)
+                    chunk_total_ms.append(timer.elapsed_ms)
+                    chunk_audio_duration_s.append(len(wav_np) / float(sample_rate))
+                    chunk_peak_vram_mb.append(float(sample_vram_mb()["peak_allocated_mb"]))
+                    chunk_wavs.append(wav_np)
+                sample = np.concatenate(chunk_wavs) if chunk_wavs else np.zeros(1, dtype=np.float32)
+                audio_duration_s = len(sample) / float(sample_rate)
+                generate_ttfa_ms = chunk_ttfa_ms[0] if chunk_ttfa_ms else None
+                generate_total_ms = sum(chunk_total_ms)
+                peak_vram_mb = max(chunk_peak_vram_mb) if chunk_peak_vram_mb else 0.0
+                extra = _chunk_playback_metadata(
+                    plan=plan,
+                    chunk_ttfa_ms=chunk_ttfa_ms,
+                    chunk_total_ms=chunk_total_ms,
+                    chunk_audio_duration_s=chunk_audio_duration_s,
                 )
-                _maybe_cuda_sync(torch)
+                applied_for_row = applied + ["shared_chunk_planner"]
+                mode = "shared_chunked_playback"
+            else:
+                with Timer() as timer:
+                    wavs, sample_rate = model.generate_voice_clone(
+                        text=scenario.text,
+                        voice_clone_prompt=prompt,
+                        language="English",
+                        non_streaming_mode=False,
+                    )
+                    _maybe_cuda_sync(torch)
 
-            wav = wavs[0] if hasattr(wavs, "__len__") and len(wavs) > 0 else wavs
-            if hasattr(wav, "detach"):
-                wav = wav.detach().cpu().numpy()
+                wav = wavs[0] if hasattr(wavs, "__len__") and len(wavs) > 0 else wavs
+                sample = _to_float_np(wav)
+                audio_duration_s = len(sample) / float(sample_rate)
+                generate_ttfa_ms = timer.elapsed_ms
+                generate_total_ms = timer.elapsed_ms
+                peak_vram_mb = float(sample_vram_mb()["peak_allocated_mb"])
+                applied_for_row = applied
+                mode = "simulated_streaming_text"
             sample_out = _sample_path(sample_root, "qwen3", profile, scenario.name)
-            _write_audio_sample(sample_out, wav, int(sample_rate))
-            audio_duration_s = len(wav.astype("float32").flatten()) / float(sample_rate)
+            _write_audio_sample(sample_out, sample, int(sample_rate))
             notes = request_prep_mode
             if backend_note:
                 notes = f"{notes} {backend_note}".strip()
@@ -1249,21 +1734,22 @@ def _run_qwen3_engine(
                     profile=profile,
                     scenario=scenario,
                     backend=backend_used,
-                    mode="simulated_streaming_text",
+                    mode=mode,
                     streaming_support="simulated",
                     true_streaming=False,
                     model_load_ms=model_load_ms,
                     warmup_ms=warm_timer.elapsed_ms,
                     cached_prompt_build_ms=cached_prompt_build_ms,
                     request_prompt_prep_ms=request_prompt_ms,
-                    generate_ttfa_ms=timer.elapsed_ms,
-                    generate_total_ms=timer.elapsed_ms,
+                    generate_ttfa_ms=generate_ttfa_ms,
+                    generate_total_ms=generate_total_ms,
                     audio_duration_s=audio_duration_s,
-                    peak_vram_mb=float(sample_vram_mb()["peak_allocated_mb"]),
+                    peak_vram_mb=peak_vram_mb,
                     sample_rate=int(sample_rate),
                     output_wav=sample_out,
-                    optimizations_applied=applied,
+                    optimizations_applied=applied_for_row,
                     optimization_notes=notes,
+                    extra=extra,
                     variant="0.6B-Base",
                 )
             )

@@ -16,17 +16,17 @@
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 208964.4,
-      "warmup_ms": 2277.3,
+      "model_load_ms": 13932.2,
+      "warmup_ms": 1909.1,
       "cached_prompt_build_ms": null,
-      "request_prompt_prep_ms": 330.5,
-      "generate_ttfa_ms": 1869.5,
-      "generate_total_ms": 1869.5,
-      "request_ttfa_ms": 2200.0,
-      "request_total_ms": 2200.0,
-      "audio_duration_s": 5.1,
-      "generation_rtf": 0.367,
-      "request_rtf": 0.431,
+      "request_prompt_prep_ms": 344.6,
+      "generate_ttfa_ms": 1842.7,
+      "generate_total_ms": 1842.7,
+      "request_ttfa_ms": 2187.3,
+      "request_total_ms": 2187.3,
+      "audio_duration_s": 5.82,
+      "generation_rtf": 0.317,
+      "request_rtf": 0.376,
       "peak_vram_mb": 10412.4,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/tada_1b__baseline__short_reply.wav",
@@ -47,17 +47,17 @@
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 208964.4,
-      "warmup_ms": 2277.3,
+      "model_load_ms": 13932.2,
+      "warmup_ms": 1909.1,
       "cached_prompt_build_ms": null,
-      "request_prompt_prep_ms": 317.8,
-      "generate_ttfa_ms": 3688.9,
-      "generate_total_ms": 3688.9,
-      "request_ttfa_ms": 4006.7,
-      "request_total_ms": 4006.7,
-      "audio_duration_s": 11.22,
-      "generation_rtf": 0.329,
-      "request_rtf": 0.357,
+      "request_prompt_prep_ms": 361.3,
+      "generate_ttfa_ms": 3683.0,
+      "generate_total_ms": 3683.0,
+      "request_ttfa_ms": 4044.3,
+      "request_total_ms": 4044.3,
+      "audio_duration_s": 18.46,
+      "generation_rtf": 0.2,
+      "request_rtf": 0.219,
       "peak_vram_mb": 10412.4,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/tada_1b__baseline__medium_reply.wav",
@@ -78,17 +78,17 @@
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 208964.4,
-      "warmup_ms": 2277.3,
+      "model_load_ms": 13932.2,
+      "warmup_ms": 1909.1,
       "cached_prompt_build_ms": null,
-      "request_prompt_prep_ms": 373.0,
-      "generate_ttfa_ms": 12944.1,
-      "generate_total_ms": 12944.1,
-      "request_ttfa_ms": 13317.1,
-      "request_total_ms": 13317.1,
-      "audio_duration_s": 51.66,
-      "generation_rtf": 0.251,
-      "request_rtf": 0.258,
+      "request_prompt_prep_ms": 401.9,
+      "generate_ttfa_ms": 12923.6,
+      "generate_total_ms": 12923.6,
+      "request_ttfa_ms": 13325.5,
+      "request_total_ms": 13325.5,
+      "audio_duration_s": 50.76,
+      "generation_rtf": 0.255,
+      "request_rtf": 0.263,
       "peak_vram_mb": 10412.4,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/tada_1b__baseline__long_reply.wav",
@@ -105,30 +105,74 @@
       "scenario_description": "One concise assistant reply.",
       "scenario_word_count": 18,
       "backend": "native_bf16_compiled",
-      "mode": "non_streaming_clone",
+      "mode": "shared_chunked_playback",
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 208964.4,
-      "warmup_ms": 3207.1,
-      "cached_prompt_build_ms": 440.8,
+      "model_load_ms": 13932.2,
+      "warmup_ms": 2780.2,
+      "cached_prompt_build_ms": 410.5,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 148588.3,
-      "generate_total_ms": 148588.3,
-      "request_ttfa_ms": 148588.3,
-      "request_total_ms": 148588.3,
-      "audio_duration_s": 6.12,
-      "generation_rtf": 24.28,
-      "request_rtf": 24.28,
-      "peak_vram_mb": 6736.5,
+      "generate_ttfa_ms": 74584.6,
+      "generate_total_ms": 75883.3,
+      "request_ttfa_ms": 74584.6,
+      "request_total_ms": 75883.3,
+      "audio_duration_s": 5.62,
+      "generation_rtf": 13.504,
+      "request_rtf": 13.504,
+      "peak_vram_mb": 6635.7,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/tada_1b__optimized__short_reply.wav",
       "optimizations_applied": [
         "prompt_cache",
-        "model.compile"
+        "model.compile",
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Prompt cache reused across replies. Upstream model.compile() applied before the optimized run.",
-      "variant": "1B"
+      "optimization_notes": "Prompt cache reused across replies and text is split by the shared chunk planner. Upstream model.compile() applied before the optimized run.",
+      "variant": "1B",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 240,
+      "chunk_max_chars": 480,
+      "chunk_char_lengths": [
+        14,
+        70
+      ],
+      "chunk_word_counts": [
+        4,
+        14
+      ],
+      "chunk_estimated_tokens": [
+        12,
+        42
+      ],
+      "chunk_text_preview": [
+        "I can do that.",
+        "The quickest fix is to keep the model warm and reuse the voice prompt."
+      ],
+      "chunk_generate_ttfa_ms": [
+        74584.6,
+        1298.8
+      ],
+      "chunk_generate_total_ms": [
+        74584.6,
+        1298.8
+      ],
+      "chunk_audio_duration_s": [
+        1.24,
+        4.38
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        74584.6,
+        75883.3
+      ],
+      "inter_chunk_gap_ms": [
+        59.0
+      ],
+      "max_inter_chunk_gap_ms": 59.0,
+      "total_generation_ms": 75883.3,
+      "stitched_audio_duration_s": 5.619,
+      "stitched_playback_ms": 80263.1
     },
     {
       "engine": "tada_1b",
@@ -139,30 +183,74 @@
       "scenario_description": "A practical multi-sentence assistant answer.",
       "scenario_word_count": 41,
       "backend": "native_bf16_compiled",
-      "mode": "non_streaming_clone",
+      "mode": "shared_chunked_playback",
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 208964.4,
-      "warmup_ms": 3207.1,
-      "cached_prompt_build_ms": 440.8,
+      "model_load_ms": 13932.2,
+      "warmup_ms": 2780.2,
+      "cached_prompt_build_ms": 410.5,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 3233.4,
-      "generate_total_ms": 3233.4,
-      "request_ttfa_ms": 3233.4,
-      "request_total_ms": 3233.4,
-      "audio_duration_s": 16.66,
-      "generation_rtf": 0.194,
-      "request_rtf": 0.194,
-      "peak_vram_mb": 7104.7,
+      "generate_ttfa_ms": 1284.3,
+      "generate_total_ms": 3645.5,
+      "request_ttfa_ms": 1284.3,
+      "request_total_ms": 3645.5,
+      "audio_duration_s": 16.54,
+      "generation_rtf": 0.22,
+      "request_rtf": 0.22,
+      "peak_vram_mb": 6881.3,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/tada_1b__optimized__medium_reply.wav",
       "optimizations_applied": [
         "prompt_cache",
-        "model.compile"
+        "model.compile",
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Prompt cache reused across replies. Upstream model.compile() applied before the optimized run.",
-      "variant": "1B"
+      "optimization_notes": "Prompt cache reused across replies and text is split by the shared chunk planner. Upstream model.compile() applied before the optimized run.",
+      "variant": "1B",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 240,
+      "chunk_max_chars": 480,
+      "chunk_char_lengths": [
+        76,
+        165
+      ],
+      "chunk_word_counts": [
+        13,
+        29
+      ],
+      "chunk_estimated_tokens": [
+        40,
+        88
+      ],
+      "chunk_text_preview": [
+        "The main latency win comes from separating one-time setup from request work.",
+        "Load the model once at startup, precompute the voice conditioning when the speaker is chosen, an"
+      ],
+      "chunk_generate_ttfa_ms": [
+        1284.3,
+        2361.2
+      ],
+      "chunk_generate_total_ms": [
+        1284.3,
+        2361.2
+      ],
+      "chunk_audio_duration_s": [
+        5.62,
+        10.92
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        1284.3,
+        3645.5
+      ],
+      "inter_chunk_gap_ms": [
+        0.0
+      ],
+      "max_inter_chunk_gap_ms": 0.0,
+      "total_generation_ms": 3645.5,
+      "stitched_audio_duration_s": 16.54,
+      "stitched_playback_ms": 17823.8
     },
     {
       "engine": "tada_1b",
@@ -173,30 +261,83 @@
       "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
       "scenario_word_count": 162,
       "backend": "native_bf16_compiled",
-      "mode": "non_streaming_clone",
+      "mode": "shared_chunked_playback",
       "streaming_support": "none",
       "true_streaming": false,
       "status": "measured",
-      "model_load_ms": 208964.4,
-      "warmup_ms": 3207.1,
-      "cached_prompt_build_ms": 440.8,
+      "model_load_ms": 13932.2,
+      "warmup_ms": 2780.2,
+      "cached_prompt_build_ms": 410.5,
       "request_prompt_prep_ms": 0.0,
-      "generate_ttfa_ms": 11306.2,
-      "generate_total_ms": 11306.2,
-      "request_ttfa_ms": 11306.2,
-      "request_total_ms": 11306.2,
-      "audio_duration_s": 51.98,
-      "generation_rtf": 0.218,
-      "request_rtf": 0.218,
-      "peak_vram_mb": 8470.9,
+      "generate_ttfa_ms": 1714.1,
+      "generate_total_ms": 11840.1,
+      "request_ttfa_ms": 1714.1,
+      "request_total_ms": 11840.1,
+      "audio_duration_s": 56.579,
+      "generation_rtf": 0.209,
+      "request_rtf": 0.209,
+      "peak_vram_mb": 7455.9,
       "sample_rate": 24000,
       "output_wav": "/mnt/c/Users/rayme-ssh.OMEN-PC/phase0-probes/results/tts_scenario_audio/wsl_python/tada_1b__optimized__long_reply.wav",
       "optimizations_applied": [
         "prompt_cache",
-        "model.compile"
+        "model.compile",
+        "shared_chunk_planner"
       ],
-      "optimization_notes": "Prompt cache reused across replies. Upstream model.compile() applied before the optimized run.",
-      "variant": "1B"
+      "optimization_notes": "Prompt cache reused across replies and text is split by the shared chunk planner. Upstream model.compile() applied before the optimized run.",
+      "variant": "1B",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 3,
+      "chunk_max_estimated_tokens": 240,
+      "chunk_max_chars": 480,
+      "chunk_char_lengths": [
+        97,
+        403,
+        416
+      ],
+      "chunk_word_counts": [
+        21,
+        68,
+        73
+      ],
+      "chunk_estimated_tokens": [
+        64,
+        208,
+        223
+      ],
+      "chunk_text_preview": [
+        "Hey, I wanted to leave a fuller note so we can hear how the voice holds up over a longer stretch",
+        "The short samples are useful for latency, but they do not tell us much about consistency, pacing",
+        "I also want enough material to expose awkward transitions, repeated prosody, or the sort of flat"
+      ],
+      "chunk_generate_ttfa_ms": [
+        1714.1,
+        4960.7,
+        5165.3
+      ],
+      "chunk_generate_total_ms": [
+        1714.1,
+        4960.7,
+        5165.3
+      ],
+      "chunk_audio_duration_s": [
+        5.92,
+        24.86,
+        25.8
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        1714.1,
+        6674.8,
+        11840.1
+      ],
+      "inter_chunk_gap_ms": [
+        0.0,
+        0.0
+      ],
+      "max_inter_chunk_gap_ms": 0.0,
+      "total_generation_ms": 11840.1,
+      "stitched_audio_duration_s": 56.579,
+      "stitched_playback_ms": 58293.4
     }
   ]
 }

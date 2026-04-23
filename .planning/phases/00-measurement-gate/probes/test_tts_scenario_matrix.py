@@ -1,6 +1,14 @@
 from __future__ import annotations
 
-from tts_scenario_matrix import ScenarioSpec, build_result_row, build_summary
+from tts_scenario_matrix import (
+    ScenarioSpec,
+    _chunk_playback_metadata,
+    _estimate_tts_tokens,
+    _split_sentence_units,
+    build_chunk_plan,
+    build_result_row,
+    build_summary,
+)
 
 
 def test_build_result_row_excludes_model_load_from_request_metrics() -> None:
@@ -138,3 +146,46 @@ def test_build_summary_picks_fastest_measured_rows() -> None:
     assert summary["best_request_ttfa"]["short_reply"]["engine"] == "f5"
     assert summary["best_request_ttfa"]["short_reply"]["profile"] == "optimized"
     assert summary["best_request_total"]["short_reply"]["engine"] == "xtts"
+
+
+def test_sentence_splitter_ignores_common_abbreviations() -> None:
+    text = "Dr. Vale checked the line. It worked, e.g. on the second pass. Done?"
+
+    assert _split_sentence_units(text) == [
+        "Dr. Vale checked the line.",
+        "It worked, e.g. on the second pass.",
+        "Done?",
+    ]
+
+
+def test_xtts_chunk_plan_stays_under_conservative_token_cap() -> None:
+    text = (
+        "First, keep this opening sentence short. "
+        + " ".join(f"word{i}" for i in range(150))
+        + ". Final sentence lands cleanly."
+    )
+
+    plan = build_chunk_plan("xtts", text)
+
+    assert len(plan.chunks) > 1
+    assert plan.max_estimated_tokens < 400
+    assert all(_estimate_tts_tokens(chunk) < plan.max_estimated_tokens for chunk in plan.chunks)
+    assert plan.chunks[0] == "First, keep this opening sentence short."
+
+
+def test_chunk_playback_metadata_tracks_hidden_generation_and_gaps() -> None:
+    plan = build_chunk_plan(
+        "f5",
+        "First sentence is quick. Second sentence is long enough to matter.",
+    )
+
+    metadata = _chunk_playback_metadata(
+        plan=plan,
+        chunk_ttfa_ms=[200.0, 500.0],
+        chunk_total_ms=[400.0, 900.0],
+        chunk_audio_duration_s=[1.2, 0.8],
+    )
+
+    assert metadata["chunk_audio_ready_offsets_ms"] == [200.0, 900.0]
+    assert metadata["inter_chunk_gap_ms"] == [0.0]
+    assert metadata["stitched_playback_ms"] == 2200.0
