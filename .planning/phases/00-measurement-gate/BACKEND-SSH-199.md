@@ -216,6 +216,36 @@ drwxr-xr-x 2 pmpg pmpg 4096 Apr 22 19:09 /home/pmpg/rayme-wsl-probe
 
 Those `Failed to translate ...` lines are PATH translation warnings from Windows environment propagation. They did not block WSL execution.
 
+Verified WSL accelerator env bootstrap on 2026-04-22:
+
+```bash
+.planning/spikes/001-omen-pc-wsl-gpu-path/bootstrap-cu121-env.sh
+```
+
+Observed result:
+
+```text
+{"cuda_available": true, "device_count": 1, "device_name": "NVIDIA GeForce RTX 3060", "torch_cuda_version": "12.1", "torch_version": "2.5.1+cu121"}
+{"deepspeed_version": "0.18.9", "torch_version": "2.5.1+cu121", "cuda_available": true}
+```
+
+WSL accelerator env facts:
+
+- Reusable env path: `/home/pmpg/rayme/.venv-cu121`
+- CUDA toolkit path to pin explicitly: `/usr/local/cuda-12.1`
+- Do not trust the default `nvcc` on `PATH`; `/usr/local/cuda` still resolves to an older CUDA 10.1 toolchain on this host.
+- When testing compiled CUDA extensions from the WSL env, include the PyTorch library directory in `LD_LIBRARY_PATH`:
+
+```bash
+export LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64:/home/pmpg/rayme/.venv-cu121/lib/python3.10/site-packages/torch/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+```
+
+FlashAttention status in WSL on this host:
+
+- `flash-attn 2.8.3` built successfully in `/home/pmpg/rayme/.venv-cu121`.
+- Import failed on Ubuntu `20.04.6 LTS` because the resulting module requires `GLIBC_2.32`, `GLIBCXX_3.4.29`, and `CXXABI_1.3.13`.
+- Practical implication: XTTS + DeepSpeed is now viable in WSL, but the Qwen/FlashAttention path needs a newer WSL distro or distro upgrade before it can be treated as a real backend option.
+
 ## WSL Path Rule
 
 - From non-interactive SSH sessions, prefer direct `wsl -d Ubuntu -e sh -c '...'` commands with fixed Linux paths such as `/home/pmpg/...`.

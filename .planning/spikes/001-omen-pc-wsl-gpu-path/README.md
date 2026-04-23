@@ -42,6 +42,12 @@ Sources:
 .planning/spikes/001-omen-pc-wsl-gpu-path/probe.sh
 ```
 
+Bootstrap the reusable CUDA 12.1 WSL env:
+
+```bash
+.planning/spikes/001-omen-pc-wsl-gpu-path/bootstrap-cu121-env.sh
+```
+
 ## What to Expect
 
 - Restores the persisted `rayme-pmpg` SSH alias.
@@ -57,6 +63,9 @@ Sources:
 - Fixed SSH auth for `pmpg` by placing the executor key in `C:\\ProgramData\\ssh\\administrators_authorized_keys`, because `pmpg` is in the local `Administrators` group.
 - Confirmed direct WSL access over SSH as `pmpg`, then created `/home/pmpg/rayme-wsl-probe` as the first fixed-path validation.
 - Created the real work root `/home/pmpg/rayme` and ran a second probe for GPU, Python, and build-tool prerequisites relevant to later DeepSpeed / FlashAttention-style work.
+- Built a reusable WSL env at `/home/pmpg/rayme/.venv-cu121` using `/home/pmpg/miniconda3/bin/python`, installed `torch 2.5.1+cu121`, and verified CUDA visibility on the RTX 3060.
+- Installed `deepspeed 0.18.9` in that env and verified that it imports successfully alongside CUDA-enabled PyTorch.
+- Attempted `flash-attn 2.8.3` in the same env with `CUDA_HOME=/usr/local/cuda-12.1` and `MAX_JOBS=4`; wheel build succeeded but import failed on the distro runtime floor.
 
 ## Results
 
@@ -68,9 +77,12 @@ Key findings:
 - The fixed Linux work root `/home/pmpg/rayme` exists and is the correct location for future Linux-side work.
 - GPU visibility is present inside WSL: `NVIDIA GeForce RTX 3060, 12288 MiB, 560.94`.
 - The distro is `Ubuntu 20.04.6 LTS` with kernel `6.6.87.2-microsoft-standard-WSL2`.
-- Python exists as `3.8.10`, but `torch` is not installed.
-- `git`, `pip3`, `gcc`, and `g++` are present.
-- `cmake` and `ninja` are missing, so the environment is not ready yet for build-heavy Linux optimization experiments.
+- The system Python is `3.8.10`, but the reusable accelerator env now exists at `/home/pmpg/rayme/.venv-cu121` and uses Python `3.10.9`.
+- That env now contains `torch 2.5.1+cu121`, `torchvision 0.20.1+cu121`, `torchaudio 2.5.1+cu121`, `deepspeed 0.18.9`, `ninja`, and `cmake`.
+- CUDA is visible from that env: `torch.cuda.is_available() == true` and the detected device is `NVIDIA GeForce RTX 3060`.
+- XTTS's documented DeepSpeed path is now practical on this host via the WSL env.
+- `flash-attn 2.8.3` does not import successfully on this distro after build. The module requires `GLIBC_2.32`, `GLIBCXX_3.4.29`, and `CXXABI_1.3.13`, while this Ubuntu 20.04 WSL runtime exposes glibc `2.31`.
+- That means the Qwen/FlashAttention path is blocked by the Ubuntu 20.04 userspace, not by missing CUDA, PyTorch, or compiler tooling.
 - The recurring `Failed to translate 'D:\\Pedro\\Programs\\python\\...'` lines are environment propagation warnings from WSL startup; they did not block the probe.
 
 Observed output:
@@ -98,5 +110,21 @@ libcuda:present
 
 Impact:
 
-- WSL on `OMEN-PC` is a viable base for Linux-only backend work, but it is not ready yet for FlashAttention, DeepSpeed, or Triton/TensorRT-class experiments.
-- The next WSL-specific step is environment bootstrap inside `/home/pmpg/rayme`: modern Python environment, PyTorch with CUDA, and missing build tools such as `cmake` and `ninja`.
+- WSL on `OMEN-PC` is now a viable execution base for XTTS + DeepSpeed experiments through `/home/pmpg/rayme/.venv-cu121`.
+- The current Ubuntu 20.04 distro is still a hard blocker for FlashAttention on this host because the built module wants a newer libc and libstdc++ baseline.
+- The next Qwen/FlashAttention-specific step is not package installation inside this distro. It is a newer WSL distro or distro upgrade with a newer glibc floor, then a rerun of the same CUDA 12.1 env bootstrap.
+
+Accelerator env verification:
+
+```text
+{"cuda_available": true, "device_count": 1, "device_name": "NVIDIA GeForce RTX 3060", "torch_cuda_version": "12.1", "torch_version": "2.5.1+cu121"}
+{"deepspeed_version": "0.18.9", "torch_version": "2.5.1+cu121", "cuda_available": true}
+```
+
+FlashAttention failure details:
+
+```text
+ImportError: /lib/x86_64-linux-gnu/libc.so.6: version `GLIBC_2.32' not found
+/lib/x86_64-linux-gnu/libstdc++.so.6: version `GLIBCXX_3.4.29' not found
+/lib/x86_64-linux-gnu/libstdc++.so.6: version `CXXABI_1.3.13' not found
+```
