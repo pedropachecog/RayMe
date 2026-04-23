@@ -1,0 +1,121 @@
+{
+  "probe": "f5_short_ttfa_comparison",
+  "timestamp_utc": "2026-04-23T02:45:00Z",
+  "target_text": "Hey, got it.",
+  "trials": 3,
+  "phase0_native_baseline": {
+    "engine": "f5",
+    "mode": "simulated_streaming",
+    "streaming_support": "simulated",
+    "true_streaming": false,
+    "ttfa_ms": 517.3,
+    "rtf": 0.388,
+    "audio_duration_s": 1.333,
+    "synthesis_time_s": 0.517,
+    "peak_vram_mb": 1990.2,
+    "sample_rate": 24000,
+    "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\f5.wav",
+    "streaming_notes": "F5-TTS slices generated audio into chunks after synthesis; no true incremental decode.",
+    "optimization_backend": "not_applicable",
+    "optimization_backend_reason": "F5-TTS does not expose a selectable attention/acceleration backend in this probe; the measured path is controlled by synthesis chunking only."
+  },
+  "fresh_native_trials": [
+    {
+      "engine": "f5",
+      "mode": "simulated_streaming",
+      "streaming_support": "simulated",
+      "true_streaming": false,
+      "ttfa_ms": 524.5,
+      "rtf": 0.393,
+      "audio_duration_s": 1.333,
+      "synthesis_time_s": 0.525,
+      "peak_vram_mb": 1990.2,
+      "sample_rate": 24000,
+      "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\f5_native_short_trial1.wav"
+    },
+    {
+      "engine": "f5",
+      "mode": "simulated_streaming",
+      "streaming_support": "simulated",
+      "true_streaming": false,
+      "ttfa_ms": 520.1,
+      "rtf": 0.39,
+      "audio_duration_s": 1.333,
+      "synthesis_time_s": 0.52,
+      "peak_vram_mb": 1990.2,
+      "sample_rate": 24000,
+      "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\f5_native_short_trial2.wav"
+    },
+    {
+      "engine": "f5",
+      "mode": "simulated_streaming",
+      "streaming_support": "simulated",
+      "true_streaming": false,
+      "ttfa_ms": 521.8,
+      "rtf": 0.391,
+      "audio_duration_s": 1.333,
+      "synthesis_time_s": 0.522,
+      "peak_vram_mb": 1990.2,
+      "sample_rate": 24000,
+      "output_wav": "C:\\Users\\rayme-ssh.OMEN-PC\\phase0-probes\\fixtures\\tts_samples\\f5_native_short_trial3.wav"
+    }
+  ],
+  "fresh_native_summary": {
+    "mean_ttfa_ms": 522.1,
+    "median_ttfa_ms": 521.8,
+    "min_ttfa_ms": 520.1,
+    "max_ttfa_ms": 524.5,
+    "mean_rtf": 0.391,
+    "median_rtf": 0.391
+  },
+  "wsl_triton_grpc_trials": [
+    {
+      "engine": "f5_triton_wsl_grpc",
+      "transport": "grpc",
+      "trial": 1,
+      "ttfa_ms": 2801.2,
+      "audio_duration_s": 1.611,
+      "rtf": 1.739,
+      "sample_rate": 24000,
+      "num_samples": 38656,
+      "output_wav": "/workspace-host/client_grpc_short_trial1.wav"
+    },
+    {
+      "engine": "f5_triton_wsl_grpc",
+      "transport": "grpc",
+      "trial": 2,
+      "ttfa_ms": 1806.2,
+      "audio_duration_s": 1.611,
+      "rtf": 1.121,
+      "sample_rate": 24000,
+      "num_samples": 38656,
+      "output_wav": "/workspace-host/client_grpc_short_trial2.wav"
+    },
+    {
+      "engine": "f5_triton_wsl_grpc",
+      "transport": "grpc",
+      "trial": 3,
+      "ttfa_ms": 1813.4,
+      "audio_duration_s": 1.611,
+      "rtf": 1.126,
+      "sample_rate": 24000,
+      "num_samples": 38656,
+      "output_wav": "/workspace-host/client_grpc_short_trial3.wav"
+    }
+  ],
+  "wsl_triton_grpc_summary": {
+    "mean_ttfa_ms": 2140.3,
+    "median_ttfa_ms": 1813.4,
+    "min_ttfa_ms": 1806.2,
+    "max_ttfa_ms": 2801.2,
+    "mean_rtf": 1.329,
+    "median_rtf": 1.126
+  },
+  "comparison": {
+    "median_ttfa_delta_ms": 1291.6,
+    "median_ttfa_ratio": 3.475,
+    "mean_rtf_delta": 0.938,
+    "winner_for_short_ttfa": "native_f5",
+    "recommendation": "Keep native Windows F5 for short-response TTFA; current WSL Triton gRPC path is slower."
+  }
+}

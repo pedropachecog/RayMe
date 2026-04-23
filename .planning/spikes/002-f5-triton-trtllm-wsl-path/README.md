@@ -47,6 +47,7 @@ Sources:
 .planning/spikes/002-f5-triton-trtllm-wsl-path/assemble-model-repo.sh
 .planning/spikes/002-f5-triton-trtllm-wsl-path/launch-runtime-server.sh
 .planning/spikes/002-f5-triton-trtllm-wsl-path/client-http-smoke.sh
+.planning/spikes/002-f5-triton-trtllm-wsl-path/sync-phase0-fixtures.sh
 .planning/spikes/002-f5-triton-trtllm-wsl-path/native-docker-bootstrap.sh
 .planning/spikes/002-f5-triton-trtllm-wsl-path/native-docker-gpu-smoke.sh
 ```
@@ -100,6 +101,7 @@ Current status:
   - assemble `model_repo_cpuipc_18000` with `assemble-model-repo.sh`
   - launch Triton with `launch-runtime-server.sh`
   - verify synthesis with `client-http-smoke.sh`
+- The builder's short Phase 0 fixture is mirrored into `/home/pmpg/rayme/f5-triton-runtime/phase0-fixtures` with `sync-phase0-fixtures.sh` for apples-to-apples comparison work.
 - The official prebuilt image has two defects relative to the documented path:
   - stage `2` needs `pip install vocos`
   - runtime launch needs `pip install rjieba`
@@ -110,3 +112,10 @@ Current status:
   - synthesis response: HTTP `200`
   - output audio: `/home/pmpg/rayme/f5-triton-runtime/client_http_out.wav`
   - output format: `24000 Hz`, `97280` frames, about `191 KB`
+- Short-response comparison against the existing native F5 Phase 0 probe is now captured in `results/f5_short_ttfa_comparison.json`.
+- Result for target text `Hey, got it.`:
+  - native Windows F5 trials: `524.5 ms`, `520.1 ms`, `521.8 ms`; median `521.8 ms`
+  - WSL Triton gRPC trials: `2801.2 ms`, `1806.2 ms`, `1813.4 ms`; median `1813.4 ms`
+  - median delta: `+1291.6 ms`
+  - median ratio: `3.475x` slower than native
+- Practical conclusion: keep native Windows F5 for short-response TTFA. The current WSL Triton path is a validated deployment/runtime path, but it is not the latency winner for v1 short acknowledgments.

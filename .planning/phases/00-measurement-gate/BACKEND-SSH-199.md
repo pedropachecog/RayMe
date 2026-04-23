@@ -262,6 +262,18 @@ Known runtime quirks on this host:
 - The safe model repo works around that by forcing the `vocoder` BLS response to `preferred_memory=pb_utils.PreferredMemory(pb_utils.TRITONSERVER_MEMORY_CPU, 0)`.
 - Avoid the stock F5 `run.sh` stage `3` because it contains `rm -r $MODEL_REPO`; the safe assembled repo replaces that destructive path.
 
+Measured short-response comparison versus native F5 on 2026-04-23:
+
+- Comparison artifact: `.planning/spikes/002-f5-triton-trtllm-wsl-path/results/f5_short_ttfa_comparison.json`
+- Target text: `Hey, got it.`
+- Native Windows F5 trials: `524.5 ms`, `520.1 ms`, `521.8 ms`
+- WSL Triton gRPC trials: `2801.2 ms`, `1806.2 ms`, `1813.4 ms`
+- Native median TTFA: `521.8 ms`
+- WSL Triton gRPC median TTFA: `1813.4 ms`
+- Median gap: `+1291.6 ms`
+- Median ratio: `3.475x` slower than native
+- Recommendation: keep native Windows F5 for short-response TTFA; do not promote the current WSL Triton path as the v1 latency path for short acknowledgments.
+
 FlashAttention status in WSL on this host:
 
 - The WSL distro was upgraded in place to Ubuntu `22.04.5 LTS`.

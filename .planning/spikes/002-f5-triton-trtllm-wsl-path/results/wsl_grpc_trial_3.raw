@@ -1,0 +1,1 @@
+{"engine":"f5_triton_wsl_grpc","transport":"grpc","trial":3,"ttfa_ms":1813.4,"audio_duration_s":1.611,"rtf":1.126,"sample_rate":24000,"num_samples":38656,"output_wav":"/workspace-host/client_grpc_short_trial3.wav"}
