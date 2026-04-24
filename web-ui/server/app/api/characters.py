@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -161,6 +162,27 @@ async def replace_portrait(
         raise HTTPException(status_code=404, detail="Character not found") from exc
     except PortraitValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.get("/{character_id}/portrait")
+async def read_portrait(
+    character_id: str,
+    service: CharacterService = Depends(get_character_service),
+) -> FileResponse:
+    try:
+        portrait = await service.active_portrait_blob(character_id)
+    except CharacterNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Character not found") from exc
+
+    if portrait is None:
+        raise HTTPException(status_code=404, detail="Portrait not found")
+
+    return FileResponse(
+        portrait.path,
+        media_type=portrait.content_type,
+        filename=portrait.storage_path,
+        headers={"Cache-Control": "private, max-age=31536000, immutable"},
+    )
 
 
 @router.delete("/{character_id}/portrait")

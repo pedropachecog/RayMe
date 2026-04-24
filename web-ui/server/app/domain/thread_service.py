@@ -10,6 +10,7 @@ from uuid import uuid4
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.character_service import portrait_url_for_asset
 from app.storage.models import (
     Character,
     CharacterAsset,
@@ -147,6 +148,7 @@ class ThreadService:
             "title": thread.title,
             "character_id": thread.character_id,
             "character_name": thread.character_snapshot_name,
+            "character_portrait_url": portrait_url_for_asset(thread.character_id, portrait),
             "character_portrait_asset_id": portrait.id if portrait else None,
             "character_portrait_storage_path": portrait.storage_path if portrait else None,
             "character_snapshot": {
@@ -245,6 +247,7 @@ class ThreadService:
             "title": thread.title,
             "character_id": thread.character_id,
             "character_name": thread.character_snapshot_name,
+            "character_portrait_url": portrait_url_for_asset(thread.character_id, portrait),
             "character_portrait_asset_id": portrait.id if portrait else None,
             "character_portrait_storage_path": portrait.storage_path if portrait else None,
             "last_message_snippet": _snippet(last_message.selected_content() if last_message else None),

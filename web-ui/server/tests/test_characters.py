@@ -188,9 +188,13 @@ def test_import_png_card_creates_active_portrait_asset(
     body = response.json()
     character_id = body["id"]
     assert body["portrait_asset_id"] is not None
+    assert body["portrait_url"] == (
+        f"/api/characters/{character_id}/portrait?asset_id={body['portrait_asset_id']}"
+    )
     assert body["portrait_storage_path"] is not None
     assert (portrait_dir / body["portrait_storage_path"]).is_file()
     assert body["character"]["portrait_asset_id"] == body["portrait_asset_id"]
+    assert body["character"]["portrait_url"] == body["portrait_url"]
     assets = asyncio.run(_load_assets(sessionmaker, character_id))
     assert len(assets) == 1
     assert assets[0].asset_kind == ACTIVE_PORTRAIT_KIND
@@ -246,8 +250,15 @@ def test_valid_portrait_creates_asset_record_and_blob(
     assert response.status_code == 200
     body = response.json()
     assert body["portrait_asset_id"] is not None
+    assert body["portrait_url"] == (
+        f"/api/characters/{character_id}/portrait?asset_id={body['portrait_asset_id']}"
+    )
     assert body["portrait_storage_path"] != "portrait.png"
     assert (portrait_dir / body["portrait_storage_path"]).is_file()
+    blob_response = client.get(body["portrait_url"])
+    assert blob_response.status_code == 200
+    assert blob_response.headers["content-type"] == "image/png"
+    assert blob_response.content == _png_bytes()
     assets = asyncio.run(_load_assets(sessionmaker, character_id))
     assert len(assets) == 1
     assert assets[0].asset_kind == ACTIVE_PORTRAIT_KIND
@@ -276,6 +287,7 @@ def test_portrait_replace_and_delete_manage_active_reference(
     deleted = client.delete(f"/api/characters/{character_id}/portrait")
     assert deleted.status_code == 200
     assert deleted.json()["portrait_asset_id"] is None
+    assert deleted.json()["portrait_url"] is None
     assets_after_delete = asyncio.run(_load_assets(sessionmaker, character_id))
     assert len(assets_after_delete) == 2
     assert sum(asset.asset_kind == ACTIVE_PORTRAIT_KIND for asset in assets_after_delete) == 0

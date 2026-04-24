@@ -22,6 +22,14 @@ as durable context, not one-off preferences.
   browser-capable check such as Playwright and verify rendered content plus
   console errors. HTTP 200, health endpoints, and curl output are not enough for
   browser UI readiness.
+- The user's manual testing is product-owner acceptance, not first-line QA. Do
+  not ask the user to try a feature until the agent has already run the relevant
+  backend/API checks, automated browser tests or Playwright smoke checks, and
+  live deployed verification when the feature depends on `OMEN-PC` LAN runtime.
+- When a user-reported UI bug exposes an untested workflow, add durable coverage
+  for that workflow before calling the phase complete. Manual reproduction by
+  the user is evidence of missing test coverage, not a substitute for agent-run
+  verification.
 - Do not launch backend runtime tasks through visible `.cmd` windows. On
   `OMEN-PC`, scheduled tasks must use hidden PowerShell launchers or another
   no-console mechanism so the user's desktop is not littered with completed

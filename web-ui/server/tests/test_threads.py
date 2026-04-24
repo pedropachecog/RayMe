@@ -180,6 +180,9 @@ def test_threads_list_sorts_by_activity_with_character_snapshot_and_last_snippet
     assert [item["id"] for item in items] == [newer_thread_id, older_thread_id]
     assert items[0]["character_name"] == "Test Character"
     assert items[0]["character_portrait_asset_id"] == "asset_newer"
+    assert items[0]["character_portrait_url"] == (
+        "/api/characters/char_newer/portrait?asset_id=asset_newer"
+    )
     assert items[0]["last_message_snippet"] == "A recent selected answer for the Home list."
 
 

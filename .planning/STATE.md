@@ -2,11 +2,11 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Executing Phase 01
-stopped_at: Phase 1 Wave 9 complete
-last_updated: "2026-04-24T08:58:25.000Z"
+status: Phase 01 acceptance blocked pending Phase 01.1 verification hardening
+stopped_at: Phase 1 plan 01-24 live acceptance uncovered UI regression-test debt
+last_updated: "2026-04-24T13:40:00.000Z"
 progress:
-  total_phases: 7
+  total_phases: 8
   completed_phases: 1
   total_plans: 33
   completed_plans: 32
@@ -16,7 +16,8 @@ progress:
 ## Phase Status
 
 - Phase 0 complete on 2026-04-23.
-- Next phase: Phase 1 - Foundations & Text Chat.
+- Phase 1 plan 01-24 is not complete; do not create `01-24-SUMMARY.md` until hardened acceptance and Android checkpoint pass.
+- Next phase gate: Phase 01.1 - UI acceptance and regression test hardening.
 
 ## Current Decisions
 
@@ -46,6 +47,7 @@ progress:
 - Plan 00-07.1 inserted into `00-measurement-gate`: benchmark TTS attention/optimization backends per engine before final writeback.
 - Plan 00-07.2 completed: benchmarked native Windows vs WSL runtime permutations before Phase 0 writeback.
 - 2026-04-23 TTS follow-up: shared chunking has been implemented and the Windows plus WSL matrix reran. Manual listening is partially scored but sufficient to close the spike with caveats: keep all engines, avoid raw latency-only defaults, tune F5 long-form stretch/duration, retest LuxTTS with better references, and keep Chatterbox optimized long-form while avoiding baseline/raw long-form.
+- Phase 01.1 inserted after Phase 1: UI acceptance and regression test hardening. Reason: Phase 1 live LAN/Android acceptance exposed UI workflows that existed but were not adequately agent-tested before product-owner testing. Future manual user testing must be treated as acceptance after agent-run API/browser/deployed verification, not first-line QA.
 
 ### Phase 0 Completion Notes
 

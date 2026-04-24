@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import hashlib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 from uuid import uuid4
 
 from sqlalchemy import select
@@ -44,12 +46,29 @@ class CharacterNotFoundError(LookupError):
     """Raised when a requested character does not exist or is deleted."""
 
 
+@dataclass(frozen=True)
+class PortraitBlob:
+    path: Path
+    content_type: str
+    asset_id: str
+    storage_path: str
+
+
 def new_character_id() -> str:
     return f"char_{uuid4().hex}"
 
 
 def new_asset_id() -> str:
     return f"asset_{uuid4().hex}"
+
+
+def portrait_url_for_asset(character_id: str, asset: CharacterAsset | None) -> str | None:
+    if asset is None:
+        return None
+
+    encoded_character_id = quote(character_id, safe="")
+    encoded_asset_id = quote(asset.id, safe="")
+    return f"/api/characters/{encoded_character_id}/portrait?asset_id={encoded_asset_id}"
 
 
 class CharacterService:
@@ -157,6 +176,27 @@ class CharacterService:
         await self.session.refresh(character)
         return await self.character_to_response(character)
 
+    async def active_portrait_blob(self, character_id: str) -> PortraitBlob | None:
+        await self.get_character(character_id)
+        active_portrait = await self._active_portrait(character_id)
+        if active_portrait is None:
+            return None
+
+        storage_name = Path(active_portrait.storage_path).name
+        if storage_name != active_portrait.storage_path:
+            return None
+
+        path = self.portrait_blob_dir / storage_name
+        if not path.is_file():
+            return None
+
+        return PortraitBlob(
+            path=path,
+            content_type=active_portrait.content_type,
+            asset_id=active_portrait.id,
+            storage_path=active_portrait.storage_path,
+        )
+
     async def delete_portrait(self, character_id: str) -> dict[str, Any]:
         character = await self.get_character(character_id)
         await self._archive_active_portraits(character_id)
@@ -197,8 +237,19 @@ class CharacterService:
             "raw_source_json": character.raw_source_json,
             "lorebook_json": character.lorebook_json,
             "lorebook_present": character.lorebook_json is not None,
+            "portrait_url": portrait_url_for_asset(character.id, active_portrait),
+            "portrait_path": (
+                active_portrait.storage_path if active_portrait else None
+            ),
             "portrait_asset_id": active_portrait.id if active_portrait else None,
             "portrait_storage_path": active_portrait.storage_path if active_portrait else None,
+            "portrait_mime_type": active_portrait.content_type if active_portrait else None,
+            "portrait_size_bytes": active_portrait.byte_size if active_portrait else None,
+            "portrait_updated_at": (
+                active_portrait.updated_at.isoformat()
+                if active_portrait and active_portrait.updated_at
+                else None
+            ),
             "created_at": character.created_at.isoformat() if character.created_at else None,
             "updated_at": character.updated_at.isoformat() if character.updated_at else None,
             "deleted_at": character.deleted_at.isoformat() if character.deleted_at else None,
@@ -304,5 +355,7 @@ __all__ = [
     "CharacterNotFoundError",
     "CharacterService",
     "HISTORICAL_PORTRAIT_KIND",
+    "PortraitBlob",
     "character_has_messages",
+    "portrait_url_for_asset",
 ]

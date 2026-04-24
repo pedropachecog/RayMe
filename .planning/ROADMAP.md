@@ -46,6 +46,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 
 - [ ] **Phase 0: Measurement Gate** — 2–3 day spike that validates VRAM, STT WER, TTS TTFA, HTTPS-on-Android, and FA2 viability before Phase 1 freezes stack commitments.
 - [ ] **Phase 1: Foundations & Text Chat** — Three-service skeleton with HTTPS, the unified `messages` schema, SillyTavern card CRUD + import/export, and full-featured text chat end-to-end against a streaming LLM.
+- [ ] **Phase 01.1: UI Acceptance & Regression Test Hardening** — Inserted verification pass to convert manually discovered Phase 1 UI regressions into durable Playwright/API coverage before Phase 2.
 - [ ] **Phase 2: AI Backend Skeleton & Voice Lab** — FastAPI + aiortc signaling, resident Whisper + Silero VAD + one-hot TTS engine on the GPU, Voice Lab upload → auto-transcript → edit → synth-preview → save, Settings with three-endpoint connection tests.
 - [ ] **Phase 3: First Working Call (MVP)** — Voice Call screen with `RTCPeerConnection`, AudioContext gesture unlock, orchestrator FSM skeleton, one-sentence non-streaming reply. Proves the media plumbing end-to-end.
 - [ ] **Phase 4: Call Feel** — Sentence-chunked streaming TTS, VAD-driven barge-in with LIFO cancel and mid-stream LLM abort, live bidirectional captions over data channel, echo-loop mitigation, Voice Visualizer three-state. The core-value phase.
@@ -151,11 +152,43 @@ Plans:
 
 ---
 
+### Phase 01.1: UI acceptance and regression test hardening (INSERTED)
+
+**Goal:** Turn the Phase 1 UI defects found during live LAN/Android acceptance into durable automated coverage, then re-run the full Phase 1 browser acceptance path before Phase 2 planning begins.
+
+**Depends on:** Phase 1 plan 01-24 discovery work.
+
+**Requirements delivered:** Verification hardening for REQ-03, REQ-10, REQ-11, REQ-12, REQ-13, REQ-14, REQ-16, REQ-17, REQ-30, REQ-31, REQ-32, REQ-33, REQ-34, REQ-35, REQ-36, REQ-60, REQ-70, REQ-71, REQ-72, REQ-90, REQ-A0, REQ-A1.
+
+**Pitfalls owned:**
+- User manual testing is product-owner acceptance, not first-line QA; the agent must run backend/API/browser/deployed checks first.
+- UI behavior must be browser-verified by the agent before asking for physical-device testing.
+- Settings connection tests must use the currently configured form values, not stale persisted defaults.
+- Portrait upload/import must prove image persistence through editor, gallery, home picker, chat header, reload, and live backend deployment.
+- Local LLM endpoints remain configurable through Settings; no code hardcoding of `192.168.1.190:8001` or any other local endpoint.
+
+**Success criteria** (observable, testable):
+1. Playwright E2E tests cover PNG import portrait persistence, direct portrait upload persistence, reload persistence, gallery/home/chat portrait rendering, and deletion/replacement behavior.
+2. Playwright E2E tests cover Settings save-before-test behavior for Web UI, AI backend, and LLM, including an OpenAI-compatible local LLM with no API key.
+3. Playwright E2E tests cover the full Phase 1 user path: import/create/edit character, start chat, alternate greeting, stream reply, regenerate, swipe, continue, reload, and continue again.
+4. Live LAN verification against `OMEN-PC` is browser-checked before the user is asked to test Android Chrome.
+5. Any request for user manual testing includes a concise statement of what the agent already verified and what product-owner signal is still needed.
+6. Phase 1 `01-24-SUMMARY.md` is created only after the hardened acceptance suite and Android checkpoint pass.
+
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 01.1 to break down)
+
+**UI hint:** yes
+
+**Scope signal:** S-M (focused verification and regression hardening, not new product scope).
+
 ### Phase 2: AI Backend Skeleton & Voice Lab
 
 **Goal:** Get the AI backend models resident on GPU behind the correct topology — STT, VAD, and one-hot TTS — and deliver Voice Lab end-to-end so that a call in Phase 3 has a voice to speak in.
 
-**Depends on:** Phase 1 (Web UI host with HTTPS + endpoint config + character + voice schema; LLM reachable).
+**Depends on:** Phase 01.1 (Phase 1 UI acceptance hardened and Android/LAN checkpoint complete).
 
 **Requirements delivered:** REQ-02, REQ-05, REQ-15 (schema + default-voice UI; in-call usage verified in Phase 3), REQ-20, REQ-21, REQ-22, REQ-23, REQ-24, REQ-80 (partial: three-endpoint config + connection tests + save-audio toggles stored; VAD slider wired in Phase 4), REQ-A3 (STT default frozen from Phase 0 measurement), REQ-90 (partial: Voice Lab + Settings screens ported).
 

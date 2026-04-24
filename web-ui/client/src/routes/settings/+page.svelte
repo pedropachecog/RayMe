@@ -71,9 +71,15 @@
   }
 
   async function saveSettings() {
+    await persistCurrentSettings({ showSuccess: true });
+  }
+
+  async function persistCurrentSettings({ showSuccess }: { showSuccess: boolean }) {
     saveState = 'saving';
     errorMessage = '';
-    successMessage = '';
+    if (showSuccess) {
+      successMessage = '';
+    }
 
     try {
       const nextSettings = await updateSettings({
@@ -84,9 +90,13 @@
         ...(llmApiKey.trim() ? { llm_api_key: llmApiKey.trim() } : {})
       });
       applySettings(nextSettings);
-      successMessage = 'Endpoint settings saved.';
+      if (showSuccess) {
+        successMessage = 'Endpoint settings saved.';
+      }
+      return true;
     } catch {
       errorMessage = 'RayMe could not save endpoint settings.';
+      return false;
     } finally {
       saveState = 'idle';
     }
@@ -95,8 +105,12 @@
   async function testWebEndpoint() {
     testingEndpoint = 'web';
     errorMessage = '';
+    successMessage = '';
 
     try {
+      if (!(await persistCurrentSettings({ showSuccess: false }))) {
+        return;
+      }
       webStatus = (await testWebSettings()).status;
     } catch {
       webStatus = 'Unreachable';
@@ -108,8 +122,12 @@
   async function testAiBackendEndpoint() {
     testingEndpoint = 'ai';
     errorMessage = '';
+    successMessage = '';
 
     try {
+      if (!(await persistCurrentSettings({ showSuccess: false }))) {
+        return;
+      }
       aiBackendStatus = (await testAiBackendSettings()).status;
     } catch {
       aiBackendStatus = 'Unreachable';
@@ -121,8 +139,12 @@
   async function testLlmEndpoint() {
     testingEndpoint = 'llm';
     errorMessage = '';
+    successMessage = '';
 
     try {
+      if (!(await persistCurrentSettings({ showSuccess: false }))) {
+        return;
+      }
       llmStatus = (await testLlmSettings()).status;
     } catch {
       llmStatus = 'Unreachable';
