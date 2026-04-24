@@ -4,3 +4,8 @@
 .ruff_cache/
 __pycache__/
 *.pyc
+web-ui/client/node_modules/
+web-ui/client/.svelte-kit/
+web-ui/client/build/
+web-ui/client/playwright-report/
+web-ui/client/test-results/
