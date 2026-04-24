@@ -57,6 +57,7 @@
 
   $: modeLabel = mode === 'create' ? 'Create character' : mode === 'review' ? 'Review character' : 'Edit character';
   $: portraitBusy = portraitState !== 'idle' || saveState === 'saving';
+  $: portraitFallbackInitials = initialsFor(form.name);
 
   onMount(() => {
     if (isCreateMode) {
@@ -171,6 +172,15 @@
       .split(/[,\n]/)
       .map((item) => item.trim())
       .filter(Boolean);
+  }
+
+  function initialsFor(value: string): string {
+    return value
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join('');
   }
 
   async function saveCharacter() {
@@ -358,6 +368,7 @@
         >
           <PortraitDropzone
             {previewUrl}
+            fallbackInitials={portraitFallbackInitials}
             busy={portraitBusy}
             errorMessage={portraitError}
             onSelect={handlePortraitSelected}

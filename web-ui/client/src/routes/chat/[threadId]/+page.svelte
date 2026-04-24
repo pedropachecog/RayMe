@@ -64,6 +64,7 @@
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'Character');
+  const characterInitials = $derived(initialsFor(characterName));
   const threadTitle = $derived(thread?.title?.trim() || characterName);
   const portraitUrl = $derived(thread?.character_portrait_url ?? null);
   const shouldVirtualize = $derived(messages.length >= VIRTUALIZATION_THRESHOLD);
@@ -554,6 +555,15 @@
       message.selected_alternate_id !== null
     );
   }
+
+  function initialsFor(value: string): string {
+    return value
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join('');
+  }
 </script>
 
 <section class="chat-route">
@@ -566,7 +576,7 @@
       {#if portraitUrl}
         <img src={portraitUrl} alt="" />
       {:else}
-        <span>{characterName.slice(0, 1).toUpperCase()}</span>
+        <span>{characterInitials || 'R'}</span>
       {/if}
     </div>
 

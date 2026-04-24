@@ -83,6 +83,15 @@
     selectedAlternateGreetingIndex = undefined;
   }
 
+  function initialsFor(value: string): string {
+    return value
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join('');
+  }
+
   async function createSelectedThread() {
     if (!selectedCharacterId) {
       return;
@@ -298,7 +307,7 @@
               {#if character.portrait_url}
                 <img src={character.portrait_url} alt="" loading="lazy" />
               {:else}
-                <span>{character.name.slice(0, 1).toUpperCase()}</span>
+                <span>{initialsFor(character.name) || 'R'}</span>
               {/if}
             </span>
             <span>

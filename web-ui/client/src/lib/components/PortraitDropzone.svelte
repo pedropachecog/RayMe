@@ -2,6 +2,7 @@
   import { ImagePlus, RefreshCw, Trash2, Upload } from 'lucide-svelte';
 
   export let previewUrl: string | null = null;
+  export let fallbackInitials = '';
   export let busy = false;
   export let errorMessage = '';
   export let onSelect: (file: File) => void | Promise<void> = () => {};
@@ -84,7 +85,11 @@
       </span>
     {:else}
       <span class="empty-preview" aria-hidden="true">
-        <ImagePlus size={28} strokeWidth={1.8} />
+        {#if fallbackInitials}
+          <span class="fallback-initials">{fallbackInitials}</span>
+        {:else}
+          <ImagePlus size={28} strokeWidth={1.8} />
+        {/if}
       </span>
       <span class="dropzone-copy">
         <strong>Upload portrait</strong>
@@ -161,6 +166,13 @@
     border-radius: var(--radius-md);
     background: rgba(182, 160, 255, 0.14);
     color: var(--color-primary);
+  }
+
+  .fallback-initials {
+    color: var(--color-surface);
+    font-size: var(--font-heading);
+    font-weight: 600;
+    line-height: var(--line-heading);
   }
 
   .dropzone-copy {
