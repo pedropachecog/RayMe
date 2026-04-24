@@ -34,6 +34,7 @@ class CharacterWrite(BaseModel):
     post_history_instructions: str | None = None
     creator: str | None = None
     character_version: str | None = None
+    default_voice_id: str | None = Field(default=None, max_length=64)
     raw_source_json: dict[str, Any] | None = None
     lorebook_json: dict[str, Any] | list[Any] | None = None
 

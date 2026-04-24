@@ -21,7 +21,7 @@ from app.domain.cards import (
 )
 from app.domain.portraits import validate_portrait_upload
 from app.storage.blob_store import atomic_write_blob
-from app.storage.models import Character, CharacterAsset, Message, Thread, utc_now
+from app.storage.models import Character, CharacterAsset, Message, Thread, Voice, utc_now
 
 ACTIVE_PORTRAIT_KIND = "portrait"
 HISTORICAL_PORTRAIT_KIND = "portrait_history"
@@ -39,6 +39,7 @@ EDITOR_FIELD_NAMES = (
     "post_history_instructions",
     "creator",
     "character_version",
+    "default_voice_id",
 )
 
 
@@ -250,9 +251,36 @@ class CharacterService:
                 if active_portrait and active_portrait.updated_at
                 else None
             ),
+            "default_voice": await self._default_voice_response(character.default_voice_id),
             "created_at": character.created_at.isoformat() if character.created_at else None,
             "updated_at": character.updated_at.isoformat() if character.updated_at else None,
             "deleted_at": character.deleted_at.isoformat() if character.deleted_at else None,
+        }
+
+    async def _default_voice_response(self, voice_id: str | None) -> dict[str, str] | None:
+        if voice_id is None:
+            return None
+
+        voice = await self.session.get(Voice, voice_id)
+        if voice is None:
+            return {
+                "voice_id": voice_id,
+                "name": "Voice unavailable",
+                "status": "unavailable",
+                "label": "Voice unavailable",
+            }
+        if voice.deleted_at is not None:
+            return {
+                "voice_id": voice.id,
+                "name": voice.name,
+                "status": "unavailable",
+                "label": "Voice unavailable",
+            }
+        return {
+            "voice_id": voice.id,
+            "name": voice.name,
+            "status": "available",
+            "label": voice.name,
         }
 
     async def _active_portrait(self, character_id: str) -> CharacterAsset | None:

@@ -13,6 +13,7 @@ from app.api.health import router as health_router
 from app.api.messages import router as messages_router
 from app.api.settings import router as settings_router
 from app.api.threads import router as threads_router
+from app.api.voices import router as voices_router
 from app.config import Settings, get_settings
 from app.security import configure_cors, configure_security_headers
 
@@ -58,6 +59,7 @@ def create_app(
     app.include_router(threads_router)
     app.include_router(chat_router)
     app.include_router(messages_router)
+    app.include_router(voices_router)
 
     if static_client_dir is not None:
         mount_static_client(app, static_client_dir)
