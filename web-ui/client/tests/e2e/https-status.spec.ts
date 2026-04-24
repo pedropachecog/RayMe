@@ -21,15 +21,34 @@ test('secure context media readiness and endpoint statuses are visible', async (
     });
   });
 
+  let currentSettings = {
+    web_url: 'https://192.168.1.199:8443',
+    ai_backend_url: 'https://192.168.1.199:9443',
+    llm_base_url: 'https://api.openai.com/v1',
+    llm_model: 'gpt-4.1-mini',
+    llm_api_key_configured: true
+  };
+
   await page.route('**/api/settings', async (route) => {
-    expect(route.request().method()).toBe('GET');
-    await fulfillJson(route, {
-      web_url: 'https://192.168.1.199:8443',
-      ai_backend_url: 'https://192.168.1.199:9443',
-      llm_base_url: 'https://api.openai.com/v1',
-      llm_model: 'gpt-4.1-mini',
-      llm_api_key_configured: true
-    });
+    const request = route.request();
+    if (request.method() === 'GET') {
+      await fulfillJson(route, currentSettings);
+      return;
+    }
+
+    expect(request.method()).toBe('PATCH');
+    const payload = request.postDataJSON() as Partial<typeof currentSettings> & {
+      llm_api_key?: string;
+    };
+    currentSettings = {
+      ...currentSettings,
+      ...payload,
+      llm_api_key_configured:
+        payload.llm_api_key !== undefined
+          ? payload.llm_api_key.trim().length > 0
+          : currentSettings.llm_api_key_configured
+    };
+    await fulfillJson(route, currentSettings);
   });
   await page.route('**/api/settings/test/web', async (route) => {
     expect(route.request().method()).toBe('POST');

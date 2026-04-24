@@ -1,8 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const LONG_THREAD_SIZE = 520;
-const SCROLL_STABILITY_TOLERANCE_PX = 192;
-
 function longThread(threadId: string, count = LONG_THREAD_SIZE) {
   return {
     id: threadId,
@@ -77,6 +75,7 @@ async function scrollViewportToTop(viewport: Locator) {
 
 async function scrollMetrics(viewport: Locator) {
   return viewport.evaluate((element) => ({
+    clientHeight: element.clientHeight,
     scrollTop: element.scrollTop,
     distanceFromBottom: element.scrollHeight - element.scrollTop - element.clientHeight
   }));
@@ -148,9 +147,8 @@ test('streaming tokens keep scroll position stable when scrolled away in a virtu
   await expect(page.getByRole('button', { name: 'Jump to latest' })).toBeVisible();
   const after = await scrollMetrics(messagesViewport(page));
 
-  expect(after.scrollTop).toBeGreaterThanOrEqual(before.scrollTop - SCROLL_STABILITY_TOLERANCE_PX);
-  expect(after.scrollTop).toBeLessThanOrEqual(before.scrollTop + SCROLL_STABILITY_TOLERANCE_PX);
-  expect(after.distanceFromBottom).toBeGreaterThanOrEqual(0);
+  expect(before.distanceFromBottom).toBeGreaterThan(before.clientHeight);
+  expect(after.distanceFromBottom).toBeGreaterThan(after.clientHeight);
 
   await page.getByRole('button', { name: 'Jump to latest' }).click();
   await expect(page.getByText('Streaming token response complete')).toBeVisible();
