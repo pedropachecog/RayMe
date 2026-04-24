@@ -175,10 +175,15 @@ Plans:
 5. Any request for user manual testing includes a concise statement of what the agent already verified and what product-owner signal is still needed.
 6. Phase 1 `01-24-SUMMARY.md` is created only after the hardened acceptance suite and Android checkpoint pass.
 
-**Plans:** 0 plans
+**Plans:** 6 plans
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 01.1 to break down)
+- [ ] 01.1-01-PLAN.md - Shared Playwright acceptance helper and fixture foundation (Wave 0)
+- [ ] 01.1-02-PLAN.md - Portrait persistence E2E coverage for import, upload, replacement, removal, and reload (Wave 1)
+- [ ] 01.1-03-PLAN.md - Settings save-before-test and local no-key LLM E2E coverage (Wave 1)
+- [ ] 01.1-04-PLAN.md - Guarded full Phase 1 browser acceptance path and existing E2E guard integration (Wave 2)
+- [ ] 01.1-05-PLAN.md - Live OMEN-PC browser smoke and Android product-owner checkpoint (Wave 3)
+- [ ] 01.1-06-PLAN.md - Phase 1 plan 01-24 summary gate after Android approval (Wave 4)
 
 **UI hint:** yes
 
