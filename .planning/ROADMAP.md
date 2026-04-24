@@ -218,7 +218,7 @@ Plans:
 - [x] 02-01-PLAN.md — Wave 0 Web UI server voice/schema/settings validation scaffolding
 - [x] 02-02-PLAN.md — Wave 0 AI backend model/STT/TTS validation scaffolding
 - [x] 02-03-PLAN.md — Wave 0 client Voice Lab, Settings, and live E2E validation scaffolding
-- [ ] 02-04-PLAN.md — Web UI voice schema, migration, and sample-asset storage
+- [x] 02-04-PLAN.md — Web UI voice schema, migration, and sample-asset storage
 - [ ] 02-05-PLAN.md — Web UI AI backend client and status bridge
 - [ ] 02-06-PLAN.md — AI backend config, model manager, lifespan, and health residency payload
 - [ ] 02-07-PLAN.md — AI backend STT/VAD processing and transient transcription API
