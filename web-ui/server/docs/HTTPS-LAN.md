@@ -28,6 +28,20 @@ All agent-created Windows-side RayMe artifacts on `OMEN-PC` must live under
 `C:\Users\pmpg\rayme\`. Do not create additional top-level directories in
 `C:\Users\pmpg\`.
 
+The current Windows-side runtime staging area is:
+
+```text
+C:\Users\pmpg\rayme\phase1-app\
+C:\Users\pmpg\rayme\phase1-app\.venv\
+C:\Users\pmpg\rayme\phase1-app\web-ui\server\
+C:\Users\pmpg\rayme\phase1-app\web-ui\client\build\
+C:\Users\pmpg\rayme\phase1-app\ai-backend\
+```
+
+This staging area exists because the Android acceptance URL must bind the real
+Windows LAN IP `192.168.1.199`. It is not the source of truth; refresh it from
+the repo when code changes need to be tested on `OMEN-PC`.
+
 The certificate covers `rayme.local`, `localhost`, `192.168.1.199`, and
 `127.0.0.1`. If Android Chrome does not already trust this Phase 1 root, install
 `.local/phase1-tls/rayme-phase1-rootCA.pem` on the phone once and keep reusing
