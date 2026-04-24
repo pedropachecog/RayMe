@@ -22,6 +22,10 @@ as durable context, not one-off preferences.
   browser-capable check such as Playwright and verify rendered content plus
   console errors. HTTP 200, health endpoints, and curl output are not enough for
   browser UI readiness.
+- Do not launch backend runtime tasks through visible `.cmd` windows. On
+  `OMEN-PC`, scheduled tasks must use hidden PowerShell launchers or another
+  no-console mechanism so the user's desktop is not littered with completed
+  command prompt windows.
 - At the end of each phase, explicitly tell the user what temporary/runtime
   directories can be deleted. Include exact full paths, what each path contains,
   whether it is safe to delete for the rest of the project, and deletion commands

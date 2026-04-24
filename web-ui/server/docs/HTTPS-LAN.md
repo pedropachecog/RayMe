@@ -129,17 +129,19 @@ tasks so the HTTPS services survive the SSH command that starts them:
 
 ```text
 Task: RayMePhase1Web
-Script: C:\Users\pmpg\rayme\start-web-ui.cmd
-Log: C:\Users\pmpg\rayme\logs\web-ui.run.log
+Script: C:\Users\pmpg\rayme\start-web-ui-hidden.ps1
+Logs: C:\Users\pmpg\rayme\logs\web-ui.hidden.out.log
+      C:\Users\pmpg\rayme\logs\web-ui.hidden.err.log
 URL: https://192.168.1.199:8443
 ```
 
-The script must run from `C:\Users\pmpg\rayme\RayMe\`, set
+The script must run hidden from `C:\Users\pmpg\rayme\RayMe\`, set
 `RAYME_DATABASE_URL` with the async SQLite driver
 `sqlite+aiosqlite:///C:/Users/pmpg/rayme/RayMe/web-ui/server/data/rayme.sqlite3`,
 and call `web-ui\server\scripts\run_dev_https.py` with only the supported
 `--host`, `--port`, `--cert`, and `--key` arguments. Do not pass a static-dir
-argument; the server mounts `web-ui/client/build` by convention.
+argument; the server mounts `web-ui/client/build` by convention. Do not use
+visible `.cmd` wrappers for the scheduled task action.
 
 ## AI Backend
 
@@ -159,8 +161,9 @@ On `OMEN-PC`, the matching scheduled-task runtime is:
 
 ```text
 Task: RayMePhase1AI
-Script: C:\Users\pmpg\rayme\start-ai-backend.cmd
-Log: C:\Users\pmpg\rayme\logs\ai-backend.run.log
+Script: C:\Users\pmpg\rayme\start-ai-backend-hidden.ps1
+Logs: C:\Users\pmpg\rayme\logs\ai-backend.hidden.out.log
+      C:\Users\pmpg\rayme\logs\ai-backend.hidden.err.log
 URL: https://192.168.1.199:9443/health
 ```
 
