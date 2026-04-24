@@ -111,8 +111,14 @@ class CharacterService:
             content_type=content_type,
         )
         payload = _payload_from_import(import_result)
-        response = await self.create_character(payload)
-        character_response = dict(response)
+        character_response = await self.create_character(payload)
+        if import_result.source_format.endswith("_png"):
+            character_response = await self.replace_portrait(
+                character_response["id"],
+                filename="imported-card.png",
+                content=content,
+            )
+        response = dict(character_response)
         response["source_format"] = import_result.source_format
         response["source_key"] = import_result.source_key
         response["warnings"] = list(import_result.warnings)

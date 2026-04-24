@@ -173,6 +173,30 @@ def test_import_route_reports_lorebook_present_not_used(
     assert "Lorebook present - not used in v1" in body["warnings"]
 
 
+def test_import_png_card_creates_active_portrait_asset(
+    character_client: tuple[TestClient, Path, async_sessionmaker],
+) -> None:
+    client, portrait_dir, sessionmaker = character_client
+    fixture = CARD_FIXTURE_DIR / "v3_card.png"
+
+    response = client.post(
+        "/api/characters/import",
+        files={"file": (fixture.name, fixture.read_bytes(), "image/png")},
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    character_id = body["id"]
+    assert body["portrait_asset_id"] is not None
+    assert body["portrait_storage_path"] is not None
+    assert (portrait_dir / body["portrait_storage_path"]).is_file()
+    assert body["character"]["portrait_asset_id"] == body["portrait_asset_id"]
+    assets = asyncio.run(_load_assets(sessionmaker, character_id))
+    assert len(assets) == 1
+    assert assets[0].asset_kind == ACTIVE_PORTRAIT_KIND
+    assert assets[0].content_type == "image/png"
+
+
 def test_export_v2_route_returns_json_only(
     character_client: tuple[TestClient, Path, async_sessionmaker],
 ) -> None:

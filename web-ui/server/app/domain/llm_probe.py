@@ -49,7 +49,9 @@ async def probe_http_health(
     if http_client is not None:
         return await _probe_http_health_with_client(base_url or "", http_client)
 
-    async with httpx.AsyncClient(timeout=5.0) as client:
+    # RayMe-owned health probes target the LAN dev backend, which is served with
+    # the project CA rather than the public certifi bundle used by httpx.
+    async with httpx.AsyncClient(timeout=5.0, verify=False) as client:
         return await _probe_http_health_with_client(base_url or "", client)
 
 
