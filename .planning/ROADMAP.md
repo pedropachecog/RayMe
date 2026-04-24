@@ -117,20 +117,33 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 4. On any AI turn the builder can Regenerate, Edit (with downstream-stale flagging and truncate-or-keep choice), Swipe across N alternates, or Continue the turn using composer content — and stored messages round-trip through the unified `messages` table with a `kind` discriminator that can distinguish `user_text` / `ai_text` / `user_speech` / `ai_speech` / `call_start` / `call_end` (the last three still unused but schema-ready).
 5. A malicious character card containing `<img src=x onerror=alert(1)>` in its description renders as plain text with no script execution, verified by import + render test.
 
-**Plans:** 11 plans
+**Plans:** 24 plans
 
 Plans:
-- [ ] 01-01-PLAN.md - Backend Wave 0 scaffold, contract tests, and card fixtures (Wave 1)
-- [ ] 01-02-PLAN.md - Frontend Wave 0 SvelteKit scaffold, sanitizer, and E2E spec shells (Wave 1)
-- [ ] 01-03-PLAN.md - AI-backend health stub, external LLM docs/config, and LAN HTTPS config examples (Wave 1)
-- [ ] 01-04-PLAN.md - Wave 0 validation marker, initial Alembic schema, SQLAlchemy storage, and atomic blob store (Wave 2)
-- [ ] 01-08-PLAN.md - Client True Dark app shell, status chips, API wrappers, and stream reader (Wave 2)
-- [ ] 01-05-PLAN.md - Web host health/settings APIs, explicit LAN bind, CORS allowlist, CSP, and HTTPS runner (Wave 3)
-- [ ] 01-06-PLAN.md - Character card import/export, CRUD, soft delete, lorebook preservation, and portrait storage (Wave 3)
-- [ ] 01-07-PLAN.md - Thread APIs, message actions, prompt builder, and streaming LLM proxy (Wave 4)
-- [ ] 01-09-PLAN.md - Home, Gallery, Character Editor, and Settings UI surfaces (Wave 4)
-- [ ] 01-10-PLAN.md - Chat UI, streaming render, message actions, swipes, stale handling, and virtualization (Wave 5)
-- [ ] 01-11-PLAN.md - Automated E2E acceptance, HTTPS/mobile runbooks, and Android Chrome checkpoint (Wave 6)
+- [ ] 01-01-PLAN.md - Backend project harness and app factory (Wave 1)
+- [ ] 01-02-PLAN.md - Backend chat/schema/message-action contracts, including LLM-backed action tests (Wave 2)
+- [ ] 01-03-PLAN.md - Backend card/character/settings contracts (Wave 2)
+- [ ] 01-04-PLAN.md - Card parser fixtures and malicious payload corpus (Wave 2)
+- [ ] 01-05-PLAN.md - SvelteKit static client scaffold (Wave 1)
+- [ ] 01-06-PLAN.md - Sanitizer boundary and Playwright acceptance shells (Wave 2)
+- [ ] 01-07-PLAN.md - AI-backend health stub, external LLM docs/config, and LAN HTTPS examples (Wave 1)
+- [ ] 01-08-PLAN.md - Wave 0 validation marker and initial SQLite/Alembic schema (Wave 3)
+- [ ] 01-09-PLAN.md - Atomic blob storage and orphan reaper (Wave 3)
+- [ ] 01-10-PLAN.md - Web host config, CORS/CSP, static serving, and HTTPS runner (Wave 4)
+- [ ] 01-11-PLAN.md - Web health and Settings connection-test APIs (Wave 5)
+- [ ] 01-12-PLAN.md - Character card import/export, CRUD, lorebook preservation, and portrait storage (Wave 4)
+- [ ] 01-13-PLAN.md - Thread APIs, opening greetings, and full thread hydration (Wave 5)
+- [ ] 01-14-PLAN.md - Prompt builder and streaming LLM proxy with full SSE done-message shape (Wave 6)
+- [ ] 01-15-PLAN.md - LLM-backed Regenerate, Swipes, Edit stale handling, and Continue (Wave 7)
+- [ ] 01-16-PLAN.md - True Dark client shell and shared UI primitives (Wave 2)
+- [ ] 01-17-PLAN.md - Client API wrappers, stream reader, and browser readiness helpers (Wave 2)
+- [ ] 01-18-PLAN.md - Home threads dashboard (Wave 6)
+- [ ] 01-19-PLAN.md - Character Gallery import flow and cards (Wave 5)
+- [ ] 01-20-PLAN.md - Character Editor and Settings screens (Wave 6)
+- [ ] 01-21-PLAN.md - Chat route hydration, composer, and streaming send UI (Wave 7)
+- [ ] 01-22-PLAN.md - Chat message actions, generated swipes, stale flags, and continue UI (Wave 8)
+- [ ] 01-23-PLAN.md - Chat virtualization, jump-to-latest, and mobile layout coverage (Wave 9)
+- [ ] 01-24-PLAN.md - Full automated acceptance, HTTPS/mobile runbooks, and Android Chrome checkpoint (Wave 10)
 
 **UI hint:** yes
 
