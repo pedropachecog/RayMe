@@ -1,19 +1,31 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
+  applyEditedBackendMessage,
   appendTokenToStreamingMessage,
   CHAT_STREAM_ERROR_COPY,
+  continueMessage,
   createDraftMessage,
+  editMessage,
+  generateSwipeAlternate,
   loadThread,
   markStreamingMessageError,
+  messageActionsForRole,
+  regenerateMessage,
   replaceStreamingMessage,
+  selectSwipeAlternate,
+  selectedAlternateIndex,
   selectedMessageContent,
-  sendChatMessage
+  sendChatMessage,
+  TRUNCATE_STALE_CONFIRMATION_COPY,
+  upsertBackendMessage
 } from '../../src/lib/api/chat';
 import type { ThreadDetail, ThreadMessage } from '../../src/lib/api/types';
 import chatApiSource from '../../src/lib/api/chat.ts?raw';
 import bubbleSource from '../../src/lib/components/ChatMessageBubble.svelte?raw';
 import composerSource from '../../src/lib/components/Composer.svelte?raw';
+import messageActionMenuSource from '../../src/lib/components/MessageActionMenu.svelte?raw';
+import swipeStepperSource from '../../src/lib/components/SwipeStepper.svelte?raw';
 import routeSource from '../../src/routes/chat/[threadId]/+page.svelte?raw';
 
 const selectedOpening: ThreadMessage = {
@@ -100,7 +112,21 @@ describe('chat route contract', () => {
     expect(routeSource).not.toContain('phone-call');
   });
 
-  it('uses thread hydration for selected alternates, alternate lists, and stale flags', async () => {
+  it('exposes AI message actions and user edit-only menu contract', () => {
+    expect(messageActionsForRole('assistant').map((action) => action.label)).toEqual([
+      'Regenerate',
+      'Swipe',
+      'Edit',
+      'Continue'
+    ]);
+    expect(messageActionsForRole('user').map((action) => action.label)).toEqual(['Edit']);
+    expect(messageActionMenuSource).toContain('messageActionsForRole(role)');
+    expect(messageActionMenuSource).toContain('Message actions');
+    expect(bubbleSource).toContain('MessageActionMenu');
+    expect(bubbleSource).toContain('onAction');
+  });
+
+  it('uses thread hydration for selected alternates, swipe controls, and stale flags', async () => {
     const fetchMock = installFetch(mockJsonResponse(threadDetail));
 
     const result = await loadThread('thread 1');
@@ -115,7 +141,8 @@ describe('chat route contract', () => {
     expect(routeSource).toContain('loadThread');
     expect(routeSource).toContain('selected_alternate_id');
     expect(bubbleSource).toContain('stale_after_edit');
-    expect(bubbleSource).toContain('Message alternates');
+    expect(bubbleSource).toContain('SwipeStepper');
+    expect(swipeStepperSource).toContain('{safeIndex + 1} / {safeTotal}');
   });
 
   it('keeps alternate greeting selection as pre-create state instead of switching in Chat', () => {
@@ -200,6 +227,151 @@ describe('chat route contract', () => {
       id: 'alt-done',
       source_action: 'regenerate'
     });
+  });
+
+  it('regenerate consumes a backend response and does not append a second canonical bubble', async () => {
+    const regenerated: ThreadMessage = {
+      ...selectedOpening,
+      content_text: 'Regenerated backend response',
+      selected_alternate_id: 'regen-alt',
+      alternates: [
+        ...selectedOpening.alternates,
+        {
+          id: 'regen-alt',
+          message_id: selectedOpening.id,
+          alternate_index: 2,
+          content_text: 'Regenerated backend response',
+          source_action: 'regenerate',
+          created_at: null
+        }
+      ]
+    };
+    const fetchMock = installFetch(mockJsonResponse(regenerated));
+
+    const response = await regenerateMessage(selectedOpening.id);
+    const request = lastRequest(fetchMock);
+    const messages = upsertBackendMessage([selectedOpening, staleUserMessage], response);
+
+    expect(request.url).toBe('/api/messages/opening/regenerate');
+    expect(request.init.method).toBe('POST');
+    expect(messages).toHaveLength(2);
+    expect(messages.filter((message) => message.id === selectedOpening.id)).toHaveLength(1);
+    expect(selectedMessageContent(messages[0])).toBe('Regenerated backend response');
+    expect(messages[0].selected_alternate_id).toBe('regen-alt');
+  });
+
+  it('swipe generated alternate consumes backend returned alternate and selected branch becomes canonical', async () => {
+    const generatedSwipe: ThreadMessage = {
+      ...selectedOpening,
+      content_text: 'Second generated swipe',
+      selected_alternate_id: 'swipe-alt-2',
+      alternates: [
+        {
+          id: 'swipe-alt-1',
+          message_id: selectedOpening.id,
+          alternate_index: 0,
+          content_text: 'First generated swipe',
+          source_action: 'swipe',
+          created_at: null
+        },
+        {
+          id: 'swipe-alt-2',
+          message_id: selectedOpening.id,
+          alternate_index: 1,
+          content_text: 'Second generated swipe',
+          source_action: 'swipe',
+          created_at: null
+        }
+      ]
+    };
+    const fetchMock = installFetch(mockJsonResponse(generatedSwipe));
+
+    const response = await generateSwipeAlternate(selectedOpening.id);
+    let messages = upsertBackendMessage([selectedOpening], response);
+
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/messages/opening/swipes',
+      init: { method: 'POST' }
+    });
+    expect(selectedMessageContent(messages[0])).toBe('Second generated swipe');
+    expect(selectedAlternateIndex(messages[0])).toBe(1);
+
+    const selectedFirstSwipe: ThreadMessage = {
+      ...generatedSwipe,
+      content_text: 'First generated swipe',
+      selected_alternate_id: 'swipe-alt-1'
+    };
+    const selectFetchMock = installFetch(mockJsonResponse(selectedFirstSwipe));
+
+    const selected = await selectSwipeAlternate(selectedOpening.id, 'swipe-alt-1');
+    messages = upsertBackendMessage(messages, selected);
+
+    expect(lastRequest(selectFetchMock).url).toBe('/api/messages/opening/swipes');
+    expect(JSON.parse(lastRequest(selectFetchMock).init.body as string)).toEqual({
+      alternate_id: 'swipe-alt-1'
+    });
+    expect(selectedMessageContent(messages[0])).toBe('First generated swipe');
+    expect(messages[0].selected_alternate_id).toBe('swipe-alt-1');
+    expect(swipeStepperSource).toContain('Generate alternate');
+  });
+
+  it('continue sends composer text and consumes backend returned continue alternate/message', async () => {
+    const continued: ThreadMessage = {
+      ...selectedOpening,
+      content_text: 'Generated continue from backend',
+      selected_alternate_id: 'continue-alt',
+      alternates: [
+        {
+          id: 'continue-alt',
+          message_id: selectedOpening.id,
+          alternate_index: 2,
+          content_text: 'Generated continue from backend',
+          source_action: 'continue',
+          created_at: null
+        }
+      ]
+    };
+    const fetchMock = installFetch(mockJsonResponse(continued));
+
+    const response = await continueMessage(selectedOpening.id, 'extend this thought');
+    const request = lastRequest(fetchMock);
+    const messages = upsertBackendMessage([selectedOpening], response);
+
+    expect(request.url).toBe('/api/messages/opening/continue');
+    expect(request.init.method).toBe('POST');
+    expect(JSON.parse(request.init.body as string)).toEqual({
+      composer_text: 'extend this thought'
+    });
+    expect(selectedMessageContent(messages[0])).toBe('Generated continue from backend');
+    expect(messages[0].alternates[0].source_action).toBe('continue');
+    expect(routeSource).toContain('composerDraft.trim()');
+  });
+
+  it('edit marks downstream stale and keeps the truncate-or-keep choice copy in the route', async () => {
+    const editedOpening: ThreadMessage = {
+      ...selectedOpening,
+      content_text: 'Edited opening branch'
+    };
+    const downstream: ThreadMessage = {
+      ...staleUserMessage,
+      stale_after_edit: false
+    };
+    const fetchMock = installFetch(mockJsonResponse(editedOpening));
+
+    const response = await editMessage(selectedOpening.id, 'Edited opening branch');
+    const request = lastRequest(fetchMock);
+    const messages = applyEditedBackendMessage([selectedOpening, downstream], response);
+
+    expect(request.url).toBe('/api/messages/opening');
+    expect(request.init.method).toBe('PATCH');
+    expect(JSON.parse(request.init.body as string)).toEqual({ content: 'Edited opening branch' });
+    expect(messages[0].content_text).toBe('Edited opening branch');
+    expect(messages[1].stale_after_edit).toBe(true);
+    expect(bubbleSource).toContain('Stale');
+    expect(chatApiSource).toContain(TRUNCATE_STALE_CONFIRMATION_COPY);
+    expect(routeSource).toContain('TRUNCATE_STALE_CONFIRMATION_COPY');
+    expect(routeSource).toContain('truncateStaleMessages');
+    expect(routeSource).toContain('keepStaleMessages');
   });
 
   it('renders exact LLM endpoint failure copy with retry/regenerate affordance', () => {

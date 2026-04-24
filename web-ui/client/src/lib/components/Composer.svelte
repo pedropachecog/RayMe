@@ -4,12 +4,31 @@
   interface Props {
     disabled?: boolean;
     placeholder?: string;
+    value?: string;
+    onDraftChange?: (content: string) => void;
     onSend: (content: string) => void | Promise<void>;
   }
 
-  let { disabled = false, placeholder = 'Type a message', onSend }: Props = $props();
+  let {
+    disabled = false,
+    placeholder = 'Type a message',
+    value = '',
+    onDraftChange,
+    onSend
+  }: Props = $props();
   let draft = $state('');
   const canSend = $derived(!disabled && draft.trim().length > 0);
+
+  $effect(() => {
+    if (value !== draft) {
+      draft = value;
+    }
+  });
+
+  function setDraft(nextDraft: string) {
+    draft = nextDraft;
+    onDraftChange?.(nextDraft);
+  }
 
   async function submit() {
     const content = draft.trim();
@@ -17,7 +36,7 @@
       return;
     }
 
-    draft = '';
+    setDraft('');
     await onSend(content);
   }
 
@@ -34,15 +53,20 @@
     event.preventDefault();
     void submit();
   }
+
+  function handleInput(event: Event) {
+    setDraft((event.currentTarget as HTMLTextAreaElement).value);
+  }
 </script>
 
 <form class="composer" aria-label="Chat composer" onsubmit={handleSubmit}>
   <textarea
-    bind:value={draft}
+    value={draft}
     {placeholder}
     disabled={disabled}
     rows="1"
     aria-label="Message"
+    oninput={handleInput}
     onkeydown={handleKeydown}
   ></textarea>
   <button type="submit" disabled={!canSend} aria-label="Send message">

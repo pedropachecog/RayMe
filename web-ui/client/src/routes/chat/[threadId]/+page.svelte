@@ -6,23 +6,48 @@
 
   import {
     appendTokenToStreamingMessage,
+    applyEditedBackendMessage,
+    continueMessage,
     createDraftMessage,
+    editMessage,
+    generateSwipeAlternate,
+    keepStaleMessages,
     loadThread,
     markStreamingMessageError,
+    regenerateMessage,
     replaceStreamingMessage,
+    selectSwipeAlternate,
+    selectedMessageContent,
     sendChatMessage,
-    type ChatMessageView
+    truncateStaleMessages,
+    TRUNCATE_STALE_CONFIRMATION_COPY,
+    upsertBackendMessage,
+    type ChatMessageView,
+    type MessageActionId
   } from '$lib/api/chat';
-  import type { ThreadDetail } from '$lib/api/types';
+  import type { ThreadDetail, ThreadMessage } from '$lib/api/types';
   import ChatMessageBubble from '$lib/components/ChatMessageBubble.svelte';
   import Composer from '$lib/components/Composer.svelte';
+
+  type BusyAction = MessageActionId | 'truncate-stale' | 'keep-stale';
+
+  interface StaleContinueRequest {
+    message: ChatMessageView;
+    composerText: string;
+  }
 
   let thread = $state<ThreadDetail | null>(null);
   let messages = $state<ChatMessageView[]>([]);
   let loadState = $state<'loading' | 'ready' | 'error'>('loading');
   let sendState = $state<'idle' | 'sending'>('idle');
+  let actionState = $state<{ messageId: string; action: BusyAction } | null>(null);
   let loadedThreadId = $state('');
   let pageError = $state('');
+  let actionError = $state('');
+  let editingMessageId = $state<string | null>(null);
+  let editDraft = $state('');
+  let composerDraft = $state('');
+  let staleConfirmation = $state<StaleContinueRequest | null>(null);
   let messagesViewport = $state<HTMLElement | null>(null);
 
   const threadId = $derived(page.params.threadId ?? '');
@@ -130,6 +155,169 @@
     await handleSend(retryContent);
   }
 
+  function handleComposerDraftChange(content: string) {
+    composerDraft = content;
+  }
+
+  function handleMessageAction(message: ChatMessageView, action: MessageActionId) {
+    if (action === 'edit') {
+      beginEdit(message);
+      return;
+    }
+
+    if (action === 'regenerate') {
+      void replaceFromBackend(message, action, () => regenerateMessage(message.id));
+      return;
+    }
+
+    if (action === 'swipe') {
+      void replaceFromBackend(message, action, () => generateSwipeAlternate(message.id));
+      return;
+    }
+
+    void requestContinue(message);
+  }
+
+  function beginEdit(message: ChatMessageView) {
+    if (actionState || sendState === 'sending') {
+      return;
+    }
+
+    editingMessageId = message.id;
+    editDraft = selectedMessageContent(message);
+    actionError = '';
+  }
+
+  function cancelEdit() {
+    editingMessageId = null;
+    editDraft = '';
+  }
+
+  function setEditDraft(content: string) {
+    editDraft = content;
+  }
+
+  async function saveEdit(message: ChatMessageView, content: string) {
+    const saved = await replaceFromBackend(
+      message,
+      'edit',
+      () => editMessage(message.id, content),
+      applyEditedBackendMessage
+    );
+
+    if (saved) {
+      cancelEdit();
+    }
+  }
+
+  async function selectAlternate(message: ChatMessageView, alternateId: string) {
+    await replaceFromBackend(message, 'swipe', () => selectSwipeAlternate(message.id, alternateId));
+  }
+
+  async function generateAlternate(message: ChatMessageView) {
+    await replaceFromBackend(message, 'swipe', () => generateSwipeAlternate(message.id));
+  }
+
+  async function requestContinue(message: ChatMessageView) {
+    const composerText = composerDraft.trim();
+
+    if (hasStaleDownstream(message)) {
+      staleConfirmation = { message, composerText };
+      actionError = '';
+      return;
+    }
+
+    await runContinue(message, composerText);
+  }
+
+  async function confirmStaleContinue(strategy: 'truncate' | 'keep') {
+    const pending = staleConfirmation;
+    if (!pending || actionState || sendState === 'sending') {
+      return;
+    }
+
+    staleConfirmation = null;
+    actionError = '';
+    actionState = {
+      messageId: pending.message.id,
+      action: strategy === 'truncate' ? 'truncate-stale' : 'keep-stale'
+    };
+
+    let targetMessage: ChatMessageView = pending.message;
+
+    try {
+      if (strategy === 'truncate') {
+        messages = sortMessages(await truncateStaleMessages(pending.message.id));
+        targetMessage =
+          messages.find((message) => message.id === pending.message.id) ?? pending.message;
+      } else {
+        const keptMessage = await keepStaleMessages(pending.message.id);
+        messages = upsertBackendMessage(messages, keptMessage);
+        targetMessage = messages.find((message) => message.id === keptMessage.id) ?? keptMessage;
+      }
+    } catch {
+      actionError = 'RayMe could not resolve stale turns for Continue.';
+      return;
+    } finally {
+      actionState = null;
+    }
+
+    await runContinue(targetMessage, pending.composerText);
+  }
+
+  async function runContinue(message: ChatMessageView, composerText: string) {
+    const continued = await replaceFromBackend(message, 'continue', () =>
+      continueMessage(message.id, composerText)
+    );
+
+    if (continued) {
+      composerDraft = '';
+    }
+  }
+
+  async function replaceFromBackend(
+    message: ChatMessageView,
+    action: BusyAction,
+    operation: () => Promise<ThreadMessage>,
+    applyMessage: (
+      currentMessages: ChatMessageView[],
+      backendMessage: ThreadMessage
+    ) => ChatMessageView[] = upsertBackendMessage
+  ): Promise<boolean> {
+    if (actionState || sendState === 'sending') {
+      return false;
+    }
+
+    actionState = { messageId: message.id, action };
+    actionError = '';
+
+    try {
+      const backendMessage = await operation();
+      messages = applyMessage(messages, backendMessage);
+      await tick();
+      scrollToLatest();
+      return true;
+    } catch {
+      actionError = 'RayMe could not update this message.';
+      return false;
+    } finally {
+      actionState = null;
+    }
+  }
+
+  function hasStaleDownstream(message: ChatMessageView): boolean {
+    return messages.some(
+      (candidate) =>
+        candidate.thread_id === message.thread_id &&
+        candidate.sequence > message.sequence &&
+        candidate.stale_after_edit
+    );
+  }
+
+  function isMessageBusy(message: ChatMessageView): boolean {
+    return actionState?.messageId === message.id || sendState === 'sending';
+  }
+
   function sortMessages(nextMessages: ChatMessageView[]): ChatMessageView[] {
     return [...nextMessages].sort((left, right) => left.sequence - right.sequence);
   }
@@ -203,13 +391,48 @@
           {characterName}
           {portraitUrl}
           openingGreeting={isOpeningGreeting(message)}
+          actionBusy={isMessageBusy(message)}
+          editing={editingMessageId === message.id}
+          {editDraft}
           onRetry={retryFailedMessage}
+          onAction={handleMessageAction}
+          onEditDraftChange={setEditDraft}
+          onSaveEdit={saveEdit}
+          onCancelEdit={cancelEdit}
+          onSelectAlternate={selectAlternate}
+          onGenerateAlternate={generateAlternate}
         />
       {/each}
     </div>
 
     <div class="composer-wrap">
-      <Composer disabled={sendState === 'sending'} onSend={handleSend} />
+      {#if actionError}
+        <p class="action-error" role="status">{actionError}</p>
+      {/if}
+      <Composer
+        disabled={sendState === 'sending'}
+        value={composerDraft}
+        onDraftChange={handleComposerDraftChange}
+        onSend={handleSend}
+      />
+    </div>
+  {/if}
+
+  {#if staleConfirmation}
+    <div class="confirmation-backdrop">
+      <div class="stale-confirmation" role="dialog" aria-modal="true" aria-labelledby="stale-title">
+        <h2 id="stale-title">Continue from edited branch</h2>
+        <p>{TRUNCATE_STALE_CONFIRMATION_COPY}</p>
+        <div class="confirmation-actions">
+          <button class="secondary" type="button" onclick={() => (staleConfirmation = null)}>
+            Cancel
+          </button>
+          <button type="button" onclick={() => confirmStaleContinue('keep')}>Keep stale turns</button>
+          <button class="destructive" type="button" onclick={() => confirmStaleContinue('truncate')}>
+            Remove stale turns
+          </button>
+        </div>
+      </div>
     </div>
   {/if}
 </section>
@@ -313,6 +536,84 @@
     z-index: 2;
     padding: var(--space-md) 0 0;
     background: linear-gradient(180deg, rgba(6, 14, 32, 0), var(--color-surface) 28%);
+  }
+
+  .action-error {
+    margin: 0 0 var(--space-sm);
+    border-radius: var(--radius-sm);
+    padding: var(--space-sm) var(--space-md);
+    background: rgba(255, 113, 108, 0.1);
+    color: var(--color-danger);
+    font-size: var(--font-label);
+    font-weight: 600;
+    line-height: var(--line-label);
+  }
+
+  .confirmation-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 20;
+    display: grid;
+    place-items: center;
+    padding: var(--space-lg);
+    background: rgba(6, 14, 32, 0.68);
+    backdrop-filter: blur(10px);
+  }
+
+  .stale-confirmation {
+    display: grid;
+    width: min(100%, 460px);
+    gap: var(--space-md);
+    border-radius: var(--radius-md);
+    padding: var(--space-lg);
+    background: rgba(25, 37, 64, 0.92);
+    color: var(--color-text);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+  }
+
+  .stale-confirmation h2,
+  .stale-confirmation p {
+    margin: 0;
+  }
+
+  .stale-confirmation h2 {
+    font-size: var(--font-heading);
+    font-weight: 600;
+    line-height: var(--line-heading);
+  }
+
+  .stale-confirmation p {
+    color: var(--color-text-muted);
+    font-size: var(--font-body);
+    line-height: var(--line-body);
+  }
+
+  .confirmation-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: var(--space-xs);
+  }
+
+  .confirmation-actions button {
+    min-height: 44px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    padding: 0 12px;
+    background: rgba(182, 160, 255, 0.18);
+    color: var(--color-text);
+    font-size: var(--font-label);
+    font-weight: 600;
+  }
+
+  .confirmation-actions button.secondary {
+    background: rgba(64, 72, 93, 0.28);
+    color: var(--color-text-muted);
+  }
+
+  .confirmation-actions button.destructive {
+    background: var(--color-danger);
+    color: var(--color-surface);
   }
 
   .chat-state {

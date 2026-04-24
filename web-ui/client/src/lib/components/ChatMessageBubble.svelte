@@ -1,15 +1,32 @@
 <script lang="ts">
   import { RefreshCw } from 'lucide-svelte';
 
-  import { selectedMessageContent, type ChatMessageView } from '$lib/api/chat';
+  import {
+    selectedAlternateIndex,
+    selectedMessageContent,
+    sortedMessageAlternates,
+    type ChatMessageView,
+    type MessageActionId
+  } from '$lib/api/chat';
   import { renderTrustedMarkdown } from '$lib/sanitizer/renderMarkdown';
+  import MessageActionMenu from './MessageActionMenu.svelte';
+  import SwipeStepper from './SwipeStepper.svelte';
 
   interface Props {
     message: ChatMessageView;
     characterName?: string | null;
     portraitUrl?: string | null;
     openingGreeting?: boolean;
+    actionBusy?: boolean;
+    editing?: boolean;
+    editDraft?: string;
     onRetry?: (message: ChatMessageView) => void;
+    onAction?: (message: ChatMessageView, action: MessageActionId) => void;
+    onEditDraftChange?: (content: string) => void;
+    onSaveEdit?: (message: ChatMessageView, content: string) => void | Promise<void>;
+    onCancelEdit?: () => void;
+    onSelectAlternate?: (message: ChatMessageView, alternateId: string) => void | Promise<void>;
+    onGenerateAlternate?: (message: ChatMessageView) => void | Promise<void>;
   }
 
   let {
@@ -17,7 +34,16 @@
     characterName = 'Character',
     portraitUrl = null,
     openingGreeting = false,
-    onRetry
+    actionBusy = false,
+    editing = false,
+    editDraft = '',
+    onRetry,
+    onAction,
+    onEditDraftChange,
+    onSaveEdit,
+    onCancelEdit,
+    onSelectAlternate,
+    onGenerateAlternate
   }: Props = $props();
 
   const isUser = $derived(message.role === 'user');
@@ -25,12 +51,51 @@
   const avatarInitial = $derived((characterName || 'R').trim().slice(0, 1).toUpperCase() || 'R');
   const content = $derived(selectedMessageContent(message));
   const renderedContent = $derived(renderTrustedMarkdown(content));
-  const orderedAlternates = $derived(
-    [...message.alternates].sort((left, right) => left.alternate_index - right.alternate_index)
+  const orderedAlternates = $derived(sortedMessageAlternates(message));
+  const currentAlternateIndex = $derived(selectedAlternateIndex(message));
+  const swipeTotal = $derived(Math.max(orderedAlternates.length, 1));
+  const showActions = $derived(
+    !message.streaming && !message.error && (message.role === 'assistant' || message.role === 'user')
   );
+  const showSwipeStepper = $derived(!isUser && !message.streaming && !message.error);
 
   function retry() {
     onRetry?.(message);
+  }
+
+  function chooseAction(action: MessageActionId) {
+    onAction?.(message, action);
+  }
+
+  function updateEditDraft(event: Event) {
+    onEditDraftChange?.((event.currentTarget as HTMLTextAreaElement).value);
+  }
+
+  function saveEdit() {
+    const nextContent = editDraft.trim();
+    if (!nextContent) {
+      return;
+    }
+
+    void onSaveEdit?.(message, nextContent);
+  }
+
+  function selectPreviousAlternate() {
+    const alternate = orderedAlternates[currentAlternateIndex - 1];
+    if (alternate) {
+      void onSelectAlternate?.(message, alternate.id);
+    }
+  }
+
+  function selectNextAlternate() {
+    const alternate = orderedAlternates[currentAlternateIndex + 1];
+    if (alternate) {
+      void onSelectAlternate?.(message, alternate.id);
+    }
+  }
+
+  function generateAlternate() {
+    void onGenerateAlternate?.(message);
   }
 </script>
 
@@ -58,6 +123,12 @@
   {/if}
 
   <div class="bubble">
+    {#if showActions}
+      <div class="message-actions">
+        <MessageActionMenu role={message.role} disabled={actionBusy} onAction={chooseAction} />
+      </div>
+    {/if}
+
     <div class="message-meta">
       <span>{displayName}</span>
       {#if openingGreeting}
@@ -71,7 +142,25 @@
       {/if}
     </div>
 
-    {#if message.error}
+    {#if editing}
+      <div class="edit-panel">
+        <textarea
+          value={editDraft}
+          aria-label="Edit message"
+          disabled={actionBusy}
+          rows="4"
+          oninput={updateEditDraft}
+        ></textarea>
+        <div class="edit-actions">
+          <button class="secondary" type="button" disabled={actionBusy} onclick={() => onCancelEdit?.()}>
+            Cancel
+          </button>
+          <button type="button" disabled={actionBusy || editDraft.trim().length === 0} onclick={saveEdit}>
+            Save
+          </button>
+        </div>
+      </div>
+    {:else if message.error}
       <div class="error-state" role="alert">
         <p>{message.error}</p>
         <button type="button" onclick={retry}>
@@ -88,15 +177,15 @@
       </div>
     {/if}
 
-    {#if orderedAlternates.length > 0 && !message.error}
-      <ol class="alternate-list" aria-label="Message alternates">
-        {#each orderedAlternates as alternate}
-          <li class:selected={alternate.id === message.selected_alternate_id}>
-            <span class="alternate-index">{alternate.alternate_index + 1}</span>
-            <div>{@html renderTrustedMarkdown(alternate.content_text)}</div>
-          </li>
-        {/each}
-      </ol>
+    {#if showSwipeStepper}
+      <SwipeStepper
+        currentIndex={currentAlternateIndex}
+        total={swipeTotal}
+        disabled={actionBusy}
+        onPrevious={selectPreviousAlternate}
+        onNext={selectNextAlternate}
+        onGenerate={generateAlternate}
+      />
     {/if}
   </div>
 </article>
@@ -143,6 +232,7 @@
   }
 
   .bubble {
+    position: relative;
     display: grid;
     width: min(76%, 680px);
     gap: var(--space-sm);
@@ -157,11 +247,26 @@
     background: rgba(182, 160, 255, 0.18);
   }
 
+  .message-actions {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    z-index: 3;
+    opacity: 0;
+    transition: opacity 120ms ease;
+  }
+
+  .message-row:hover .message-actions,
+  .message-row:focus-within .message-actions {
+    opacity: 1;
+  }
+
   .message-meta {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: var(--space-xs);
+    padding-right: 46px;
     color: var(--color-text-muted);
     font-size: var(--font-label);
     font-weight: 600;
@@ -192,15 +297,14 @@
 
   .message-content,
   .error-state p,
-  .alternate-list {
+  .edit-panel textarea {
     color: var(--color-text);
     font-size: var(--font-body);
     font-weight: 400;
     line-height: var(--line-body);
   }
 
-  .message-content :global(p),
-  .alternate-list :global(p) {
+  .message-content :global(p) {
     margin: 0;
   }
 
@@ -208,8 +312,7 @@
     margin-top: var(--space-sm);
   }
 
-  .message-content :global(a),
-  .alternate-list :global(a) {
+  .message-content :global(a) {
     color: #70aaff;
   }
 
@@ -224,39 +327,30 @@
     animation: pulse 0.85s ease-in-out infinite;
   }
 
-  .alternate-list {
+  .edit-panel {
     display: grid;
-    gap: var(--space-xs);
-    margin: 0;
-    padding: 0;
-    list-style: none;
-  }
-
-  .alternate-list li {
-    display: grid;
-    grid-template-columns: 24px minmax(0, 1fr);
     gap: var(--space-sm);
+  }
+
+  .edit-panel textarea {
+    width: 100%;
+    min-height: 112px;
+    resize: vertical;
+    border: 0;
     border-radius: var(--radius-sm);
-    padding: var(--space-sm);
+    padding: 10px 12px;
     background: rgba(9, 19, 40, 0.44);
-    color: var(--color-text-muted);
+    outline: 1px solid rgba(182, 160, 255, 0.2);
   }
 
-  .alternate-list li.selected {
-    background: rgba(182, 160, 255, 0.14);
-    color: var(--color-text);
+  .edit-panel textarea:focus {
+    outline-color: rgba(182, 160, 255, 0.48);
   }
 
-  .alternate-index {
-    display: grid;
-    width: 24px;
-    height: 24px;
-    place-items: center;
-    border-radius: 50%;
-    background: rgba(64, 72, 93, 0.26);
-    color: inherit;
-    font-size: var(--font-label);
-    font-weight: 600;
+  .edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--space-xs);
   }
 
   .error-state {
@@ -269,19 +363,35 @@
     color: var(--color-danger);
   }
 
-  .error-state button {
+  .error-state button,
+  .edit-actions button {
     display: inline-flex;
     align-items: center;
-    justify-self: start;
     min-height: 36px;
     gap: var(--space-xs);
-    border: 1px solid rgba(255, 113, 108, 0.35);
+    border: 0;
     border-radius: var(--radius-sm);
     padding: 0 12px;
-    background: transparent;
+    background: rgba(182, 160, 255, 0.18);
     color: var(--color-text);
     font-size: var(--font-label);
     font-weight: 600;
+  }
+
+  .error-state button {
+    justify-self: start;
+    outline: 1px solid rgba(255, 113, 108, 0.35);
+    background: transparent;
+  }
+
+  .edit-actions button.secondary {
+    background: rgba(64, 72, 93, 0.26);
+    color: var(--color-text-muted);
+  }
+
+  .edit-actions button:disabled {
+    cursor: not-allowed;
+    opacity: 0.58;
   }
 
   @keyframes pulse {
@@ -298,6 +408,16 @@
   @media (max-width: 640px) {
     .bubble {
       width: min(86%, 680px);
+    }
+
+    .message-actions {
+      opacity: 1;
+    }
+  }
+
+  @media (hover: none) {
+    .message-actions {
+      opacity: 1;
     }
   }
 </style>
