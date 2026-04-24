@@ -12,6 +12,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Float,
     Index,
     Integer,
     String,
@@ -23,6 +24,8 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 APP_SETTINGS_TABLE = "app_settings"
 CHARACTERS_TABLE = "characters"
 CHARACTER_ASSETS_TABLE = "character_assets"
+VOICES_TABLE = "voices"
+VOICE_ASSETS_TABLE = "voice_assets"
 THREADS_TABLE = "threads"
 MESSAGES_TABLE = "messages"
 MESSAGE_ALTERNATES_TABLE = "message_alternates"
@@ -31,6 +34,8 @@ MODEL_TABLE_NAMES = (
     APP_SETTINGS_TABLE,
     CHARACTERS_TABLE,
     CHARACTER_ASSETS_TABLE,
+    VOICES_TABLE,
+    VOICE_ASSETS_TABLE,
     THREADS_TABLE,
     MESSAGES_TABLE,
     MESSAGE_ALTERNATES_TABLE,
@@ -151,6 +156,11 @@ class Character(TimestampMixin, Base):
         JSON,
         nullable=True,
     )
+    default_voice_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey(f"{VOICES_TABLE}.id", ondelete="SET NULL"),
+        nullable=True,
+    )
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -169,6 +179,37 @@ class CharacterAsset(TimestampMixin, Base):
     content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
     byte_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
     sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
+class Voice(TimestampMixin, Base):
+    __tablename__ = VOICES_TABLE
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    default_engine: Mapped[str] = mapped_column(String(80), nullable=False)
+    reference_transcript: Mapped[str | None] = mapped_column(Text, nullable=True)
+    metadata_json: Mapped[dict[str, object] | None] = mapped_column(JSON, nullable=True)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class VoiceAsset(TimestampMixin, Base):
+    __tablename__ = VOICE_ASSETS_TABLE
+    __table_args__ = (Index("ix_voice_assets_voice_id", "voice_id"),)
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    voice_id: Mapped[str | None] = mapped_column(
+        String(64),
+        ForeignKey(f"{VOICES_TABLE}.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    asset_kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False)
+    content_type: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    byte_size: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    sha256: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sample_rate_hz: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    channel_count: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class Thread(TimestampMixin, Base):
@@ -372,6 +413,10 @@ __all__ = [
     "CHARACTER_ASSETS_TABLE",
     "Character",
     "CharacterAsset",
+    "VOICES_TABLE",
+    "VOICE_ASSETS_TABLE",
+    "Voice",
+    "VoiceAsset",
     "MESSAGE_ALTERNATES_TABLE",
     "MESSAGE_ALTERNATE_SCHEMA_REQUIRED_COLUMNS",
     "MESSAGE_ALTERNATE_SOURCE_ACTIONS",
