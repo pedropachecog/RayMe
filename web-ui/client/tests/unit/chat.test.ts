@@ -418,7 +418,9 @@ describe('chat route contract', () => {
     expect(routeSource).toContain('scrollTop: messagesViewport.scrollTop');
     expect(routeSource).toContain('messagesViewport.scrollTop = scrollAnchor.scrollTop');
     expect(routeSource).toContain('appendTokenToStreamingMessage(messages, streamingMessage.id, token)');
-    expect(routeSource).toContain("void settleMessageLayout(stickToLatest, 'auto', scrollAnchor)");
+    expect(routeSource).toContain('const shouldStick = stickToLatest && isNearBottom();');
+    expect(routeSource).toContain('preserveCurrentScrollTop(shouldStick);');
+    expect(routeSource).toContain('void settleSendLayout(shouldStick)');
     expect(routeSource).toContain('BOTTOM_PROXIMITY_PX');
   });
 

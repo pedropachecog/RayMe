@@ -1,21 +1,131 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page, type Route } from '@playwright/test';
 
-const phaseOneRoutes = ['/', '/gallery', '/characters/:id', '/chat/:threadId', '/settings'] as const;
-const futureControls = ['Voice Lab', 'Call', 'Account', 'Billing', 'Logout'] as const;
-const generatedResponseAssertions = [
-  'regenerate consumes a returned backend-generated AI alternate instead of local-only state',
-  'swipe consumes a backend-generated alternate instead of local-only state',
-  'continue consumes a backend-generated selected alternate instead of local-only state'
+const forbiddenCopy = [
+  'Voice Lab',
+  'Call',
+  'Account',
+  'Billing',
+  'Logout',
+  'Voice model',
+  'Voice controls',
+  'Wake word',
+  'Search',
+  'Filter',
+  'Subscription',
+  'Screen awareness',
+  'VAD sensitivity'
 ] as const;
 
-test('phase 1 ui omits future controls', async ({ page }) => {
-  await page.goto('/');
-  await page.goto('/gallery');
-  await page.goto('/settings');
+async function fulfillJson(route: Route, body: unknown) {
+  await route.fulfill({
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+}
 
-  expect(phaseOneRoutes).toContain('/');
-  expect(phaseOneRoutes).toContain('/gallery');
-  expect(phaseOneRoutes).toContain('/settings');
-  expect(futureControls).toEqual(['Voice Lab', 'Call', 'Account', 'Billing', 'Logout']);
-  expect(generatedResponseAssertions).toContain('swipe consumes a backend-generated alternate instead of local-only state');
+async function installContractRoutes(page: Page) {
+  const character = {
+    id: 'contract-character',
+    name: 'Contract Aster',
+    description: 'Sanitized contract character.',
+    first_mes: 'Contract opening.',
+    alternate_greetings: [],
+    tags: ['contract'],
+    lorebook_json: null,
+    deleted_at: null,
+    updated_at: null,
+    portrait_url: null
+  };
+
+  await page.route('**/api/threads', async (route) => {
+    await fulfillJson(route, {
+      items: [
+        {
+          id: 'contract-thread',
+          character_id: character.id,
+          title: 'Contract thread',
+          character_name: character.name,
+          last_message_snippet: 'A recent text-only message.',
+          last_message_at: '2026-04-24T00:00:00Z',
+          created_at: '2026-04-24T00:00:00Z',
+          updated_at: '2026-04-24T00:00:00Z'
+        }
+      ]
+    });
+  });
+  await page.route('**/api/characters', async (route) => {
+    await fulfillJson(route, { items: [character] });
+  });
+  await page.route('**/api/characters/contract-character', async (route) => {
+    await fulfillJson(route, character);
+  });
+  await page.route('**/api/threads/contract-thread', async (route) => {
+    await fulfillJson(route, {
+      id: 'contract-thread',
+      character_id: character.id,
+      title: 'Contract thread',
+      character_name: character.name,
+      character_portrait_url: null,
+      character_snapshot: { name: character.name, first_mes: character.first_mes },
+      messages: [
+        {
+          id: 'contract-opening',
+          thread_id: 'contract-thread',
+          message_kind: 'ai_text',
+          role: 'assistant',
+          sequence: 0,
+          content_text: 'Contract opening.',
+          selected_alternate_id: 'contract-opening-alt',
+          alternates: [
+            {
+              id: 'contract-opening-alt',
+              message_id: 'contract-opening',
+              alternate_index: 0,
+              content_text: 'Contract opening.',
+              source_action: 'first_mes',
+              created_at: null
+            }
+          ],
+          stale_after_edit: false,
+          created_at: null,
+          updated_at: null
+        }
+      ]
+    });
+  });
+  await page.route('**/api/settings', async (route) => {
+    await fulfillJson(route, {
+      web_url: 'https://192.168.1.199:8443',
+      ai_backend_url: 'https://192.168.1.199:9443',
+      llm_base_url: 'https://api.openai.com/v1',
+      llm_model: 'gpt-4.1-mini',
+      llm_api_key_configured: true
+    });
+  });
+}
+
+async function expectNoFutureControls(page: Page) {
+  for (const label of forbiddenCopy) {
+    await expect(page.getByText(new RegExp(`\\b${label}\\b`, 'i'))).toHaveCount(0);
+    await expect(page.getByRole('button', { name: new RegExp(label, 'i') })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: new RegExp(label, 'i') })).toHaveCount(0);
+  }
+}
+
+test('phase 1 ui omits future controls from shipped screens', async ({ page }) => {
+  await installContractRoutes(page);
+
+  for (const path of ['/', '/gallery', '/settings', '/characters/contract-character', '/chat/contract-thread']) {
+    await page.goto(path);
+    await expectNoFutureControls(page);
+  }
+
+  await page.goto('/');
+  await expect(page.locator('nav[aria-label="Top-level"] a')).toHaveCount(3);
+  await expect(page.locator('nav[aria-label="Primary mobile"] a')).toHaveCount(3);
+  await expect(page.getByRole('link', { name: 'Home' }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Gallery' }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Settings' }).first()).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Start Chat' }).first()).toBeVisible();
 });

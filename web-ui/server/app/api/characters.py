@@ -91,6 +91,15 @@ async def update_character(
         raise HTTPException(status_code=404, detail="Character not found") from exc
 
 
+@router.patch("/{character_id}")
+async def patch_character(
+    character_id: str,
+    payload: CharacterWrite,
+    service: CharacterService = Depends(get_character_service),
+) -> dict[str, Any]:
+    return await update_character(character_id, payload, service)
+
+
 @router.delete("/{character_id}")
 async def delete_character(
     character_id: str,

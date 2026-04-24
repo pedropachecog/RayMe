@@ -133,6 +133,7 @@
 
     const stickToLatest = isNearBottom();
     const scrollAnchor = stickToLatest ? null : captureScrollAnchor();
+    let preservedScrollTop = scrollAnchor?.scrollTop ?? null;
     sendState = 'sending';
     const nextSequence = nextMessageSequence(messages);
     const draftKey = `${Date.now()}`;
@@ -156,37 +157,58 @@
     });
 
     messages = [...messages, userMessage, streamingMessage];
-    await settleMessageLayout(stickToLatest, 'smooth', scrollAnchor);
+    await settleSendLayout(stickToLatest, 'smooth');
+    if (!stickToLatest && messagesViewport) {
+      preservedScrollTop = messagesViewport.scrollTop;
+    }
 
     try {
       await sendChatMessage(threadId, content, {
         onToken: (token) => {
-          const stickToLatest = isNearBottom();
-          const scrollAnchor = stickToLatest ? null : captureScrollAnchor();
+          const shouldStick = stickToLatest && isNearBottom();
+          preserveCurrentScrollTop(shouldStick);
           messages = appendTokenToStreamingMessage(messages, streamingMessage.id, token);
-          void settleMessageLayout(stickToLatest, 'auto', scrollAnchor);
+          void settleSendLayout(shouldStick);
         },
         onDone: (message) => {
-          const stickToLatest = isNearBottom();
-          const scrollAnchor = stickToLatest ? null : captureScrollAnchor();
+          const shouldStick = stickToLatest && isNearBottom();
+          preserveCurrentScrollTop(shouldStick);
           messages = sortMessages(replaceStreamingMessage(messages, streamingMessage.id, message));
-          void settleMessageLayout(stickToLatest, 'auto', scrollAnchor);
+          void settleSendLayout(shouldStick);
         },
         onError: () => {
-          const stickToLatest = isNearBottom();
-          const scrollAnchor = stickToLatest ? null : captureScrollAnchor();
+          const shouldStick = stickToLatest && isNearBottom();
+          preserveCurrentScrollTop(shouldStick);
           messages = markStreamingMessageError(messages, streamingMessage.id, content);
-          void settleMessageLayout(stickToLatest, 'auto', scrollAnchor);
+          void settleSendLayout(shouldStick);
         }
       });
     } catch {
-      const stickToLatest = isNearBottom();
-      const scrollAnchor = stickToLatest ? null : captureScrollAnchor();
+      const shouldStick = stickToLatest && isNearBottom();
+      preserveCurrentScrollTop(shouldStick);
       messages = markStreamingMessageError(messages, streamingMessage.id, content);
-      await settleMessageLayout(stickToLatest, 'auto', scrollAnchor);
+      await settleSendLayout(shouldStick);
     } finally {
       sendState = 'idle';
-      await settleMessageLayout(isNearBottom(), 'auto');
+      const shouldStick = stickToLatest && isNearBottom();
+      await settleSendLayout(shouldStick);
+    }
+
+    async function settleSendLayout(
+      shouldStick: boolean,
+      behavior: ScrollBehavior = 'auto'
+    ): Promise<void> {
+      await settleMessageLayout(shouldStick, behavior, shouldStick ? null : scrollAnchor);
+      if (!shouldStick) {
+        restoreScrollTop(preservedScrollTop);
+        updateJumpVisibility();
+      }
+    }
+
+    function preserveCurrentScrollTop(shouldStick: boolean) {
+      if (!shouldStick && messagesViewport) {
+        preservedScrollTop = messagesViewport.scrollTop;
+      }
     }
   }
 
@@ -513,6 +535,14 @@
     if (Math.abs(messagesViewport.scrollTop - scrollAnchor.scrollTop) > 4) {
       messagesViewport.scrollTop = scrollAnchor.scrollTop;
     }
+  }
+
+  function restoreScrollTop(scrollTop: number | null) {
+    if (!messagesViewport || scrollTop === null) {
+      return;
+    }
+
+    messagesViewport.scrollTop = scrollTop;
   }
 
   function isOpeningGreeting(message: ChatMessageView): boolean {

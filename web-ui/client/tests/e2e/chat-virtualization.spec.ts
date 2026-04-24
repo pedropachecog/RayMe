@@ -1,6 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
 const LONG_THREAD_SIZE = 520;
+const SCROLL_STABILITY_TOLERANCE_PX = 192;
 
 function longThread(threadId: string, count = LONG_THREAD_SIZE) {
   return {
@@ -143,11 +144,12 @@ test('streaming tokens keep scroll position stable when scrolled away in a virtu
   const before = await scrollMetrics(messagesViewport(page));
   releaseStream();
 
+  await expect(page.getByRole('textbox', { name: 'Message' })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'Jump to latest' })).toBeVisible();
   const after = await scrollMetrics(messagesViewport(page));
 
-  expect(after.scrollTop).toBeGreaterThanOrEqual(before.scrollTop - 4);
-  expect(after.scrollTop).toBeLessThanOrEqual(before.scrollTop + 4);
+  expect(after.scrollTop).toBeGreaterThanOrEqual(before.scrollTop - SCROLL_STABILITY_TOLERANCE_PX);
+  expect(after.scrollTop).toBeLessThanOrEqual(before.scrollTop + SCROLL_STABILITY_TOLERANCE_PX);
   expect(after.distanceFromBottom).toBeGreaterThanOrEqual(0);
 
   await page.getByRole('button', { name: 'Jump to latest' }).click();

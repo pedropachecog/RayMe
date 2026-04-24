@@ -112,9 +112,11 @@ class CharacterService:
         )
         payload = _payload_from_import(import_result)
         response = await self.create_character(payload)
+        character_response = dict(response)
         response["source_format"] = import_result.source_format
         response["source_key"] = import_result.source_key
         response["warnings"] = list(import_result.warnings)
+        response["character"] = character_response
         return response
 
     async def export_character_v2(self, character_id: str) -> dict[str, Any]:
