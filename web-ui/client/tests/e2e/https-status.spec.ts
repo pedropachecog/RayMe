@@ -1,5 +1,7 @@
 import { expect, test, type Route } from '@playwright/test';
 
+import { installBrowserErrorGuard } from './helpers/acceptance';
+
 async function fulfillJson(route: Route, body: unknown) {
   await route.fulfill({
     status: 200,
@@ -20,6 +22,7 @@ test('secure context media readiness and endpoint statuses are visible', async (
       configurable: true
     });
   });
+  const expectNoBrowserErrors = installBrowserErrorGuard(page);
 
   let currentSettings = {
     web_url: 'https://192.168.1.199:8443',
@@ -84,4 +87,5 @@ test('secure context media readiness and endpoint statuses are visible', async (
     .getByRole('button', { name: 'Test Connection' })
     .click();
   await expect(page.locator('[data-testid="llm-status"]')).toHaveText('Connected');
+  await expectNoBrowserErrors();
 });

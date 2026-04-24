@@ -1,5 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 
+import { installBrowserErrorGuard } from './helpers/acceptance';
+
 const LONG_THREAD_SIZE = 520;
 function longThread(threadId: string, count = LONG_THREAD_SIZE) {
   return {
@@ -82,6 +84,7 @@ async function scrollMetrics(viewport: Locator) {
 }
 
 test('long chat threads virtualize at 520 messages and jump back to latest', async ({ page }) => {
+  const expectNoBrowserErrors = installBrowserErrorGuard(page);
   const threadId = 'virtual-thread';
   await mockLongThread(page, threadId);
 
@@ -104,11 +107,13 @@ test('long chat threads virtualize at 520 messages and jump back to latest', asy
 
   await expect(page.getByText(`Long thread message ${LONG_THREAD_SIZE - 1}`)).toBeVisible();
   await expect(jump).toBeHidden();
+  await expectNoBrowserErrors();
 });
 
 test('streaming tokens keep scroll position stable when scrolled away in a virtualized thread', async ({
   page
 }) => {
+  const expectNoBrowserErrors = installBrowserErrorGuard(page);
   const threadId = 'virtual-stream-thread';
   let releaseStream: () => void = () => undefined;
   const streamCanFinish = new Promise<void>((resolve) => {
@@ -152,12 +157,14 @@ test('streaming tokens keep scroll position stable when scrolled away in a virtu
 
   await page.getByRole('button', { name: 'Jump to latest' }).click();
   await expect(page.getByText('Streaming token response complete')).toBeVisible();
+  await expectNoBrowserErrors();
 });
 
 test.describe('mobile virtualized chat layout', () => {
   test.use({ viewport: { width: 393, height: 851 }, isMobile: true });
 
   test('jump control sits above the sticky composer and mobile bottom navigation', async ({ page }) => {
+    const expectNoBrowserErrors = installBrowserErrorGuard(page);
     const threadId = 'virtual-mobile-thread';
     await mockLongThread(page, threadId);
 
@@ -180,5 +187,6 @@ test.describe('mobile virtualized chat layout', () => {
     expect(jumpBox!.y + jumpBox!.height).toBeLessThanOrEqual(composerBox!.y + 1);
     expect(composerBox!.y + composerBox!.height).toBeLessThanOrEqual(bottomNavBox!.y + 1);
     expect(jumpBox!.y + jumpBox!.height).toBeLessThanOrEqual(bottomNavBox!.y + 1);
+    await expectNoBrowserErrors();
   });
 });

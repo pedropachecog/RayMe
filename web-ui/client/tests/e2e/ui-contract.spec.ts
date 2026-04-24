@@ -1,5 +1,7 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 
+import { installBrowserErrorGuard } from './helpers/acceptance';
+
 const forbiddenCopy = [
   'Voice Lab',
   'Call',
@@ -114,6 +116,7 @@ async function expectNoFutureControls(page: Page) {
 }
 
 test('phase 1 ui omits future controls from shipped screens', async ({ page }) => {
+  const expectNoBrowserErrors = installBrowserErrorGuard(page);
   await installContractRoutes(page);
 
   for (const path of ['/', '/gallery', '/settings', '/characters/contract-character', '/chat/contract-thread']) {
@@ -128,4 +131,5 @@ test('phase 1 ui omits future controls from shipped screens', async ({ page }) =
   await expect(page.getByRole('link', { name: 'Gallery' }).first()).toBeVisible();
   await expect(page.getByRole('link', { name: 'Settings' }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Start Chat' }).first()).toBeVisible();
+  await expectNoBrowserErrors();
 });
