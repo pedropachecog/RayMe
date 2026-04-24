@@ -96,6 +96,23 @@ uv run --project web-ui/server python web-ui/server/scripts/run_dev_https.py
 
 Browser URL: `https://192.168.1.199:8443`.
 
+On `OMEN-PC`, the current repeatable Phase 1 runtime uses Windows scheduled
+tasks so the HTTPS services survive the SSH command that starts them:
+
+```text
+Task: RayMePhase1Web
+Script: C:\Users\pmpg\rayme\start-web-ui.cmd
+Log: C:\Users\pmpg\rayme\logs\web-ui.run.log
+URL: https://192.168.1.199:8443
+```
+
+The script must run from `C:\Users\pmpg\rayme\RayMe\`, set
+`RAYME_DATABASE_URL` with the async SQLite driver
+`sqlite+aiosqlite:///C:/Users/pmpg/rayme/RayMe/web-ui/server/rayme-phase1.db`,
+and call `web-ui\server\scripts\run_dev_https.py` with only the supported
+`--host`, `--port`, `--cert`, and `--key` arguments. Do not pass a static-dir
+argument; the server mounts `web-ui/client/build` by convention.
+
 ## AI Backend
 
 Run from the backend Git checkout:
@@ -109,6 +126,19 @@ uv run --project ai-backend python ai-backend/scripts/run_https.py \
 ```
 
 Verification URL: `https://192.168.1.199:9443/health`.
+
+On `OMEN-PC`, the matching scheduled-task runtime is:
+
+```text
+Task: RayMePhase1AI
+Script: C:\Users\pmpg\rayme\start-ai-backend.cmd
+Log: C:\Users\pmpg\rayme\logs\ai-backend.run.log
+URL: https://192.168.1.199:9443/health
+```
+
+The Windows firewall must allow inbound TCP on `8443` and `9443`. The durable
+rule names used for Phase 1 are `RayMe Phase 1 HTTPS Web UI 8443` and
+`RayMe Phase 1 HTTPS AI Backend 9443`.
 
 ## Binding Rules
 

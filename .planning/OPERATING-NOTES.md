@@ -55,6 +55,13 @@ as durable context, not one-off preferences.
   mount.
 - The backend mirror for that same TLS material lives under
   `C:\Users\pmpg\rayme\phase1-tls\`.
+- Phase 1 HTTPS runtime on `OMEN-PC` uses scheduled tasks
+  `RayMePhase1Web` and `RayMePhase1AI`, backed by
+  `C:\Users\pmpg\rayme\start-web-ui.cmd` and
+  `C:\Users\pmpg\rayme\start-ai-backend.cmd`. Logs are under
+  `C:\Users\pmpg\rayme\logs\`.
+- Keep inbound Windows firewall rules for TCP `8443` and `9443` when doing
+  Android LAN testing.
 - Do not generate throwaway certificates for normal HTTPS testing. Reuse the
   Phase 1 cert set until it expires or the LAN IP/hostnames change.
 - If a new certificate set is required, create it deliberately as a reusable
