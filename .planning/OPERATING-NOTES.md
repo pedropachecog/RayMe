@@ -18,6 +18,10 @@ as durable context, not one-off preferences.
   underlying approach and update durable docs; do not just patch the symptom.
 - Keep updates concrete and short. Say what is blocked, what exact help is
   needed, and what the agent will do after that help is provided.
+- Before asking the user to test a UI in browser, the agent must open it with a
+  browser-capable check such as Playwright and verify rendered content plus
+  console errors. HTTP 200, health endpoints, and curl output are not enough for
+  browser UI readiness.
 - At the end of each phase, explicitly tell the user what temporary/runtime
   directories can be deleted. Include exact full paths, what each path contains,
   whether it is safe to delete for the rest of the project, and deletion commands
