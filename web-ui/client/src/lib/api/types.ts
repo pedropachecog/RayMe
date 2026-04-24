@@ -45,6 +45,8 @@ export interface ThreadMessage {
 export interface CharacterPortraitMetadata {
   portrait_url?: string | null;
   portrait_path?: string | null;
+  portrait_asset_id?: string | null;
+  portrait_storage_path?: string | null;
   portrait_mime_type?: string | null;
   portrait_size_bytes?: number | null;
   portrait_updated_at?: string | null;
@@ -109,10 +111,16 @@ export interface ThreadSummary {
   title: string | null;
   character_name?: string | null;
   character_portrait_url?: string | null;
+  character_portrait_asset_id?: string | null;
+  character_portrait_storage_path?: string | null;
   last_message_snippet?: string | null;
   last_message_at?: string | null;
   created_at?: string | null;
   updated_at?: string | null;
+}
+
+export interface ListResponse<T> {
+  items: T[];
 }
 
 export interface CreateThreadRequest {
@@ -123,6 +131,21 @@ export interface CreateThreadRequest {
 
 export interface CreateThreadResponse {
   thread_id: string;
+}
+
+export interface RenameThreadRequest {
+  title: string;
+}
+
+export interface RenameThreadResponse {
+  thread_id: string;
+  title: string;
+  updated_at?: string | null;
+}
+
+export interface DeleteThreadResponse {
+  thread_id: string;
+  deleted: boolean;
 }
 
 export interface ThreadDetail extends ThreadSummary {

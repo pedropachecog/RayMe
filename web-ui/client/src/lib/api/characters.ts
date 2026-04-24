@@ -4,12 +4,16 @@ import type {
   CharacterDetail,
   CharacterEditorPayload,
   CharacterImportResult,
+  ListResponse,
   CharacterSummary,
   CharacterV2Export
 } from './types';
 
-export function listCharacters(): Promise<CharacterSummary[]> {
-  return apiFetch<CharacterSummary[]>('/characters', { method: 'GET' });
+export async function listCharacters(): Promise<CharacterSummary[]> {
+  const response = await apiFetch<ListResponse<CharacterSummary> | CharacterSummary[]>('/characters', {
+    method: 'GET'
+  });
+  return Array.isArray(response) ? response : response.items;
 }
 
 export function getCharacter(characterId: string): Promise<CharacterDetail> {
