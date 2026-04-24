@@ -1,11 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 
-import {
-  expectRayMeApiRequest,
-  fulfillJson,
-  fulfillSse,
-  installBrowserErrorGuard
-} from '../e2e/helpers/acceptance';
+import type * as AcceptanceHelpers from '../e2e/helpers/acceptance';
 import {
   makeAiMessage,
   makeCharacter,
@@ -15,6 +10,30 @@ import {
   PHASE1_LOCAL_LLM_URL
 } from '../e2e/helpers/fixtures';
 import { alternatePortraitPng, fulfillPortraitImage, portraitPng } from '../e2e/helpers/images';
+
+let expectRayMeApiRequest: typeof AcceptanceHelpers.expectRayMeApiRequest;
+let fulfillJson: typeof AcceptanceHelpers.fulfillJson;
+let fulfillSse: typeof AcceptanceHelpers.fulfillSse;
+let installBrowserErrorGuard: typeof AcceptanceHelpers.installBrowserErrorGuard;
+
+beforeAll(async () => {
+  vi.doMock('@playwright/test', () => ({
+    expect: (received: unknown) => ({
+      toEqual(expected: unknown) {
+        try {
+          expect(received).toEqual(expected);
+        } catch {
+          throw new Error(JSON.stringify(received));
+        }
+      }
+    })
+  }));
+  const acceptance = await import('../e2e/helpers/acceptance');
+  expectRayMeApiRequest = acceptance.expectRayMeApiRequest;
+  fulfillJson = acceptance.fulfillJson;
+  fulfillSse = acceptance.fulfillSse;
+  installBrowserErrorGuard = acceptance.installBrowserErrorGuard;
+});
 
 type Listener = (value: unknown) => void;
 
