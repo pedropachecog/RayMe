@@ -18,6 +18,11 @@ as durable context, not one-off preferences.
   underlying approach and update durable docs; do not just patch the symptom.
 - Keep updates concrete and short. Say what is blocked, what exact help is
   needed, and what the agent will do after that help is provided.
+- At the end of each phase, explicitly tell the user what temporary/runtime
+  directories can be deleted. Include exact full paths, what each path contains,
+  whether it is safe to delete for the rest of the project, and deletion commands
+  only when requested. Never use expanded variables, globs, or mounted Windows
+  paths in cleanup commands.
 
 ## Backend Host And TLS
 
