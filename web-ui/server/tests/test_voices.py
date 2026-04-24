@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
+import wave
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -70,6 +72,60 @@ class CreatedVoice:
     voice_id: str
     asset_id: str
     body: dict[str, Any]
+
+
+def test_validate_voice_sample_upload_rejects_paths_and_unsupported_files() -> None:
+    from app.domain.voice_assets import VoiceSampleValidationError, validate_voice_sample_upload
+
+    with pytest.raises(VoiceSampleValidationError):
+        validate_voice_sample_upload("../../sample.wav", "audio/wav", _pcm_wav_bytes(7.0))
+
+    with pytest.raises(VoiceSampleValidationError):
+        validate_voice_sample_upload("sample.txt", "text/plain", b"not audio")
+
+
+def test_validate_voice_sample_upload_accepts_audio_and_reports_duration_warnings() -> None:
+    from app.domain.voice_assets import validate_voice_sample_upload
+
+    short_sample = validate_voice_sample_upload(
+        "short.wav",
+        "audio/wav",
+        _pcm_wav_bytes(5.0),
+    )
+    recommended_sample = validate_voice_sample_upload(
+        "recommended.wav",
+        "audio/x-wav",
+        _pcm_wav_bytes(6.0),
+    )
+    long_sample = validate_voice_sample_upload(
+        "long.wav",
+        "audio/wav",
+        _pcm_wav_bytes(16.0),
+    )
+
+    assert short_sample.extension == ".wav"
+    assert short_sample.content_type == "audio/wav"
+    assert short_sample.byte_size == len(short_sample.content)
+    assert short_sample.duration_seconds == pytest.approx(5.0)
+    assert "too_short" in short_sample.warnings
+    assert recommended_sample.warnings == []
+    assert "longer_than_recommended" in long_sample.warnings
+
+
+def test_write_voice_sample_blob_uses_asset_id_and_atomic_write(tmp_path: Path) -> None:
+    from app.domain.voice_assets import validate_voice_sample_upload, write_voice_sample_blob
+
+    sample = validate_voice_sample_upload(
+        "owner-secret.wav",
+        "audio/wav",
+        _pcm_wav_bytes(7.0),
+    )
+
+    stored_path = write_voice_sample_blob(tmp_path, "voice_asset_test", sample)
+
+    assert stored_path == tmp_path / "voice_asset_test.wav"
+    assert stored_path.read_bytes() == sample.content
+    assert stored_path.name != "owner-secret.wav"
 
 
 @pytest.fixture()
@@ -338,6 +394,17 @@ def _wav_audio(filename: str) -> UploadedAudio:
 
 def _flac_audio(filename: str) -> UploadedAudio:
     return UploadedAudio(filename=filename, content_type="audio/flac", content=b"fLaC\x00\x00\x00")
+
+
+def _pcm_wav_bytes(duration_seconds: float, *, sample_rate_hz: int = 8000) -> bytes:
+    buffer = io.BytesIO()
+    frame_count = int(duration_seconds * sample_rate_hz)
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate_hz)
+        wav_file.writeframes(b"\x00\x00" * frame_count)
+    return buffer.getvalue()
 
 
 def _upload_voice_asset(client: TestClient, audio: UploadedAudio):
