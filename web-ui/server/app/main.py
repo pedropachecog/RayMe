@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
 
+from app.api.chat import router as chat_router
 from app.api.characters import router as characters_router
 from app.api.health import router as health_router
 from app.api.settings import router as settings_router
@@ -54,6 +55,7 @@ def create_app(
     app.include_router(settings_router)
     app.include_router(characters_router)
     app.include_router(threads_router)
+    app.include_router(chat_router)
 
     if static_client_dir is not None:
         mount_static_client(app, static_client_dir)
