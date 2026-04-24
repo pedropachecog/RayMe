@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-04-24T23:02:34.595Z"
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-04-24T23:16:05.825Z"
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 57
-  completed_plans: 40
-  percent: 70
+  completed_plans: 41
+  percent: 72
 ---
 
 ## Phase Status
@@ -22,6 +22,7 @@ progress:
 - Phase 1 plan 01-24 completed after Phase 01.1 hardened acceptance and Android checkpoint on 2026-04-24.
 - Phase 01.1 complete on 2026-04-24; next phase gate is Phase 2 planning.
 - Phase 02 plan 02-01 completed on 2026-04-24: RED Web UI server voice/schema/settings contracts committed; expected implementation failures remain for later Phase 2 plans.
+- Phase 02 plan 02-02 completed on 2026-04-24: RED AI backend health/model residency, STT/VAD, and six-engine TTS registry contracts committed; expected implementation failures remain for later Phase 2 plans.
 
 ## Current Decisions
 
@@ -37,6 +38,7 @@ progress:
 - FlashAttention 2: not installed on Windows, so Qwen 1.7B is ineligible for v1.
 - VRAM soak: F5 `1990.2 MB`, XTTS `2104.0 MB`, Qwen3 `3010.0 MB`; all stable and within budget.
 - Phase 02-01 contract policy: voice APIs use stable internal voice IDs, voice save has no preview gate, voice deletes surface `Voice unavailable`, and Settings owns save-audio/VAD/status fields.
+- Phase 02-02 contract policy: AI backend health exposes STT/VAD/TTS residency, VRAM/headroom, one resident TTS engine, typed unavailable reasons without raw exception text, English-only STT defaults, VAD/manual-transcript fallback, and the full six-engine TTS registry with F5 as only default.
 
 ## Evidence
 
@@ -62,8 +64,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-04-24T23:00:14Z
-Stopped at: Completed 02-01-PLAN.md
+Last session: 2026-04-24T23:13:13.444Z
+Stopped at: Completed 02-02-PLAN.md
 Resume file: None
 
 **Planned Phase:** 02 (AI Backend Skeleton & Voice Lab) — 18 plans — 2026-04-24T22:37:51.511Z
