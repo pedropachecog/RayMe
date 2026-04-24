@@ -30,6 +30,22 @@ from app.storage.models import Base
 from app.storage.session import create_engine
 
 STATUS_VALUES = {CONNECTED, UNREACHABLE, UNAUTHORIZED, NOT_CONFIGURED}
+AI_BACKEND_STATUS_FIELDS = {
+    "endpoint_status",
+    "stt_model",
+    "vad_ready",
+    "resident_tts_engine",
+    "available_tts_engines",
+    "loading_state",
+    "vram_mb",
+    "vram_headroom_mb",
+}
+DEFAULT_SETTINGS_EXTENSIONS = {
+    "save_ai_audio": True,
+    "save_mic_audio": False,
+    "vad_threshold": 0.5,
+    "vad_end_silence_ms": 700,
+}
 
 
 @pytest.fixture()
@@ -85,6 +101,10 @@ def test_get_and_patch_settings_persist_values_without_echoing_raw_key(
             "llm_base_url": "https://llm.local/v1",
             "llm_model": "configured-model",
             "llm_api_key": raw_llm_api_key,
+            "save_ai_audio": False,
+            "save_mic_audio": True,
+            "vad_threshold": 0.65,
+            "vad_end_silence_ms": 900,
         },
     )
     fetched = settings_client.get("/api/settings")
@@ -92,15 +112,37 @@ def test_get_and_patch_settings_persist_values_without_echoing_raw_key(
     assert updated.status_code == 200
     assert fetched.status_code == 200
     assert updated.json() == fetched.json()
-    assert fetched.json() == {
-        "web_url": "https://rayme.local:8443",
-        "ai_backend_url": "https://ai.local:9443",
-        "llm_base_url": "https://llm.local/v1",
-        "llm_model": "configured-model",
-        "llm_api_key_configured": True,
-    }
+    body = fetched.json()
+    assert body["web_url"] == "https://rayme.local:8443"
+    assert body["ai_backend_url"] == "https://ai.local:9443"
+    assert body["llm_base_url"] == "https://llm.local/v1"
+    assert body["llm_model"] == "configured-model"
+    assert body["llm_api_key_configured"] is True
+    assert "save_ai_audio" in body
+    assert "save_mic_audio" in body
+    assert "vad_threshold" in body
+    assert "vad_end_silence_ms" in body
+    assert body["save_ai_audio"] is False
+    assert body["save_mic_audio"] is True
+    assert body["vad_threshold"] == 0.65
+    assert body["vad_end_silence_ms"] == 900
+    assert "ai_backend_status" in body
+    assert AI_BACKEND_STATUS_FIELDS.issubset(body["ai_backend_status"])
     assert raw_llm_api_key not in json.dumps(fetched.json())
     assert "llm_api_key" not in fetched.json()
+
+
+def test_settings_defaults_include_audio_vad_and_ai_backend_status(
+    settings_client: TestClient,
+) -> None:
+    body = settings_client.get("/api/settings").json()
+
+    for key, expected in DEFAULT_SETTINGS_EXTENSIONS.items():
+        assert key in body
+        assert body[key] == expected
+
+    assert "ai_backend_status" in body
+    assert AI_BACKEND_STATUS_FIELDS.issubset(body["ai_backend_status"])
 
 
 def test_connection_test_routes_return_only_allowed_status_values(
@@ -113,12 +155,21 @@ def test_connection_test_routes_return_only_allowed_status_values(
             "ai_backend_url": "https://ai.local:9443",
             "llm_base_url": "https://llm.local/v1",
             "llm_model": "configured-model",
+            "save_ai_audio": True,
+            "save_mic_audio": False,
+            "vad_threshold": 0.5,
+            "vad_end_silence_ms": 700,
         },
     )
 
+    assert settings_client.get("/api/settings").json()["web_url"] == "https://rayme.local:8443"
     seen = {settings_client.post("/api/settings/test/web").json()["status"]}
     for status in (CONNECTED, UNREACHABLE, UNAUTHORIZED):
         settings_client.app.dependency_overrides[get_ai_backend_probe] = _health_probe(status)
+        assert (
+            settings_client.get("/api/settings").json()["ai_backend_url"]
+            == "https://ai.local:9443"
+        )
         response = settings_client.post("/api/settings/test/ai-backend")
         assert response.status_code == 200
         seen.add(response.json()["status"])
@@ -152,9 +203,12 @@ def test_llm_test_uses_server_side_settings_and_never_returns_api_key(
             "llm_base_url": "https://llm.local/v1",
             "llm_api_key": raw_llm_api_key,
             "llm_model": "configured-model",
+            "save_ai_audio": True,
+            "save_mic_audio": False,
         },
     )
 
+    assert settings_client.get("/api/settings").json()["llm_base_url"] == "https://llm.local/v1"
     response = settings_client.post(
         "/api/settings/test/llm",
         json={

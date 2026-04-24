@@ -12,6 +12,20 @@ from alembic.config import Config
 from app.storage import models
 
 SERVER_ROOT = Path(__file__).resolve().parents[1]
+VOICE_TABLES = {"voices", "voice_assets"}
+VOICE_COLUMNS = {
+    "id",
+    "name",
+    "default_engine",
+    "reference_transcript",
+    "metadata_json",
+    "deleted_at",
+}
+VOICE_ASSET_COLUMNS = {
+    "voice_id",
+    "asset_kind",
+    "storage_path",
+}
 
 
 def run_migration(tmp_path: Path) -> Path:
@@ -66,6 +80,7 @@ def test_initial_migration_creates_all_storage_tables(tmp_path: Path) -> None:
 
     with connect(db_path) as connection:
         assert set(models.MODEL_TABLE_NAMES).issubset(table_names(connection))
+        assert VOICE_TABLES.issubset(table_names(connection))
 
         character_columns = column_names(connection, models.CHARACTERS_TABLE)
         assert {
@@ -81,6 +96,7 @@ def test_initial_migration_creates_all_storage_tables(tmp_path: Path) -> None:
             "raw_source_json",
             "lorebook_json",
             "deleted_at",
+            "default_voice_id",
         }.issubset(character_columns)
 
         thread_columns = column_names(connection, models.THREADS_TABLE)
@@ -95,6 +111,12 @@ def test_initial_migration_creates_all_storage_tables(tmp_path: Path) -> None:
             "character_snapshot_lorebook_json",
             "character_snapshot_raw_source_json",
         }.issubset(thread_columns)
+
+        voice_columns = column_names(connection, "voices")
+        assert VOICE_COLUMNS.issubset(voice_columns)
+
+        voice_asset_columns = column_names(connection, "voice_assets")
+        assert VOICE_ASSET_COLUMNS.issubset(voice_asset_columns)
 
 
 def test_messages_accept_only_unified_message_kinds(tmp_path: Path) -> None:
