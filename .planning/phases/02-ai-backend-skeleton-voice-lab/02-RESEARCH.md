@@ -548,22 +548,22 @@ All claims in this research are tagged with verified local files, registry looku
 |---|-------|---------|---------------|
 | None | No unverified assumptions were used as planning facts. [VERIFIED: research session] | All sections | None. [VERIFIED: research session] |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should Phase 2 production pin `f5-tts==1.1.17` or bump to current `1.1.20`?** [VERIFIED: requirements-phase0.txt; CITED: https://pypi.org/project/f5-tts/]
+1. **RESOLVED: Phase 2 production starts with `f5-tts==1.1.17`; optional bump requires a discrete self-test.** [VERIFIED: requirements-phase0.txt; CITED: https://pypi.org/project/f5-tts/]
    - What we know: Phase 0 measured `1.1.17`; PyPI current is `1.1.20`, and `1.1.18`/`1.1.19` were yanked. [VERIFIED: requirements-phase0.txt; CITED: https://pypi.org/project/f5-tts/]
-   - What's unclear: Whether `1.1.20` preserves measured latency/quality/runtime behavior on OMEN-PC. [VERIFIED: no project evidence found]
-   - Recommendation: Start with `1.1.17` for adapter parity and include a discrete bump self-test if planners want `1.1.20`. [VERIFIED: .planning/phases/00-measurement-gate/KEY_DECISIONS.md]
+   - Plan-backed decision: Plan `02-08` Task 1 pins `f5-tts==1.1.17` for adapter parity; Plan `02-16` Task 2 creates the runtime evidence gate; Plan `02-18` Task 1 records live OMEN-PC self-test evidence before any package bump is accepted. [VERIFIED: .planning/phases/02-ai-backend-skeleton-voice-lab/02-08-PLAN.md; VERIFIED: .planning/phases/02-ai-backend-skeleton-voice-lab/02-16-PLAN.md; VERIFIED: .planning/phases/02-ai-backend-skeleton-voice-lab/02-18-PLAN.md]
+   - Execution rule: `1.1.20` may replace `1.1.17` only after the same short/medium synthesis, health, and VRAM self-test passes and is captured in runtime evidence. [VERIFIED: .planning/phases/02-ai-backend-skeleton-voice-lab/02-CONTEXT.md]
 
-2. **How much of aiortc belongs in Phase 2?** [VERIFIED: .planning/ROADMAP.md; VERIFIED: 02-CONTEXT.md]
+2. **RESOLVED: Phase 2 includes only a non-call aiortc signaling skeleton.** [VERIFIED: .planning/ROADMAP.md; VERIFIED: 02-CONTEXT.md]
    - What we know: Roadmap mentions FastAPI + aiortc signaling in Phase 2, while live call media is Phase 3. [VERIFIED: .planning/ROADMAP.md]
-   - What's unclear: Whether a no-op signaling skeleton is valuable before Voice Lab is complete. [VERIFIED: no implemented aiortc code found]
-   - Recommendation: Plan aiortc as an isolated late slice with tests proving it does not claim live call readiness. [CITED: https://context7.com/aiortc/aiortc/llms.txt; VERIFIED: .planning/ROADMAP.md]
+   - Plan-backed decision: Plan `02-17` adds `GET /webrtc/status` and `POST /webrtc/offer` tests that explicitly return skeleton/not-ready semantics and forbid `/call`, `/captions`, or `/barge-in` routes. It does not implement live media, captions, barge-in, call UI, or playback behavior. [VERIFIED: .planning/phases/02-ai-backend-skeleton-voice-lab/02-17-PLAN.md]
+   - Execution rule: Any live call behavior remains Phase 3 scope. [VERIFIED: .planning/ROADMAP.md]
 
-3. **Which engines get fully synthesized in automated local tests vs live OMEN-only tests?** [VERIFIED: environment audit]
+3. **RESOLVED: Local tests use mocks/fakes; live OMEN-PC evidence covers runtime self-tests.** [VERIFIED: environment audit]
    - What we know: Current shell lacks `nvidia-smi` and `ffmpeg`; live AI health is reachable at `https://192.168.1.199:9443/health`. [VERIFIED: environment audit]
-   - What's unclear: Whether every engine can run inside default CI/local test time and hardware limits. [VERIFIED: environment audit]
-   - Recommendation: Mock adapters in local tests, run one short live self-test per engine on OMEN-PC, and require `/health` availability reasons for failures. [VERIFIED: .planning/OPERATING-NOTES.md; VERIFIED: 02-CONTEXT.md]
+   - Plan-backed decision: Plans `02-02`, `02-06`, `02-07`, and `02-08` require local unit tests to use lightweight fake adapters rather than GPU downloads; Plan `02-18` records live OMEN-PC `/health`, VRAM/headroom, generated audio, and per-engine unavailable reasons. [VERIFIED: .planning/phases/02-ai-backend-skeleton-voice-lab/02-02-PLAN.md; VERIFIED: .planning/phases/02-ai-backend-skeleton-voice-lab/02-06-PLAN.md; VERIFIED: .planning/phases/02-ai-backend-skeleton-voice-lab/02-07-PLAN.md; VERIFIED: .planning/phases/02-ai-backend-skeleton-voice-lab/02-08-PLAN.md; VERIFIED: .planning/phases/02-ai-backend-skeleton-voice-lab/02-18-PLAN.md]
+   - Execution rule: Local success proves contracts and failure isolation; live OMEN-PC evidence proves runtime residency/self-test behavior. [VERIFIED: .planning/OPERATING-NOTES.md; VERIFIED: 02-CONTEXT.md]
 
 ## Environment Availability
 
