@@ -180,7 +180,7 @@ Copy rules:
 ### Character Editor
 
 - Desktop editor uses a two-column layout: identity/media/meta on the left, prompts/greetings/advanced text fields on the right. Mobile stacks the same sections in this order.
-- Header actions: `Discard` and `Save Character`. Save is accent; Discard is secondary.
+- Header actions: `Discard Edits` and `Save Character`. Save is accent; Discard Edits is secondary.
 - Required fields visible in Phase 1: name, description, personality, scenario, first message, example messages, system prompt, creator notes, character notes, tags, alternate greetings, post-history instructions, creator, character version, and portrait upload/preview.
 - Use text areas for long character-card fields. Every long field has stable height and internal scroll after its max height; typing must not push header or footer controls off-screen.
 - Alternate greetings use a list editor with add, edit, remove, and reorder controls. Use compact icon buttons with accessible labels.
@@ -282,7 +282,7 @@ Build these as local Svelte components or equivalent module boundaries:
 - Mobile: single-column screens, bottom nav, sticky composer, and 44px minimum targets.
 - Text must never overflow buttons, chips, menus, or cards. Long character names and thread titles truncate with accessible full text where needed.
 - Chat composer and jump-to-latest must not overlap mobile bottom navigation.
-- Editor Save/Discard actions remain reachable on mobile through a sticky bottom action bar or sticky header, but never both.
+- Editor Save Character/Discard Edits actions remain reachable on mobile through a sticky bottom action bar or sticky header, but never both.
 
 ---
 
@@ -298,11 +298,11 @@ Build these as local Svelte components or equivalent module boundaries:
 
 ## Checker Sign-Off
 
-- [ ] Dimension 1 Copywriting: PASS
-- [ ] Dimension 2 Visuals: PASS
-- [ ] Dimension 3 Color: PASS
-- [ ] Dimension 4 Typography: PASS
-- [ ] Dimension 5 Spacing: PASS
-- [ ] Dimension 6 Registry Safety: PASS
+- [x] Dimension 1 Copywriting: PASS
+- [x] Dimension 2 Visuals: PASS
+- [x] Dimension 3 Color: PASS
+- [x] Dimension 4 Typography: PASS
+- [x] Dimension 5 Spacing: PASS
+- [x] Dimension 6 Registry Safety: PASS
 
-**Approval:** pending
+**Approval:** approved 2026-04-24
