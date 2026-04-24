@@ -199,20 +199,40 @@ Plans:
 
 **Pitfalls owned:**
 - **#6 Whisper hallucinations** — VAD-gated input + `condition_on_previous_text=False` + hallucination blocklist.
-- **#7 VRAM budget** — exactly one TTS engine resident, documented hot-swap registry (F5 ↔ XTTS ↔ Qwen3-TTS, six directed swap paths), `expandable_segments` CUDA allocator config, startup self-test asserts headroom per engine.
-- **#9 F5 transcript error** — Voice Lab forces an editable-transcript step and a synth-preview before save. (Same editable transcript is captured for Qwen3-TTS voices, which also require a reference transcript; XTTS does not require one but still stores it for portability.)
+- **#7 VRAM budget** — exactly one TTS engine resident, documented hot-swap registry for the full measured roster (`F5-TTS`, `XTTS v2`, `Qwen3-TTS 0.6B-Base`, `LuxTTS`, `Chatterbox Turbo`, `TADA 1B`), `expandable_segments` CUDA allocator config, startup self-test asserts headroom per engine.
+- **#9 F5 transcript error** — Voice Lab forces an editable-transcript step and offers synth-preview as a convenience, but save does not require a successful preview. (Same editable transcript is captured for Qwen3-TTS voices, which also require a reference transcript; XTTS does not require one but still stores it for portability.)
 - **#12 Coqui abandonware** — `coqui-tts` idiap fork pinned; never `TTS`. (Qwen3-TTS is the medium-term v1.x fallback if idiap fork stalls.)
 - **#13 Non-commercial licenses** — `LICENSES.md` shipped with F5 (CC-BY-NC) + XTTS (CPML) non-commercial notices and a **Qwen3-TTS Apache-2.0** entry (the only commercially-permissive engine; activates if RayMe ever pivots past PROJECT.md's non-commercial scope).
 - **Qwen3-TTS install friction** — backend bringup script verifies `qwen-tts==0.1.1` load and FlashAttention 2 availability; falls back to 0.6B-Base without FA2 if the install fails. Pinned dependency prevents 0.2.x breaking upgrades.
 
 **Success criteria** (observable, testable):
 1. The AI backend boots, loads Whisper (Phase 0 default) + Silero VAD + one TTS engine (default per Phase 0 outcome — F5, XTTS, or Qwen3-TTS 0.6B-Base), and reports GPU residency < 11 GB in its `/health` response; the Web UI Settings screen shows all three endpoints green on connection-test.
-2. The builder can upload a 6–15 s WAV/MP3/FLAC voice sample in Voice Lab, see an auto-generated reference transcript appear within a few seconds, edit it inline, pick **F5-TTS, XTTS v2, or Qwen3-TTS** as the engine (Qwen3-TTS option hidden if Phase 0 rejected it), save the voice with a name, and hear a synth-preview of a stock phrase using the new voice before committing the save.
-3. The Voice Library lists all saved voices and supports rename, delete (with cascade-or-block handling of character defaults and per-chat overrides), and test-play with custom text.
-4. Assigning a voice as a character's default in the Character Editor persists the reference and surfaces in the Gallery; deleting a referenced voice either reassigns safely or surfaces a clear blocker listing the referents.
-5. Settings exposes save-AI-audio (default ON) and save-mic-audio (default OFF) toggles that the backend respects, plus VAD sensitivity placeholders whose backend wiring is verified in Phase 4.
+2. The builder can upload a 6–15 s WAV/MP3/FLAC voice sample in Voice Lab, see an auto-generated reference transcript appear within a few seconds or enter one manually after STT failure, edit it inline, pick any available engine from the full measured roster, optionally preview a stock phrase, and save the voice with a name without a preview gate.
+3. The Voice Library lists all saved voices and supports rename, delete with explicit force-delete handling for referents, and test-play with custom text.
+4. Assigning a voice as a character's default in the Character Editor persists the stable voice ID and surfaces in the Gallery; deleting a referenced voice surfaces `Voice unavailable` without crashing or silently clearing the reference.
+5. Settings exposes save-AI-audio (default ON) and save-mic-audio (default OFF) toggles, VAD threshold/end-of-utterance values marked as Call Feel-owned behavior, and compact AI backend status with resident engine, available engines, loading state, and VRAM/headroom.
 
-**Plans:** TBD
+**Plans:** 18 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Wave 0 Web UI server voice/schema/settings validation scaffolding
+- [ ] 02-02-PLAN.md — Wave 0 AI backend model/STT/TTS validation scaffolding
+- [ ] 02-03-PLAN.md — Wave 0 client Voice Lab, Settings, and live E2E validation scaffolding
+- [ ] 02-04-PLAN.md — Web UI voice schema, migration, and sample-asset storage
+- [ ] 02-05-PLAN.md — Web UI AI backend client and status bridge
+- [ ] 02-06-PLAN.md — AI backend config, model manager, lifespan, and health residency payload
+- [ ] 02-07-PLAN.md — AI backend STT/VAD processing and transient transcription API
+- [ ] 02-08-PLAN.md — AI backend TTS registry, adapters, switching, and transient synthesis API
+- [ ] 02-09-PLAN.md — Web UI voice domain/API for upload, transcribe, save, library, delete, and test-play
+- [ ] 02-10-PLAN.md — Web UI Settings service/API for save-audio, VAD values, and AI backend status
+- [ ] 02-11-PLAN.md — Character default voice server persistence and unavailable state
+- [ ] 02-12-PLAN.md — Client Voice Lab creation flow with six-engine picker and optional preview
+- [ ] 02-13-PLAN.md — Client Voice Library list, rename, delete, and test-play
+- [ ] 02-14-PLAN.md — Client Settings panels and Voice Lab navigation
+- [ ] 02-15-PLAN.md — Character Editor/Gallery default voice assignment and badges
+- [ ] 02-16-PLAN.md — License, runtime evidence, Voice Lab, and LAN runbook documentation
+- [ ] 02-17-PLAN.md — Non-call aiortc signaling skeleton
+- [ ] 02-18-PLAN.md — Full local, live OMEN-PC, and Android product-owner acceptance
 
 **UI hint:** yes
 
