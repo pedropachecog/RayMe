@@ -76,11 +76,11 @@ async def build_prompt_context(
         if until_message_id is not None and _field(message, "id") == until_message_id:
             break
 
-    if action == "continue" and composer_text and composer_text.strip():
+    if action == "continue":
         context.append(
             {
                 "role": "user",
-                "content": f"Continue with: {composer_text.strip()}",
+                "content": _continue_instruction(composer_text),
             }
         )
 
@@ -125,6 +125,17 @@ def _system_prompt(prompt_thread: object) -> str:
         parts.append(str(post_history).strip())
 
     return "\n\n".join(part for part in parts if part)
+
+
+def _continue_instruction(composer_text: str | None) -> str:
+    instruction = (
+        "Continue the previous assistant message. Return the complete assistant message, "
+        "including the existing text and the continuation."
+    )
+    stripped_text = composer_text.strip() if composer_text else ""
+    if not stripped_text:
+        return instruction
+    return f"{instruction}\n\nUser continuation note: {stripped_text}"
 
 
 def _thread(prompt_thread: object) -> object:

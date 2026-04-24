@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal, TypedDict
@@ -16,6 +17,7 @@ SSE_DATA_PREFIX = "data: "
 TOKEN_EVENT_TYPE = "token"
 DONE_EVENT_TYPE = "done"
 ERROR_EVENT_TYPE = "error"
+CHAT_COMPLETION_SEED_LIMIT = 2**31 - 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -133,6 +135,7 @@ async def _stream_text_tokens(
     stream = await create(
         model=settings.model,
         messages=[dict(message) for message in messages],
+        seed=_random_chat_completion_seed(),
         stream=True,
     )
     async for chunk in stream:
@@ -146,6 +149,10 @@ def _openai_client(settings: ChatCompletionSettings) -> AsyncOpenAI:
         base_url=settings.base_url,
         api_key=settings.api_key or "",
     )
+
+
+def _random_chat_completion_seed() -> int:
+    return secrets.randbelow(CHAT_COMPLETION_SEED_LIMIT + 1)
 
 
 def _chunk_delta_text(chunk: object) -> str | None:
@@ -169,6 +176,7 @@ def _field(source: object, key: str) -> Any:
 
 
 __all__ = [
+    "CHAT_COMPLETION_SEED_LIMIT",
     "ChatCompletionSettings",
     "DONE_EVENT_TYPE",
     "DoneEvent",

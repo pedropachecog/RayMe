@@ -115,7 +115,7 @@ describe('chat route contract', () => {
   it('exposes AI message actions and user edit-only menu contract', () => {
     expect(messageActionsForRole('assistant').map((action) => action.label)).toEqual([
       'Regenerate',
-      'Swipe',
+      'Generate alternate',
       'Edit',
       'Continue'
     ]);
@@ -124,6 +124,9 @@ describe('chat route contract', () => {
     expect(messageActionMenuSource).toContain('Message actions');
     expect(bubbleSource).toContain('MessageActionMenu');
     expect(bubbleSource).toContain('onAction');
+    expect(bubbleSource).toContain('busyLabel');
+    expect(routeSource).toContain('Regenerating');
+    expect(routeSource).toContain('Updating alternate');
   });
 
   it('uses thread hydration for selected alternates, swipe controls, and stale flags', async () => {
@@ -313,6 +316,8 @@ describe('chat route contract', () => {
     expect(selectedMessageContent(messages[0])).toBe('First generated swipe');
     expect(messages[0].selected_alternate_id).toBe('swipe-alt-1');
     expect(swipeStepperSource).toContain('Generate alternate');
+    expect(bubbleSource).toContain('ontouchstart={handleTouchStart}');
+    expect(bubbleSource).toContain('swipe-preview-next');
   });
 
   it('continue sends composer text and consumes backend returned continue alternate/message', async () => {
@@ -428,6 +433,7 @@ describe('chat route contract', () => {
     expect(routeSource).toContain('min-height: 44px');
     expect(bubbleSource).toContain('min-height: 44px');
     expect(bubbleSource).toContain('overflow-wrap: anywhere');
+    expect(bubbleSource).toContain('@media (hover: none)');
     expect(composerSource).toContain('overflow-y: auto');
   });
 });

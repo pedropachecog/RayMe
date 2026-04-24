@@ -18,6 +18,7 @@
     portraitUrl?: string | null;
     openingGreeting?: boolean;
     actionBusy?: boolean;
+    busyLabel?: string | null;
     editing?: boolean;
     editDraft?: string;
     onRetry?: (message: ChatMessageView) => void;
@@ -35,6 +36,7 @@
     portraitUrl = null,
     openingGreeting = false,
     actionBusy = false,
+    busyLabel = null,
     editing = false,
     editDraft = '',
     onRetry,
@@ -54,10 +56,15 @@
   const orderedAlternates = $derived(sortedMessageAlternates(message));
   const currentAlternateIndex = $derived(selectedAlternateIndex(message));
   const swipeTotal = $derived(Math.max(orderedAlternates.length, 1));
+  const canTouchSwipe = $derived(
+    !isUser && !actionBusy && !editing && orderedAlternates.length > 1
+  );
   const showActions = $derived(
     !message.streaming && !message.error && (message.role === 'assistant' || message.role === 'user')
   );
   const showSwipeStepper = $derived(!isUser && !message.streaming && !message.error);
+  let touchStart = $state<{ x: number; y: number } | null>(null);
+  let swipePreview = $state<'previous' | 'next' | null>(null);
 
   function retry() {
     onRetry?.(message);
@@ -97,12 +104,85 @@
   function generateAlternate() {
     void onGenerateAlternate?.(message);
   }
+
+  function handleTouchStart(event: TouchEvent) {
+    if (!canTouchSwipe) {
+      return;
+    }
+
+    const touch = event.touches[0];
+    if (!touch) {
+      return;
+    }
+    touchStart = { x: touch.clientX, y: touch.clientY };
+    swipePreview = null;
+  }
+
+  function handleTouchMove(event: TouchEvent) {
+    if (!touchStart || !canTouchSwipe) {
+      return;
+    }
+
+    const touch = event.touches[0];
+    if (!touch) {
+      return;
+    }
+    swipePreview = swipeTarget(touch.clientX - touchStart.x, touch.clientY - touchStart.y, 24);
+  }
+
+  function handleTouchEnd(event: TouchEvent) {
+    if (!touchStart || !canTouchSwipe) {
+      resetTouchSwipe();
+      return;
+    }
+
+    const touch = event.changedTouches[0];
+    if (!touch) {
+      resetTouchSwipe();
+      return;
+    }
+    const target = swipeTarget(touch.clientX - touchStart.x, touch.clientY - touchStart.y, 56);
+    resetTouchSwipe();
+
+    if (target === 'previous') {
+      selectPreviousAlternate();
+    } else if (target === 'next') {
+      selectNextAlternate();
+    }
+  }
+
+  function resetTouchSwipe() {
+    touchStart = null;
+    swipePreview = null;
+  }
+
+  function swipeTarget(
+    deltaX: number,
+    deltaY: number,
+    threshold: number
+  ): 'previous' | 'next' | null {
+    if (Math.abs(deltaX) < threshold || Math.abs(deltaX) < Math.abs(deltaY) * 1.25) {
+      return null;
+    }
+
+    if (deltaX > 0 && currentAlternateIndex > 0) {
+      return 'previous';
+    }
+
+    if (deltaX < 0 && currentAlternateIndex < orderedAlternates.length - 1) {
+      return 'next';
+    }
+
+    return null;
+  }
 </script>
 
 <article
   class:user={isUser}
   class:assistant={!isUser}
   class:stale={message.stale_after_edit}
+  class:swipe-preview-previous={swipePreview === 'previous'}
+  class:swipe-preview-next={swipePreview === 'next'}
   class="message-row"
   data-message-id={message.id}
   data-message-kind={message.message_kind}
@@ -111,6 +191,10 @@
   data-selected-alternate-id={message.selected_alternate_id ?? ''}
   data-stale-after-edit={message.stale_after_edit ? 'true' : 'false'}
   data-streaming={message.streaming ? 'true' : 'false'}
+  ontouchstart={handleTouchStart}
+  ontouchmove={handleTouchMove}
+  ontouchend={handleTouchEnd}
+  ontouchcancel={resetTouchSwipe}
 >
   {#if !isUser}
     <div class="avatar" aria-hidden="true">
@@ -139,6 +223,9 @@
       {/if}
       {#if message.streaming}
         <span class="chip streaming-chip">Streaming</span>
+      {/if}
+      {#if actionBusy && busyLabel}
+        <span class="chip busy-chip">{busyLabel}</span>
       {/if}
     </div>
 
@@ -242,6 +329,16 @@
     background: rgba(20, 31, 56, 0.72);
     color: var(--color-text);
     box-shadow: 0 18px 48px rgba(0, 0, 0, 0.16);
+    touch-action: pan-y;
+    transition: transform 120ms ease;
+  }
+
+  .message-row.swipe-preview-previous .bubble {
+    transform: translateX(10px);
+  }
+
+  .message-row.swipe-preview-next .bubble {
+    transform: translateX(-10px);
   }
 
   .user .bubble {
@@ -260,6 +357,12 @@
   .message-row:hover .message-actions,
   .message-row:focus-within .message-actions {
     opacity: 1;
+  }
+
+  @media (hover: none) {
+    .message-actions {
+      opacity: 1;
+    }
   }
 
   .message-meta {
@@ -287,7 +390,8 @@
   }
 
   .chip.selected,
-  .streaming-chip {
+  .streaming-chip,
+  .busy-chip {
     background: rgba(182, 160, 255, 0.18);
     color: var(--color-text);
   }
@@ -417,9 +521,4 @@
     }
   }
 
-  @media (hover: none) {
-    .message-actions {
-      opacity: 1;
-    }
-  }
 </style>

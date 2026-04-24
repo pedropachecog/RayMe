@@ -93,11 +93,33 @@ async def test_continue_includes_composer_text_without_mutating_storage() -> Non
         composer_text="finish this sentence",
     )
 
+    assert messages[-1]["role"] == "user"
+    assert "Continue the previous assistant message." in messages[-1]["content"]
+    assert "Return the complete assistant message" in messages[-1]["content"]
+    assert "User continuation note: finish this sentence" in messages[-1]["content"]
+    assert messages[-2]["role"] == "assistant"
+    assert repository.messages[-1]["content_text"] == "Edited-away downstream answer"
+
+
+async def test_continue_without_composer_text_avoids_assistant_prefill() -> None:
+    repository = FakePromptRepository()
+
+    messages = await build_prompt_context(
+        "thread-1",
+        repository=repository,
+        action="continue",
+        until_message_id="ai-1",
+        composer_text="",
+    )
+
     assert messages[-1] == {
         "role": "user",
-        "content": "Continue with: finish this sentence",
+        "content": (
+            "Continue the previous assistant message. Return the complete assistant message, "
+            "including the existing text and the continuation."
+        ),
     }
-    assert repository.messages[-1]["content_text"] == "Edited-away downstream answer"
+    assert messages[-2] == {"role": "assistant", "content": "Selected branch"}
 
 
 async def test_stale_rows_are_excluded_from_prompt_context() -> None:

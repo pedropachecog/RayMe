@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Edit3, MessageSquarePlus, MoreHorizontal, RefreshCw, RotateCw } from 'lucide-svelte';
+  import { Edit3, MessageSquarePlus, MoreHorizontal, RefreshCw, Sparkles } from 'lucide-svelte';
 
   import {
     messageActionsForRole,
@@ -65,7 +65,7 @@
             {#if action.id === 'regenerate'}
               <RefreshCw size={16} strokeWidth={1.8} aria-hidden="true" />
             {:else if action.id === 'swipe'}
-              <RotateCw size={16} strokeWidth={1.8} aria-hidden="true" />
+              <Sparkles size={16} strokeWidth={1.8} aria-hidden="true" />
             {:else if action.id === 'continue'}
               <MessageSquarePlus size={16} strokeWidth={1.8} aria-hidden="true" />
             {:else}

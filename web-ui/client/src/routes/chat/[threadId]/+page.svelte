@@ -393,6 +393,29 @@
     return actionState?.messageId === message.id || sendState === 'sending';
   }
 
+  function busyLabelFor(message: ChatMessageView): string | null {
+    if (actionState?.messageId !== message.id) {
+      return null;
+    }
+
+    switch (actionState.action) {
+      case 'regenerate':
+        return 'Regenerating';
+      case 'swipe':
+        return 'Updating alternate';
+      case 'continue':
+        return 'Continuing';
+      case 'edit':
+        return 'Saving';
+      case 'truncate-stale':
+        return 'Removing stale turns';
+      case 'keep-stale':
+        return 'Keeping stale turns';
+      default:
+        return null;
+    }
+  }
+
   function sortMessages(nextMessages: ChatMessageView[]): ChatMessageView[] {
     return [...nextMessages].sort((left, right) => left.sequence - right.sequence);
   }
@@ -633,6 +656,7 @@
                   {portraitUrl}
                   openingGreeting={isOpeningGreeting(message)}
                   actionBusy={isMessageBusy(message)}
+                  busyLabel={busyLabelFor(message)}
                   editing={editingMessageId === message.id}
                   {editDraft}
                   onRetry={retryFailedMessage}
@@ -655,6 +679,7 @@
             {portraitUrl}
             openingGreeting={isOpeningGreeting(message)}
             actionBusy={isMessageBusy(message)}
+            busyLabel={busyLabelFor(message)}
             editing={editingMessageId === message.id}
             {editDraft}
             onRetry={retryFailedMessage}

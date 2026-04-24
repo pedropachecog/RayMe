@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.api.chat import get_chat_completion_client, get_chat_session
 from app.config import Settings
 from app.domain.llm_stream import (
+    CHAT_COMPLETION_SEED_LIMIT,
     ChatCompletionSettings,
     collect_chat_completion,
     done_event,
@@ -44,6 +45,24 @@ class FakeStreamingClient:
             yield token
         if self.fail_after_tokens:
             raise RuntimeError("upstream disconnected")
+
+
+class FakeOpenAICompletions:
+    def __init__(self) -> None:
+        self.requests: list[dict[str, object]] = []
+
+    async def create(self, **kwargs: object):
+        self.requests.append(dict(kwargs))
+
+        async def stream():
+            yield {"choices": [{"delta": {"content": "Seeded"}}]}
+
+        return stream()
+
+
+class FakeOpenAIClient:
+    def __init__(self) -> None:
+        self.chat = type("FakeChat", (), {"completions": FakeOpenAICompletions()})()
 
 
 @pytest.fixture()
@@ -130,6 +149,28 @@ async def test_collect_chat_completion_uses_same_server_side_stream_settings() -
 
     assert text == "Hello"
     assert fake_client.requests[0]["settings"] == settings
+
+
+async def test_openai_compatible_generation_uses_fresh_random_seed() -> None:
+    fake_client = FakeOpenAIClient()
+    settings = ChatCompletionSettings(
+        base_url="http://llm.local/v1",
+        model="configured-model",
+        api_key="server-secret",
+    )
+
+    text = await collect_chat_completion(
+        settings,
+        [{"role": "user", "content": "Say hello"}],
+        client=fake_client,
+    )
+
+    request = fake_client.chat.completions.requests[0]
+    assert text == "Seeded"
+    assert request["model"] == "configured-model"
+    assert request["stream"] is True
+    assert isinstance(request["seed"], int)
+    assert 0 <= request["seed"] <= CHAT_COMPLETION_SEED_LIMIT
 
 
 def test_done_event_contains_full_thread_message_shape() -> None:
