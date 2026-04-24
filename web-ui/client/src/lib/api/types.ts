@@ -152,30 +152,12 @@ export interface ThreadDetail extends ThreadSummary {
   messages: ThreadMessage[];
 }
 
-export interface WebSettings {
-  url?: string | null;
-  status: EndpointStatus;
-}
-
-export interface AiBackendSettings {
-  url?: string | null;
-  status: EndpointStatus;
-  health_path: string;
-}
-
-export interface LlmSettings {
-  base_url?: string | null;
-  model?: string | null;
-  status: EndpointStatus;
-  test_path: string;
-  api_key_masked?: string | null;
-  llm_api_key_configured?: boolean;
-}
-
 export interface SettingsPayload {
-  web_ui: WebSettings;
-  ai_backend: AiBackendSettings;
-  llm: LlmSettings;
+  web_url: string;
+  ai_backend_url: string;
+  llm_base_url: string;
+  llm_model: string;
+  llm_api_key_configured: boolean;
 }
 
 export interface SettingsUpdatePayload {
