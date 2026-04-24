@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Phase 02 context gathered
-last_updated: "2026-04-24T22:37:51.537Z"
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-04-24T23:02:34.595Z"
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 57
-  completed_plans: 39
-  percent: 68
+  completed_plans: 40
+  percent: 70
 ---
 
 ## Phase Status
@@ -21,6 +21,7 @@ progress:
 - Phase 01.1 Wave 3 complete on 2026-04-24: live `OMEN-PC` browser verification passed, Android Chrome product-owner acceptance passed after message-action fixes, and deployed runtime reached commit `6f687e9`.
 - Phase 1 plan 01-24 completed after Phase 01.1 hardened acceptance and Android checkpoint on 2026-04-24.
 - Phase 01.1 complete on 2026-04-24; next phase gate is Phase 2 planning.
+- Phase 02 plan 02-01 completed on 2026-04-24: RED Web UI server voice/schema/settings contracts committed; expected implementation failures remain for later Phase 2 plans.
 
 ## Current Decisions
 
@@ -35,6 +36,7 @@ progress:
 - Qwen3-TTS: included as an opt-in/non-default engine despite failing the acceptance gate; latency and accent-quality caveats still apply.
 - FlashAttention 2: not installed on Windows, so Qwen 1.7B is ineligible for v1.
 - VRAM soak: F5 `1990.2 MB`, XTTS `2104.0 MB`, Qwen3 `3010.0 MB`; all stable and within budget.
+- Phase 02-01 contract policy: voice APIs use stable internal voice IDs, voice save has no preview gate, voice deletes surface `Voice unavailable`, and Settings owns save-audio/VAD/status fields.
 
 ## Evidence
 
@@ -60,8 +62,8 @@ progress:
 
 ## Session Continuity
 
-Last session: --stopped-at
-Stopped at: Phase 02 context gathered
-Resume file: --resume-file
+Last session: 2026-04-24T23:00:14Z
+Stopped at: Completed 02-01-PLAN.md
+Resume file: None
 
 **Planned Phase:** 02 (AI Backend Skeleton & Voice Lab) — 18 plans — 2026-04-24T22:37:51.511Z
