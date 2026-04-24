@@ -142,7 +142,7 @@ Plans:
 - [x] 01-20-PLAN.md - Character Editor and Settings screens (Wave 6)
 - [x] 01-21-PLAN.md - Chat route hydration, composer, and streaming send UI (Wave 7)
 - [x] 01-22-PLAN.md - Chat message actions, generated swipes, stale flags, and continue UI (Wave 8)
-- [ ] 01-23-PLAN.md - Chat virtualization, jump-to-latest, and mobile layout coverage (Wave 9)
+- [x] 01-23-PLAN.md - Chat virtualization, jump-to-latest, and mobile layout coverage (Wave 9)
 - [ ] 01-24-PLAN.md - Full automated acceptance, HTTPS/mobile runbooks, and Android Chrome checkpoint (Wave 10)
 
 **UI hint:** yes
