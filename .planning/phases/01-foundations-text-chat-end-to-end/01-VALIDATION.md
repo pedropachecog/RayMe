@@ -1,7 +1,7 @@
 ---
 phase: 01
 slug: foundations-text-chat-end-to-end
-status: ready
+status: automated-green-pending-android
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-04-24
@@ -86,6 +86,19 @@ Rows map requirements to the required verification surface. Plan IDs are provisi
 
 ---
 
+## Plan 01-24 Automated Acceptance Update
+
+**Date:** 2026-04-24
+
+**Automated status:** green
+
+- [x] Backend API acceptance covers import -> imported review update via `PATCH /api/characters/{character_id}` -> thread creation with `alternate_greeting_index` -> stream -> regenerate -> swipe -> continue -> reload/query -> same-thread send.
+- [x] Browser acceptance covers imported-card review/save, selected alternate greeting thread creation, streamed chat, regenerate, swipe, continue, reload, Home Start Chat, Gallery Start Chat, Gallery export, Gallery delete confirmation, secure/media status, mobile text flow, and Phase 1 UI contract exclusions.
+- [x] HTTPS runbooks exist at `web-ui/server/docs/HTTPS-LAN.md` and `web-ui/server/docs/PHASE1-ACCEPTANCE.md` with direct LAN IP URLs `https://192.168.1.199:8443` and `https://192.168.1.199:9443/health`.
+- [x] Required automated commands passed: `uv run --project web-ui/server pytest web-ui/server/tests -q`, `npm --prefix web-ui/client run test:unit -- --run`, and `npm --prefix web-ui/client run test:e2e`.
+- [x] `rg "test\.(skip|fixme|todo)" web-ui/client/tests web-ui/server/tests` returned no matches.
+- [ ] Manual Android Chrome direct-IP HTTPS acceptance remains pending. Do not mark green until the physical-device flow is approved.
+
 ## Manual-Only Verifications
 
 | Behavior | Requirement | Why Manual | Test Instructions |
@@ -104,6 +117,6 @@ Rows map requirements to the required verification surface. Plan IDs are provisi
 - [x] No watch-mode flags in required verification commands.
 - [x] Feedback latency target is less than 90 seconds for automated sampling after scaffold setup.
 - [x] `nyquist_compliant: true` set in frontmatter.
-- [ ] `wave_0_complete: true` set in frontmatter after Wave 0 execution.
+- [x] `wave_0_complete: true` set in frontmatter after Wave 0 execution.
 
 **Approval:** ready for planning.
