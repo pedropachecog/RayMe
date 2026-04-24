@@ -17,6 +17,10 @@ SETTING_FIELDS = (
     "llm_base_url",
     "llm_api_key",
     "llm_model",
+    "save_ai_audio",
+    "save_mic_audio",
+    "vad_threshold",
+    "vad_end_silence_ms",
 )
 
 
@@ -27,27 +31,40 @@ class EndpointSettings:
     llm_base_url: str
     llm_api_key: str
     llm_model: str
+    save_ai_audio: bool
+    save_mic_audio: bool
+    vad_threshold: float
+    vad_end_silence_ms: int
 
     @property
     def llm_api_key_configured(self) -> bool:
         return bool(self.llm_api_key.strip())
 
-    def to_public_dict(self) -> dict[str, str | bool]:
+    def to_public_dict(self) -> dict[str, object]:
         return {
             "web_url": self.web_url,
             "ai_backend_url": self.ai_backend_url,
             "llm_base_url": self.llm_base_url,
             "llm_model": self.llm_model,
             "llm_api_key_configured": self.llm_api_key_configured,
+            "save_ai_audio": self.save_ai_audio,
+            "save_mic_audio": self.save_mic_audio,
+            "vad_threshold": self.vad_threshold,
+            "vad_end_silence_ms": self.vad_end_silence_ms,
+            "ai_backend_status": _default_ai_backend_status(),
         }
 
-    def to_private_dict(self) -> dict[str, str]:
+    def to_private_dict(self) -> dict[str, object]:
         return {
             "web_url": self.web_url,
             "ai_backend_url": self.ai_backend_url,
             "llm_base_url": self.llm_base_url,
             "llm_api_key": self.llm_api_key,
             "llm_model": self.llm_model,
+            "save_ai_audio": self.save_ai_audio,
+            "save_mic_audio": self.save_mic_audio,
+            "vad_threshold": self.vad_threshold,
+            "vad_end_silence_ms": self.vad_end_silence_ms,
         }
 
 
@@ -67,7 +84,7 @@ class SettingsService:
         for key, value in updates.items():
             if key not in SETTING_FIELDS:
                 continue
-            merged[key] = _clean_setting_value(value)
+            merged[key] = _clean_setting_value(key, value)
 
         snapshot = self._snapshot(merged)
         await self._save(snapshot.to_private_dict())
@@ -79,12 +96,12 @@ class SettingsService:
             return {}
 
         return {
-            key: value.strip()
+            key: _clean_persisted_setting(key, value)
             for key, value in row.value_json.items()
-            if key in SETTING_FIELDS and isinstance(value, str)
+            if key in SETTING_FIELDS
         }
 
-    async def _save(self, values: Mapping[str, str]) -> None:
+    async def _save(self, values: Mapping[str, object]) -> None:
         row = await self._session.get(AppSetting, SETTINGS_KEY)
         if row is None:
             self._session.add(AppSetting(key=SETTINGS_KEY, value_json=dict(values)))
@@ -99,21 +116,64 @@ class SettingsService:
             "llm_base_url": self._runtime_settings.llm_base_url,
             "llm_api_key": self._runtime_settings.llm_api_key,
             "llm_model": self._runtime_settings.llm_model,
+            "save_ai_audio": True,
+            "save_mic_audio": False,
+            "vad_threshold": 0.5,
+            "vad_end_silence_ms": 700,
         }
         values = {**defaults, **persisted}
         return EndpointSettings(
-            web_url=values["web_url"],
-            ai_backend_url=values["ai_backend_url"],
-            llm_base_url=values["llm_base_url"],
-            llm_api_key=values["llm_api_key"],
-            llm_model=values["llm_model"],
+            web_url=str(values["web_url"]),
+            ai_backend_url=str(values["ai_backend_url"]),
+            llm_base_url=str(values["llm_base_url"]),
+            llm_api_key=str(values["llm_api_key"]),
+            llm_model=str(values["llm_model"]),
+            save_ai_audio=bool(values["save_ai_audio"]),
+            save_mic_audio=bool(values["save_mic_audio"]),
+            vad_threshold=float(values["vad_threshold"]),
+            vad_end_silence_ms=int(values["vad_end_silence_ms"]),
         )
 
 
-def _clean_setting_value(value: Any) -> str:
+def _clean_setting_value(key: str, value: Any) -> object:
     if value is None:
+        if key in {"save_ai_audio", "save_mic_audio"}:
+            return False
+        if key == "vad_threshold":
+            return 0.5
+        if key == "vad_end_silence_ms":
+            return 700
         return ""
+    if key in {"save_ai_audio", "save_mic_audio"}:
+        return bool(value)
+    if key == "vad_threshold":
+        return float(value)
+    if key == "vad_end_silence_ms":
+        return int(value)
     return str(value).strip()
+
+
+def _clean_persisted_setting(key: str, value: Any) -> object:
+    if key in {"save_ai_audio", "save_mic_audio"}:
+        return bool(value)
+    if key == "vad_threshold":
+        return float(value)
+    if key == "vad_end_silence_ms":
+        return int(value)
+    return str(value).strip() if isinstance(value, str) else ""
+
+
+def _default_ai_backend_status() -> dict[str, object]:
+    return {
+        "endpoint_status": "Not configured",
+        "stt_model": None,
+        "vad_ready": False,
+        "resident_tts_engine": None,
+        "available_tts_engines": [],
+        "loading_state": None,
+        "vram_mb": None,
+        "vram_headroom_mb": None,
+    }
 
 
 __all__ = ["EndpointSettings", "SETTING_FIELDS", "SETTINGS_KEY", "SettingsService"]
