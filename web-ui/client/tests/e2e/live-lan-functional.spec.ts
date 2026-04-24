@@ -28,19 +28,19 @@ test('live OMEN-PC Settings portraits and text flow pass before Android handoff'
   test.setTimeout(300_000);
 
   const expectNoBrowserErrors = installBrowserErrorGuard(page);
-  const completedSettingsRequests: string[] = [];
+  const settingsRequests: string[] = [];
   const characterName = `${liveCharacterPrefix} ${Date.now()}`;
 
-  page.on('request', expectRayMeApiRequest);
-  page.on('requestfinished', (request) => {
+  page.on('request', (request) => {
+    expectRayMeApiRequest(request);
     const label = settingsRequestLabel(request);
     if (label) {
-      completedSettingsRequests.push(label);
+      settingsRequests.push(label);
     }
   });
 
   await verifyLiveHealth(page);
-  await verifySettings(page, completedSettingsRequests);
+  await verifySettings(page, settingsRequests);
 
   const characterId = await importLiveCharacter(page, characterName);
   await uploadAndAssertPortrait(page, characterId);
