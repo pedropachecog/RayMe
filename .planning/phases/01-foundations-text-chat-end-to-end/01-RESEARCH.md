@@ -654,26 +654,23 @@ Planning implication: use `extra="allow"` at the source-card boundary to preserv
 | A1 | SSE/fetch-style streaming is sufficient for Phase 1 text streaming and preferable to WebSocket for testability. | Standard Stack, Architecture Patterns | If later call architecture requires one shared socket now, transport tasks must change. |
 | A2 | `@tanstack/svelte-virtual` works cleanly with this Svelte 5/SvelteKit setup. | Standard Stack, Don't Hand-Roll | If integration fails, planner needs a Wave 0 spike or alternative virtualizer. |
 | A3 | Filesystem writes and SQLite metadata cannot be made a single atomic transaction; app-level compensation is required. | Common Pitfalls | If storage backend changes, blob transaction handling may differ. |
-| A4 | External OpenAI-compatible LLM status should be represented by a Settings connection probe, not a required `/health` endpoint. | Common Pitfalls, Open Questions | If the user expects a local LLM health shim, Phase 1 scope and `llm/` responsibilities need clarification. |
-| A5 | Enabling SQLite WAL is beneficial for the local chat app once write/read concurrency appears. | State of the Art | If filesystem or backup constraints make WAL undesirable, keep default journal mode. |
+| A4 | External OpenAI-compatible LLM status is represented by `POST /api/settings/test/llm`, not a required local LLM `/health` endpoint. | Common Pitfalls, Open Questions (RESOLVED) | Resolved in planning: Phase 1 keeps `llm/` as docs/config only and probes the configured OpenAI-compatible endpoint server-side. |
+| A5 | SQLite WAL is not enabled in Phase 1 unless future concurrency tests justify it. | State of the Art, Open Questions (RESOLVED) | Resolved in planning: keep SQLite journal mode conservative for the first migration/setup. |
 | A6 | The browser stream reader example's `data:` framing will match the final FastAPI response format. | Code Examples | If the endpoint uses NDJSON or raw text chunks, the client parser changes. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **How should the roadmap's "LLM `/health`" acceptance be interpreted?**
-   - What we know: Context D-06 says `llm/` is docs/config only and RayMe does not ship local inference. [VERIFIED: 01-CONTEXT.md]
-   - What's unclear: Whether acceptance expects a literal third `/health` endpoint or a Settings connection probe to the external OpenAI-compatible endpoint. [VERIFIED: ROADMAP.md]
-   - Recommendation: Plan `web-ui/server` and `ai-backend` `/health`; plan LLM status as `web-ui/server` probing configured OpenAI-compatible endpoint. [ASSUMED]
+   - Resolution: Phase 1 LLM status is `POST /api/settings/test/llm`, implemented by `web-ui/server` as a server-side probe against the configured OpenAI-compatible Chat Completions endpoint.
+   - Decision basis: Context D-06 says `llm/` is docs/config only and RayMe does not ship local inference. Plans 03 and 05 document and implement the Settings probe instead of a local LLM `/health` server. [VERIFIED: 01-CONTEXT.md]
 
 2. **Should `rayme.local` be supported in Phase 1?**
-   - What we know: Phase 0's known passing Android URL was direct IP `https://192.168.1.199:8443`; local notes say `rayme.local` was not configured. [VERIFIED: 01-CONTEXT.md] [VERIFIED: .planning/phases/00-measurement-gate/results/https_android.json]
-   - What's unclear: Whether Phase 1 should add mDNS/DNS setup or continue with direct LAN IP. [ASSUMED]
-   - Recommendation: Do not require hostname success in Phase 1 unless the planner adds an explicit DNS/mDNS task. [ASSUMED]
+   - Resolution: Direct LAN IP HTTPS is sufficient for Phase 1. The known passing Android URL path is `https://192.168.1.199:8443`; `rayme.local` remains optional and only works when the user has local DNS/mDNS configured.
+   - Decision basis: D-10 locks the Phase 0 mkcert-on-LAN workflow as the supported Phase 1 HTTPS path, and Phase 0 acceptance passed on the direct LAN IP. [VERIFIED: 01-CONTEXT.md] [VERIFIED: .planning/phases/00-measurement-gate/results/https_android.json]
 
 3. **Should SQLite WAL be enabled in the first migration/setup?**
-   - What we know: SQLite documents WAL as a separate journaling mode with different behavior. [CITED: https://www.sqlite.org/wal.html]
-   - What's unclear: Whether the app's local storage directory and backup workflow benefit enough in Phase 1. [ASSUMED]
-   - Recommendation: Add a small storage setup decision in planning; default can stay conservative until concurrency tests require WAL. [ASSUMED]
+   - Resolution: SQLite WAL is not enabled in Phase 1. Keep journal mode conservative in the initial migration/setup unless future tests demonstrate a concrete concurrency need.
+   - Decision basis: Plan 04 explicitly requires no `PRAGMA journal_mode=WAL` matches during Phase 1 verification while preserving the option to revisit after measured read/write contention. [CITED: https://www.sqlite.org/wal.html]
 
 ## Environment Availability
 
