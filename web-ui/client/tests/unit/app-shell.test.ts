@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 
 import appShellSource from '../../src/lib/components/AppShell.svelte?raw';
 
-const forbiddenTopLevelLabels = ['Voice Lab', 'Call', 'Account', 'Billing', 'Logout', 'Subscribe'];
+const forbiddenTopLevelLabels = ['Call', 'Account', 'Billing', 'Logout', 'Subscribe'];
 const appCss = readFileSync('src/app.css', 'utf8');
 
 function navigationLabels() {
@@ -30,10 +30,11 @@ describe('AppShell', () => {
     }
   });
 
-  it('uses only Home, Gallery, and Settings as top-level destinations', () => {
+  it('uses exactly Home, Gallery, Voice Lab, and Settings as top-level destinations', () => {
     expect(navigationLabels()).toEqual([
       { label: 'Home', href: '/' },
       { label: 'Gallery', href: '/gallery' },
+      { label: 'Voice Lab', href: '/voice-lab' },
       { label: 'Settings', href: '/settings' }
     ]);
 
@@ -42,11 +43,11 @@ describe('AppShell', () => {
     }
   });
 
-  it('renders the mobile bottom navigation from exactly three items', () => {
-    expect(navigationLabels()).toHaveLength(3);
+  it('renders the mobile bottom navigation from exactly four items', () => {
+    expect(navigationLabels()).toHaveLength(4);
     expect(appShellSource).toContain('class="bottom-nav"');
     expect(appShellSource).toContain('{#each navigation as item}');
-    expect(appShellSource).toContain('grid-template-columns: repeat(3, minmax(0, 1fr))');
+    expect(appShellSource).toContain('grid-template-columns: repeat(4, minmax(0, 1fr))');
     expect(appShellSource).toContain('min-height: 64px');
   });
 });

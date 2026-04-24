@@ -51,7 +51,7 @@ function lastRequest(fetchMock: ReturnType<typeof installFetch>) {
 }
 
 describe('Settings route', () => {
-  it('renders only real Phase 1 endpoint and mobile readiness controls', () => {
+  it('renders Phase 2 endpoint, audio retention, VAD, and model residency controls', () => {
     const requiredCopy = [
       'Web UI status',
       'AI backend URL',
@@ -61,6 +61,12 @@ describe('Settings route', () => {
       'LLM status',
       'HTTPS secure-context status',
       'Media-device availability status',
+      'Save AI audio',
+      'Save mic audio',
+      'VAD threshold',
+      'End-of-utterance silence',
+      'Coming in Call Feel',
+      'Resident TTS engine',
       'Test Connection',
       'Connected',
       'Unreachable',
@@ -76,12 +82,26 @@ describe('Settings route', () => {
       'Billing',
       'Subscription',
       'Wake word',
-      'VAD',
       'save-audio',
       'clear all data',
       'PWA',
-      'Voice Lab',
       'Call'
+    ]) {
+      expect(settingsSource).not.toContain(forbidden);
+      expect(endpointPanelSource).not.toContain(forbidden);
+    }
+  });
+
+  it('does not expose raw API keys, tracebacks, or backend exception copy in status UI', () => {
+    for (const forbidden of [
+      'Traceback',
+      'stack trace',
+      'Exception:',
+      'ValueError',
+      'RuntimeError',
+      'sk-',
+      'api key value',
+      'raw API key'
     ]) {
       expect(settingsSource).not.toContain(forbidden);
       expect(endpointPanelSource).not.toContain(forbidden);
