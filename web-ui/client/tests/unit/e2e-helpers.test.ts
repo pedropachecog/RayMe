@@ -14,6 +14,7 @@ import {
   PHASE1_LOCAL_LLM_MODEL,
   PHASE1_LOCAL_LLM_URL
 } from '../e2e/helpers/fixtures';
+import { alternatePortraitPng, fulfillPortraitImage, portraitPng } from '../e2e/helpers/images';
 
 type Listener = (value: unknown) => void;
 
@@ -52,6 +53,16 @@ function makeRequest(url: string, pageUrl = 'http://127.0.0.1:4173/settings') {
         url: () => pageUrl
       })
     })
+  };
+}
+
+function makeRoutingPage() {
+  const routes: { pattern: string; handler: (route: unknown) => Promise<void> }[] = [];
+  return {
+    route: vi.fn((pattern: string, handler: (route: unknown) => Promise<void>) => {
+      routes.push({ pattern, handler });
+    }),
+    routes
   };
 }
 
@@ -201,5 +212,31 @@ describe('Phase 01.1 fixture builders', () => {
     expect(detail.character_portrait_asset_id).toBe('asset-two');
     expect(detail.character_portrait_storage_path).toBe('characters/phase011-character/asset-two.png');
     expect(detail.messages.map((message) => message.sequence)).toEqual([0, 3]);
+  });
+});
+
+describe('portrait image E2E helpers', () => {
+  it('returns distinct valid PNG buffers for portrait upload assertions', () => {
+    const primary = portraitPng();
+    const alternate = alternatePortraitPng();
+
+    expect(primary.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    expect(alternate.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    expect(primary.equals(alternate)).toBe(false);
+  });
+
+  it('registers an exact portrait URL route that fulfills image/png bytes', async () => {
+    const page = makeRoutingPage();
+    const body = alternatePortraitPng();
+    await fulfillPortraitImage(page as never, '/api/characters/phase011-character/portrait', body);
+
+    expect(page.route).toHaveBeenCalledWith('**/api/characters/phase011-character/portrait', expect.any(Function));
+    const route = makeRoute();
+    await page.routes[0].handler(route);
+    expect(route.fulfill).toHaveBeenCalledWith({
+      status: 200,
+      headers: { 'Content-Type': 'image/png' },
+      body
+    });
   });
 });
