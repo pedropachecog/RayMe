@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.api.settings import get_ai_backend_probe, get_llm_probe, get_settings_session
+from app.api.settings import get_ai_backend_client, get_llm_probe, get_settings_session
 from app.config import Settings
 from app.domain.ai_backend_client import (
     AiBackendStatus,
@@ -170,7 +170,7 @@ def test_connection_test_routes_return_only_allowed_status_values(
     assert settings_client.get("/api/settings").json()["web_url"] == "https://rayme.local:8443"
     seen = {settings_client.post("/api/settings/test/web").json()["status"]}
     for status in (CONNECTED, UNREACHABLE, UNAUTHORIZED):
-        settings_client.app.dependency_overrides[get_ai_backend_probe] = _health_probe(status)
+        settings_client.app.dependency_overrides[get_ai_backend_client] = _ai_backend_client(status)
         assert (
             settings_client.get("/api/settings").json()["ai_backend_url"]
             == "https://ai.local:9443"
@@ -180,7 +180,7 @@ def test_connection_test_routes_return_only_allowed_status_values(
         seen.add(response.json()["status"])
 
     settings_client.patch("/api/settings", json={"ai_backend_url": ""})
-    settings_client.app.dependency_overrides[get_ai_backend_probe] = _health_probe(CONNECTED)
+    settings_client.app.dependency_overrides[get_ai_backend_client] = _ai_backend_client(CONNECTED)
     seen.add(settings_client.post("/api/settings/test/ai-backend").json()["status"])
 
     assert seen == STATUS_VALUES
@@ -559,8 +559,16 @@ async def test_ai_backend_client_sanitizes_public_error_payloads() -> None:
         assert forbidden not in rendered
 
 
-def _health_probe(status: ConnectionStatus):
-    async def fake_probe(_base_url: str | None) -> ConnectionStatus:
-        return status
+def _ai_backend_client(status: ConnectionStatus):
+    class FakeAiBackendClient:
+        async def get_status(self, _base_url: str) -> AiBackendStatus:
+            if status == CONNECTED:
+                return AiBackendStatus(status="ok")
+            if status == UNAUTHORIZED:
+                raise AiBackendUnavailable(
+                    code="unauthorized",
+                    message="AI backend unreachable",
+                )
+            raise AiBackendUnavailable(code="unreachable", message="AI backend unreachable")
 
-    return lambda: fake_probe
+    return FakeAiBackendClient

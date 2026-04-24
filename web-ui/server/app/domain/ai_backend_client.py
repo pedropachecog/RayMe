@@ -156,6 +156,8 @@ class AiBackendClient:
 
         if response.status_code >= 500 and processing_message and processing_code:
             raise AiBackendProcessingError(code=processing_code, message=processing_message)
+        if response.status_code in {401, 403}:
+            raise AiBackendUnavailable(code="unauthorized", message=UNREACHABLE_MESSAGE)
         if response.status_code >= 400:
             raise AiBackendUnavailable(code="unreachable", message=UNREACHABLE_MESSAGE)
         return response

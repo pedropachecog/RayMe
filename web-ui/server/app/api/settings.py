@@ -9,9 +9,12 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.domain.ai_backend_client import AiBackendClient, AiBackendUnavailable
 from app.domain.llm_probe import (
     CONNECTED,
     NOT_CONFIGURED,
+    UNAUTHORIZED,
+    UNREACHABLE,
     ConnectionStatus,
     probe_http_health,
     probe_openai_compatible_llm,
@@ -95,6 +98,10 @@ def get_ai_backend_probe() -> HealthProbe:
     return probe_http_health
 
 
+def get_ai_backend_client() -> AiBackendClient:
+    return AiBackendClient()
+
+
 def get_llm_probe() -> LlmProbe:
     return probe_openai_compatible_llm
 
@@ -128,12 +135,18 @@ async def test_web_settings(
 @router.post("/test/ai-backend", response_model=ConnectionTestResponse)
 async def test_ai_backend_settings(
     service: SettingsService = Depends(get_settings_service),
-    probe: HealthProbe = Depends(get_ai_backend_probe),
+    client: AiBackendClient = Depends(get_ai_backend_client),
 ) -> dict[str, ConnectionStatus]:
     settings = await service.read()
     if not _is_configured(settings.ai_backend_url):
         return {"status": NOT_CONFIGURED}
-    return {"status": await probe(settings.ai_backend_url)}
+    try:
+        await client.get_status(settings.ai_backend_url)
+    except AiBackendUnavailable as exc:
+        if exc.code == "unauthorized":
+            return {"status": UNAUTHORIZED}
+        return {"status": UNREACHABLE}
+    return {"status": CONNECTED}
 
 
 @router.post("/test/llm", response_model=ConnectionTestResponse)
@@ -161,6 +174,7 @@ __all__ = [
     "ConnectionTestResponse",
     "PublicSettings",
     "SettingsPatch",
+    "get_ai_backend_client",
     "get_ai_backend_probe",
     "get_llm_probe",
     "get_runtime_settings",

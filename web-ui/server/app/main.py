@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
 
+from app.api.ai_backend import router as ai_backend_router
 from app.api.chat import router as chat_router
 from app.api.characters import router as characters_router
 from app.api.health import router as health_router
@@ -54,6 +55,7 @@ def create_app(
     configure_cors(app, runtime_settings.allowed_origins)
     configure_security_headers(app)
     app.include_router(health_router)
+    app.include_router(ai_backend_router)
     app.include_router(settings_router)
     app.include_router(characters_router)
     app.include_router(threads_router)
