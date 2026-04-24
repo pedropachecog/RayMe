@@ -16,6 +16,25 @@ git but persisted under the repo-local `.local/` tree:
 .local/phase1-tls/rayme.local+1-key.pem
 ```
 
+The active Phase 1 root CA profile must include critical `CA:TRUE` basic
+constraints and critical `keyCertSign, cRLSign` key usage for Android Chrome
+trust compatibility. The active serving cert is valid from
+`2026-04-24` through `2027-04-24` and covers `rayme.local`, `localhost`,
+`192.168.1.199`, and `127.0.0.1`.
+
+Current active fingerprints:
+
+```text
+Root CA SHA-256 fingerprint:
+AE:57:76:5A:25:AF:38:D7:9E:17:73:E1:B4:28:C5:C2:17:F7:C8:D7:E5:45:9B:FB:AB:44:54:FE:38:41:06:D6
+
+Root CA transfer-file SHA-256 hash:
+9819c9661dfa5bb0b4d6251659029591f4e5b3e7250ef2d638b724c4f2ee00a1
+
+Serving cert SHA-256 fingerprint:
+46:85:09:B2:8E:75:D2:4F:0D:E2:6D:E3:EA:58:7A:DA:1A:A5:6D:C2:ED:85:C8:83:EC:7E:E9:06:9D:A5:E7:93
+```
+
 The same serving cert/key are mirrored on the backend host at:
 
 ```text
@@ -65,6 +84,15 @@ The certificate covers `rayme.local`, `localhost`, `192.168.1.199`, and
 `127.0.0.1`. If Android Chrome does not already trust this Phase 1 root, install
 `.local/phase1-tls/rayme-phase1-rootCA.pem` on the phone once and keep reusing
 this cert set. Do not create per-session certificates.
+
+For phone transfer during manual testing, `OMEN-PC` may run the temporary
+`RayMePhase1CertTransfer` scheduled task, serving only the public root CA from
+`C:\Users\pmpg\rayme\phase1-tls\` on port `8081`. Use the cache-busting filename
+below when replacing an earlier bad Phase 1 root:
+
+```text
+http://192.168.1.199:8081/rayme-phase1-rootCA-20260424.crt
+```
 
 Use these paths from the backend Git checkout or the local repository root:
 

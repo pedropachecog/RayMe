@@ -1,8 +1,9 @@
 # Phase 1 LAN HTTPS Setup
 
-Phase 1 uses the Phase 0 mkcert-on-LAN workflow for trusted browser access. For
-Phase 1, direct LAN IP HTTPS is sufficient for the Web UI and AI-backend health
-checks. rayme.local is optional unless DNS/mDNS is configured.
+Phase 1 uses the reusable certificate set documented in
+`web-ui/server/docs/HTTPS-LAN.md`. Direct LAN IP HTTPS is sufficient for the Web
+UI and AI-backend health checks. `rayme.local` is optional unless DNS/mDNS is
+configured.
 
 ## Endpoints
 
@@ -13,24 +14,17 @@ checks. rayme.local is optional unless DNS/mDNS is configured.
 
 ## Certificate Setup
 
-On the LAN host, generate a certificate that covers both the friendly name and
-the direct IP:
-
-```powershell
-mkcert -install
-mkcert rayme.local 192.168.1.199
-```
-
-The output files can be referenced from `web-ui/server/config.example.env`:
+Use the persisted Phase 1 certificate files. Do not generate per-session
+certificates.
 
 ```env
-RAYME_TLS_CERT=.certs/rayme.local+1.pem
-RAYME_TLS_KEY=.certs/rayme.local+1-key.pem
+RAYME_TLS_CERT=C:\Users\pmpg\rayme\phase1-tls\rayme.local+1.pem
+RAYME_TLS_KEY=C:\Users\pmpg\rayme\phase1-tls\rayme.local+1-key.pem
 ```
 
-Install the mkcert root CA on the Android device before testing Chrome. The
-accepted Phase 0 path loaded `https://192.168.1.199:8443` directly because
-`rayme.local` name resolution was not configured on the phone.
+Install the active Phase 1 root CA as an Android CA certificate before testing
+Chrome. During manual testing, `OMEN-PC` can temporarily serve the public root
+CA at `http://192.168.1.199:8081/rayme-phase1-rootCA-20260424.crt`.
 
 ## Bind And Origin Rules
 

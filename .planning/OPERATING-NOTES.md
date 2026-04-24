@@ -64,6 +64,10 @@ as durable context, not one-off preferences.
   Android LAN testing.
 - Do not generate throwaway certificates for normal HTTPS testing. Reuse the
   Phase 1 cert set until it expires or the LAN IP/hostnames change.
+- The active Phase 1 root CA must include critical CA basic constraints and
+  critical `keyCertSign, cRLSign` key usage; an earlier root without key usage
+  did not work for Android Chrome. Active root transfer-file SHA-256:
+  `9819c9661dfa5bb0b4d6251659029591f4e5b3e7250ef2d638b724c4f2ee00a1`.
 - If a new certificate set is required, create it deliberately as a reusable
   project artifact, document its paths, copy it back to the repo-local ignored
   store, and update `web-ui/server/docs/HTTPS-LAN.md`.
