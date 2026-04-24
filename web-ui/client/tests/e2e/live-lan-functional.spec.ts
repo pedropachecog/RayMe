@@ -104,22 +104,28 @@ async function runConnectionTest(
 ) {
   const startIndex = completedSettingsRequests.length;
   const patchResponse = page.waitForResponse(
-    (response) => isSettingsRequest(response.request(), 'PATCH', '/api/settings') && response.ok()
+    (response) => isSettingsRequest(response.request(), 'PATCH', '/api/settings') && response.ok(),
+    { timeout: 30_000 }
   );
   const testResponse = page.waitForResponse(
-    (response) => isSettingsRequest(response.request(), 'POST', testPath) && response.ok()
+    (response) => isSettingsRequest(response.request(), 'POST', testPath) && response.ok(),
+    { timeout: 30_000 }
   );
 
   await section.getByRole('button', { name: 'Test Connection' }).click();
-  await patchResponse;
-  await testResponse;
+  const [patchResult, testResult] = await Promise.allSettled([patchResponse, testResponse]);
+  const observedRequests = completedSettingsRequests.slice(startIndex);
+  const observedRequestText = observedRequests.length > 0 ? observedRequests.join(' -> ') : 'none';
+
+  if (patchResult.status === 'rejected' || testResult.status === 'rejected') {
+    throw new Error(
+      `Expected PATCH /api/settings before POST ${testPath}; observed Settings requests: ${observedRequestText}`
+    );
+  }
+
   await expect(page.getByTestId(statusTestId)).toHaveText('Connected', { timeout: 60_000 });
 
-  await expect
-    .poll(() => completedSettingsRequests.slice(startIndex).join('|'), {
-      timeout: 30_000
-    })
-    .toContain(`PATCH /api/settings|POST ${testPath}`);
+  expect(observedRequests.slice(0, 2)).toEqual(['PATCH /api/settings', `POST ${testPath}`]);
 }
 
 async function importLiveCharacter(page: Page, characterName: string) {

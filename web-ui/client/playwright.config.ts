@@ -2,6 +2,7 @@ import { defineConfig, devices } from '@playwright/test';
 
 export default defineConfig({
   testDir: './tests/e2e',
+  testIgnore: process.env.RAYME_ENABLE_LIVE_E2E === '1' ? [] : ['**/live-*.spec.ts'],
   fullyParallel: true,
   webServer: {
     command: 'npm run build && npm run preview -- --host 127.0.0.1 --port 4173',
