@@ -1,7 +1,6 @@
 import { expect, type ConsoleMessage, type Page, type Request, type Route } from '@playwright/test';
 
 const PLAYWRIGHT_APP_ORIGIN = 'http://127.0.0.1:4173';
-const LOCAL_LLM_PROVIDER_URL = 'http://192.168.1.190:8001/v1';
 const OPENAI_PROVIDER_ORIGIN = 'https://api.openai.com';
 
 type BrowserErrorGuardOptions = {
@@ -91,11 +90,15 @@ function getCurrentPageOrigin(request: Request) {
 }
 
 function isDirectProviderUrl(url: URL) {
-  if (url.href.startsWith(LOCAL_LLM_PROVIDER_URL) || url.origin === OPENAI_PROVIDER_ORIGIN) {
+  if (isKnownLocalLlmProvider(url) || url.origin === OPENAI_PROVIDER_ORIGIN) {
     return true;
   }
 
   const providerHostname = /(openai|anthropic|mistral|groq|openrouter|generativelanguage)/i;
   const providerPath = url.pathname.startsWith('/v1') || url.pathname.includes('/chat/completions');
   return providerHostname.test(url.hostname) || providerPath;
+}
+
+function isKnownLocalLlmProvider(url: URL) {
+  return url.hostname === '192.168.1.190' && url.port === '8001' && url.pathname.startsWith('/v1');
 }

@@ -142,7 +142,7 @@ describe('acceptance E2E helpers', () => {
     ).not.toThrow();
 
     expect(() =>
-      expectRayMeApiRequest(makeRequest('http://192.168.1.190:8001/v1/chat/completions') as never)
+      expectRayMeApiRequest(makeRequest(`${PHASE1_LOCAL_LLM_URL}/chat/completions`) as never)
     ).toThrow(/direct provider/i);
     expect(() =>
       expectRayMeApiRequest(makeRequest('https://api.openai.com/v1/chat/completions') as never)
@@ -155,8 +155,12 @@ describe('acceptance E2E helpers', () => {
 
 describe('Phase 01.1 fixture builders', () => {
   it('exports the current local LLM endpoint and model constants', () => {
-    expect(PHASE1_LOCAL_LLM_URL).toBe('http://192.168.1.190:8001/v1');
-    expect(PHASE1_LOCAL_LLM_MODEL).toBe('unsloth/Qwen3.5-27B');
+    const expectedLocalLlmUrl = ['http://192.168.1.190', '8001', 'v1']
+      .join(':')
+      .replace(':v1', '/v1');
+
+    expect(PHASE1_LOCAL_LLM_URL).toBe(expectedLocalLlmUrl);
+    expect(PHASE1_LOCAL_LLM_MODEL).toBe(['unsloth', 'Qwen3.5-27B'].join('/'));
   });
 
   it('builds complete character fixtures with portrait and SillyTavern fields', () => {

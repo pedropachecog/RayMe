@@ -44,9 +44,13 @@ test('Settings Test Connection saves current form values before probing endpoint
 }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
   const events: SettingsEvent[] = [];
+  const requestUrls: string[] = [];
   let currentSettings = { ...staleSettings };
 
-  page.on('request', expectRayMeApiRequest);
+  page.on('request', (request) => {
+    requestUrls.push(request.url());
+    expectRayMeApiRequest(request);
+  });
 
   await page.route('**/api/settings', async (route) => {
     const request = route.request();
@@ -124,7 +128,12 @@ test('Settings Test Connection saves current form values before probing endpoint
     { method: 'POST', path: '/api/settings/test/llm' }
   ]);
   const llmPatch = events.at(-2) as Extract<SettingsEvent, { method: 'PATCH' }>;
-  expect(llmPatch.payload).not.toHaveProperty('llm_api_key');
+  const payload = llmPatch.payload;
+  expect(payload.llm_base_url).toBe(PHASE1_LOCAL_LLM_URL);
+  expect(payload.llm_model).toBe(PHASE1_LOCAL_LLM_MODEL);
+  expect(Object.prototype.hasOwnProperty.call(payload, 'llm_api_key')).toBe(false);
+  expect(requestUrls.filter((url) => url.includes('192.168.1.190:8001'))).toEqual([]);
+  await expect(page.getByText(/sk-|server-secret|sk-browser-supplied/i)).toHaveCount(0);
   await expect(page.getByTestId('web-ui-status')).toHaveText('Connected');
   await expect(page.getByTestId('ai-backend-status')).toHaveText('Connected');
   await expect(page.getByTestId('llm-status')).toHaveText('Connected');
