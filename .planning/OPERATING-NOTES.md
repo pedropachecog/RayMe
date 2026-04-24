@@ -18,6 +18,12 @@ as durable context, not one-off preferences.
   underlying approach and update durable docs; do not just patch the symptom.
 - Keep updates concrete and short. Say what is blocked, what exact help is
   needed, and what the agent will do after that help is provided.
+- When asking the user for a checkpoint, manual test, approval, or other human
+  action, include the relevant phase/plan context in plain language. Do not say
+  only "test on Android" or "approve the checkpoint"; explain what has already
+  been verified by the agent, what remains for the user to verify, why that
+  specific human signal is needed, and what the agent will do next after the
+  response. The user does not share the agent's full planning context.
 - Before asking the user to test a UI in browser, the agent must open it with a
   browser-capable check such as Playwright and verify rendered content plus
   console errors. HTTP 200, health endpoints, and curl output are not enough for
