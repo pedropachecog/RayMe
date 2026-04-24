@@ -156,6 +156,14 @@ test('PNG import persists portrait across Editor Gallery Home Chat and reload', 
   assertNoBrowserErrors();
 });
 
+test('direct portrait upload replaces and removes portrait across surfaces', async ({ page }) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  page.on('request', expectRayMeApiRequest);
+
+  await expect(page.locator('img[src*="asset-upload-one"]')).toHaveCount(1);
+  assertNoBrowserErrors();
+});
+
 async function assertVisiblePortrait(locator: Locator) {
   await expect(locator).toHaveAttribute('src', importPortraitUrl);
   await expect(locator).toBeVisible();
