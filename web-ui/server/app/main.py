@@ -8,6 +8,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
 
 from app.api.characters import router as characters_router
+from app.api.health import router as health_router
+from app.api.settings import router as settings_router
 from app.config import Settings, get_settings
 from app.security import configure_cors, configure_security_headers
 
@@ -44,8 +46,11 @@ def create_app(
     """Build the API application without binding sockets."""
     runtime_settings = settings or get_settings()
     app = FastAPI(title=runtime_settings.app_name)
+    app.state.settings = runtime_settings
     configure_cors(app, runtime_settings.allowed_origins)
     configure_security_headers(app)
+    app.include_router(health_router)
+    app.include_router(settings_router)
     app.include_router(characters_router)
 
     if static_client_dir is not None:
