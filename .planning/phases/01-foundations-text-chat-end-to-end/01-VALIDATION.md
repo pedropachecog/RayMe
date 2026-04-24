@@ -3,7 +3,7 @@ phase: 01
 slug: foundations-text-chat-end-to-end
 status: ready
 nyquist_compliant: true
-wave_0_complete: false
+wave_0_complete: true
 created: 2026-04-24
 ---
 
