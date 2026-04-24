@@ -178,9 +178,9 @@ Plans:
 **Plans:** 6 plans
 
 Plans:
-- [ ] 01.1-01-PLAN.md - Shared Playwright acceptance helper and fixture foundation (Wave 0)
-- [ ] 01.1-02-PLAN.md - Portrait persistence E2E coverage for import, upload, replacement, removal, and reload (Wave 1)
-- [ ] 01.1-03-PLAN.md - Settings save-before-test and local no-key LLM E2E coverage (Wave 1)
+- [x] 01.1-01-PLAN.md - Shared Playwright acceptance helper and fixture foundation (Wave 0)
+- [x] 01.1-02-PLAN.md - Portrait persistence E2E coverage for import, upload, replacement, removal, and reload (Wave 1)
+- [x] 01.1-03-PLAN.md - Settings save-before-test and local no-key LLM E2E coverage (Wave 1)
 - [ ] 01.1-04-PLAN.md - Guarded full Phase 1 browser acceptance path and existing E2E guard integration (Wave 2)
 - [ ] 01.1-05-PLAN.md - Live OMEN-PC functional browser checks and Android product-owner checkpoint (Wave 3)
 - [ ] 01.1-06-PLAN.md - Phase 1 plan 01-24 summary gate after Android approval (Wave 4)

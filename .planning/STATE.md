@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Phase 01.1 executing - 0/6 plans complete
+status: Phase 01.1 executing - 3/6 plans complete
 stopped_at: Phase 01.1 execution
-last_updated: "2026-04-24T15:07:16.812Z"
+last_updated: "2026-04-24T16:36:00.000Z"
 progress:
   total_phases: 8
   completed_phases: 1
@@ -16,6 +16,7 @@ progress:
 ## Phase Status
 
 - Phase 0 complete on 2026-04-23.
+- Phase 01.1 Wave 1 complete on 2026-04-24: plans 01.1-01 through 01.1-03 passed backend pytest, client unit tests, and full Playwright E2E.
 - Phase 1 plan 01-24 is not complete; do not create `01-24-SUMMARY.md` until hardened acceptance and Android checkpoint pass.
 - Next phase gate: Phase 01.1 - UI acceptance and regression test hardening.
 
