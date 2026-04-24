@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
 
+from app.api.characters import router as characters_router
 from app.config import Settings, get_settings
 from app.security import configure_cors, configure_security_headers
 
@@ -45,6 +46,7 @@ def create_app(
     app = FastAPI(title=runtime_settings.app_name)
     configure_cors(app, runtime_settings.allowed_origins)
     configure_security_headers(app)
+    app.include_router(characters_router)
 
     if static_client_dir is not None:
         mount_static_client(app, static_client_dir)
