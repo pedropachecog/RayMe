@@ -40,31 +40,25 @@ runtime trees as the normal sync mechanism. `C:\Users\pmpg\rayme\phase1-app\`
 was a temporary copied staging tree from Plan 01-24 troubleshooting and is not
 canonical.
 
-If GitHub credentials are unavailable on `OMEN-PC`, sync with a Git bundle while
-preserving a real `main` branch:
+Git sync must use the GitHub HTTPS remote. If fetch/pull prompts or fails on
+`OMEN-PC`, fix Git Credential Manager instead of using copied trees or bundles:
 
-```bash
-git bundle create .local/backend-sync/RayMe-main.bundle main
-scp .local/backend-sync/RayMe-main.bundle rayme-pmpg:'C:/Users/pmpg/rayme/RayMe-main.bundle'
+```cmd
+git config --global credential.helper manager
+git config --global credential.credentialStore dpapi
 ```
 
-Then on `OMEN-PC`:
+Then clone or update the checkout:
 
 ```cmd
 cd /d C:\Users\pmpg\rayme
-git clone -b main RayMe-main.bundle RayMe
+git clone https://github.com/pedropachecog/RayMe.git RayMe
 cd /d C:\Users\pmpg\rayme\RayMe
-git status
+git fetch origin main
+git pull --ff-only origin main
+git status --short
 git branch --show-current
-git rev-parse HEAD
-```
-
-For later updates, copy a new bundle and run:
-
-```cmd
-cd /d C:\Users\pmpg\rayme\RayMe
-git fetch C:\Users\pmpg\rayme\RayMe-main.bundle main:refs/heads/main
-git switch main
+git rev-parse --short HEAD
 ```
 
 The certificate covers `rayme.local`, `localhost`, `192.168.1.199`, and

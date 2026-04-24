@@ -3,6 +3,22 @@
 These are project-specific operating rules for Codex/agent sessions. Treat them
 as durable context, not one-off preferences.
 
+## Collaboration Expectations
+
+- The agent owns execution. Do not hand the user a full command sequence for
+  work the agent can do through available tools.
+- Ask the user only for the narrow interactive action that cannot be completed
+  through tools, such as approving a browser/device credential prompt, then
+  immediately continue the remaining steps.
+- Before inventing a workaround, check the obvious existing mechanism first:
+  Git before copied staging trees, persisted certs before new certs, documented
+  backend paths before filesystem searching, and real backend host before local
+  substitutes.
+- When the user points out a sequencing or architecture mistake, correct the
+  underlying approach and update durable docs; do not just patch the symptom.
+- Keep updates concrete and short. Say what is blocked, what exact help is
+  needed, and what the agent will do after that help is provided.
+
 ## Backend Host And TLS
 
 - The real LAN backend for Android HTTPS checks is `OMEN-PC` at
@@ -14,13 +30,15 @@ as durable context, not one-off preferences.
 - Backend runtime code should be a Git checkout, not an ad hoc copied staging
   tree. Use `C:\Users\pmpg\rayme\RayMe\` as the canonical Windows-side checkout
   on `OMEN-PC`, and use Git to inspect/update the commit that is running.
-- If `OMEN-PC` cannot clone/fetch from GitHub non-interactively, use a Git
-  bundle as the transport, but keep the backend as a real branch checkout:
-  - local: `git bundle create .local/backend-sync/RayMe-main.bundle main`
-  - copy bundle to `C:\Users\pmpg\rayme\RayMe-main.bundle`
-  - first backend setup: `git clone -b main C:\Users\pmpg\rayme\RayMe-main.bundle C:\Users\pmpg\rayme\RayMe`
-  - backend update: from `C:\Users\pmpg\rayme\RayMe`, run `git fetch C:\Users\pmpg\rayme\RayMe-main.bundle main:refs/heads/main` and `git switch main`
-  - verify with `git status`, `git branch --show-current`, and `git rev-parse HEAD`
+- Backend Git sync uses the GitHub HTTPS remote
+  `https://github.com/pedropachecog/RayMe.git`. If credentials fail, fix Git
+  Credential Manager on `OMEN-PC`; do not invent bundle or copied-tree sync
+  paths.
+- `OMEN-PC` Git credential baseline:
+  - `git config --global credential.helper manager`
+  - `git config --global credential.credentialStore dpapi`
+  - GitHub auth may require one user-assisted browser/device approval, after
+    which the agent should continue the rest of the sync itself.
 - `C:\Users\pmpg\rayme\phase1-app\` was a temporary copied staging tree created
   during Plan 01-24 troubleshooting. Do not add to it or treat it as canonical;
   it can be removed after `C:\Users\pmpg\rayme\RayMe\` is available and verified.
@@ -52,7 +70,12 @@ as durable context, not one-off preferences.
 - Do not waste time searching for ad hoc backend staging directories. Check
   `C:\Users\pmpg\rayme\RayMe\` first, then run `git status`, `git branch`, and
   `git rev-parse HEAD` to determine what code is on the backend. If that
-  checkout is missing, create it there rather than copying a partial runtime
-  tree.
+  checkout is missing, create it there with GitHub clone/pull after credentials
+  are fixed rather than copying a partial runtime tree.
+- Do not repurpose the `OMEN-PC` SSH login key for GitHub. That key is for
+  logging into `192.168.1.199` only.
+- Push local commits to `origin/main` before expecting `OMEN-PC` to pull them.
+- Ask the user for help only when an interactive credential/browser approval is
+  genuinely needed; do not hand them the whole operational command sequence.
 - Keep generated private keys, root CA keys, virtual environments, and staged
   runtime apps out of git.
