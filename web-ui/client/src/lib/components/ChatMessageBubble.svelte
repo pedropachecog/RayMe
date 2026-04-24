@@ -63,7 +63,7 @@
     !message.streaming && !message.error && (message.role === 'assistant' || message.role === 'user')
   );
   const showSwipeStepper = $derived(!isUser && !message.streaming && !message.error);
-  let touchStart = $state<{ x: number; y: number } | null>(null);
+  let pointerStart = $state<{ x: number; y: number; id: number } | null>(null);
   let swipePreview = $state<'previous' | 'next' | null>(null);
 
   function retry() {
@@ -105,44 +105,31 @@
     void onGenerateAlternate?.(message);
   }
 
-  function handleTouchStart(event: TouchEvent) {
+  function handlePointerDown(event: PointerEvent) {
     if (!canTouchSwipe) {
       return;
     }
 
-    const touch = event.touches[0];
-    if (!touch) {
-      return;
-    }
-    touchStart = { x: touch.clientX, y: touch.clientY };
+    pointerStart = { x: event.clientX, y: event.clientY, id: event.pointerId };
     swipePreview = null;
   }
 
-  function handleTouchMove(event: TouchEvent) {
-    if (!touchStart || !canTouchSwipe) {
+  function handlePointerMove(event: PointerEvent) {
+    if (!pointerStart || pointerStart.id !== event.pointerId || !canTouchSwipe) {
       return;
     }
 
-    const touch = event.touches[0];
-    if (!touch) {
-      return;
-    }
-    swipePreview = swipeTarget(touch.clientX - touchStart.x, touch.clientY - touchStart.y, 24);
+    swipePreview = swipeTarget(event.clientX - pointerStart.x, event.clientY - pointerStart.y, 24);
   }
 
-  function handleTouchEnd(event: TouchEvent) {
-    if (!touchStart || !canTouchSwipe) {
-      resetTouchSwipe();
+  function handlePointerUp(event: PointerEvent) {
+    if (!pointerStart || pointerStart.id !== event.pointerId || !canTouchSwipe) {
+      resetPointerSwipe();
       return;
     }
 
-    const touch = event.changedTouches[0];
-    if (!touch) {
-      resetTouchSwipe();
-      return;
-    }
-    const target = swipeTarget(touch.clientX - touchStart.x, touch.clientY - touchStart.y, 56);
-    resetTouchSwipe();
+    const target = swipeTarget(event.clientX - pointerStart.x, event.clientY - pointerStart.y, 56);
+    resetPointerSwipe();
 
     if (target === 'previous') {
       selectPreviousAlternate();
@@ -151,8 +138,8 @@
     }
   }
 
-  function resetTouchSwipe() {
-    touchStart = null;
+  function resetPointerSwipe() {
+    pointerStart = null;
     swipePreview = null;
   }
 
@@ -191,10 +178,10 @@
   data-selected-alternate-id={message.selected_alternate_id ?? ''}
   data-stale-after-edit={message.stale_after_edit ? 'true' : 'false'}
   data-streaming={message.streaming ? 'true' : 'false'}
-  ontouchstart={handleTouchStart}
-  ontouchmove={handleTouchMove}
-  ontouchend={handleTouchEnd}
-  ontouchcancel={resetTouchSwipe}
+  onpointerdown={handlePointerDown}
+  onpointermove={handlePointerMove}
+  onpointerup={handlePointerUp}
+  onpointercancel={resetPointerSwipe}
 >
   {#if !isUser}
     <div class="avatar" aria-hidden="true">

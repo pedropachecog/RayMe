@@ -186,6 +186,22 @@ async function installMobileRoutes(page: Page) {
     await fulfillJson(route, next);
   });
   await page.route('**/api/messages/mobile-ai-1/swipes', async (route) => {
+    const payload = route.request().postData()
+      ? (route.request().postDataJSON() as { alternate_id?: string })
+      : null;
+    if (payload?.alternate_id) {
+      const selected = messages[2].alternates.find((alternate) => alternate.id === payload.alternate_id);
+      expect(selected).toBeTruthy();
+      const next = {
+        ...messages[2],
+        content_text: selected?.content_text ?? messages[2].content_text,
+        selected_alternate_id: payload.alternate_id
+      } satisfies Message;
+      messages[2] = next;
+      await fulfillJson(route, next);
+      return;
+    }
+
     const next = {
       ...messages[2],
       selected_alternate_id: 'mobile-swipe',
@@ -268,6 +284,8 @@ test('mobile viewport can import chat reload and continue', async ({ page }) => 
   await expect(page.getByText('Mobile regenerated backend answer.')).toBeVisible();
   await page.locator('[data-message-id="mobile-ai-1"]').getByRole('button', { name: 'Generate alternate' }).click();
   await expect(page.getByText('Mobile swipe backend alternate.')).toBeVisible();
+  await swipeMessage(page, 'mobile-ai-1', 'right');
+  await expect(page.getByText('Mobile regenerated backend answer.')).toBeVisible();
   await page.getByRole('textbox', { name: 'Message' }).fill('mobile continue text');
   await chooseAction(page, 'mobile-ai-1', 'Continue');
   await expect(page.getByText('Mobile continue backend alternate.')).toBeVisible();
@@ -285,3 +303,32 @@ test('mobile viewport can import chat reload and continue', async ({ page }) => 
   expect((composerBox?.y ?? 0) + (composerBox?.height ?? 0)).toBeLessThanOrEqual(mobileNavBox?.y ?? 0);
   await expectNoBrowserErrors();
 });
+
+async function swipeMessage(page: Page, messageId: string, direction: 'left' | 'right') {
+  const row = page.locator(`[data-message-id="${messageId}"]`);
+  const box = await row.boundingBox();
+  expect(box).not.toBeNull();
+
+  const startX = direction === 'left' ? (box?.x ?? 0) + (box?.width ?? 0) - 24 : (box?.x ?? 0) + 24;
+  const endX = direction === 'left' ? startX - 96 : startX + 96;
+  const y = (box?.y ?? 0) + (box?.height ?? 0) / 2;
+
+  await row.dispatchEvent('pointerdown', {
+    pointerId: 1,
+    pointerType: 'touch',
+    clientX: startX,
+    clientY: y
+  });
+  await row.dispatchEvent('pointermove', {
+    pointerId: 1,
+    pointerType: 'touch',
+    clientX: endX,
+    clientY: y
+  });
+  await row.dispatchEvent('pointerup', {
+    pointerId: 1,
+    pointerType: 'touch',
+    clientX: endX,
+    clientY: y
+  });
+}

@@ -316,7 +316,7 @@ describe('chat route contract', () => {
     expect(selectedMessageContent(messages[0])).toBe('First generated swipe');
     expect(messages[0].selected_alternate_id).toBe('swipe-alt-1');
     expect(swipeStepperSource).toContain('Generate alternate');
-    expect(bubbleSource).toContain('ontouchstart={handleTouchStart}');
+    expect(bubbleSource).toContain('onpointerdown={handlePointerDown}');
     expect(bubbleSource).toContain('swipe-preview-next');
   });
 
