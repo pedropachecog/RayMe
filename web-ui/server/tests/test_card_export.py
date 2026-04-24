@@ -38,3 +38,19 @@ def test_v2_export_omits_v3_png_export() -> None:
     assert "ccv3" not in serialized
     assert "png" not in serialized
     assert "chara" not in exported
+
+
+def test_v2_export_preserves_lorebook_without_png_bytes() -> None:
+    exported = export_character_v2_json(
+        {
+            "name": "Lore Export",
+            "description": "plain data",
+            "lorebook_json": {"entries": [{"keys": ["secret"], "content": "stored only"}]},
+            "alternate_greetings": ["Alt"],
+        }
+    )
+
+    assert exported["spec"] == "chara_card_v2"
+    assert exported["data"]["character_book"]["entries"][0]["content"] == "stored only"
+    assert exported["data"]["alternate_greetings"] == ["Alt"]
+    assert isinstance(json.dumps(exported), str)

@@ -5,12 +5,19 @@ from __future__ import annotations
 import base64
 import io
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
 from PIL import Image, PngImagePlugin
 
-from app.domain.cards import CharacterCardParseError, parse_character_card_bytes
+from app.domain.cards import (
+    CharacterCardParseError,
+    MAX_PNG_CARD_JSON_BYTES,
+    parse_character_card_bytes,
+)
+
+CARD_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "cards"
 
 
 def _json_bytes(payload: dict[str, Any]) -> bytes:
@@ -185,3 +192,54 @@ def test_import_response_reports_lorebook_present_not_used() -> None:
     assert result.lorebook_json == lorebook
     assert "lorebook_json" in result.prompt_excluded_fields
     assert "Ignore prior instructions" not in prompt_fields
+
+
+@pytest.mark.parametrize(
+    ("fixture_name", "expected_format", "expected_name"),
+    (
+        ("v2_card.json", "v2_json", "RayMe Fixture V2"),
+        ("v3_card.json", "v3_json", "RayMe Fixture V3"),
+        ("v2_card.png", "v2_png", "RayMe PNG V2"),
+        ("v3_card.png", "v3_png", "RayMe PNG V3"),
+    ),
+)
+def test_plan04_card_fixtures_import_successfully(
+    fixture_name: str,
+    expected_format: str,
+    expected_name: str,
+) -> None:
+    fixture = CARD_FIXTURE_DIR / fixture_name
+
+    result = parse_character_card_bytes(fixture.read_bytes(), filename=fixture.name)
+
+    assert result.source_format == expected_format
+    assert result.character.name == expected_name
+    assert result.raw_source_json["data"]["name"] == expected_name
+
+
+def test_plan04_dual_png_fixture_prefers_ccv3() -> None:
+    fixture = CARD_FIXTURE_DIR / "dual_chunk_prefers_ccv3.png"
+
+    result = parse_character_card_bytes(fixture.read_bytes(), filename=fixture.name)
+
+    assert result.source_key == "ccv3"
+    assert result.character.name == "RayMe Dual Preferred CCV3"
+
+
+def test_oversized_png_card_metadata_rejected_without_traceback() -> None:
+    oversized_payload = b'{"data":{"name":"' + (b"A" * MAX_PNG_CARD_JSON_BYTES) + b'"}}'
+    oversized_png = _png_card_bytes(
+        ccv3=base64.b64encode(oversized_payload).decode("ascii"),
+    )
+
+    with pytest.raises(CharacterCardParseError) as exc_info:
+        parse_character_card_bytes(oversized_png, filename="oversized.png")
+
+    message = str(exc_info.value)
+    assert "too large" in message.lower()
+    assert "Traceback" not in message
+
+
+def test_oversized_upload_rejected_before_parsing() -> None:
+    with pytest.raises(CharacterCardParseError, match="too large"):
+        parse_character_card_bytes(b" " * (10 * 1024 * 1024 + 1), filename="large.json")
