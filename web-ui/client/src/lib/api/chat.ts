@@ -22,8 +22,8 @@ export interface MessageActionDescriptor {
 }
 
 export const AI_MESSAGE_ACTIONS: MessageActionDescriptor[] = [
-  { id: 'regenerate', label: 'Regenerate' },
-  { id: 'swipe', label: 'Generate alternate' },
+  { id: 'regenerate', label: 'Redo and Replace' },
+  { id: 'swipe', label: 'Redo' },
   { id: 'edit', label: 'Edit' },
   { id: 'continue', label: 'Continue' }
 ];

@@ -490,14 +490,14 @@ test('full Phase 1 browser acceptance path survives reload and continues', async
   await expect(page.getByText('Phase one streamed answer.')).toBeVisible();
   await expect(page.locator('[data-stale-after-edit="true"]')).toHaveCount(1);
 
-  await chooseMessageAction(page, 'phase1-ai-1', 'Regenerate');
+  await chooseMessageAction(page, 'phase1-ai-1', 'Redo and Replace');
   await expect(page.getByText('Phase one regenerated replacement.')).toBeVisible();
   await expect(page.locator('[data-message-id="phase1-ai-1"]')).toHaveAttribute(
     'data-selected-alternate-id',
     'phase1-regenerated-selected'
   );
 
-  await page.locator('[data-message-id="phase1-ai-1"]').getByRole('button', { name: 'Generate alternate' }).click();
+  await page.locator('[data-message-id="phase1-ai-1"]').getByRole('button', { name: 'Redo' }).click();
   await expect(page.getByText('Phase one swipe alternate selected.')).toBeVisible();
   await expect(page.locator('[data-message-id="phase1-ai-1"]')).toHaveAttribute(
     'data-selected-alternate-id',

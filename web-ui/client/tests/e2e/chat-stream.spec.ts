@@ -166,6 +166,6 @@ test('chat stream error keeps the user message and renders exact recovery copy',
 
   await expect(page.getByText('Try the endpoint')).toBeVisible();
   await expect(page.getByText(errorCopy)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Regenerate' })).toBeVisible();
+  await expect(page.getByRole('alert').getByRole('button', { name: 'Redo' })).toBeVisible();
   await expectNoBrowserErrors();
 });

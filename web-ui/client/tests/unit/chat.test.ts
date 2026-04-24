@@ -114,8 +114,8 @@ describe('chat route contract', () => {
 
   it('exposes AI message actions and user edit-only menu contract', () => {
     expect(messageActionsForRole('assistant').map((action) => action.label)).toEqual([
-      'Regenerate',
-      'Generate alternate',
+      'Redo and Replace',
+      'Redo',
       'Edit',
       'Continue'
     ]);
@@ -315,7 +315,7 @@ describe('chat route contract', () => {
     });
     expect(selectedMessageContent(messages[0])).toBe('First generated swipe');
     expect(messages[0].selected_alternate_id).toBe('swipe-alt-1');
-    expect(swipeStepperSource).toContain('Generate alternate');
+    expect(swipeStepperSource).toContain('aria-label="Redo"');
     expect(bubbleSource).toContain('onpointerdown={handlePointerDown}');
     expect(bubbleSource).toContain('swipe-preview-next');
   });
@@ -396,7 +396,7 @@ describe('chat route contract', () => {
     expect(errored.retryContent).toBe('Retry me');
     expect(chatApiSource).toContain(CHAT_STREAM_ERROR_COPY);
     expect(bubbleSource).toContain('{message.error}');
-    expect(bubbleSource).toContain('Regenerate');
+    expect(bubbleSource).toContain('Redo');
   });
 
   it('composer sends on Enter and preserves newline entry on Shift+Enter', () => {

@@ -239,7 +239,7 @@
         <p>{message.error}</p>
         <button type="button" onclick={retry}>
           <RefreshCw size={16} strokeWidth={1.8} aria-hidden="true" />
-          <span>Regenerate</span>
+          <span>Redo</span>
         </button>
       </div>
     {:else}

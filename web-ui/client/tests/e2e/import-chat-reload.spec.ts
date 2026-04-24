@@ -356,14 +356,14 @@ test('imported character chat reloads and continues', async ({ page }) => {
   await expect(page.locator('[data-message-id="ai-send-1"]')).toBeVisible();
   await expect(page.getByText('Streamed backend answer.')).toBeVisible();
 
-  await chooseMessageAction(page, 'ai-send-1', 'Regenerate');
+  await chooseMessageAction(page, 'ai-send-1', 'Redo and Replace');
   await expect(page.getByText('Backend regenerated replacement.')).toBeVisible();
   await expect(page.locator('[data-message-id="ai-send-1"]')).toHaveAttribute(
     'data-selected-alternate-id',
     'alt-regenerated-selected'
   );
 
-  await page.locator('[data-message-id="ai-send-1"]').getByRole('button', { name: 'Generate alternate' }).click();
+  await page.locator('[data-message-id="ai-send-1"]').getByRole('button', { name: 'Redo' }).click();
   await expect(page.getByText('Backend swipe alternate selected.')).toBeVisible();
   await expect(page.locator('[data-message-id="ai-send-1"]')).toHaveAttribute(
     'data-selected-alternate-id',

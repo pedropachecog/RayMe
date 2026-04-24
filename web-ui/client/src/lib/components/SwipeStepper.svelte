@@ -39,12 +39,12 @@
   <button
     class="generate"
     type="button"
-    aria-label="Generate alternate"
+    aria-label="Redo"
     disabled={disabled}
     onclick={() => onGenerate?.()}
   >
     <Sparkles size={16} strokeWidth={1.8} aria-hidden="true" />
-    <span>Generate alternate</span>
+    <span>Redo</span>
   </button>
 </div>
 

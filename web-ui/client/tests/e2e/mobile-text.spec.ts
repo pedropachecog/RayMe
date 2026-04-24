@@ -280,9 +280,9 @@ test('mobile viewport can import chat reload and continue', async ({ page }) => 
   await page.keyboard.press('Enter');
   await expect(page.getByText('Mobile streamed answer.')).toBeVisible();
 
-  await chooseAction(page, 'mobile-ai-1', 'Regenerate');
+  await chooseAction(page, 'mobile-ai-1', 'Redo and Replace');
   await expect(page.getByText('Mobile regenerated backend answer.')).toBeVisible();
-  await page.locator('[data-message-id="mobile-ai-1"]').getByRole('button', { name: 'Generate alternate' }).click();
+  await page.locator('[data-message-id="mobile-ai-1"]').getByRole('button', { name: 'Redo' }).click();
   await expect(page.getByText('Mobile swipe backend alternate.')).toBeVisible();
   await swipeMessage(page, 'mobile-ai-1', 'right');
   await expect(page.getByText('Mobile regenerated backend answer.')).toBeVisible();

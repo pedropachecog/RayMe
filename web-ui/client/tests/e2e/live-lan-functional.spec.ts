@@ -225,12 +225,12 @@ async function runFullTextFlow(page: Page, threadId: string) {
   await sendAndWaitForAssistant(page, 'Give me one short line.', openingCount);
 
   let target = assistantMessages.last();
-  await runMessageMenuAction(page, target, 'Regenerate');
+  await runMessageMenuAction(page, target, 'Redo and Replace');
   await waitForActionToSettle(target);
 
   target = assistantMessages.last();
   const selectedBeforeSwipe = await target.getAttribute('data-selected-alternate-id');
-  await target.getByRole('button', { name: 'Generate alternate' }).click();
+  await target.getByRole('button', { name: 'Redo' }).click();
   await expect(target).not.toHaveAttribute('data-selected-alternate-id', selectedBeforeSwipe ?? '', {
     timeout: 120_000
   });
