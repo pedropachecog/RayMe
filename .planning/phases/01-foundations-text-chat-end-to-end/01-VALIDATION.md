@@ -1,7 +1,7 @@
 ---
 phase: 01
 slug: foundations-text-chat-end-to-end
-status: automated-green-pending-android
+status: green
 nyquist_compliant: true
 wave_0_complete: true
 created: 2026-04-24
@@ -97,7 +97,7 @@ Rows map requirements to the required verification surface. Plan IDs are provisi
 - [x] HTTPS runbooks exist at `web-ui/server/docs/HTTPS-LAN.md` and `web-ui/server/docs/PHASE1-ACCEPTANCE.md` with direct LAN IP URLs `https://192.168.1.199:8443` and `https://192.168.1.199:9443/health`.
 - [x] Required automated commands passed: `uv run --project web-ui/server pytest web-ui/server/tests -q`, `npm --prefix web-ui/client run test:unit -- --run`, and `npm --prefix web-ui/client run test:e2e`.
 - [x] `rg "test\.(skip|fixme|todo)" web-ui/client/tests web-ui/server/tests` returned no matches.
-- [ ] Manual Android Chrome direct-IP HTTPS acceptance remains pending. Do not mark green until the physical-device flow is approved.
+- [x] Manual Android Chrome direct-IP HTTPS acceptance green on 2026-04-24 for `https://192.168.1.199:8443` and `https://192.168.1.199:9443/health`.
 
 ## Manual-Only Verifications
 

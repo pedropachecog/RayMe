@@ -45,8 +45,8 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 ## Phases
 
 - [ ] **Phase 0: Measurement Gate** — 2–3 day spike that validates VRAM, STT WER, TTS TTFA, HTTPS-on-Android, and FA2 viability before Phase 1 freezes stack commitments.
-- [ ] **Phase 1: Foundations & Text Chat** — Three-service skeleton with HTTPS, the unified `messages` schema, SillyTavern card CRUD + import/export, and full-featured text chat end-to-end against a streaming LLM.
-- [ ] **Phase 01.1: UI Acceptance & Regression Test Hardening** — Inserted verification pass to convert manually discovered Phase 1 UI regressions into durable Playwright/API coverage before Phase 2.
+- [x] **Phase 1: Foundations & Text Chat** — Three-service skeleton with HTTPS, the unified `messages` schema, SillyTavern card CRUD + import/export, and full-featured text chat end-to-end against a streaming LLM.
+- [x] **Phase 01.1: UI Acceptance & Regression Test Hardening** — Inserted verification pass to convert manually discovered Phase 1 UI regressions into durable Playwright/API coverage before Phase 2.
 - [ ] **Phase 2: AI Backend Skeleton & Voice Lab** — FastAPI + aiortc signaling, resident Whisper + Silero VAD + one-hot TTS engine on the GPU, Voice Lab upload → auto-transcript → edit → synth-preview → save, Settings with three-endpoint connection tests.
 - [ ] **Phase 3: First Working Call (MVP)** — Voice Call screen with `RTCPeerConnection`, AudioContext gesture unlock, orchestrator FSM skeleton, one-sentence non-streaming reply. Proves the media plumbing end-to-end.
 - [ ] **Phase 4: Call Feel** — Sentence-chunked streaming TTS, VAD-driven barge-in with LIFO cancel and mid-stream LLM abort, live bidirectional captions over data channel, echo-loop mitigation, Voice Visualizer three-state. The core-value phase.
@@ -144,7 +144,7 @@ Plans:
 - [x] 01-21-PLAN.md - Chat route hydration, composer, and streaming send UI (Wave 7)
 - [x] 01-22-PLAN.md - Chat message actions, generated swipes, stale flags, and continue UI (Wave 8)
 - [x] 01-23-PLAN.md - Chat virtualization, jump-to-latest, and mobile layout coverage (Wave 9)
-- [ ] 01-24-PLAN.md - Full automated acceptance, HTTPS/mobile runbooks, and Android Chrome checkpoint (Wave 10)
+- [x] 01-24-PLAN.md - Full automated acceptance, HTTPS/mobile runbooks, and Android Chrome checkpoint (Wave 10)
 
 **UI hint:** yes
 
@@ -183,7 +183,7 @@ Plans:
 - [x] 01.1-03-PLAN.md - Settings save-before-test and local no-key LLM E2E coverage (Wave 1)
 - [x] 01.1-04-PLAN.md - Guarded full Phase 1 browser acceptance path and existing E2E guard integration (Wave 2)
 - [x] 01.1-05-PLAN.md - Live OMEN-PC functional browser checks and Android product-owner checkpoint (Wave 3)
-- [ ] 01.1-06-PLAN.md - Phase 1 plan 01-24 summary gate after Android approval (Wave 4)
+- [x] 01.1-06-PLAN.md - Phase 1 plan 01-24 summary gate after Android approval (Wave 4)
 
 **UI hint:** yes
 
