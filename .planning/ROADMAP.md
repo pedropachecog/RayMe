@@ -120,13 +120,13 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 **Plans:** 24 plans
 
 Plans:
-- [ ] 01-01-PLAN.md - Backend project harness and app factory (Wave 1)
+- [x] 01-01-PLAN.md - Backend project harness and app factory (Wave 1)
 - [ ] 01-02-PLAN.md - Backend chat/schema/message-action contracts, including LLM-backed action tests (Wave 2)
 - [ ] 01-03-PLAN.md - Backend card/character/settings contracts (Wave 2)
 - [ ] 01-04-PLAN.md - Card parser fixtures and malicious payload corpus (Wave 2)
-- [ ] 01-05-PLAN.md - SvelteKit static client scaffold (Wave 1)
+- [x] 01-05-PLAN.md - SvelteKit static client scaffold (Wave 1)
 - [ ] 01-06-PLAN.md - Sanitizer boundary and Playwright acceptance shells (Wave 2)
-- [ ] 01-07-PLAN.md - AI-backend health stub, external LLM docs/config, and LAN HTTPS examples (Wave 1)
+- [x] 01-07-PLAN.md - AI-backend health stub, external LLM docs/config, and LAN HTTPS examples (Wave 1)
 - [ ] 01-08-PLAN.md - Wave 0 validation marker and initial SQLite/Alembic schema (Wave 3)
 - [ ] 01-09-PLAN.md - Atomic blob storage and orphan reaper (Wave 3)
 - [ ] 01-10-PLAN.md - Web host config, CORS/CSP, static serving, and HTTPS runner (Wave 4)
