@@ -95,7 +95,12 @@ def test_csp_contains_default_src_self() -> None:
     response = client.get("/")
 
     assert "default-src 'self'" in CSP_HEADER
+    assert "script-src 'self' 'unsafe-inline'" in CSP_HEADER
     assert "default-src 'self'" in response.headers["content-security-policy"]
+    assert (
+        "script-src 'self' 'unsafe-inline'"
+        in response.headers["content-security-policy"]
+    )
 
 
 def test_static_client_mount_is_conditional_on_build_output(tmp_path: Path) -> None:

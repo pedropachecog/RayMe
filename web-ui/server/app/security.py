@@ -9,6 +9,7 @@ CSP_HEADER = (
     "default-src 'self'; "
     "connect-src 'self'; "
     "img-src 'self' data: blob:; "
+    "script-src 'self' 'unsafe-inline'; "
     "style-src 'self' 'unsafe-inline'"
 )
 
