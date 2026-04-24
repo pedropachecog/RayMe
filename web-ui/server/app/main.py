@@ -10,6 +10,7 @@ from starlette.types import Scope
 from app.api.characters import router as characters_router
 from app.api.health import router as health_router
 from app.api.settings import router as settings_router
+from app.api.threads import router as threads_router
 from app.config import Settings, get_settings
 from app.security import configure_cors, configure_security_headers
 
@@ -52,6 +53,7 @@ def create_app(
     app.include_router(health_router)
     app.include_router(settings_router)
     app.include_router(characters_router)
+    app.include_router(threads_router)
 
     if static_client_dir is not None:
         mount_static_client(app, static_client_dir)
