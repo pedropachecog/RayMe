@@ -11,22 +11,22 @@ as durable context, not one-off preferences.
 - All agent-created Windows-side RayMe artifacts on `OMEN-PC` must live under
   `C:\Users\pmpg\rayme\`. Do not create additional top-level directories in
   `C:\Users\pmpg\`.
-- Current Windows-side runtime staging layout:
-  - `C:\Users\pmpg\rayme\phase1-app\` - staged runtime copy used when the
-    Windows host must bind `192.168.1.199`.
-  - `C:\Users\pmpg\rayme\phase1-app\.venv\` - Windows Python runtime
-    environment for that staged app.
-  - `C:\Users\pmpg\rayme\phase1-app\web-ui\server\` - staged Web UI API/static
-    host source.
-  - `C:\Users\pmpg\rayme\phase1-app\web-ui\client\build\` - staged built
-    Svelte client.
-  - `C:\Users\pmpg\rayme\phase1-app\ai-backend\` - staged AI backend health
-    service source.
-  - `C:\Users\pmpg\rayme\phase1-tls\` - backend mirror of the reusable Phase 1
-    TLS cert set.
-- The staged Windows app is not a new source of truth. The source of truth stays
-  in the repo; restage deliberately when code changes need to run on the
-  physical LAN host.
+- Backend runtime code should be a Git checkout, not an ad hoc copied staging
+  tree. Use `C:\Users\pmpg\rayme\RayMe\` as the canonical Windows-side checkout
+  on `OMEN-PC`, and use Git to inspect/update the commit that is running.
+- If `OMEN-PC` cannot clone/fetch from GitHub non-interactively, use a Git
+  bundle as the transport, but keep the backend as a real branch checkout:
+  - local: `git bundle create .local/backend-sync/RayMe-main.bundle main`
+  - copy bundle to `C:\Users\pmpg\rayme\RayMe-main.bundle`
+  - first backend setup: `git clone -b main C:\Users\pmpg\rayme\RayMe-main.bundle C:\Users\pmpg\rayme\RayMe`
+  - backend update: from `C:\Users\pmpg\rayme\RayMe`, run `git fetch C:\Users\pmpg\rayme\RayMe-main.bundle main:refs/heads/main` and `git switch main`
+  - verify with `git status`, `git branch --show-current`, and `git rev-parse HEAD`
+- `C:\Users\pmpg\rayme\phase1-app\` was a temporary copied staging tree created
+  during Plan 01-24 troubleshooting. Do not add to it or treat it as canonical;
+  it can be removed after `C:\Users\pmpg\rayme\RayMe\` is available and verified.
+- `C:\Users\pmpg\rayme\phase1-tls\` is the backend mirror of the reusable Phase
+  1 TLS cert set. TLS material stays outside the Git checkout because it is
+  private and gitignored locally.
 - Reusable Phase 1 LAN TLS material lives locally under
   `.local/phase1-tls/`, which is gitignored but persisted with the repo bind
   mount.
@@ -50,7 +50,9 @@ as durable context, not one-off preferences.
 - If WSL cannot bind `192.168.1.199`, use the Windows side of `OMEN-PC`; the LAN
   IP belongs to Windows, not the local container.
 - Do not waste time searching for ad hoc backend staging directories. Check
-  `C:\Users\pmpg\rayme\` first; if the needed runtime copy is stale, refresh it
-  from the repo into the documented subdirectories.
+  `C:\Users\pmpg\rayme\RayMe\` first, then run `git status`, `git branch`, and
+  `git rev-parse HEAD` to determine what code is on the backend. If that
+  checkout is missing, create it there rather than copying a partial runtime
+  tree.
 - Keep generated private keys, root CA keys, virtual environments, and staged
   runtime apps out of git.
