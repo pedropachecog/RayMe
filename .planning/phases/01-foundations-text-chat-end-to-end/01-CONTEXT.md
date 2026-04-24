@@ -1,7 +1,8 @@
 # Phase 1: Foundations & Text Chat End-to-End - Context
 
 **Gathered:** 2026-04-23T23:39:24Z
-**Status:** Ready for planning
+**Updated:** 2026-04-24
+**Status:** Ready for UI design contract, then planning
 
 <domain>
 ## Phase Boundary
@@ -15,51 +16,64 @@ This phase does not implement Voice Lab synthesis, resident STT/TTS/VAD models, 
 <decisions>
 ## Implementation Decisions
 
-### Workflow Fallback
-- **D-01:** Structured interactive prompts are unavailable in this Codex session, so this context uses the `gsd-discuss-phase` fallback: present the gray areas conceptually and lock conservative defaults from `PROJECT.md`, `REQUIREMENTS.md`, Phase 0 decisions, and existing research.
-- **D-02:** These decisions should be treated as builder defaults, not new product scope. If the user later wants a different UX preference, update this context before planning.
+### Discussion Mode
+- **D-01:** The project now has `workflow.text_mode: true`, so future GSD discussion workflows must use plain numbered prompts and must not skip discussion because structured prompt UI is unavailable.
+- **D-02:** Recommendations should always be shown clearly and listed first. User selections in this file are explicit discussion decisions, not inferred defaults.
+
+### Phase 1 Delivery Shape
+- **D-03:** Prioritize a balanced vertical slice: Home -> Character Gallery/import -> Character Editor basics -> Chat -> streaming LLM reply -> persisted unified messages. This is preferred over backend-only progress or broad but shallow screen scaffolding.
+- **D-04:** Phase 1 acceptance target is an end-to-end imported-character chat over HTTPS: import a v2/v3 card, start a chat, stream a reply, persist unified messages, reload, and continue.
+- **D-05:** Run `$gsd-ui-phase 1` before implementation planning. Planning should consume a UI design contract for Home, Character Gallery, Character Editor, Settings, and Chat instead of relying only on the Stitch handoff.
 
 ### Service And Repo Shape
-- **D-03:** Use a monorepo with three top-level runtime areas: `web-ui/`, `ai-backend/`, and `llm/` docs/config only. The LLM is external and OpenAI-compatible; RayMe does not ship local inference.
-- **D-04:** Split `web-ui/` into a SvelteKit 2 / Svelte 5 static client and a Python FastAPI API/static host. The FastAPI host owns SQLite, file blobs, app APIs, TLS serving, and LLM proxying for text chat.
-- **D-05:** Create an `ai-backend/` FastAPI health stub in Phase 1 only. It must answer `/health` over HTTPS and support Settings connection tests, but model residency and WebRTC signaling are Phase 2+.
-- **D-06:** Text chat calls the LLM from the Web UI host, not directly from the browser, so API keys stay server-side and streaming behavior is centralized.
+- **D-06:** Use a monorepo with three top-level runtime areas: `web-ui/`, `ai-backend/`, and `llm/` docs/config only. The LLM is external and OpenAI-compatible; RayMe does not ship local inference.
+- **D-07:** Split `web-ui/` into a SvelteKit 2 / Svelte 5 static client and a Python FastAPI API/static host. The FastAPI host owns SQLite, file blobs, app APIs, TLS serving, and LLM proxying for text chat.
+- **D-08:** Create an `ai-backend/` FastAPI health stub in Phase 1 only. It must answer `/health` over HTTPS and support Settings connection tests, but model residency and WebRTC signaling are Phase 2+.
+- **D-09:** Text chat uses a server-side LLM proxy. The browser talks to RayMe; RayMe streams from the configured OpenAI-compatible endpoint so API keys and endpoint details stay server-side.
 
 ### HTTPS And LAN Safety
-- **D-07:** Use the Phase 0 mkcert-on-LAN workflow as the only supported Phase 1 HTTPS path. The known passing Android URL was `https://192.168.1.199:8443`.
-- **D-08:** First-launch or Settings should visibly check `window.isSecureContext` and `navigator.mediaDevices` because certificate appearance alone is not the real mobile readiness signal.
-- **D-09:** Bind services to explicit configured LAN interfaces by default. If `0.0.0.0` is needed to satisfy local LAN reachability during development, require an explicit config value and a visible LAN-trust warning.
-- **D-10:** CORS and WebSocket origin policy must be explicit allow-lists. No `Access-Control-Allow-Origin: *` for app APIs.
+- **D-10:** Use the Phase 0 mkcert-on-LAN workflow as the only supported Phase 1 HTTPS path. The known passing Android URL was `https://192.168.1.199:8443`.
+- **D-11:** First-launch or Settings should visibly check `window.isSecureContext` and `navigator.mediaDevices` because certificate appearance alone is not the real mobile readiness signal.
+- **D-12:** Use explicit LAN bind with guided setup: default to configured LAN IP/host, show setup guidance when missing, and do not bind `0.0.0.0` by default.
+- **D-13:** CORS and WebSocket origin policy must be explicit allow-lists. No `Access-Control-Allow-Origin: *` for app APIs.
 
 ### Storage And Schema
-- **D-11:** SQLite is the durable metadata store from day one, with migrations checked in. Use WAL mode and predictable local data paths.
-- **D-12:** Binary assets are files on disk, not SQLite BLOBs. Phase 1 needs this for character portraits and future compatibility with voice/audio blobs.
-- **D-13:** Establish the unified `messages` table immediately with `message_kind` values for `user_text`, `ai_text`, `user_speech`, `ai_speech`, `call_start`, and `call_end`, even though Phase 1 only writes text kinds.
-- **D-14:** Message branch/swipe support should be represented in schema now, so Regenerate, Swipes, Edit stale-state, and Continue do not require a later migration.
-- **D-15:** Character deletion should preserve existing chat history. Prefer soft delete or detached historical snapshots over cascading thread deletion.
+- **D-14:** Use schema-first SQLite: build migrations and real tables up front, including future `message_kind` values and branch/swipe structure.
+- **D-15:** Binary assets are files on disk, not SQLite BLOBs. Phase 1 needs this for character portraits and future compatibility with voice/audio blobs.
+- **D-16:** Establish the unified `messages` table immediately with `message_kind` values for `user_text`, `ai_text`, `user_speech`, `ai_speech`, `call_start`, and `call_end`, even though Phase 1 only writes text kinds.
+- **D-17:** Message branch/swipe support should be represented in schema now, so Regenerate, Swipes, Edit stale-state, and Continue do not require a later migration.
+- **D-18:** Character deletion should preserve existing chat history. Prefer soft delete or detached historical snapshots over cascading thread deletion.
 
 ### Character Cards
-- **D-16:** Normalize all imported cards to one internal v3-shaped character model, while preserving original source JSON for safe round-trip and later export work.
-- **D-17:** PNG import must prefer the `ccv3` tEXt chunk and fall back to `chara`. Malformed base64, oversized chunks, or schema-invalid payloads must fail with clear import errors.
-- **D-18:** v2 JSON export ships in Phase 1. v3 PNG export remains deferred to v1.x per requirements.
-- **D-19:** Lorebook/world-info data must be preserved in storage and surfaced as "present, not used in v1"; it must not be injected into the LLM context in this phase.
-- **D-20:** Character-rendered fields are untrusted content. Render as escaped text or through a strict Markdown pipeline with sanitization; never raw HTML.
+- **D-19:** Normalize all imported cards to one internal v3-shaped character model, while preserving original source JSON for safe round-trip and later export work.
+- **D-20:** Use best-effort safe import: import what RayMe can safely parse, preserve raw source JSON, warn clearly about ignored/invalid fields, and reject dangerous or malformed payloads that could crash parsing or create XSS risk.
+- **D-21:** PNG import must prefer the `ccv3` tEXt chunk and fall back to `chara`.
+- **D-22:** v2 JSON export ships in Phase 1. v3 PNG export remains deferred to v1.x per requirements.
+- **D-23:** Lorebook/world-info data must be preserved in storage and surfaced as "present, not used in v1"; it must not be injected into the LLM context in this phase.
+- **D-24:** Character-rendered fields are untrusted content. Render with sanitized Markdown: preserve common card formatting, but strip/escape HTML and dangerous content. Never render raw HTML.
+- **D-25:** Character Gallery is the import entry point. Imported cards should open in Character Editor for review/save.
 
 ### Text Chat Semantics
-- **D-21:** A new chat seeds the opening AI message from `first_mes`; if alternate greetings exist, show a picker before creating the thread.
-- **D-22:** Streaming LLM output should render token-by-token, then persist the final message atomically when the stream completes.
-- **D-23:** Regenerate replaces the current selected AI response for the last AI turn; it does not append a second visible canonical answer.
-- **D-24:** Swipes store alternates for an AI turn and track the selected alternate. Only the selected branch contributes to future LLM context.
-- **D-25:** Editing a prior user or AI turn marks downstream turns stale. The UI must offer truncate-and-continue or keep-stale-history instead of silently rewriting history.
-- **D-26:** Continue uses the composer text, when present, as an instruction/prefix to extend the previous AI turn.
-- **D-27:** Long threads should be virtualized once they cross the requirement threshold, approximately 500 messages.
+- **D-26:** Implement full SillyTavern text basics in Phase 1: streaming replies, Regenerate, Edit with stale downstream turns, Swipes, Continue, and alternate greetings.
+- **D-27:** New chats start immediately with the default `first_mes`. If alternate greetings exist, the opening message must clearly show an alternate-greeting control so the user can switch before continuing the thread.
+- **D-28:** Streaming LLM output should render token-by-token, then persist the final message atomically when the stream completes.
+- **D-29:** Regenerate replaces the current selected AI response for the last AI turn; it does not append a second visible canonical answer.
+- **D-30:** Swipes store alternates for an AI turn and track the selected alternate. Only the selected branch contributes to future LLM context.
+- **D-31:** Editing a prior user or AI turn marks downstream turns stale. Use an explicit stale flag with branch choice: when continuing after an edit, the user chooses truncate stale downstream turns or keep stale history.
+- **D-32:** Continue uses the composer text, when present, as an instruction/prefix to extend the previous AI turn.
+- **D-33:** Use per-message contextual actions: hover/tap menu on AI turns for Regenerate, Swipe, Edit, and Continue; user turns get Edit.
+- **D-34:** Long threads should be virtualized once they cross the requirement threshold, approximately 500 messages.
 
 ### UI And Design
-- **D-28:** Build the actual app shell as the first screen, not a landing page. Home is the operational dashboard.
-- **D-29:** Use `docs/stitch/DESIGN.md` and the True Dark Stitch exports as the visual contract. Home, Character Gallery, Character Editor, and Settings are the Phase 1 primary screens; Voice Lab and Voice Call can appear as disabled/future nav entries only if needed for navigation consistency.
-- **D-30:** Follow the design system's tonal layering and no-divider/no-raw-border direction while still preserving accessibility. Use ghost outlines only when needed for usable focus/structure.
-- **D-31:** Settings in Phase 1 must include endpoint configuration and connection tests for Web UI host, AI backend stub, and LLM endpoint. Voice/VAD/audio controls may appear disabled or marked future if the screen needs to preserve layout.
-- **D-32:** Avoid fake account, billing, logout, or notification behavior from the Stitch mockups. RayMe is single-user LAN with no auth in v1.
+- **D-35:** Build the actual app shell as the first screen, not a landing page. Home is the operational dashboard.
+- **D-36:** Use Stitch-faithful, scope-corrected UI: keep the True Dark visual language and layout feel, but remove fake account/billing/logout/noise and show only real Phase 1 controls.
+- **D-37:** Home is threads-first: recent threads list is primary; new chat/import/create actions are nearby.
+- **D-38:** Chat thread layout should be a spacious modern messenger, not a cramped SillyTavern clone. Preserve enough density for long threads and virtualization while favoring a polished RayMe conversational feel.
+- **D-39:** Settings in Phase 1 should show real endpoint settings only: Web UI URL/status, AI backend URL/status, LLM URL/key/model/status, and HTTPS/secure-context status.
+- **D-40:** Follow the design system's tonal layering and no-divider/no-raw-border direction while still preserving accessibility. Use ghost outlines only when needed for usable focus/structure.
+
+### Testing And Verification
+- **D-41:** Use contract-heavy tests for Phase 1: schema migrations, card parser/importer, sanitizer, LLM streaming proxy, message actions, endpoint health, and the end-to-end imported-character chat target.
 
 ### the agent's Discretion
 - Exact folder names inside `web-ui/client`, `web-ui/server`, and `ai-backend`.
@@ -67,6 +81,7 @@ This phase does not implement Voice Lab synthesis, resident STT/TTS/VAD models, 
 - Exact component breakdown for Stitch-derived screens.
 - Exact loading skeletons, empty states, and toast wording.
 - Whether chat streaming reaches the browser via SSE or WebSocket, as long as it is reliable, testable, and fits the later call architecture.
+- Exact visual treatment of contextual message menus, stale flags, and alternate-greeting controls, subject to the UI-SPEC.
 
 </decisions>
 
@@ -77,6 +92,7 @@ This phase does not implement Voice Lab synthesis, resident STT/TTS/VAD models, 
 - Treat the Stitch True Dark screens as strong visual references, but remove mock-product affordances that conflict with the v1 scope, especially auth/account/billing concepts.
 - The Settings connection-test UX is important because the project deliberately has three independently configurable endpoints.
 - The malicious-card test from the roadmap should be implemented early enough that unsafe rendering patterns never enter the codebase.
+- The UI contract should make the new Chat/thread surface explicit because Stitch has Home/Gallery/Editor/Settings references but not a complete Phase 1 text-chat screen.
 
 </specifics>
 
@@ -161,3 +177,4 @@ This phase does not implement Voice Lab synthesis, resident STT/TTS/VAD models, 
 
 *Phase: 01-foundations-text-chat-end-to-end*
 *Context gathered: 2026-04-23T23:39:24Z*
+*Context updated after text discussion: 2026-04-24*
