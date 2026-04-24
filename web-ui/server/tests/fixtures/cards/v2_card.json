@@ -1,0 +1,52 @@
+{
+  "spec": "chara_card_v2",
+  "spec_version": "2.0",
+  "data": {
+    "name": "RayMe Fixture V2",
+    "description": "Deterministic v2 JSON card with alternate greetings and preserved lorebook data.",
+    "personality": "V2 is observant, warm, and precise.",
+    "scenario": "V2 is helping test RayMe character import behavior.",
+    "first_mes": "V2 Primary opening message.",
+    "mes_example": "<START>\n{{user}}: What should this fixture prove?\n{{char}}: It proves deterministic V2 card parsing.",
+    "creator_notes": "V2 creator notes are preserved as untrusted data.",
+    "character_version": "2.0-fixture",
+    "alternate_greetings": [
+      "V2 Alternate greeting one.",
+      "V2 Alternate greeting two."
+    ],
+    "character_book": {
+      "name": "V2 Lorebook",
+      "description": "Preserved by import, not injected into v1 prompts.",
+      "entries": [
+        {
+          "id": 1,
+          "keys": [
+            "clocktower",
+            "blue lantern"
+          ],
+          "content": "V2 hidden lore that must stay out of prompt context.",
+          "enabled": true,
+          "position": "before_char"
+        }
+      ]
+    },
+    "extensions": {
+      "world_info": {
+        "format": "sillytavern-compatible",
+        "entries": [
+          {
+            "id": 1,
+            "keys": [
+              "clocktower",
+              "blue lantern"
+            ],
+            "content": "V2 World Info hidden lore that must stay out of prompt context.",
+            "enabled": true,
+            "position": "before_char"
+          }
+        ]
+      },
+      "rayme_fixture": true
+    }
+  }
+}

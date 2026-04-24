@@ -1,0 +1,61 @@
+{
+  "spec": "chara_card_v3",
+  "spec_version": "3.0",
+  "data": {
+    "name": "RayMe Malicious Fixture",
+    "description": "<img src=x onerror=alert(1)> should stay inert data, not rendered HTML.",
+    "personality": "RayMe Malicious Fixture is observant, warm, and precise.",
+    "scenario": "RayMe Malicious Fixture is helping test RayMe character import behavior.",
+    "first_mes": "Unsafe links such as javascript:alert(1) must be sanitized later.",
+    "mes_example": "<START>\n{{user}}: What should this fixture prove?\n{{char}}: It proves deterministic RayMe Malicious Fixture card parsing.",
+    "creator_notes": "Contains literal <img src=x onerror=alert(1)> and javascript:alert(1) payloads.",
+    "character_version": "3.0-fixture",
+    "alternate_greetings": [
+      "V3 Alternate greeting one.",
+      "V3 Alternate greeting two."
+    ],
+    "character_book": {
+      "name": "RayMe Malicious Fixture Lorebook",
+      "description": "Preserved by import, not injected into v1 prompts.",
+      "entries": [
+        {
+          "id": 1,
+          "keys": [
+            "clocktower",
+            "blue lantern"
+          ],
+          "content": "RayMe Malicious Fixture hidden lore that must stay out of prompt context.",
+          "enabled": true,
+          "position": "before_char"
+        }
+      ]
+    },
+    "extensions": {
+      "world_info": {
+        "format": "sillytavern-compatible",
+        "entries": [
+          {
+            "id": 1,
+            "keys": [
+              "clocktower",
+              "blue lantern"
+            ],
+            "content": "RayMe Malicious Fixture World Info hidden lore that must stay out of prompt context.",
+            "enabled": true,
+            "position": "before_char"
+          }
+        ]
+      },
+      "rayme_fixture": true
+    },
+    "system_prompt": "Stay in character and keep responses concise.",
+    "character_notes": "V3-only character notes stay preserved as data.",
+    "tags": [
+      "fixture",
+      "v3",
+      "lorebook"
+    ],
+    "post_history_instructions": "Do not include preserved lorebook fields automatically.",
+    "creator": "RayMe test suite"
+  }
+}
