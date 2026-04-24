@@ -1,7 +1,7 @@
 ---
 phase: 01
 slug: foundations-text-chat-end-to-end
-status: draft
+status: approved
 shadcn_initialized: false
 preset: none
 created: 2026-04-24
