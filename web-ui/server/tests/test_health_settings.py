@@ -311,6 +311,146 @@ async def test_probes_map_unauthorized_unreachable_and_not_configured() -> None:
     assert llm_not_configured == NOT_CONFIGURED
 
 
+async def test_ai_backend_client_maps_status_transcription_and_synthesis_shapes() -> None:
+    from app.domain.ai_backend_client import (
+        AiBackendClient,
+        AiBackendStatus,
+        EngineStatus,
+        SynthesisResult,
+        TranscriptionResult,
+    )
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/base/health":
+            return httpx.Response(
+                200,
+                json={
+                    "status": "degraded",
+                    "stt_model": "distil-large-v3",
+                    "stt_compute_type": "int8_float16",
+                    "vad_ready": True,
+                    "resident_tts_engine": "f5",
+                    "available_engines": [
+                        {"id": "f5", "label": "F5-TTS", "available": True, "state": "resident"}
+                    ],
+                    "loading_engine": None,
+                    "vram_used_mb": 2300,
+                    "vram_headroom_mb": 8700,
+                },
+            )
+        if request.url.path == "/base/transcribe":
+            return httpx.Response(
+                200,
+                json={
+                    "status": "ok",
+                    "transcript": "Hello from the sample",
+                    "language": "en",
+                    "model": "distil-large-v3",
+                    "compute_type": "int8_float16",
+                    "segments": [{"start": 0.0, "end": 1.0, "text": "Hello from the sample"}],
+                    "speech_detected": True,
+                    "retry_allowed": False,
+                    "manual_transcript_allowed": False,
+                },
+            )
+        if request.url.path == "/base/synthesize":
+            return httpx.Response(
+                200,
+                json={
+                    "engine_id": "f5",
+                    "content_type": "audio/wav",
+                    "audio_base64": "UklGRg==",
+                    "duration_ms": 420,
+                },
+            )
+        return httpx.Response(404)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        ai_client = AiBackendClient(http_client=client)
+        status = await ai_client.get_status("https://ai.local:9443/base")
+        transcription = await ai_client.transcribe_sample(
+            "https://ai.local:9443/base",
+            b"sample-audio",
+            "sample.wav",
+            "audio/wav",
+        )
+        synthesis = await ai_client.synthesize(
+            "https://ai.local:9443/base",
+            {"text": "Hello", "engine_id": "f5"},
+        )
+
+    assert isinstance(status, AiBackendStatus)
+    assert isinstance(status.available_engines[0], EngineStatus)
+    assert status.status == "degraded"
+    assert status.stt_model == "distil-large-v3"
+    assert status.stt_compute_type == "int8_float16"
+    assert status.vad_ready is True
+    assert status.resident_tts_engine == "f5"
+    assert status.vram_headroom_mb == 8700
+    assert isinstance(transcription, TranscriptionResult)
+    assert transcription.transcript == "Hello from the sample"
+    assert transcription.manual_transcript_allowed is False
+    assert isinstance(synthesis, SynthesisResult)
+    assert synthesis.engine_id == "f5"
+    assert synthesis.content_type == "audio/wav"
+    assert [request.url.path for request in requests] == [
+        "/base/health",
+        "/base/transcribe",
+        "/base/synthesize",
+    ]
+
+
+async def test_ai_backend_client_sanitizes_public_error_payloads() -> None:
+    from app.domain.ai_backend_client import (
+        AiBackendClient,
+        AiBackendProcessingError,
+        AiBackendUnavailable,
+    )
+
+    def traceback_handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/health"):
+            raise httpx.ConnectError(
+                'Traceback RuntimeError File "C:\\secret\\adapter.py"',
+                request=request,
+            )
+        if request.url.path.endswith("/transcribe"):
+            return httpx.Response(500, text='Traceback RuntimeError File "/models/private.py"')
+        if request.url.path.endswith("/synthesize"):
+            return httpx.Response(200, text='Traceback RuntimeError File "/models/private.py"')
+        return httpx.Response(404)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(traceback_handler)) as client:
+        ai_client = AiBackendClient(http_client=client)
+        with pytest.raises(AiBackendUnavailable) as unreachable:
+            await ai_client.get_status("https://ai.local:9443")
+        with pytest.raises(AiBackendProcessingError) as transcription_failed:
+            await ai_client.transcribe_sample(
+                "https://ai.local:9443",
+                b"sample-audio",
+                "sample.wav",
+                "audio/wav",
+            )
+        with pytest.raises(AiBackendUnavailable) as invalid_response:
+            await ai_client.synthesize("https://ai.local:9443", {"text": "Hello"})
+
+    public_errors = [
+        unreachable.value.to_public_dict(),
+        transcription_failed.value.to_public_dict(),
+        invalid_response.value.to_public_dict(),
+    ]
+    assert public_errors == [
+        {"code": "unreachable", "message": "AI backend unreachable"},
+        {"code": "transcription_failed", "message": "Transcription failed"},
+        {"code": "invalid_response", "message": "AI backend returned an invalid response"},
+    ]
+    rendered = json.dumps(public_errors)
+    for forbidden in ("Traceback", 'File "', "RuntimeError", "C:\\", "/models/"):
+        assert forbidden not in rendered
+
+
 def _health_probe(status: ConnectionStatus):
     async def fake_probe(_base_url: str | None) -> ConnectionStatus:
         return status
