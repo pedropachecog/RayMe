@@ -108,7 +108,7 @@ URL: https://192.168.1.199:8443
 
 The script must run from `C:\Users\pmpg\rayme\RayMe\`, set
 `RAYME_DATABASE_URL` with the async SQLite driver
-`sqlite+aiosqlite:///C:/Users/pmpg/rayme/RayMe/web-ui/server/rayme-phase1.db`,
+`sqlite+aiosqlite:///C:/Users/pmpg/rayme/RayMe/web-ui/server/data/rayme.sqlite3`,
 and call `web-ui\server\scripts\run_dev_https.py` with only the supported
 `--host`, `--port`, `--cert`, and `--key` arguments. Do not pass a static-dir
 argument; the server mounts `web-ui/client/build` by convention.

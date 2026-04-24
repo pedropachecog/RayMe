@@ -9,3 +9,6 @@ web-ui/client/.svelte-kit/
 web-ui/client/build/
 web-ui/client/playwright-report/
 web-ui/client/test-results/
+web-ui/server/data/*.sqlite3
+web-ui/server/data/*.sqlite3-*
+web-ui/server/*.db
