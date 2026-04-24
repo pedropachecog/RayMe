@@ -26,6 +26,8 @@ VOICE_ASSET_COLUMNS = {
     "asset_kind",
     "storage_path",
 }
+VOICE_ASSET_INDEX = "ix_voice_assets_voice_id"
+CHARACTER_DEFAULT_VOICE_INDEX = "ix_characters_default_voice_id"
 
 
 def run_migration(tmp_path: Path) -> Path:
@@ -56,6 +58,14 @@ def table_names(connection: sqlite3.Connection) -> set[str]:
 
 def column_names(connection: sqlite3.Connection, table_name: str) -> set[str]:
     return {row["name"] for row in connection.execute(f"PRAGMA table_info({table_name})")}
+
+
+def index_names(connection: sqlite3.Connection, table_name: str) -> set[str]:
+    return {row["name"] for row in connection.execute(f"PRAGMA index_list({table_name})")}
+
+
+def foreign_keys(connection: sqlite3.Connection, table_name: str) -> list[sqlite3.Row]:
+    return list(connection.execute(f"PRAGMA foreign_key_list({table_name})"))
 
 
 def insert_thread(connection: sqlite3.Connection) -> None:
@@ -117,6 +127,27 @@ def test_initial_migration_creates_all_storage_tables(tmp_path: Path) -> None:
 
         voice_asset_columns = column_names(connection, "voice_assets")
         assert VOICE_ASSET_COLUMNS.issubset(voice_asset_columns)
+
+
+def test_voice_storage_schema_has_indexes_and_default_voice_fk(tmp_path: Path) -> None:
+    db_path = run_migration(tmp_path)
+
+    assert models.VOICES_TABLE in models.MODEL_TABLE_NAMES
+    assert models.VOICE_ASSETS_TABLE in models.MODEL_TABLE_NAMES
+
+    with connect(db_path) as connection:
+        assert VOICE_ASSET_INDEX in index_names(connection, "voice_assets")
+        assert CHARACTER_DEFAULT_VOICE_INDEX in index_names(connection, models.CHARACTERS_TABLE)
+
+        character_voice_fks = [
+            row
+            for row in foreign_keys(connection, models.CHARACTERS_TABLE)
+            if row["from"] == "default_voice_id"
+        ]
+        assert len(character_voice_fks) == 1
+        assert character_voice_fks[0]["table"] == models.VOICES_TABLE
+        assert character_voice_fks[0]["to"] == "id"
+        assert character_voice_fks[0]["on_delete"].upper() == "SET NULL"
 
 
 def test_messages_accept_only_unified_message_kinds(tmp_path: Path) -> None:
