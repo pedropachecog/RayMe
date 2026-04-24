@@ -14,6 +14,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api.settings import get_ai_backend_probe, get_llm_probe, get_settings_session
 from app.config import Settings
+from app.domain.ai_backend_client import (
+    AiBackendStatus,
+    AiBackendUnavailable,
+    EngineStatus,
+)
 from app.domain.llm_probe import (
     CONNECTED,
     NOT_CONFIGURED,
@@ -179,6 +184,109 @@ def test_connection_test_routes_return_only_allowed_status_values(
     seen.add(settings_client.post("/api/settings/test/ai-backend").json()["status"])
 
     assert seen == STATUS_VALUES
+
+
+def test_ai_backend_status_bridge_returns_compact_backend_status(
+    settings_client: TestClient,
+) -> None:
+    from app.api.ai_backend import get_ai_backend_client
+
+    class FakeAiBackendClient:
+        async def get_status(self, base_url: str) -> AiBackendStatus:
+            assert base_url == "https://127.0.0.1:9443"
+            return AiBackendStatus(
+                status="degraded",
+                stt_model="distil-large-v3",
+                stt_compute_type="int8_float16",
+                vad_ready=True,
+                resident_tts_engine="f5",
+                available_engines=[
+                    EngineStatus(
+                        id="f5",
+                        label="F5-TTS",
+                        available=True,
+                        state="resident",
+                    )
+                ],
+                loading_engine="xtts_v2",
+                vram_used_mb=2300,
+                vram_headroom_mb=8700,
+            )
+
+    settings_client.app.dependency_overrides[get_ai_backend_client] = FakeAiBackendClient
+
+    response = settings_client.get("/api/ai-backend/status")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "endpoint_status": "degraded",
+        "status": "degraded",
+        "stt_model": "distil-large-v3",
+        "stt_compute_type": "int8_float16",
+        "vad_ready": True,
+        "resident_tts_engine": "f5",
+        "available_engines": [
+            {"id": "f5", "label": "F5-TTS", "available": True, "state": "resident"}
+        ],
+        "loading_engine": "xtts_v2",
+        "vram_used_mb": 2300,
+        "vram_headroom_mb": 8700,
+    }
+
+
+def test_ai_backend_settings_probe_uses_typed_client_and_treats_degraded_as_connected(
+    settings_client: TestClient,
+) -> None:
+    from app.api.settings import get_ai_backend_client
+
+    class DegradedAiBackendClient:
+        async def get_status(self, base_url: str) -> AiBackendStatus:
+            assert base_url == "https://ai.local:9443"
+            return AiBackendStatus(
+                status="degraded",
+                stt_model="distil-large-v3",
+                stt_compute_type="int8_float16",
+                vad_ready=False,
+                resident_tts_engine=None,
+                available_engines=[],
+                loading_engine=None,
+                vram_used_mb=None,
+                vram_headroom_mb=None,
+            )
+
+    settings_client.patch("/api/settings", json={"ai_backend_url": "https://ai.local:9443"})
+    settings_client.app.dependency_overrides[get_ai_backend_client] = DegradedAiBackendClient
+
+    response = settings_client.post("/api/settings/test/ai-backend")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": CONNECTED}
+
+
+def test_ai_backend_settings_probe_preserves_unreachable_unauthorized_and_not_configured(
+    settings_client: TestClient,
+) -> None:
+    from app.api.settings import get_ai_backend_client
+
+    class UnauthorizedAiBackendClient:
+        async def get_status(self, _base_url: str) -> AiBackendStatus:
+            raise AiBackendUnavailable(code="unauthorized", message="AI backend unreachable")
+
+    class UnreachableAiBackendClient:
+        async def get_status(self, _base_url: str) -> AiBackendStatus:
+            raise AiBackendUnavailable(code="unreachable", message="AI backend unreachable")
+
+    settings_client.patch("/api/settings", json={"ai_backend_url": "https://ai.local:9443"})
+    settings_client.app.dependency_overrides[get_ai_backend_client] = UnauthorizedAiBackendClient
+    assert settings_client.post("/api/settings/test/ai-backend").json() == {"status": UNAUTHORIZED}
+
+    settings_client.app.dependency_overrides[get_ai_backend_client] = UnreachableAiBackendClient
+    assert settings_client.post("/api/settings/test/ai-backend").json() == {"status": UNREACHABLE}
+
+    settings_client.patch("/api/settings", json={"ai_backend_url": ""})
+    assert settings_client.post("/api/settings/test/ai-backend").json() == {
+        "status": NOT_CONFIGURED
+    }
 
 
 def test_llm_test_uses_server_side_settings_and_never_returns_api_key(
