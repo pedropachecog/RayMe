@@ -1,8 +1,10 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
-  import { ArrowLeft, RefreshCw } from 'lucide-svelte';
+  import { createVirtualizer } from '@tanstack/svelte-virtual';
+  import { ArrowDown, ArrowLeft, RefreshCw } from 'lucide-svelte';
   import { tick } from 'svelte';
+  import { get } from 'svelte/store';
 
   import {
     appendTokenToStreamingMessage,
@@ -31,9 +33,18 @@
 
   type BusyAction = MessageActionId | 'truncate-stale' | 'keep-stale';
 
+  const VIRTUALIZATION_THRESHOLD = 500;
+  const BOTTOM_PROXIMITY_PX = 96;
+
   interface StaleContinueRequest {
     message: ChatMessageView;
     composerText: string;
+  }
+
+  interface ScrollAnchor {
+    messageId: string;
+    offsetTop: number;
+    scrollTop: number;
   }
 
   let thread = $state<ThreadDetail | null>(null);
@@ -49,14 +60,44 @@
   let composerDraft = $state('');
   let staleConfirmation = $state<StaleContinueRequest | null>(null);
   let messagesViewport = $state<HTMLElement | null>(null);
+  let showJumpToLatest = $state(false);
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'Character');
   const threadTitle = $derived(thread?.title?.trim() || characterName);
   const portraitUrl = $derived(thread?.character_portrait_url ?? null);
+  const shouldVirtualize = $derived(messages.length >= VIRTUALIZATION_THRESHOLD);
   const hasUserMessage = $derived(
     messages.some((message) => message.role === 'user' && message.message_kind === 'user_text')
   );
+  const messageVirtualizer = createVirtualizer<HTMLDivElement, HTMLDivElement>({
+    count: 0,
+    getScrollElement: () => messagesViewport,
+    estimateSize: estimateMessageSize,
+    getItemKey: (index) => messages[index]?.id ?? index,
+    overscan: 10,
+    gap: 16,
+    enabled: false
+  });
+
+  $effect(() => {
+    const virtualizer = get(messageVirtualizer);
+
+    virtualizer.setOptions({
+      count: shouldVirtualize ? messages.length : 0,
+      getScrollElement: () => messagesViewport,
+      estimateSize: estimateMessageSize,
+      getItemKey: (index) => messages[index]?.id ?? index,
+      overscan: 10,
+      gap: 16,
+      enabled: shouldVirtualize
+    });
+    virtualizer.shouldAdjustScrollPositionOnItemSizeChange = () => false;
+
+    if (!shouldVirtualize) {
+      showJumpToLatest = false;
+    }
+  });
 
   $effect(() => {
     if (!threadId || threadId === loadedThreadId) {
@@ -76,8 +117,7 @@
       thread = detail;
       messages = sortMessages(detail.messages);
       loadState = 'ready';
-      await tick();
-      scrollToLatest();
+      await settleMessageLayout(true, 'auto');
     } catch {
       thread = null;
       messages = [];
@@ -91,6 +131,8 @@
       return;
     }
 
+    const stickToLatest = isNearBottom();
+    const scrollAnchor = stickToLatest ? null : captureScrollAnchor();
     sendState = 'sending';
     const nextSequence = nextMessageSequence(messages);
     const draftKey = `${Date.now()}`;
@@ -114,28 +156,37 @@
     });
 
     messages = [...messages, userMessage, streamingMessage];
-    await tick();
-    scrollToLatest();
+    await settleMessageLayout(stickToLatest, 'smooth', scrollAnchor);
 
     try {
       await sendChatMessage(threadId, content, {
         onToken: (token) => {
+          const stickToLatest = isNearBottom();
+          const scrollAnchor = stickToLatest ? null : captureScrollAnchor();
           messages = appendTokenToStreamingMessage(messages, streamingMessage.id, token);
-          void tick().then(scrollToLatest);
+          void settleMessageLayout(stickToLatest, 'auto', scrollAnchor);
         },
         onDone: (message) => {
+          const stickToLatest = isNearBottom();
+          const scrollAnchor = stickToLatest ? null : captureScrollAnchor();
           messages = sortMessages(replaceStreamingMessage(messages, streamingMessage.id, message));
+          void settleMessageLayout(stickToLatest, 'auto', scrollAnchor);
         },
         onError: () => {
+          const stickToLatest = isNearBottom();
+          const scrollAnchor = stickToLatest ? null : captureScrollAnchor();
           messages = markStreamingMessageError(messages, streamingMessage.id, content);
+          void settleMessageLayout(stickToLatest, 'auto', scrollAnchor);
         }
       });
     } catch {
+      const stickToLatest = isNearBottom();
+      const scrollAnchor = stickToLatest ? null : captureScrollAnchor();
       messages = markStreamingMessageError(messages, streamingMessage.id, content);
+      await settleMessageLayout(stickToLatest, 'auto', scrollAnchor);
     } finally {
       sendState = 'idle';
-      await tick();
-      scrollToLatest();
+      await settleMessageLayout(isNearBottom(), 'auto');
     }
   }
 
@@ -293,9 +344,10 @@
 
     try {
       const backendMessage = await operation();
+      const stickToLatest = isNearBottom();
+      const scrollAnchor = stickToLatest ? null : captureScrollAnchor();
       messages = applyMessage(messages, backendMessage);
-      await tick();
-      scrollToLatest();
+      await settleMessageLayout(stickToLatest, 'auto', scrollAnchor);
       return true;
     } catch {
       actionError = 'RayMe could not update this message.';
@@ -326,11 +378,141 @@
     return currentMessages.reduce((max, message) => Math.max(max, message.sequence), -1) + 1;
   }
 
-  function scrollToLatest() {
-    messagesViewport?.scrollTo({
-      top: messagesViewport.scrollHeight,
-      behavior: 'smooth'
+  function estimateMessageSize(index: number): number {
+    const message = messages[index];
+    const contentLength = selectedMessageContent(
+      message ?? { content_text: '', selected_alternate_id: null, alternates: [] }
+    ).length;
+    const baseSize = message?.role === 'user' ? 88 : 112;
+    const streamingReserve = message?.streaming ? 28 : 0;
+    const staleReserve = message?.stale_after_edit ? 12 : 0;
+    const editReserve = editingMessageId === message?.id ? 132 : 0;
+    const alternateReserve = message && message.role === 'assistant' ? 44 : 0;
+
+    return Math.min(
+      260,
+      baseSize +
+        Math.ceil(contentLength / 90) * 20 +
+        streamingReserve +
+        staleReserve +
+        editReserve +
+        alternateReserve
+    );
+  }
+
+  function measureVirtualRow(node: HTMLDivElement) {
+    get(messageVirtualizer).measureElement(node);
+
+    return {
+      update() {
+        get(messageVirtualizer).measureElement(node);
+      },
+      destroy() {
+        get(messageVirtualizer).measureElement(null);
+      }
+    };
+  }
+
+  async function settleMessageLayout(
+    stickToLatest: boolean,
+    behavior: ScrollBehavior = 'smooth',
+    scrollAnchor: ScrollAnchor | null = null
+  ) {
+    await tick();
+    await nextAnimationFrame();
+    get(messageVirtualizer).measure();
+
+    if (stickToLatest) {
+      scrollToLatest(behavior);
+      await nextAnimationFrame();
+      scrollToLatest('auto');
+    } else {
+      restoreScrollAnchor(scrollAnchor);
+      updateJumpVisibility();
+    }
+  }
+
+  function nextAnimationFrame(): Promise<void> {
+    if (typeof requestAnimationFrame !== 'function') {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve) => requestAnimationFrame(() => resolve()));
+  }
+
+  function scrollToLatest(behavior: ScrollBehavior = 'smooth') {
+    if (!messagesViewport) {
+      return;
+    }
+
+    messagesViewport.scrollTo({
+      top: Math.max(messagesViewport.scrollHeight, get(messageVirtualizer).getTotalSize()),
+      behavior
     });
+
+    showJumpToLatest = false;
+  }
+
+  function isNearBottom(): boolean {
+    if (!messagesViewport) {
+      return true;
+    }
+
+    return (
+      messagesViewport.scrollHeight - messagesViewport.scrollTop - messagesViewport.clientHeight <=
+      BOTTOM_PROXIMITY_PX
+    );
+  }
+
+  function updateJumpVisibility() {
+    showJumpToLatest = loadState === 'ready' && !isNearBottom();
+  }
+
+  function handleMessagesScroll() {
+    updateJumpVisibility();
+  }
+
+  function captureScrollAnchor(): ScrollAnchor | null {
+    if (!messagesViewport) {
+      return null;
+    }
+
+    const viewportTop = messagesViewport.getBoundingClientRect().top;
+    const rows = Array.from(messagesViewport.querySelectorAll<HTMLElement>('[data-message-id]'));
+    const anchorRow = rows.find((row) => row.getBoundingClientRect().bottom >= viewportTop);
+
+    if (!anchorRow?.dataset.messageId) {
+      return null;
+    }
+
+    return {
+      messageId: anchorRow.dataset.messageId,
+      offsetTop: anchorRow.getBoundingClientRect().top - viewportTop,
+      scrollTop: messagesViewport.scrollTop
+    };
+  }
+
+  function restoreScrollAnchor(scrollAnchor: ScrollAnchor | null) {
+    if (!messagesViewport || !scrollAnchor) {
+      return;
+    }
+
+    const viewportTop = messagesViewport.getBoundingClientRect().top;
+    const anchorRow = Array.from(
+      messagesViewport.querySelectorAll<HTMLElement>('[data-message-id]')
+    ).find((row) => row.dataset.messageId === scrollAnchor.messageId);
+
+    if (!anchorRow) {
+      messagesViewport.scrollTop = scrollAnchor.scrollTop;
+      return;
+    }
+
+    const nextOffsetTop = anchorRow.getBoundingClientRect().top - viewportTop;
+    messagesViewport.scrollTop += nextOffsetTop - scrollAnchor.offsetTop;
+
+    if (Math.abs(messagesViewport.scrollTop - scrollAnchor.scrollTop) > 4) {
+      messagesViewport.scrollTop = scrollAnchor.scrollTop;
+    }
   }
 
   function isOpeningGreeting(message: ChatMessageView): boolean {
@@ -384,28 +566,78 @@
       </button>
     </div>
   {:else}
-    <div class="messages" bind:this={messagesViewport} aria-label="Chat messages">
-      {#each messages as message (message.id)}
-        <ChatMessageBubble
-          {message}
-          {characterName}
-          {portraitUrl}
-          openingGreeting={isOpeningGreeting(message)}
-          actionBusy={isMessageBusy(message)}
-          editing={editingMessageId === message.id}
-          {editDraft}
-          onRetry={retryFailedMessage}
-          onAction={handleMessageAction}
-          onEditDraftChange={setEditDraft}
-          onSaveEdit={saveEdit}
-          onCancelEdit={cancelEdit}
-          onSelectAlternate={selectAlternate}
-          onGenerateAlternate={generateAlternate}
-        />
-      {/each}
+    <div
+      class:virtualized={shouldVirtualize}
+      class="messages"
+      bind:this={messagesViewport}
+      aria-label="Chat messages"
+      data-message-count={messages.length}
+      data-virtualized={shouldVirtualize ? 'true' : 'false'}
+      onscroll={handleMessagesScroll}
+    >
+      {#if shouldVirtualize}
+        <div class="virtual-spacer" style={`height: ${$messageVirtualizer.getTotalSize()}px;`}>
+          {#each $messageVirtualizer.getVirtualItems() as virtualRow (virtualRow.key)}
+            {@const message = messages[virtualRow.index]}
+            {#if message}
+              <div
+                class="virtual-row"
+                data-index={virtualRow.index}
+                data-virtual-index={virtualRow.index}
+                style={`transform: translateY(${virtualRow.start}px);`}
+                use:measureVirtualRow
+              >
+                <ChatMessageBubble
+                  {message}
+                  {characterName}
+                  {portraitUrl}
+                  openingGreeting={isOpeningGreeting(message)}
+                  actionBusy={isMessageBusy(message)}
+                  editing={editingMessageId === message.id}
+                  {editDraft}
+                  onRetry={retryFailedMessage}
+                  onAction={handleMessageAction}
+                  onEditDraftChange={setEditDraft}
+                  onSaveEdit={saveEdit}
+                  onCancelEdit={cancelEdit}
+                  onSelectAlternate={selectAlternate}
+                  onGenerateAlternate={generateAlternate}
+                />
+              </div>
+            {/if}
+          {/each}
+        </div>
+      {:else}
+        {#each messages as message (message.id)}
+          <ChatMessageBubble
+            {message}
+            {characterName}
+            {portraitUrl}
+            openingGreeting={isOpeningGreeting(message)}
+            actionBusy={isMessageBusy(message)}
+            editing={editingMessageId === message.id}
+            {editDraft}
+            onRetry={retryFailedMessage}
+            onAction={handleMessageAction}
+            onEditDraftChange={setEditDraft}
+            onSaveEdit={saveEdit}
+            onCancelEdit={cancelEdit}
+            onSelectAlternate={selectAlternate}
+            onGenerateAlternate={generateAlternate}
+          />
+        {/each}
+      {/if}
     </div>
 
     <div class="composer-wrap">
+      {#if showJumpToLatest}
+        <div class="jump-row">
+          <button class="jump-to-latest" type="button" onclick={() => scrollToLatest()}>
+            <ArrowDown size={16} strokeWidth={1.8} aria-hidden="true" />
+            <span>Jump to latest</span>
+          </button>
+        </div>
+      {/if}
       {#if actionError}
         <p class="action-error" role="status">{actionError}</p>
       {/if}
@@ -530,12 +762,62 @@
     scroll-behavior: smooth;
   }
 
+  .messages.virtualized {
+    display: block;
+    contain: strict;
+  }
+
+  .virtual-spacer {
+    position: relative;
+    width: 100%;
+    min-height: 100%;
+  }
+
+  .virtual-row {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    min-height: 64px;
+  }
+
   .composer-wrap {
     position: sticky;
     bottom: 0;
     z-index: 2;
     padding: var(--space-md) 0 0;
     background: linear-gradient(180deg, rgba(6, 14, 32, 0), var(--color-surface) 28%);
+  }
+
+  .jump-row {
+    display: flex;
+    justify-content: center;
+    margin-bottom: var(--space-sm);
+    pointer-events: none;
+  }
+
+  .jump-to-latest {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    gap: var(--space-xs);
+    border: 0;
+    border-radius: var(--radius-md);
+    padding: 0 14px;
+    background: rgba(25, 37, 64, 0.78);
+    color: var(--color-text);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.28);
+    font-size: var(--font-label);
+    font-weight: 600;
+    line-height: var(--line-label);
+    pointer-events: auto;
+    backdrop-filter: blur(20px);
+  }
+
+  .jump-to-latest:hover,
+  .jump-to-latest:focus-visible {
+    background: rgba(182, 160, 255, 0.2);
   }
 
   .action-error {
@@ -659,6 +941,10 @@
     .chat-route {
       min-height: calc(100vh - 88px);
       padding-bottom: 64px;
+    }
+
+    .composer-wrap {
+      bottom: 64px;
     }
 
     .chat-header {

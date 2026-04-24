@@ -94,6 +94,7 @@
     width: 100%;
     max-height: 168px;
     min-height: 40px;
+    overflow-y: auto;
     resize: none;
     border: 0;
     outline: 0;

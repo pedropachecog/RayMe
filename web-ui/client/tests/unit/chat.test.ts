@@ -399,4 +399,33 @@ describe('chat route contract', () => {
     expect(composerSource).toContain('onsubmit={handleSubmit}');
     expect(composerSource).toContain('onkeydown={handleKeydown}');
   });
+
+  it('virtualizes long chat threads and exposes jump-to-latest controls', () => {
+    expect(routeSource).toContain("import { createVirtualizer } from '@tanstack/svelte-virtual'");
+    expect(routeSource).toContain('const VIRTUALIZATION_THRESHOLD = 500');
+    expect(routeSource).toContain('messages.length >= VIRTUALIZATION_THRESHOLD');
+    expect(routeSource).toContain('$messageVirtualizer.getVirtualItems()');
+    expect(routeSource).toContain('get(messageVirtualizer).measureElement(node)');
+    expect(routeSource).toContain('shouldAdjustScrollPositionOnItemSizeChange');
+    expect(routeSource).toContain("data-virtualized={shouldVirtualize ? 'true' : 'false'}");
+    expect(routeSource).toContain('Jump to latest');
+    expect(routeSource).toContain('showJumpToLatest = loadState ===');
+  });
+
+  it('keeps streaming scroll anchored only when already near the latest message', () => {
+    expect(routeSource).toContain('const stickToLatest = isNearBottom();');
+    expect(routeSource).toContain('const scrollAnchor = stickToLatest ? null : captureScrollAnchor();');
+    expect(routeSource).toContain('scrollTop: messagesViewport.scrollTop');
+    expect(routeSource).toContain('messagesViewport.scrollTop = scrollAnchor.scrollTop');
+    expect(routeSource).toContain('appendTokenToStreamingMessage(messages, streamingMessage.id, token)');
+    expect(routeSource).toContain("void settleMessageLayout(stickToLatest, 'auto', scrollAnchor)");
+    expect(routeSource).toContain('BOTTOM_PROXIMITY_PX');
+  });
+
+  it('keeps mobile chat controls and composer affordances at the required minimum size', () => {
+    expect(routeSource).toContain('min-height: 44px');
+    expect(bubbleSource).toContain('min-height: 44px');
+    expect(bubbleSource).toContain('overflow-wrap: anywhere');
+    expect(composerSource).toContain('overflow-y: auto');
+  });
 });

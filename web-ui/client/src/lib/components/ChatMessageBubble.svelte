@@ -196,6 +196,7 @@
     align-items: flex-end;
     gap: var(--space-sm);
     width: 100%;
+    min-height: 52px;
   }
 
   .message-row.user {
@@ -302,6 +303,7 @@
     font-size: var(--font-body);
     font-weight: 400;
     line-height: var(--line-body);
+    overflow-wrap: anywhere;
   }
 
   .message-content :global(p) {
@@ -367,7 +369,7 @@
   .edit-actions button {
     display: inline-flex;
     align-items: center;
-    min-height: 36px;
+    min-height: 44px;
     gap: var(--space-xs);
     border: 0;
     border-radius: var(--radius-sm);
