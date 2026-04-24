@@ -22,18 +22,71 @@ def run_runner(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-def test_health_returns_exact_phase_one_contract() -> None:
+def test_health_returns_phase_two_model_residency_contract() -> None:
     client = TestClient(create_app())
 
     response = client.get("/health")
 
     assert response.status_code == 200
-    assert response.json() == {
-        "service": "rayme-ai-backend",
-        "status": "ok",
-        "phase": "01",
-        "capabilities": ["health"],
+    payload = response.json()
+    assert payload["service"] == "rayme-ai-backend"
+    assert payload["status"] in {"ok", "degraded", "starting", "error"}
+    assert payload["phase"] == "02"
+    assert payload["stt_model"] == "distil-large-v3"
+    assert payload["stt_compute_type"] == "int8_float16"
+    assert payload["vad_ready"] is True
+    assert payload["resident_tts_engine"] == "f5"
+    assert payload["loading_engine"] is None
+    assert isinstance(payload["vram_used_mb"], int | float)
+    assert isinstance(payload["vram_headroom_mb"], int | float)
+
+    available_engines = payload["available_engines"]
+    assert isinstance(available_engines, list)
+    engine_ids = {
+        engine.get("id") or engine.get("engine_id")
+        for engine in available_engines
     }
+    assert engine_ids == {
+        "f5",
+        "xtts_v2",
+        "qwen3_0_6b",
+        "luxtts",
+        "chatterbox_turbo",
+        "tada_1b",
+    }
+    resident_engines = [
+        engine.get("id") or engine.get("engine_id")
+        for engine in available_engines
+        if engine.get("resident") is True
+        or engine.get("state") == "resident"
+        or engine.get("availability") == "resident"
+    ]
+    assert resident_engines == ["f5"]
+
+
+def test_health_does_not_return_raw_exception_text_in_public_payload() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    rendered = response.text
+    for forbidden in (
+        "Traceback",
+        "RuntimeError",
+        "ValueError",
+        "CUDA out of memory",
+        "C:\\",
+        "/models/",
+    ):
+        assert forbidden not in rendered
+
+    for engine in response.json()["available_engines"]:
+        if engine.get("available") is False:
+            assert engine["unavailable_reason"]
+            reason = str(engine["unavailable_reason"])
+            assert "Traceback" not in reason
+            assert "RuntimeError" not in reason
 
 
 def test_https_runner_check_config_accepts_explicit_host() -> None:
