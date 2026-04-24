@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { MessageSquarePlus, Upload, UserRoundPlus, SlidersHorizontal, MoreHorizontal } from 'lucide-svelte';
+  import { MessageSquarePlus, MoreHorizontal, SlidersHorizontal, Upload, UserRoundPlus } from 'lucide-svelte';
 
   const actions = [
     { label: 'Start Chat', icon: MessageSquarePlus, primary: true },
@@ -12,7 +12,7 @@
 <section class="home">
   <div class="heading">
     <div>
-      <p class="eyebrow">Local workspace</p>
+      <p class="eyebrow">Home</p>
       <h1>RayMe</h1>
     </div>
 
@@ -53,7 +53,7 @@
       <div class="readiness-list">
         <div>
           <span class="dot"></span>
-          <span>Web UI pending</span>
+          <span>Web UI status pending</span>
         </div>
         <div>
           <span class="dot"></span>
@@ -81,10 +81,10 @@
 
   .eyebrow {
     margin: 0 0 8px;
-    color: #9eaad5;
-    font-size: 12px;
+    color: var(--color-text-muted);
+    font-size: var(--font-label);
     font-weight: 600;
-    line-height: 1.3;
+    line-height: var(--line-label);
   }
 
   h1,
@@ -95,31 +95,31 @@
   }
 
   h1 {
-    color: #dee5ff;
-    font-size: 28px;
+    color: var(--color-text);
+    font-size: var(--font-display);
     font-weight: 600;
-    line-height: 1.15;
+    line-height: var(--line-display);
   }
 
   h2 {
-    color: #dee5ff;
-    font-size: 20px;
+    color: var(--color-text);
+    font-size: var(--font-heading);
     font-weight: 600;
-    line-height: 1.2;
+    line-height: var(--line-heading);
   }
 
   h3 {
-    color: #dee5ff;
-    font-size: 20px;
+    color: var(--color-text);
+    font-size: var(--font-heading);
     font-weight: 600;
-    line-height: 1.2;
+    line-height: var(--line-heading);
   }
 
   p {
-    color: #9eaad5;
-    font-size: 14px;
+    color: var(--color-text-muted);
+    font-size: var(--font-body);
     font-weight: 400;
-    line-height: 1.5;
+    line-height: var(--line-body);
   }
 
   .actions {
@@ -135,24 +135,19 @@
     min-height: 44px;
     gap: 8px;
     border: 0;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     padding: 0 14px;
     background: rgba(20, 31, 56, 0.78);
-    color: #dee5ff;
-    font-size: 12px;
+    color: var(--color-text);
+    font-size: var(--font-label);
     font-weight: 600;
-    line-height: 1.3;
+    line-height: var(--line-label);
     cursor: pointer;
   }
 
-  button:focus-visible {
-    outline: 2px solid #b6a0ff;
-    outline-offset: 2px;
-  }
-
   button.primary {
-    background: #b6a0ff;
-    color: #060e20;
+    background: var(--color-primary);
+    color: var(--color-surface);
   }
 
   .dashboard-grid {
@@ -162,7 +157,7 @@
 
   .threads-panel,
   .status-panel {
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     background: rgba(9, 19, 40, 0.76);
     backdrop-filter: blur(20px);
   }
@@ -222,17 +217,17 @@
     align-items: center;
     min-height: 44px;
     gap: 12px;
-    border-radius: 8px;
+    border-radius: var(--radius-md);
     padding: 0 12px;
     background: rgba(20, 31, 56, 0.64);
-    color: #dee5ff;
+    color: var(--color-text);
   }
 
   .dot {
     width: 8px;
     height: 8px;
     border-radius: 50%;
-    background: #00e3fd;
+    background: var(--color-secondary);
     box-shadow: 0 0 18px rgba(0, 227, 253, 0.28);
   }
 
