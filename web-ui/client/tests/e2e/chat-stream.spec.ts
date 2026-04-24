@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
+import { installBrowserErrorGuard } from './helpers/acceptance';
+
 const errorCopy =
   'RayMe cannot reach the LLM endpoint. Check Settings, run Test Connection, and try again.';
 
@@ -104,6 +106,7 @@ async function mockThread(page: Page, threadId: string) {
 test('chat hydrates selected alternates, streams send, and preserves done message fields', async ({
   page
 }) => {
+  const expectNoBrowserErrors = installBrowserErrorGuard(page);
   const threadId = 'e2e-thread';
   await mockThread(page, threadId);
   await page.route(`**/api/chat/${threadId}/send`, async (route) => {
@@ -142,9 +145,11 @@ test('chat hydrates selected alternates, streams send, and preserves done messag
   await expect(doneBubble).toHaveAttribute('data-stale-after-edit', 'true');
   await expect(doneBubble.getByText('Generated final selected branch').first()).toBeVisible();
   await expect(page.locator('[data-message-id^="streaming-ai-"]')).toHaveCount(0);
+  await expectNoBrowserErrors();
 });
 
 test('chat stream error keeps the user message and renders exact recovery copy', async ({ page }) => {
+  const expectNoBrowserErrors = installBrowserErrorGuard(page);
   const threadId = 'e2e-error-thread';
   await mockThread(page, threadId);
   await page.route(`**/api/chat/${threadId}/send`, async (route) => {
@@ -162,4 +167,5 @@ test('chat stream error keeps the user message and renders exact recovery copy',
   await expect(page.getByText('Try the endpoint')).toBeVisible();
   await expect(page.getByText(errorCopy)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Regenerate' })).toBeVisible();
+  await expectNoBrowserErrors();
 });

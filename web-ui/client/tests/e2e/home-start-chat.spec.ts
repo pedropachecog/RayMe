@@ -2,6 +2,8 @@ import { readFile } from 'node:fs/promises';
 
 import { expect, test, type Route } from '@playwright/test';
 
+import { installBrowserErrorGuard } from './helpers/acceptance';
+
 const deleteConfirmation =
   'Delete this character? Existing chats stay in history, but the character leaves the gallery.';
 
@@ -78,6 +80,7 @@ function threadDetail(threadId: string, character: typeof homeCharacter) {
 test('home and gallery start chat use POST /api/threads and returned thread IDs', async ({
   page
 }) => {
+  const expectNoBrowserErrors = installBrowserErrorGuard(page);
   const createRequests: unknown[] = [];
   let galleryDeleted = false;
   let exportCalled = false;
@@ -179,4 +182,5 @@ test('home and gallery start chat use POST /api/threads and returned thread IDs'
   await expect(deleteDialog.getByText(deleteConfirmation, { exact: true })).toBeVisible();
   await deleteDialog.getByRole('button', { name: 'Delete' }).click();
   await expect(page.getByTestId('character-card-gallery-character')).toHaveCount(0);
+  await expectNoBrowserErrors();
 });

@@ -1,5 +1,7 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 
+import { installBrowserErrorGuard } from './helpers/acceptance';
+
 const maliciousDescription = '<img src=x onerror=alert(1)> javascript:alert(1)';
 const characterId = 'imported-character';
 const threadId = 'imported-thread';
@@ -307,6 +309,7 @@ test('imported character chat reloads and continues', async ({ page }) => {
       (window as Window & { __raymeXssFired?: boolean }).__raymeXssFired = true;
     };
   });
+  const expectNoBrowserErrors = installBrowserErrorGuard(page);
   const calls = await installAcceptanceRoutes(page);
 
   await page.goto('/gallery');
@@ -390,4 +393,5 @@ test('imported character chat reloads and continues', async ({ page }) => {
     continued: true,
     sends: 2
   });
+  await expectNoBrowserErrors();
 });

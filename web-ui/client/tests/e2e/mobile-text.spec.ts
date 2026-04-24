@@ -1,5 +1,7 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 
+import { installBrowserErrorGuard } from './helpers/acceptance';
+
 test.use({ viewport: { width: 393, height: 851 }, isMobile: true });
 
 const character = {
@@ -231,6 +233,7 @@ async function chooseAction(page: Page, messageId: string, label: string) {
 }
 
 test('mobile viewport can import chat reload and continue', async ({ page }) => {
+  const expectNoBrowserErrors = installBrowserErrorGuard(page);
   await installMobileRoutes(page);
 
   await page.goto('/gallery');
@@ -280,4 +283,5 @@ test('mobile viewport can import chat reload and continue', async ({ page }) => 
   expect(composerBox).not.toBeNull();
   expect(mobileNavBox).not.toBeNull();
   expect((composerBox?.y ?? 0) + (composerBox?.height ?? 0)).toBeLessThanOrEqual(mobileNavBox?.y ?? 0);
+  await expectNoBrowserErrors();
 });
