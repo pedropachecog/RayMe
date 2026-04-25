@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,6 +30,7 @@ class CallFixture:
     client: TestClient
     sessionmaker: async_sessionmaker
     backend: "FakeCallBackend"
+    completion: "FakeCompletionClient"
 
 
 class FakeCallBackend:
@@ -36,6 +38,8 @@ class FakeCallBackend:
         self.ready = ready
         self.voice_available = voice_available
         self.created_sessions: list[dict[str, Any]] = []
+        self.speak_calls: list[dict[str, Any]] = []
+        self.interrupt_calls: list[dict[str, Any]] = []
 
     async def readiness(self) -> dict[str, Any]:
         if not self.ready:
@@ -54,6 +58,45 @@ class FakeCallBackend:
             return {"status": "voice_unavailable", "code": "call_voice_unavailable"}
         return {"session_id": f"ai_session_{len(self.created_sessions):032d}"}
 
+    async def speak_call(
+        self,
+        base_url: str,
+        session_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.speak_calls.append(
+            {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
+        )
+        return {"session_id": session_id, "event": {"type": "ai_done"}}
+
+    async def interrupt_call(self, base_url: str, session_id: str) -> dict[str, Any]:
+        self.interrupt_calls.append({"base_url": base_url, "session_id": session_id})
+        return {"session_id": session_id, "interrupted": True}
+
+
+class FakeCompletionClient:
+    def __init__(self) -> None:
+        self.token_sequences: list[list[str]] = [["AI reply."]]
+        self.requests: list[dict[str, Any]] = []
+        self.fail_next = False
+
+    async def stream_chat_completion_tokens(self, settings: Any, messages: Any) -> AsyncIterator[str]:
+        self.requests.append({"settings": settings, "messages": list(messages)})
+        if self.fail_next:
+            self.fail_next = False
+            raise RuntimeError("raw LLM failure")
+        tokens = self.token_sequences.pop(0) if self.token_sequences else ["AI reply."]
+        for token in tokens:
+            yield token
+
+
+class FakeCancelableTask:
+    def __init__(self) -> None:
+        self.cancel_calls = 0
+
+    def cancel(self) -> None:
+        self.cancel_calls += 1
+
 
 @pytest.fixture()
 def call_fixture(tmp_path: Path) -> Iterator[CallFixture]:
@@ -67,11 +110,17 @@ def call_fixture(tmp_path: Path) -> Iterator[CallFixture]:
     asyncio.run(setup_database())
 
     backend = FakeCallBackend()
+    completion = FakeCompletionClient()
     app = create_app(static_client_dir=None)
-    _install_test_dependencies(app, sessionmaker, backend)
+    _install_test_dependencies(app, sessionmaker, backend, completion)
 
     with TestClient(app) as client:
-        yield CallFixture(client=client, sessionmaker=sessionmaker, backend=backend)
+        yield CallFixture(
+            client=client,
+            sessionmaker=sessionmaker,
+            backend=backend,
+            completion=completion,
+        )
 
     asyncio.run(engine.dispose())
 
@@ -119,6 +168,26 @@ def test_controls_reject_unknown_or_mismatched_call_session_pairs(
     response = call_fixture.client.post(
         f"/api/calls/call_unknown{control_route}",
         json={"session_id": "ai_session_foreign", "muted": True, "sdp": "fake-offer", "type": "offer"},
+    )
+
+    assert response.status_code == 404
+    assert _public_error_code(response) == "call_session_not_found"
+
+
+def test_turns_reject_mismatched_session_for_existing_call(call_fixture: CallFixture) -> None:
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    start_response = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id})
+    assert start_response.status_code == 201
+    started = start_response.json()
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": "ai_session_not_owned_by_this_call",
+            "turn_id": "user-turn-1",
+            "text": "Hello",
+            "source": "user_final",
+        },
     )
 
     assert response.status_code == 404
@@ -223,10 +292,117 @@ def test_start_and_end_write_chronological_call_boundary_rows(
     ]
 
 
+def test_two_turns_stream_tokens_and_write_exact_speech_rows_before_call_end(
+    call_fixture: CallFixture,
+) -> None:
+    call_fixture.completion.token_sequences = [
+        ["First ", "AI answer."],
+        ["Second ", "AI answer."],
+    ]
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+
+    first = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-1",
+            "text": "First user turn.",
+            "source": "user_final",
+        },
+    )
+    second = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-2",
+            "text": "Second user turn.",
+            "source": "user_final",
+        },
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    first_events = _sse_events(first.text)
+    second_events = _sse_events(second.text)
+    assert [event["type"] for event in first_events] == ["ai_token", "ai_token", "ai_done"]
+    assert [event["type"] for event in second_events] == ["ai_token", "ai_token", "ai_done"]
+    assert "".join(event.get("text", "") for event in first_events) == "First AI answer."
+    assert "".join(event.get("text", "") for event in second_events) == "Second AI answer."
+
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    speech_rows = [row for row in rows if row[0] in {"user_speech", "ai_speech"}]
+    assert speech_rows == [
+        ("user_speech", "user", "First user turn."),
+        ("ai_speech", "assistant", "First AI answer."),
+        ("user_speech", "user", "Second user turn."),
+        ("ai_speech", "assistant", "Second AI answer."),
+    ]
+    assert [call["payload"]["text"] for call in call_fixture.backend.speak_calls] == [
+        "First AI answer.",
+        "Second AI answer.",
+    ]
+    assert all(call["session_id"] == started["session_id"] for call in call_fixture.backend.speak_calls)
+
+
+def test_turn_generation_failure_preserves_user_speech_and_returns_fixed_code(
+    call_fixture: CallFixture,
+) -> None:
+    call_fixture.completion.fail_next = True
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-fail",
+            "text": "Persist this user speech.",
+            "source": "user_final",
+        },
+    )
+
+    assert response.status_code == 200
+    events = _sse_events(response.text)
+    assert events == [
+        {
+            "type": "error",
+            "turn_id": "turn-fail",
+            "code": "call_generation_failed",
+            "message": "AI generation failed",
+        }
+    ]
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert ("user_speech", "user", "Persist this user speech.") in rows
+    assert not any(row[0] == "ai_speech" for row in rows)
+
+
+def test_interrupt_cancels_server_generation_and_ai_backend_session(
+    call_fixture: CallFixture,
+) -> None:
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    calls_module = importlib.import_module("app.api.calls")
+    fake_task = FakeCancelableTask()
+    calls_module._ACTIVE_LLM_TURNS[started["call_id"]] = fake_task
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/interrupt",
+        json={"session_id": started["session_id"]},
+    )
+
+    assert response.status_code == 200
+    assert fake_task.cancel_calls == 1
+    assert call_fixture.backend.interrupt_calls == [
+        {"base_url": "https://127.0.0.1:9443", "session_id": started["session_id"]}
+    ]
+
+
 def _install_test_dependencies(
     app: FastAPI,
     sessionmaker: async_sessionmaker,
     backend: FakeCallBackend,
+    completion: FakeCompletionClient,
 ) -> None:
     async def override_session() -> AsyncIterator[Any]:
         async with sessionmaker() as session:
@@ -254,6 +430,10 @@ def _install_test_dependencies(
         dependency = getattr(calls_module, name, None)
         if dependency is not None:
             app.dependency_overrides[dependency] = lambda: backend
+
+    completion_dependency = getattr(calls_module, "get_call_completion_client", None)
+    if completion_dependency is not None:
+        app.dependency_overrides[completion_dependency] = lambda: completion
 
 
 async def _insert_thread_with_character_and_voice(sessionmaker: async_sessionmaker) -> str:
@@ -390,3 +570,14 @@ def _public_error_message(response: Any) -> str | None:
     if isinstance(detail, dict):
         return detail.get("message")
     return None
+
+
+def _sse_events(text: str) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for line in text.splitlines():
+        if not line.startswith("data: "):
+            continue
+        payload = json.loads(line[len("data: ") :])
+        if isinstance(payload, dict):
+            events.append(payload)
+    return events

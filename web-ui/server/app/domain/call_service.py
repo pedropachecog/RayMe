@@ -184,6 +184,27 @@ class CallService:
     def interrupt(self, call_id: str) -> dict[str, Any]:
         return self._active_call(call_id).to_public_dict()
 
+    def active_call(self, call_id: str) -> dict[str, Any]:
+        return self._active_call(call_id).to_public_dict()
+
+    async def record_user_speech(self, call_id: str, text: str) -> dict[str, Any]:
+        call = self._active_call(call_id)
+        return await self._append_message(
+            call.thread_id,
+            text,
+            message_kind="user_speech",
+            role="user",
+        )
+
+    async def record_ai_speech(self, call_id: str, text: str) -> dict[str, Any]:
+        call = self._active_call(call_id)
+        return await self._append_message(
+            call.thread_id,
+            text,
+            message_kind="ai_speech",
+            role="assistant",
+        )
+
     async def end_call(self, call_id: str, reason: str = "hangup") -> dict[str, Any]:
         call = self._active_call(call_id)
         if call.ended_at is None:

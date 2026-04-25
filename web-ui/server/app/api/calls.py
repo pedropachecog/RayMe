@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 from collections.abc import AsyncIterator, Mapping
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +20,7 @@ from app.domain.call_service import (
     CallServiceError,
     CallSessionNotFoundError,
 )
+from app.domain.llm_stream import ChatCompletionSettings, SSE_DATA_PREFIX, stream_chat_completion
 from app.domain.prompt_builder import SqlAlchemyPromptRepository, build_call_prompt_context
 from app.domain.settings_service import SettingsService
 from app.domain.thread_service import CharacterUnavailableError, ThreadNotFoundError
@@ -27,10 +31,12 @@ router = APIRouter(prefix="/api/calls", tags=["calls"])
 CALL_BACKEND_NOT_READY = "call_backend_not_ready"
 CALL_ORIGIN_NOT_ALLOWED = "call_origin_not_allowed"
 CALL_SESSION_NOT_FOUND_CODE = "call_session_not_found"
+CALL_GENERATION_FAILED = "call_generation_failed"
 RAYME_EVENTS_CHANNEL = "rayme-events"
 CALL_BACKEND_NOT_READY_MESSAGE = (
     "RayMe voice backend is not ready. Check Settings, then try again."
 )
+_ACTIVE_LLM_TURNS: dict[str, asyncio.Task[Any]] = {}
 
 
 class CallStartRequest(BaseModel):
@@ -83,6 +89,15 @@ class EndRequest(BaseModel):
     reason: str = Field(default="hangup", min_length=1, max_length=80)
 
 
+class CallTurnRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1, max_length=128)
+    turn_id: str = Field(min_length=1, max_length=128)
+    text: str = Field(min_length=1, max_length=20000)
+    source: Literal["user_final"]
+
+
 async def get_call_session() -> AsyncIterator[AsyncSession]:
     async for session in get_session():
         yield session
@@ -94,6 +109,10 @@ def get_call_runtime_settings(request: Request) -> Settings:
 
 def get_call_backend_client() -> AiBackendClient:
     return AiBackendClient()
+
+
+def get_call_completion_client() -> object | None:
+    return None
 
 
 def get_call_service(session: AsyncSession = Depends(get_call_session)) -> CallService:
@@ -220,6 +239,9 @@ async def interrupt_call(
     try:
         session_id = service.session_for_call(call_id)
         _reject_mismatched_session(session_id, payload.session_id if payload else None)
+        task = _ACTIVE_LLM_TURNS.get(call_id)
+        if task is not None:
+            task.cancel()
         endpoint_settings = await SettingsService(session, runtime_settings).read()
         await _interrupt_call(backend, endpoint_settings.ai_backend_url, session_id)
         service.interrupt(call_id)
@@ -228,6 +250,115 @@ async def interrupt_call(
         raise _call_error(exc) from exc
     except AiBackendClientError as exc:
         raise _backend_error(exc) from exc
+
+
+@router.post("/{call_id}/turns", dependencies=[Depends(enforce_same_origin_for_calls)])
+async def create_call_turn(
+    call_id: str,
+    payload: CallTurnRequest,
+    session: AsyncSession = Depends(get_call_session),
+    runtime_settings: Settings = Depends(get_call_runtime_settings),
+    backend: Any = Depends(get_call_backend_client),
+    completion_client: object | None = Depends(get_call_completion_client),
+) -> StreamingResponse:
+    service = CallService(session)
+    try:
+        session_id = service.session_for_call(call_id)
+        _reject_mismatched_session(session_id, payload.session_id)
+        call = service.active_call(call_id)
+        await service.record_user_speech(call_id, payload.text)
+        prompt_messages = await build_call_prompt_context(
+            call["thread_id"],
+            repository=SqlAlchemyPromptRepository(session),
+            max_turns=24,
+        )
+        endpoint_settings = await SettingsService(session, runtime_settings).read()
+    except CallServiceError as exc:
+        raise _call_error(exc) from exc
+
+    completion_settings = ChatCompletionSettings(
+        base_url=endpoint_settings.llm_base_url,
+        api_key=endpoint_settings.llm_api_key,
+        model=endpoint_settings.llm_model,
+    )
+
+    async def events() -> AsyncIterator[str]:
+        current_task = asyncio.current_task()
+        if current_task is not None:
+            _ACTIVE_LLM_TURNS[call_id] = current_task
+        accumulated: list[str] = []
+        try:
+            async for raw_event in stream_chat_completion(
+                completion_settings,
+                prompt_messages,
+                client=completion_client,
+            ):
+                event = _decode_sse_event(raw_event)
+                if event.get("type") == "token":
+                    token = str(event.get("text") or "")
+                    if not token:
+                        continue
+                    accumulated.append(token)
+                    yield _sse({"type": "ai_token", "turn_id": payload.turn_id, "text": token})
+                    continue
+                if event.get("type") == "error":
+                    yield _sse(
+                        {
+                            "type": "error",
+                            "turn_id": payload.turn_id,
+                            "code": CALL_GENERATION_FAILED,
+                            "message": "AI generation failed",
+                        }
+                    )
+                    return
+
+            visible_text = "".join(accumulated)
+            if visible_text:
+                await _speak_call(
+                    backend,
+                    endpoint_settings.ai_backend_url,
+                    session_id,
+                    {
+                        "turn_id": payload.turn_id,
+                        "text": visible_text,
+                        "voice_id": call["voice_id"],
+                        "engine_id": call["engine_id"],
+                        "final_chunk": True,
+                    },
+                )
+            message = await service.record_ai_speech(call_id, visible_text)
+            yield _sse(
+                {
+                    "type": "ai_done",
+                    "turn_id": payload.turn_id,
+                    "message": message,
+                }
+            )
+        except asyncio.CancelledError:
+            return
+        except AiBackendClientError:
+            yield _sse(
+                {
+                    "type": "error",
+                    "turn_id": payload.turn_id,
+                    "code": "call_tts_failed",
+                    "message": "Speech playback failed",
+                }
+            )
+        except Exception:
+            yield _sse(
+                {
+                    "type": "error",
+                    "turn_id": payload.turn_id,
+                    "code": CALL_GENERATION_FAILED,
+                    "message": "AI generation failed",
+                }
+            )
+        finally:
+            if current_task is not None and _ACTIVE_LLM_TURNS.get(call_id) is current_task:
+                _ACTIVE_LLM_TURNS.pop(call_id, None)
+
+    return StreamingResponse(events(), media_type="text/event-stream")
 
 
 @router.post("/{call_id}/end", dependencies=[Depends(enforce_same_origin_for_calls)])
@@ -302,6 +433,17 @@ async def _end_call(backend: Any, base_url: str, session_id: str, reason: str) -
     return dict(await backend.end_call(base_url, session_id, reason))
 
 
+async def _speak_call(
+    backend: Any,
+    base_url: str,
+    session_id: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not hasattr(backend, "speak_call"):
+        return {"session_id": session_id, "event": {"type": "ai_done"}}
+    return dict(await backend.speak_call(base_url, session_id, payload))
+
+
 def _reject_mismatched_session(stored_session_id: str, provided_session_id: str | None) -> None:
     if provided_session_id is not None and provided_session_id != stored_session_id:
         raise CallSessionNotFoundError()
@@ -324,13 +466,31 @@ def _origin_from_url(value: str) -> str:
     return f"{scheme.lower()}://{authority.lower()}"
 
 
+def _sse(event: Mapping[str, Any]) -> str:
+    return f"{SSE_DATA_PREFIX}{json.dumps(dict(event), separators=(',', ':'))}\n\n"
+
+
+def _decode_sse_event(raw_event: str) -> dict[str, Any]:
+    for line in raw_event.splitlines():
+        if not line.startswith(SSE_DATA_PREFIX):
+            continue
+        try:
+            payload = json.loads(line[len(SSE_DATA_PREFIX) :])
+        except ValueError:
+            return {}
+        return payload if isinstance(payload, dict) else {}
+    return {}
+
+
 __all__ = [
     "CALL_BACKEND_NOT_READY",
+    "CALL_GENERATION_FAILED",
     "CALL_ORIGIN_NOT_ALLOWED",
     "CALL_SESSION_NOT_FOUND_CODE",
     "CALL_SESSION_NOT_FOUND",
     "RAYME_EVENTS_CHANNEL",
     "get_call_backend_client",
+    "get_call_completion_client",
     "get_call_session",
     "router",
 ]

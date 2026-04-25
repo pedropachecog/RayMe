@@ -195,6 +195,25 @@ class AiBackendClient:
             raise _invalid_response()
         return dict(payload)
 
+    async def speak_call(
+        self,
+        base_url: str,
+        session_id: str,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        response = await self._request(
+            "POST",
+            _join_endpoint(base_url, f"/webrtc/sessions/{session_id}/speak"),
+            json=dict(payload),
+            processing_message=WEBRTC_FAILED_MESSAGE,
+            processing_code="call_tts_failed",
+            timeout=self._synthesis_timeout,
+        )
+        response_payload = _json_payload(response)
+        if not isinstance(response_payload, dict):
+            raise _invalid_response()
+        return dict(response_payload)
+
     async def end_call(self, base_url: str, session_id: str, reason: str) -> dict[str, Any]:
         response = await self._request(
             "POST",
