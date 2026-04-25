@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import base64
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
@@ -16,7 +18,7 @@ from app.domain.thread_service import (
     ThreadService,
     new_message_id,
 )
-from app.storage.models import Character, Message, Thread, Voice, utc_now
+from app.storage.models import Character, Message, Thread, Voice, VoiceAsset, utc_now
 
 CALL_VOICE_REQUIRED = "call_voice_required"
 CALL_VOICE_UNAVAILABLE = "call_voice_unavailable"
@@ -204,6 +206,29 @@ class CallService:
             message_kind="ai_speech",
             role="assistant",
         )
+
+    async def voice_reference_for_call(self, call_id: str, voice_blob_dir: Path) -> dict[str, Any]:
+        call = self._active_call(call_id)
+        voice = await self._required_available_voice(call.voice_id)
+        result = await self.session.execute(
+            select(VoiceAsset)
+            .where(VoiceAsset.voice_id == voice.id, VoiceAsset.asset_kind == "sample")
+            .order_by(VoiceAsset.created_at.desc())
+        )
+        asset = result.scalars().first()
+        if asset is None:
+            raise CallVoiceUnavailableError()
+        storage_name = Path(asset.storage_path).name
+        if storage_name != asset.storage_path:
+            raise CallVoiceUnavailableError()
+        sample_path = voice_blob_dir / storage_name
+        if not sample_path.is_file():
+            raise CallVoiceUnavailableError()
+        return {
+            "reference_audio_base64": base64.b64encode(sample_path.read_bytes()).decode("ascii"),
+            "reference_audio_content_type": asset.content_type,
+            "reference_transcript": voice.reference_transcript,
+        }
 
     async def end_call(self, call_id: str, reason: str = "hangup") -> dict[str, Any]:
         call = self._active_call(call_id)

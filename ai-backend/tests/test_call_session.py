@@ -67,6 +67,15 @@ class FakeTtsAdapter:
         return {"wav_bytes": b"fake-wav", "sample_rate": 24000, "duration_ms": 100}
 
 
+class FakeGenericTtsAdapter:
+    def __init__(self) -> None:
+        self.reference_audio: bytes | None = None
+
+    def synthesize(self, payload: Any) -> dict[str, Any]:
+        self.reference_audio = payload.reference_audio
+        return {"wav_bytes": b"fake-wav", "sample_rate": 24000, "duration_ms": 100}
+
+
 class FakeInboundAudioFrame:
     def __init__(self, pcm: bytes) -> None:
         self.pcm = pcm
@@ -232,6 +241,26 @@ def test_speak_text_queues_audio_and_emits_done_for_final_chunk() -> None:
     assert [item["type"] for item in events] == ["ai_audio_started", "ai_done"]
     assert event["type"] == "ai_done"
     assert session.state == "listening"
+
+
+def test_speak_text_generic_adapter_uses_real_reference_audio() -> None:
+    adapter = FakeGenericTtsAdapter()
+    session, _ = _new_session(tts_adapter=adapter)
+
+    _run(
+        session.speak_text(
+            "ai-turn-reference",
+            "Hello from AI.",
+            "voice-1",
+            "f5",
+            final_chunk=True,
+            reference_audio_b64="cmVhbC1zYW1wbGU=",
+            reference_transcript="Real reference text.",
+            reference_audio_content_type="audio/wav",
+        )
+    )
+
+    assert adapter.reference_audio == b"real-sample"
 
 
 def test_interrupt_cancels_active_speech_before_ai_done() -> None:

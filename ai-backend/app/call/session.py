@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import inspect
 import json
 from collections.abc import Awaitable, Callable
@@ -206,6 +207,9 @@ class CallSession:
         final_chunk: bool = False,
         *,
         tts_adapter: Any | None = None,
+        reference_audio_b64: str | None = None,
+        reference_transcript: str | None = None,
+        reference_audio_content_type: str | None = None,
     ) -> dict[str, Any]:
         self._cancelled_ai_turns.discard(turn_id)
         self.state = "speaking"
@@ -230,6 +234,9 @@ class CallSession:
                 voice_id=voice_id,
                 engine_id=engine_id,
                 tts_adapter=tts_adapter,
+                reference_audio_b64=reference_audio_b64,
+                reference_transcript=reference_transcript,
+                reference_audio_content_type=reference_audio_content_type,
             )
             if turn_id in self._cancelled_ai_turns:
                 return {"status": "cancelled", "turn_id": turn_id}
@@ -442,6 +449,9 @@ class CallSession:
         voice_id: str,
         engine_id: str,
         tts_adapter: Any | None,
+        reference_audio_b64: str | None,
+        reference_transcript: str | None,
+        reference_audio_content_type: str | None,
     ) -> dict[str, Any]:
         adapter = tts_adapter or self.tts_adapter
         if adapter is None:
@@ -455,10 +465,14 @@ class CallSession:
                 engine_id=engine_id,
             )
         else:
+            if not reference_audio_b64:
+                raise ValueError("call TTS reference audio is required")
             result = adapter.synthesize(
                 TtsSynthesisInput(
                     text=text,
-                    reference_audio=b"rayme-call-reference-placeholder",
+                    reference_audio=base64.b64decode(reference_audio_b64, validate=True),
+                    reference_transcript=reference_transcript,
+                    reference_audio_content_type=reference_audio_content_type,
                     speech_speed=1.0,
                 )
             )

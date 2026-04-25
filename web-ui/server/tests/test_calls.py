@@ -31,6 +31,10 @@ class CallFixture:
     sessionmaker: async_sessionmaker
     backend: "FakeCallBackend"
     completion: "FakeCompletionClient"
+    voice_blob_dir: Path
+
+
+_TEST_VOICE_BLOB_DIR: Path | None = None
 
 
 class FakeCallBackend:
@@ -112,7 +116,10 @@ def call_fixture(tmp_path: Path) -> Iterator[CallFixture]:
     backend = FakeCallBackend()
     completion = FakeCompletionClient()
     app = create_app(static_client_dir=None)
-    _install_test_dependencies(app, sessionmaker, backend, completion)
+    voice_blob_dir = tmp_path / "blobs" / "voices"
+    global _TEST_VOICE_BLOB_DIR
+    _TEST_VOICE_BLOB_DIR = voice_blob_dir
+    _install_test_dependencies(app, sessionmaker, backend, completion, voice_blob_dir)
 
     with TestClient(app) as client:
         yield CallFixture(
@@ -120,8 +127,10 @@ def call_fixture(tmp_path: Path) -> Iterator[CallFixture]:
             sessionmaker=sessionmaker,
             backend=backend,
             completion=completion,
+            voice_blob_dir=voice_blob_dir,
         )
 
+    _TEST_VOICE_BLOB_DIR = None
     asyncio.run(engine.dispose())
 
 
@@ -342,6 +351,11 @@ def test_two_turns_stream_tokens_and_write_exact_speech_rows_before_call_end(
         "First AI answer.",
         "Second AI answer.",
     ]
+    assert all(call["payload"]["reference_audio_base64"] for call in call_fixture.backend.speak_calls)
+    assert all(
+        call["payload"]["reference_transcript"] == "Reference transcript for the assigned voice."
+        for call in call_fixture.backend.speak_calls
+    )
     assert all(call["session_id"] == started["session_id"] for call in call_fixture.backend.speak_calls)
 
 
@@ -403,6 +417,7 @@ def _install_test_dependencies(
     sessionmaker: async_sessionmaker,
     backend: FakeCallBackend,
     completion: FakeCompletionClient,
+    voice_blob_dir: Path,
 ) -> None:
     async def override_session() -> AsyncIterator[Any]:
         async with sessionmaker() as session:
@@ -435,6 +450,10 @@ def _install_test_dependencies(
     if completion_dependency is not None:
         app.dependency_overrides[completion_dependency] = lambda: completion
 
+    voice_blob_dependency = getattr(calls_module, "get_call_voice_blob_dir", None)
+    if voice_blob_dependency is not None:
+        app.dependency_overrides[voice_blob_dependency] = lambda: voice_blob_dir
+
 
 async def _insert_thread_with_character_and_voice(sessionmaker: async_sessionmaker) -> str:
     character_id = await _insert_character_with_voice(sessionmaker)
@@ -453,6 +472,9 @@ async def _insert_character_with_voice(
 
 
 async def _insert_voice(sessionmaker: async_sessionmaker, *, voice_id: str, deleted: bool = False) -> None:
+    if _TEST_VOICE_BLOB_DIR is not None:
+        _TEST_VOICE_BLOB_DIR.mkdir(parents=True, exist_ok=True)
+        (_TEST_VOICE_BLOB_DIR / f"voice_asset_{voice_id}.wav").write_bytes(b"voice sample bytes")
     async with sessionmaker() as session:
         voice = Voice(
             id=voice_id,

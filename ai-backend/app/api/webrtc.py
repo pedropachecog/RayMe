@@ -4,7 +4,7 @@ import asyncio
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from app.api.stt import _settings_from_app, _stt_adapter_from_app, _vad_adapter_from_app
 from app.call.session import CallSession, CallSessionManager
@@ -53,13 +53,19 @@ class EndControlRequest(BaseModel):
 
 
 class SpeakRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     turn_id: str = Field(min_length=1, max_length=128)
     text: str = Field(min_length=1, max_length=5000)
     voice_id: str = Field(min_length=1, max_length=128)
     engine_id: str = Field(min_length=1, max_length=64)
     final_chunk: bool = False
+    reference_audio_b64: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("reference_audio_b64", "reference_audio_base64"),
+    )
+    reference_transcript: str | None = Field(default=None, max_length=10000)
+    reference_audio_content_type: str | None = Field(default=None, max_length=120)
 
 
 class CallControlResponse(BaseModel):
@@ -173,6 +179,9 @@ async def speak_session(
             payload.engine_id,
             final_chunk=payload.final_chunk,
             tts_adapter=adapter,
+            reference_audio_b64=payload.reference_audio_b64,
+            reference_transcript=payload.reference_transcript,
+            reference_audio_content_type=payload.reference_audio_content_type,
         )
     except HTTPException:
         raise

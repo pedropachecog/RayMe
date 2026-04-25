@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator, Mapping
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -24,9 +25,10 @@ from app.domain.llm_stream import ChatCompletionSettings, SSE_DATA_PREFIX, strea
 from app.domain.prompt_builder import SqlAlchemyPromptRepository, build_call_prompt_context
 from app.domain.settings_service import SettingsService
 from app.domain.thread_service import CharacterUnavailableError, ThreadNotFoundError
-from app.storage.session import get_session
+from app.storage.session import SERVER_ROOT, get_session
 
 router = APIRouter(prefix="/api/calls", tags=["calls"])
+DEFAULT_CALL_VOICE_BLOB_DIR = SERVER_ROOT / "data" / "blobs" / "voices"
 
 CALL_BACKEND_NOT_READY = "call_backend_not_ready"
 CALL_ORIGIN_NOT_ALLOWED = "call_origin_not_allowed"
@@ -109,6 +111,10 @@ def get_call_runtime_settings(request: Request) -> Settings:
 
 def get_call_backend_client() -> AiBackendClient:
     return AiBackendClient()
+
+
+def get_call_voice_blob_dir() -> Path:
+    return DEFAULT_CALL_VOICE_BLOB_DIR
 
 
 def get_call_completion_client() -> object | None:
@@ -260,6 +266,7 @@ async def create_call_turn(
     runtime_settings: Settings = Depends(get_call_runtime_settings),
     backend: Any = Depends(get_call_backend_client),
     completion_client: object | None = Depends(get_call_completion_client),
+    voice_blob_dir: Path = Depends(get_call_voice_blob_dir),
 ) -> StreamingResponse:
     service = CallService(session)
     try:
@@ -272,6 +279,7 @@ async def create_call_turn(
             repository=SqlAlchemyPromptRepository(session),
             max_turns=24,
         )
+        voice_reference = await service.voice_reference_for_call(call_id, voice_blob_dir)
         endpoint_settings = await SettingsService(session, runtime_settings).read()
     except CallServiceError as exc:
         raise _call_error(exc) from exc
@@ -324,6 +332,7 @@ async def create_call_turn(
                         "voice_id": call["voice_id"],
                         "engine_id": call["engine_id"],
                         "final_chunk": True,
+                        **voice_reference,
                     },
                 )
             message = await service.record_ai_speech(call_id, visible_text)
@@ -492,5 +501,6 @@ __all__ = [
     "get_call_backend_client",
     "get_call_completion_client",
     "get_call_session",
+    "get_call_voice_blob_dir",
     "router",
 ]
