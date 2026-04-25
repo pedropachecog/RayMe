@@ -3,6 +3,19 @@
 These are project-specific operating rules for Codex/agent sessions. Treat them
 as durable context, not one-off preferences.
 
+## Session Startup
+
+- At the start of every context-reset session, read `.planning/SESSION-START.md`
+  and run `scripts/operational-check.sh start` before making implementation,
+  deployment, or handoff decisions.
+- Do not depend on previous conversational context for project constraints.
+  Rehydrate from `.planning/PROJECT.md`, `.planning/STATE.md`,
+  `.planning/OPERATING-NOTES.md`, `.planning/LEARNINGS.md`, and the active
+  phase files.
+- If the current request touches UI, OMEN, Android, LAN HTTPS, STT, TTS, VAD,
+  LLM, WebRTC, or GPU runtime, decide the verification layers before editing
+  and record them in the final handoff.
+
 ## Collaboration Expectations
 
 - The agent owns execution. Do not hand the user a full command sequence for
@@ -50,6 +63,9 @@ as durable context, not one-off preferences.
   5. commit SHA and deployed target stated.
   If any item is skipped, explicitly say why and mark the handoff as not fully
   verified.
+- Use `scripts/operational-check.sh handoff` before final readiness handoffs.
+  It does not replace judgment, but it prevents evidence-free "ready" claims
+  after context resets.
 - If the user reports "you gave me an untested path," treat that as an incident,
   not feedback to smooth over. Add or update durable tests/evidence, then add a
   brief note to `.planning/LEARNINGS.md` identifying the false assumption, the

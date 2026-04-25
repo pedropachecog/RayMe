@@ -98,3 +98,27 @@ Before telling the user a workflow is ready, report the exact evidence:
 
 If that evidence does not exist yet, keep working instead of asking the user to
 find the next failure.
+
+## 2026-04-25: Context Resets Need Explicit Rehydration
+
+### What Went Wrong
+
+- Corrective rules existed in planning docs, but future sessions could still
+  start from the active task and miss the operating constraints.
+- GSD context clearing is part of the workflow, so "remember this next time" is
+  insufficient unless the next session has a startup gate.
+
+### False Assumptions
+
+- Updating one durable note was enough to change behavior across context resets.
+- A future agent would naturally inspect the right operational files before
+  handoff.
+
+### Guards Added
+
+- `.planning/SESSION-START.md` defines the mandatory rehydration order,
+  startup checks, handoff gate, and readiness reporting format.
+- `scripts/operational-check.sh start` verifies that core operating constraints
+  are present before work begins.
+- `scripts/operational-check.sh handoff` verifies phase, commit, tests, and
+  evidence paths before a workflow is called ready.

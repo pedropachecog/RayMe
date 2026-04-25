@@ -67,6 +67,9 @@ progress:
 - Execution learning policy: repeated user reports of untested handoffs must be
   converted into durable tests, saved evidence, and `.planning/LEARNINGS.md`
   entries that name the false assumption and recurrence guard.
+- Session reset policy: every new context-reset session must read
+  `.planning/SESSION-START.md` and run `scripts/operational-check.sh start`
+  before implementation, deployment, or readiness handoff decisions.
 - Phase 02-08 TTS registry policy: TTS runtime packages are locked behind the AI backend optional `tts` extra, the canonical synthesis route is `/tts/synthesize`, and per-engine adapter modules are import-gated until live runtime evidence enables real model synthesis paths.
 - Phase 02-08 TTS error policy: synthesis failures return fixed public `tts_failed` details and never expose local paths, tracebacks, or adapter exception text.
 - Phase 02-09 voice API policy: voice save persists metadata plus sample linkage without a preview-success gate; rename updates display name only; Web UI transcription uses the AI backend `/stt/transcribe` route with stored sample bytes.
