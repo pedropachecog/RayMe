@@ -20,7 +20,9 @@ const editedTranscript = 'This is the edited reference transcript.';
 const previewText = 'Preview this RayMe voice.';
 
 test('Voice Lab saves after preview returns HTTP 502 and stays on RayMe APIs', async ({ page }) => {
-  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+    allowConsoleErrors: [/Failed to load resource: the server responded with a status of 502/]
+  });
   const voiceEvents: string[] = [];
 
   page.on('request', (request) => {
@@ -34,7 +36,7 @@ test('Voice Lab saves after preview returns HTTP 502 and stays on RayMe APIs', a
   await expect(page.getByRole('heading', { name: 'Voice Lab' })).toBeVisible();
 
   for (const stepLabel of ['1 Upload', '2 Transcript', '3 Engine', '4 Preview', '5 Save']) {
-    await expect(page.getByText(stepLabel)).toBeVisible();
+    await expect(page.getByText(stepLabel, { exact: true })).toBeVisible();
   }
 
   await page.getByLabel('Upload Sample').setInputFiles({

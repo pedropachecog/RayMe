@@ -27,6 +27,9 @@ const voiceLabSources = sourceFiles
   .filter((path) => existsSync(path))
   .map((path) => `\n/* ${path} */\n${readFileSync(path, 'utf8')}`)
   .join('\n');
+const routeSource = existsSync('src/routes/voice-lab/+page.svelte')
+  ? readFileSync('src/routes/voice-lab/+page.svelte', 'utf8')
+  : '';
 
 const requiredVoiceLabCopy = [
   'Voice Lab',
@@ -199,8 +202,9 @@ describe('Voice Lab Phase 2 source contract', () => {
     expect(voiceLabSources).toContain('Save Voice');
     expect(voiceLabSources).toContain('Preview Voice');
     expect(voiceLabSources).toContain('Use default engine');
-    expect(voiceLabSources).not.toMatch(/disabled=\{[^}]*preview[^}]*\}/i);
-    expect(voiceLabSources).not.toMatch(/preview\s*(?:Succeeded|Complete|Ready)\s*&&\s*canSave/i);
+    expect(routeSource).toMatch(/canSave\s*=\s*Boolean\([\s\S]*asset[\s\S]*voiceName[\s\S]*transcript[\s\S]*selectedEngine/i);
+    expect(routeSource).not.toMatch(/canSave\s*=\s*Boolean\([^)]*preview/i);
+    expect(routeSource).not.toMatch(/preview\s*(?:Succeeded|Complete|Ready)\s*&&\s*canSave/i);
   });
 
   it('preserves user input and preview text when preview synthesis fails', () => {

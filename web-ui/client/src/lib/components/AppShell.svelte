@@ -211,6 +211,7 @@
 
   .status-row {
     display: flex;
+    min-width: 0;
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: var(--space-sm);
@@ -249,6 +250,18 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  @media (max-width: 520px) {
+    .topbar {
+      display: grid;
+      grid-template-columns: 1fr;
+      align-items: start;
+    }
+
+    .status-row {
+      justify-content: flex-start;
+    }
   }
 
   @media (min-width: 800px) {
