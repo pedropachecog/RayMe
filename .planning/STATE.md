@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 02-09-PLAN.md (02-08 still pending)
-last_updated: "2026-04-25T00:31:24.415Z"
+stopped_at: Completed 02-10-PLAN.md (02-08 still pending)
+last_updated: "2026-04-25T00:41:51.420Z"
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 57
-  completed_plans: 47
-  percent: 82
+  completed_plans: 48
+  percent: 84
 ---
 
 ## Phase Status
@@ -29,6 +29,7 @@ progress:
 - Phase 02 plan 02-06 completed on 2026-04-25: AI backend settings, lifespan-owned model manager, six-engine residency metadata, and expanded `/health` VRAM/headroom payload passed AI backend health/model-manager contracts.
 - Phase 02 plan 02-07 completed on 2026-04-25: faster-whisper STT, Silero VAD gating, hallucination/manual transcript fallback, and transient `/stt/transcribe` passed AI backend STT/health contracts.
 - Phase 02 plan 02-09 completed on 2026-04-25: durable Web UI voice service/API now uploads, transcribes, previews, saves without preview gate, lists, reads, renames, soft-deletes with referents, and test-plays voices; plan 02-08 remains pending.
+- Phase 02 plan 02-10 completed on 2026-04-25: Settings now persists audio/VAD/STT/TTS defaults, enforces VAD bounds, and returns compact AI backend residency status; plan 02-08 remains pending.
 
 ## Current Decisions
 
@@ -52,6 +53,7 @@ progress:
 - Phase 02-06 health disclosure policy: public AI backend health uses fixed sanitized degradation reasons rather than raw adapter exceptions, tracebacks, or local model paths.
 - Phase 02-07 STT policy: uploaded samples are decoded to generated temporary WAV paths, faster-whisper runs English transcribe with `condition_on_previous_text=False`, and no-speech/hallucination/failure paths preserve retry plus manual transcript fallback.
 - Phase 02-09 voice API policy: voice save persists metadata plus sample linkage without a preview-success gate; rename updates display name only; Web UI transcription uses the AI backend `/stt/transcribe` route with stored sample bytes.
+- Phase 02-10 Settings policy: server-side Settings persists `stt_model` and `tts_default_engine` with audio/VAD defaults, uses compact AI backend status fields matching the RayMe-owned bridge, and unit tests override backend status dependencies instead of probing live LAN services.
 
 ## Evidence
 
@@ -77,8 +79,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-04-25T00:31:13.082Z
-Stopped at: Completed 02-09-PLAN.md (02-08 still pending)
+Last session: 2026-04-25T00:41:51.396Z
+Stopped at: Completed 02-10-PLAN.md (02-08 still pending)
 Resume file: None
 
 **Planned Phase:** 02 (AI Backend Skeleton & Voice Lab) — 18 plans — 2026-04-24T22:37:51.511Z
