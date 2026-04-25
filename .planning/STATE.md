@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 02-12-PLAN.md
-last_updated: "2026-04-25T02:01:24.545Z"
+stopped_at: Completed 02-16-PLAN.md
+last_updated: "2026-04-25T02:09:46.416Z"
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 57
-  completed_plans: 52
-  percent: 91
+  completed_plans: 53
+  percent: 93
 ---
 
 ## Phase Status
@@ -34,6 +34,7 @@ progress:
 - Phase 02 plan 02-11 completed on 2026-04-25: character writes now persist validated default voice IDs and character reads hydrate `none`, `assigned`, and `unavailable` voice states.
 - Phase 02 plan 02-12 completed on 2026-04-25: client Voice Lab now uploads samples, transcribes editable references, renders the full six-engine picker, previews optionally, and saves voices without a preview gate.
 - Phase 02 plan 02-14 completed on 2026-04-25: Settings UI now exposes audio defaults, VAD values, compact AI backend residency status, and top-level Voice Lab navigation.
+- Phase 02 plan 02-16 completed on 2026-04-25: license notices, runtime evidence gates, Voice Lab operations, safe cleanup paths, and OMEN-PC live evidence templates now document Phase 2 handoff rules.
 
 ## Current Decisions
 
@@ -65,6 +66,9 @@ progress:
 - Phase 02-12 engine-picker policy: Voice Lab renders the full six-engine roster from Settings AI backend metadata with a full-roster fallback.
 - Phase 02-14 Settings UI policy: browser saves include audio, VAD, STT, and TTS defaults before every endpoint test, and backend residency stays a compact endpoint-panel summary rather than a dashboard.
 - Phase 02-14 navigation policy: Voice Lab is a real top-level destination; Call navigation remains out of scope for Phase 2.
+- Phase 02-16 license policy: TTS notices distinguish package/code licenses from model/weights licenses and keep default engine selection separate from commercial-use clearance.
+- Phase 02-16 runtime evidence policy: runtime promotion requires one-runtime evidence first; split runtime, WSL, Docker, or subprocess paths require logged one-runtime failure evidence while preserving one public AI backend API.
+- Phase 02-16 cleanup policy: Voice Lab cleanup guidance uses exact durable blob paths and protects the canonical OMEN-PC checkout plus reusable TLS material.
 
 ## Evidence
 
@@ -90,8 +94,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-04-25T02:01:24.521Z
-Stopped at: Completed 02-12-PLAN.md
+Last session: 2026-04-25T02:09:46.390Z
+Stopped at: Completed 02-16-PLAN.md
 Resume file: None
 
 **Planned Phase:** 02 (AI Backend Skeleton & Voice Lab) — 18 plans — 2026-04-24T22:37:51.511Z
