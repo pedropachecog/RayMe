@@ -2,7 +2,7 @@
   import { browser } from '$app/environment';
   import { page } from '$app/state';
   import type { Snippet } from 'svelte';
-  import { Home, Images, Settings } from 'lucide-svelte';
+  import { FileAudio, Home, Images, Settings } from 'lucide-svelte';
 
   import StatusChip from './StatusChip.svelte';
 
@@ -11,6 +11,7 @@
   const navigation = [
     { label: 'Home', href: '/', icon: Home },
     { label: 'Gallery', href: '/gallery', icon: Images },
+    { label: 'Voice Lab', href: '/voice-lab', icon: FileAudio },
     { label: 'Settings', href: '/settings', icon: Settings }
   ] as const;
 
@@ -224,7 +225,7 @@
     position: fixed;
     inset: auto 0 0;
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     min-height: 64px;
     padding: 6px var(--space-sm) var(--space-sm);
     background: rgba(9, 19, 40, 0.96);
