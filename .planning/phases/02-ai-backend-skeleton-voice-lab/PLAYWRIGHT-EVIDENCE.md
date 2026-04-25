@@ -60,3 +60,44 @@ Results:
   Warm repeat: 1 second.
 - The cold timings are model-load warmup; the warm timings are the steady-state
   runtime path relevant to call-latency behavior.
+
+## Voice Lab Playback And Speed Controls
+
+- Saved tests:
+  - `web-ui/client/tests/e2e/voice-lab.spec.ts`
+  - `web-ui/client/tests/e2e/live-voice-lab.spec.ts`
+- Deployed commit for passing live run: `f9dd3cd`
+- Live target: `https://192.168.1.199:8443/voice-lab`
+- AI health target: `https://192.168.1.199:9443/health`
+
+Commands:
+
+```bash
+cd web-ui/client
+npx playwright test tests/e2e/voice-lab.spec.ts --project=desktop-chromium --reporter=json
+```
+
+```bash
+cd web-ui/client
+RAYME_ENABLE_LIVE_E2E=1 \
+RAYME_LIVE_WEB_URL=https://192.168.1.199:8443 \
+RAYME_LIVE_AI_HEALTH_URL=https://192.168.1.199:9443/health \
+npx playwright test tests/e2e/live-voice-lab.spec.ts --project=desktop-chromium --reporter=json
+```
+
+Results:
+
+- `playwright-results/live-voice-lab-playback-speed-20260425T135243Z.json`:
+  failed, 0 passed / 1 failed, duration 79032.473 ms. This run found that the
+  live Voice Library already had saved voices with row-level speech speed
+  sliders, making the test's generic `Speech speed` locator ambiguous.
+- `playwright-results/live-voice-lab-playback-speed-20260425T135525Z.json`:
+  passed, 1 passed / 0 failed, duration 96763.603 ms. This live deployed run
+  verified uploaded-sample playback, speech-speed submission, saved-voice
+  test-play, generated test audio controls, and cleanup of the temporary live
+  test voice.
+- `playwright-results/local-voice-lab-playback-speed-20260425T135811Z.json`:
+  passed, 6 passed / 0 failed, duration 78618.173 ms. This mocked browser run
+  covers Voice Lab save after preview failure, manual transcript after failed
+  transcription, mobile-width layout, row-scoped test-play, blocked delete, and
+  gallery voice states with the new playback/speed controls.

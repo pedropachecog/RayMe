@@ -1,0 +1,157 @@
+{
+  "config": {
+    "configFile": "/d/Pedro/Repos/Program/RayMe/web-ui/client/playwright.config.ts",
+    "rootDir": "/d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e",
+    "forbidOnly": false,
+    "fullyParallel": true,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/d/Pedro/Repos/Program/RayMe/web-ui/client/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "desktop-chromium",
+        "name": "desktop-chromium",
+        "testDir": "/d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/d/Pedro/Repos/Program/RayMe/web-ui/client/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "mobile-chromium",
+        "name": "mobile-chromium",
+        "testDir": "/d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.59.1",
+    "workers": 12,
+    "webServer": {
+      "command": "npm run build && npm run preview -- --host 127.0.0.1 --port 4173",
+      "url": "http://127.0.0.1:4173",
+      "reuseExistingServer": true,
+      "timeout": 120000
+    }
+  },
+  "suites": [
+    {
+      "title": "live-voice-lab.spec.ts",
+      "file": "live-voice-lab.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "live OMEN-PC Voice Lab upload transcribe save and test-play path passes before Android handoff",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 300000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "desktop-chromium",
+              "projectName": "desktop-chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 1854,
+                  "error": {
+                    "message": "Error: locator.evaluate: Error: strict mode violation: getByLabel('Speech speed') resolved to 4 elements:\n    1) <input min=\"0.5\" max=\"1.5\" step=\"0.05\" type=\"range\" class=\"svelte-wc2gvt\" aria-label=\"Speech speed\"/> aka getByRole('slider', { name: 'Speech speed', exact: true })\n    2) <input min=\"0.5\" max=\"1.5\" step=\"0.05\" type=\"range\" class=\"svelte-1mc2ajy\" aria-label=\"Stamets-Sample-Short speech speed\"/> aka getByRole('slider', { name: 'Stamets-Sample-Short speech' })\n    3) <input min=\"0.5\" max=\"1.5\" step=\"0.05\" type=\"range\" class=\"svelte-1mc2ajy\" aria-label=\"sample_bill_shorter speech speed\"/> aka getByRole('slider', { name: 'sample_bill_shorter speech' })\n    4) <input min=\"0.5\" max=\"1.5\" step=\"0.05\" type=\"range\" class=\"svelte-1mc2ajy\" aria-label=\"odavid3-24 speech speed\"/> aka getByRole('slider', { name: 'odavid3-24 speech speed' })\n\nCall log:\n\u001b[2m  - waiting for getByLabel('Speech speed')\u001b[22m\n",
+                    "stack": "Error: locator.evaluate: Error: strict mode violation: getByLabel('Speech speed') resolved to 4 elements:\n    1) <input min=\"0.5\" max=\"1.5\" step=\"0.05\" type=\"range\" class=\"svelte-wc2gvt\" aria-label=\"Speech speed\"/> aka getByRole('slider', { name: 'Speech speed', exact: true })\n    2) <input min=\"0.5\" max=\"1.5\" step=\"0.05\" type=\"range\" class=\"svelte-1mc2ajy\" aria-label=\"Stamets-Sample-Short speech speed\"/> aka getByRole('slider', { name: 'Stamets-Sample-Short speech' })\n    3) <input min=\"0.5\" max=\"1.5\" step=\"0.05\" type=\"range\" class=\"svelte-1mc2ajy\" aria-label=\"sample_bill_shorter speech speed\"/> aka getByRole('slider', { name: 'sample_bill_shorter speech' })\n    4) <input min=\"0.5\" max=\"1.5\" step=\"0.05\" type=\"range\" class=\"svelte-1mc2ajy\" aria-label=\"odavid3-24 speech speed\"/> aka getByRole('slider', { name: 'odavid3-24 speech speed' })\n\nCall log:\n\u001b[2m  - waiting for getByLabel('Speech speed')\u001b[22m\n\n    at setRangeValue (/d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e/live-voice-lab.spec.ts:110:17)\n    at /d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e/live-voice-lab.spec.ts:60:9",
+                    "location": {
+                      "file": "/d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e/live-voice-lab.spec.ts",
+                      "column": 17,
+                      "line": 110
+                    },
+                    "snippet": "  108 |\n  109 | async function setRangeValue(locator: Locator, value: string) {\n> 110 |   await locator.evaluate((node, nextValue) => {\n      |                 ^\n  111 |     const input = node as HTMLInputElement;\n  112 |     input.value = nextValue;\n  113 |     input.dispatchEvent(new Event('input', { bubbles: true }));"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e/live-voice-lab.spec.ts",
+                        "column": 17,
+                        "line": 110
+                      },
+                      "message": "Error: locator.evaluate: Error: strict mode violation: getByLabel('Speech speed') resolved to 4 elements:\n    1) <input min=\"0.5\" max=\"1.5\" step=\"0.05\" type=\"range\" class=\"svelte-wc2gvt\" aria-label=\"Speech speed\"/> aka getByRole('slider', { name: 'Speech speed', exact: true })\n    2) <input min=\"0.5\" max=\"1.5\" step=\"0.05\" type=\"range\" class=\"svelte-1mc2ajy\" aria-label=\"Stamets-Sample-Short speech speed\"/> aka getByRole('slider', { name: 'Stamets-Sample-Short speech' })\n    3) <input min=\"0.5\" max=\"1.5\" step=\"0.05\" type=\"range\" class=\"svelte-1mc2ajy\" aria-label=\"sample_bill_shorter speech speed\"/> aka getByRole('slider', { name: 'sample_bill_shorter speech' })\n    4) <input min=\"0.5\" max=\"1.5\" step=\"0.05\" type=\"range\" class=\"svelte-1mc2ajy\" aria-label=\"odavid3-24 speech speed\"/> aka getByRole('slider', { name: 'odavid3-24 speech speed' })\n\nCall log:\n\u001b[2m  - waiting for getByLabel('Speech speed')\u001b[22m\n\n\n  108 |\n  109 | async function setRangeValue(locator: Locator, value: string) {\n> 110 |   await locator.evaluate((node, nextValue) => {\n      |                 ^\n  111 |     const input = node as HTMLInputElement;\n  112 |     input.value = nextValue;\n  113 |     input.dispatchEvent(new Event('input', { bubbles: true }));\n\u001b[2m    at setRangeValue (/d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e/live-voice-lab.spec.ts:110:17)\u001b[22m\n\u001b[2m    at /d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e/live-voice-lab.spec.ts:60:9\u001b[22m"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-04-25T13:54:09.450Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/d/Pedro/Repos/Program/RayMe/web-ui/client/test-results/live-voice-lab-live-OMEN-P-5ef10-sses-before-Android-handoff-desktop-chromium/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e/live-voice-lab.spec.ts",
+                    "column": 17,
+                    "line": 110
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "d3c94934bbeea19f3832-ffd3cd5ef017895ad276",
+          "file": "live-voice-lab.spec.ts",
+          "line": 19,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-04-25T13:52:52.254Z",
+    "duration": 79032.473,
+    "expected": 0,
+    "skipped": 0,
+    "unexpected": 1,
+    "flaky": 0
+  }
+}

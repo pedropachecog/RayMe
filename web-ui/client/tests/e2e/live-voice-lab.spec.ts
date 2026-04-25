@@ -1,4 +1,4 @@
-import { expect, test, type Request } from '@playwright/test';
+import { expect, test, type Locator, type Request } from '@playwright/test';
 
 import { expectRayMeApiRequest, installBrowserErrorGuard } from './helpers/acceptance';
 
@@ -17,7 +17,8 @@ test.skip(
 test.use({ ignoreHTTPSErrors: true });
 
 test('live OMEN-PC Voice Lab upload transcribe save and test-play path passes before Android handoff', async ({
-  page
+  page,
+  request: apiRequest
 }) => {
   test.setTimeout(300_000);
   expect(liveWebUrl).toBe(canonicalLiveWebUrl);
@@ -45,6 +46,7 @@ test('live OMEN-PC Voice Lab upload transcribe save and test-play path passes be
     mimeType: 'audio/wav',
     buffer: makeToneWav()
   });
+  await expect(page.getByLabel('Play uploaded sample')).toBeVisible({ timeout: 60_000 });
   await page.getByRole('button', { name: 'Transcribe Sample' }).click();
   const transcript = page.getByLabel('Reference transcript');
   await expect(transcript).toBeEnabled({ timeout: 120_000 });
@@ -55,11 +57,13 @@ test('live OMEN-PC Voice Lab upload transcribe save and test-play path passes be
   const liveVoiceName = `Live Voice Lab ${Date.now()}`;
   await page.getByLabel('Voice name').fill(liveVoiceName);
   await page.getByLabel('Preview text').fill('Short live Voice Lab acceptance phrase.');
+  await setRangeValue(page.getByRole('slider', { name: 'Speech speed', exact: true }), '0.75');
   await page.getByRole('button', { name: 'Save Voice' }).click();
 
   const voiceRow = page.getByRole('listitem', { name: new RegExp(escapeRegExp(liveVoiceName)) });
   await expect(voiceRow).toBeVisible({ timeout: 120_000 });
   await voiceRow.getByPlaceholder('Type a test phrase').fill('One short live test phrase.');
+  await setRangeValue(voiceRow.getByLabel(`${liveVoiceName} speech speed`), '0.75');
   const testPlayResponsePromise = page.waitForResponse(
     (response) =>
       response.url().includes('/api/voices/') &&
@@ -73,6 +77,14 @@ test('live OMEN-PC Voice Lab upload transcribe save and test-play path passes be
   expect(Boolean(testPlayBody.audio_url || testPlayBody.audio_base64), 'test-play audio payload').toBe(true);
   expect(testPlayBody.content_type, 'test-play content type').toMatch(/^audio\//);
   await expect(page.getByText('Test voice ready.')).toBeVisible({ timeout: 180_000 });
+  await expect(voiceRow.getByLabel(`${liveVoiceName} generated test audio`)).toBeVisible();
+
+  const voiceId = new URL(testPlayResponse.url()).pathname.match(/\/api\/voices\/([^/]+)\/test-play/)?.[1];
+  expect(voiceId, 'created live test voice id').toBeTruthy();
+  if (voiceId) {
+    const deleteResponse = await apiRequest.delete(`${canonicalLiveWebUrl}/api/voices/${voiceId}`);
+    expect(deleteResponse.ok(), 'cleanup live test voice').toBe(true);
+  }
 
   expect(voiceRequests).toEqual(
     expect.arrayContaining([
@@ -92,6 +104,15 @@ function recordVoiceRequest(request: Request, events: string[]) {
   }
 
   events.push(`${request.method()} ${url.pathname}${url.search}`);
+}
+
+async function setRangeValue(locator: Locator, value: string) {
+  await locator.evaluate((node, nextValue) => {
+    const input = node as HTMLInputElement;
+    input.value = nextValue;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, value);
 }
 
 function makeToneWav() {
