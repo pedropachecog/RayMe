@@ -222,7 +222,7 @@ Plans:
 - [x] 02-05-PLAN.md — Web UI AI backend client and status bridge
 - [x] 02-06-PLAN.md — AI backend config, model manager, lifespan, and health residency payload
 - [x] 02-07-PLAN.md — AI backend STT/VAD processing and transient transcription API
-- [ ] 02-08-PLAN.md — AI backend TTS registry, adapters, switching, and transient synthesis API
+- [x] 02-08-PLAN.md — AI backend TTS registry, adapters, switching, and transient synthesis API
 - [x] 02-09-PLAN.md — Web UI voice domain/API for upload, transcribe, save, library, delete, and test-play
 - [x] 02-10-PLAN.md — Web UI Settings service/API for save-audio, VAD values, and AI backend status
 - [ ] 02-11-PLAN.md — Character default voice server persistence and unavailable state
