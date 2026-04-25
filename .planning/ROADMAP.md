@@ -272,7 +272,7 @@ Plans:
 - [x] 03-07-PLAN.md - Client call API wrappers, media helpers, and call state machine
 - [x] 03-08-PLAN.md - Phase 3 call UI surface, entry points, toolbar, visualizer, transcript, and thread row rendering
 - [x] 03-09-PLAN.md - Full Phase 3 MVP call loop wiring across browser, Web UI server, and AI backend
-- [ ] 03-10-PLAN.md - Full local Phase 3 automated acceptance and Playwright evidence
+- [x] 03-10-PLAN.md - Full local Phase 3 automated acceptance and Playwright evidence
 - [ ] 03-11-PLAN.md - OMEN-PC live LAN call acceptance and evidence
 - [ ] 03-12-PLAN.md - Physical Android Chrome product-owner acceptance and Phase 3 evidence closure
 

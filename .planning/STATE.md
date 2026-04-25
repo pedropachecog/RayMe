@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 03-09-PLAN.md
-last_updated: "2026-04-25T21:53:09.928Z"
+stopped_at: Completed 03-10-PLAN.md
+last_updated: "2026-04-25T22:05:25.917Z"
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 69
-  completed_plans: 66
-  percent: 96
+  completed_plans: 67
+  percent: 97
 ---
 
 ## Phase Status
@@ -49,6 +49,7 @@ progress:
 - Phase 03 plan 03-07 completed on 2026-04-25: client call API wrappers, WebRTC `rayme-events` helpers, call FSM, AudioContext unlock, device fallback copy, and split mic/AI RMS metering passed RED unit contracts.
 - Phase 03 plan 03-08 completed on 2026-04-25: operational call UI route, thread and character Start Call entry points, RMS visualizer, toolbar, live transcript, call row rendering, and mobile control layout passed client unit plus desktop/mobile Playwright contracts.
 - Phase 03 plan 03-09 completed on 2026-04-25: full MVP call loop now carries `user_final` turns through server-owned `/turns` SSE orchestration, LLM token streaming, saved-voice TTS playback, durable speech rows, and interrupt-safe cancellation.
+- Phase 03 plan 03-10 completed on 2026-04-25: full local Phase 3 automated acceptance passed across AI backend pytest, Web UI server pytest, client unit tests, desktop Chromium call specs, and mobile Chromium call spec with saved Playwright evidence.
 
 ## Current Decisions
 
@@ -123,6 +124,7 @@ progress:
 - Phase 03-09 call loop policy: Web UI server owns call/session validation for every `user_final` turn, streams `ai_token` events, and persists final `ai_speech` from the exact visible accumulated text.
 - Phase 03-09 TTS policy: call playback forwards saved voice sample audio and reference transcript to the AI backend; placeholder reference audio is invalid for generic TTS adapters.
 - Phase 03-09 interrupt policy: button interrupt cancels browser SSE reading, server LLM generation, and AI backend speech playback before returning to listening.
+- Phase 03-10 evidence policy: local Phase 3 call acceptance must keep mocked call specs free of skip/only/TODO gates, save browser evidence with command/timestamp/commit/pass-fail details, and leave live acceptance opt-in through `RAYME_ENABLE_LIVE_E2E`.
 
 ## Evidence
 
@@ -148,8 +150,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-04-25T21:53:09.906Z
-Stopped at: Completed 03-09-PLAN.md
+Last session: 2026-04-25T22:05:25.891Z
+Stopped at: Completed 03-10-PLAN.md
 Resume file: None
 
 **Planned Phase:** 03 (First Working Call (MVP)) — 12 plans — 2026-04-25T19:41:06.684Z
