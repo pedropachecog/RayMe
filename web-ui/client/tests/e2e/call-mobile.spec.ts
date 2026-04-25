@@ -7,7 +7,10 @@ const threadId = 'call-mobile-thread';
 
 test.describe('mobile-chromium call path', () => {
   test('keeps call controls visible above bottom navigation on mobile', async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== 'mobile-chromium', 'mobile-chromium only');
+    if (testInfo.project.name !== 'mobile-chromium') {
+      return;
+    }
+
     const assertNoBrowserErrors = installBrowserErrorGuard(page);
     await installMobileRoutes(page);
 
