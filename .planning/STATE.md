@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 02-13-PLAN.md
-last_updated: "2026-04-25T02:41:40.108Z"
+stopped_at: Completed 02-15-PLAN.md
+last_updated: "2026-04-25T02:56:07.542Z"
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 57
-  completed_plans: 55
-  percent: 96
+  completed_plans: 56
+  percent: 98
 ---
 
 ## Phase Status
@@ -35,6 +35,7 @@ progress:
 - Phase 02 plan 02-12 completed on 2026-04-25: client Voice Lab now uploads samples, transcribes editable references, renders the full six-engine picker, previews optionally, and saves voices without a preview gate.
 - Phase 02 plan 02-13 completed on 2026-04-25: Voice Library now lists saved voices, supports row-scoped test-play and rename, and requires explicit force confirmation with readable referents before deleting referenced voices.
 - Phase 02 plan 02-14 completed on 2026-04-25: Settings UI now exposes audio defaults, VAD values, compact AI backend residency status, and top-level Voice Lab navigation.
+- Phase 02 plan 02-15 completed on 2026-04-25: Character Editor now assigns saved default voices through Save Character, and Gallery cards show assigned, no-voice, and unavailable voice states.
 - Phase 02 plan 02-16 completed on 2026-04-25: license notices, runtime evidence gates, Voice Lab operations, safe cleanup paths, and OMEN-PC live evidence templates now document Phase 2 handoff rules.
 - Phase 02 plan 02-17 completed on 2026-04-25: AI backend now exposes only a non-call `/webrtc` skeleton with explicit non-readiness flags and fixed Phase 3 offer rejection.
 
@@ -71,6 +72,8 @@ progress:
 - Phase 02-13 unavailable-state policy: force-deleting a referenced voice removes it from active library rows while leaving character references intact for later UI to render as `Voice unavailable`.
 - Phase 02-14 Settings UI policy: browser saves include audio, VAD, STT, and TTS defaults before every endpoint test, and backend residency stays a compact endpoint-panel summary rather than a dashboard.
 - Phase 02-14 navigation policy: Voice Lab is a real top-level destination; Call navigation remains out of scope for Phase 2.
+- Phase 02-15 character voice UI policy: Character Editor default voice selection is route-owned state and persists only through `Save Character`.
+- Phase 02-15 Gallery voice-state policy: voice names render as text-only badges, and deleted references remain visible as `Voice unavailable` rather than crashing or disappearing.
 - Phase 02-16 license policy: TTS notices distinguish package/code licenses from model/weights licenses and keep default engine selection separate from commercial-use clearance.
 - Phase 02-16 runtime evidence policy: runtime promotion requires one-runtime evidence first; split runtime, WSL, Docker, or subprocess paths require logged one-runtime failure evidence while preserving one public AI backend API.
 - Phase 02-16 cleanup policy: Voice Lab cleanup guidance uses exact durable blob paths and protects the canonical OMEN-PC checkout plus reusable TLS material.
@@ -100,8 +103,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-04-25T02:39:53Z
-Stopped at: Completed 02-13-PLAN.md
+Last session: 2026-04-25T02:54:55Z
+Stopped at: Completed 02-15-PLAN.md
 Resume file: None
 
 **Planned Phase:** 02 (AI Backend Skeleton & Voice Lab) — 18 plans — 2026-04-24T22:37:51.511Z

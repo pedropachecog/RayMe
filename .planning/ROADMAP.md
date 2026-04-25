@@ -229,7 +229,7 @@ Plans:
 - [x] 02-12-PLAN.md — Client Voice Lab creation flow with six-engine picker and optional preview
 - [x] 02-13-PLAN.md — Client Voice Library list, rename, delete, and test-play
 - [x] 02-14-PLAN.md — Client Settings panels and Voice Lab navigation
-- [ ] 02-15-PLAN.md — Character Editor/Gallery default voice assignment and badges
+- [x] 02-15-PLAN.md — Character Editor/Gallery default voice assignment and badges
 - [x] 02-16-PLAN.md — License, runtime evidence, Voice Lab, and LAN runbook documentation
 - [x] 02-17-PLAN.md — Non-call aiortc signaling skeleton
 - [ ] 02-18-PLAN.md — Full local, live OMEN-PC, and Android product-owner acceptance
