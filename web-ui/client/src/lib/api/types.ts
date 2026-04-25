@@ -176,6 +176,110 @@ export interface ThreadDetail extends ThreadSummary {
   messages: ThreadMessage[];
 }
 
+export type CallStateName =
+  | 'idle'
+  | 'connecting'
+  | 'listening'
+  | 'thinking'
+  | 'speaking'
+  | 'interrupted'
+  | 'ended'
+  | 'failed';
+
+export type CallErrorCode =
+  | 'call_backend_not_ready'
+  | 'call_control_failed'
+  | 'call_generation_failed'
+  | 'call_origin_not_allowed'
+  | 'call_session_not_found'
+  | 'call_stt_failed'
+  | 'call_tts_failed'
+  | 'call_voice_required'
+  | 'call_voice_unavailable'
+  | 'webrtc_offer_failed'
+  | (string & {});
+
+export interface CallStartRequest {
+  thread_id?: string | null;
+  character_id?: string | null;
+}
+
+export interface CallStartResponse {
+  call_id: string;
+  session_id: string;
+  thread_id: string;
+  voice_id?: string | null;
+  engine_id?: TtsEngineId | null;
+  state?: CallStateName | string;
+}
+
+export interface CallSessionDescription {
+  type: RTCSdpType;
+  sdp: string;
+}
+
+export interface CallOfferResponse {
+  call_id: string;
+  session_id: string;
+  answer: RTCSessionDescriptionInit | CallSessionDescription | null;
+  event_channel: 'rayme-events' | string;
+}
+
+export interface CallTurnRequest {
+  session_id: string;
+  turn_id: string;
+  text: string;
+  source: 'user_final';
+}
+
+export interface CallTranscriptTurn {
+  id?: string;
+  turn_id?: string;
+  role: 'user' | 'assistant' | 'event';
+  type?: 'user_speech' | 'ai_speech' | 'call_start' | 'call_end' | string;
+  text: string;
+  created_at?: string | null;
+}
+
+export type CallEvent =
+  | {
+      type: 'user_final';
+      session_id: string;
+      turn_id: string;
+      text: string;
+      started_at?: string | null;
+      ended_at?: string | null;
+    }
+  | {
+      type: 'ai_audio_started';
+      session_id: string;
+      turn_id?: string | null;
+      text?: string | null;
+    }
+  | {
+      type: 'muted';
+      session_id: string;
+      muted: boolean;
+      turn_id?: string | null;
+    }
+  | {
+      type: 'interrupted';
+      session_id: string;
+      turn_id?: string | null;
+    }
+  | {
+      type: 'ended';
+      session_id: string;
+      reason?: string | null;
+    }
+  | {
+      type: 'failed';
+      session_id?: string | null;
+      turn_id?: string | null;
+      code: CallErrorCode;
+      message?: string | null;
+    };
+
 export interface SettingsPayload {
   web_url: string;
   ai_backend_url: string;
