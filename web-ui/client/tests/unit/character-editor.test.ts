@@ -10,6 +10,7 @@ import {
 import type { CharacterDetail, CharacterEditorPayload } from '../../src/lib/api/types';
 import characterFormSectionSource from '../../src/lib/components/CharacterFormSection.svelte?raw';
 import portraitDropzoneSource from '../../src/lib/components/PortraitDropzone.svelte?raw';
+import voiceAssignmentSelectSource from '../../src/lib/components/voice/VoiceAssignmentSelect.svelte?raw';
 import editorSource from '../../src/routes/characters/[id]/+page.svelte?raw';
 
 const requiredFields = [
@@ -60,12 +61,21 @@ const characterPayload: CharacterEditorPayload = {
   alternate_greetings: ['Backup line open.'],
   post_history_instructions: 'Preserve tone.',
   creator: 'RayMe',
-  character_version: '1.0'
+  character_version: '1.0',
+  default_voice_id: 'voice-f5'
 };
 
 const characterDetail: CharacterDetail = {
   id: 'character-1',
   ...characterPayload,
+  default_voice_state: 'assigned',
+  default_voice_label: 'Aster F5',
+  default_voice: {
+    id: 'voice-f5',
+    name: 'Aster F5',
+    default_engine: 'f5',
+    status: 'available'
+  },
   portrait_url: '/api/characters/character-1/portrait',
   lorebook_status: 'present_not_used_in_v1',
   lorebook_json: { entries: [] }
@@ -172,6 +182,43 @@ describe('Character Editor route', () => {
     }
     expect(editorSource).toContain("requestedMode === 'review'");
     expect(editorSource).toContain('await updateCharacter(characterId, payload)');
+  });
+
+  it('persists default_voice_id only through Save Character payloads', async () => {
+    const fetchMock = installFetch({
+      '/api/characters/character-1::PATCH': characterDetail
+    });
+
+    await updateCharacter('character-1', {
+      ...characterPayload,
+      default_voice_id: 'voice-f5'
+    });
+    const request = lastRequest(fetchMock);
+    const body = JSON.parse(request.init.body as string);
+
+    expect(body.default_voice_id).toBe('voice-f5');
+    expect(editorSource).toContain('default_voice_id: form.default_voice_id');
+    expect(editorSource).toContain('<VoiceAssignmentSelect');
+    expect(editorSource).toContain('Save Character');
+
+    const beforeSave = editorSource.slice(0, editorSource.indexOf('async function saveCharacter()'));
+    expect(beforeSave).not.toContain('updateCharacter(');
+    expect(voiceAssignmentSelectSource).not.toContain('updateCharacter(');
+    expect(voiceAssignmentSelectSource).not.toContain('createCharacter(');
+  });
+
+  it('renders saved voice options with no-voice, create-voice, and Qwen caveat copy', () => {
+    expect(editorSource).toContain('listVoices');
+    expect(editorSource).toContain('Default voice');
+    expect(editorSource).toContain('No voice assigned');
+    expect(editorSource).toContain('Create Voice');
+    expect(editorSource).toContain('/voice-lab');
+    expect(editorSource).toContain('default_voice_state');
+    expect(editorSource).toContain('default_voice_label');
+    expect(voiceAssignmentSelectSource).toContain('Default voice');
+    expect(voiceAssignmentSelectSource).toContain('No voice assigned');
+    expect(voiceAssignmentSelectSource).toContain('Create Voice');
+    expect(voiceAssignmentSelectSource).toContain('Qwen3-TTS 0.6B-Base');
   });
 
   it('uploads and removes portraits through PUT and DELETE /api/characters/{character_id}/portrait', async () => {
