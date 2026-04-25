@@ -1,18 +1,30 @@
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 
-HEALTH_PAYLOAD = {
-    "service": "rayme-ai-backend",
-    "status": "ok",
-    "phase": "01",
-    "capabilities": ["health"],
-}
+from app.api.health import router as health_router
+from app.config import AiBackendSettings
+from app.models.model_manager import ModelManager
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    manager = getattr(app.state, "model_manager", None)
+    if manager is None:
+        manager = ModelManager(AiBackendSettings())
+        app.state.model_manager = manager
+    manager.startup()
+    try:
+        yield
+    finally:
+        manager.shutdown()
 
 
 def create_app() -> FastAPI:
-    app = FastAPI(title="RayMe AI Backend", version="0.1.0")
-
-    @app.get("/health")
-    def health() -> dict[str, object]:
-        return {**HEALTH_PAYLOAD, "capabilities": list(HEALTH_PAYLOAD["capabilities"])}
-
+    app = FastAPI(title="RayMe AI Backend", version="0.2.0", lifespan=lifespan)
+    app.state.model_manager = ModelManager(AiBackendSettings())
+    app.include_router(health_router)
     return app
