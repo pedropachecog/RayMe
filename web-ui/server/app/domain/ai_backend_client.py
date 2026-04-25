@@ -90,10 +90,12 @@ class AiBackendClient:
         *,
         http_client: httpx.AsyncClient | None = None,
         timeout: float = 5.0,
+        transcription_timeout: float = 120.0,
         synthesis_timeout: float = 120.0,
     ) -> None:
         self._http_client = http_client
         self._timeout = timeout
+        self._transcription_timeout = transcription_timeout
         self._synthesis_timeout = synthesis_timeout
 
     async def get_status(self, base_url: str) -> AiBackendStatus:
@@ -117,6 +119,7 @@ class AiBackendClient:
             files={"file": (filename, audio_bytes, content_type)},
             processing_message=TRANSCRIPTION_FAILED_MESSAGE,
             processing_code="transcription_failed",
+            timeout=self._transcription_timeout,
         )
         payload = _json_payload(response)
         try:
