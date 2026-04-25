@@ -11,6 +11,7 @@
   --color-danger: #ff716c;
   --color-focus: rgba(182, 160, 255, 0.72);
   --color-outline-ghost: rgba(64, 72, 93, 0.28);
+  --call-mobile-control-reserve: calc(80px + env(safe-area-inset-bottom));
   --space-xs: 4px;
   --space-sm: 8px;
   --space-md: 16px;
