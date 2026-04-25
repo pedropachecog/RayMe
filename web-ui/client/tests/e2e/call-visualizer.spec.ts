@@ -14,14 +14,14 @@ test('voice visualizer reflects Listening, Thinking, and Speaking call states', 
 
   const visualizer = page.getByTestId('voice-visualizer');
   await expect(visualizer).toBeVisible();
-  await expect(page.getByText('Listening')).toBeVisible();
+  await expect(visualizer.getByText('Listening')).toBeVisible();
   await expect(visualizer).toHaveAttribute('data-call-state', 'listening');
   await expect(visualizer).toHaveAttribute('data-listening-rms', /0\.[1-9]/);
 
-  await expect(page.getByText('Thinking')).toBeVisible();
+  await expect(visualizer.getByText('Thinking')).toBeVisible();
   await expect(visualizer).toHaveAttribute('data-call-state', 'thinking');
 
-  await expect(page.getByText('Speaking')).toBeVisible();
+  await expect(visualizer.getByText('Speaking')).toBeVisible();
   await expect(visualizer).toHaveAttribute('data-call-state', 'speaking');
   await expect(visualizer).toHaveAttribute('data-speaking-rms', /0\.[1-9]/);
   assertNoBrowserErrors();
@@ -36,9 +36,13 @@ async function installVisualizerRoutes(page: Page) {
       messages: []
     }));
   });
-  await page.route('**/api/calls', async (route) => {
+  await page.route('**/api/characters/*/portrait**', async (route) => {
+    await route.fulfill({ status: 204 });
+  });
+  await page.route('**/api/calls/start', async (route) => {
     await fulfillJson(route, {
       call_id: 'call-visualizer-01',
+      session_id: 'rtc-call-visualizer-01',
       thread_id: threadId,
       state: 'listening',
       events: [

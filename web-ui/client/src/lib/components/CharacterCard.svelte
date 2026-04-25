@@ -1,6 +1,8 @@
 <script lang="ts">
-  import { Download, MessageSquarePlus, Pencil, Trash2 } from 'lucide-svelte';
+  import { goto } from '$app/navigation';
+  import { Download, MessageSquarePlus, Pencil, Phone, Trash2 } from 'lucide-svelte';
 
+  import { startCall } from '$lib/api/calls';
   import type { CharacterSummary } from '$lib/api/types';
   import { renderTrustedMarkdown } from '$lib/sanitizer/renderMarkdown';
   import VoiceStateBadge from '$lib/components/voice/VoiceStateBadge.svelte';
@@ -11,6 +13,7 @@
   export let onEdit: (character: CharacterSummary) => void = () => {};
   export let onExportJson: (character: CharacterSummary) => void = () => {};
   export let onDelete: (character: CharacterSummary) => void = () => {};
+  let callStarting = false;
 
   $: portraitUrl = character.portrait_url || '';
   $: initials = character.name
@@ -28,6 +31,28 @@
   $: renderedSnippet = renderTrustedMarkdown(snippetSource);
   $: visibleTags = (character.tags ?? []).filter(Boolean).slice(0, 2);
   $: remainingTagCount = Math.max(0, (character.tags?.length ?? 0) - visibleTags.length);
+  $: voiceUsable = character.default_voice_state === 'assigned';
+  $: callRecovery =
+    character.default_voice_state === 'unavailable'
+      ? "This character's assigned voice is unavailable."
+      : 'Assign a voice before calling this character.';
+
+  async function startCharacterCall() {
+    if (!voiceUsable || busy || callStarting) {
+      return;
+    }
+
+    callStarting = true;
+
+    try {
+      const started = await startCall({ character_id: character.id });
+      await goto(
+        `/call/${encodeURIComponent(started.thread_id)}?call_id=${encodeURIComponent(started.call_id)}&session_id=${encodeURIComponent(started.session_id)}&state=${encodeURIComponent(String(started.state ?? 'listening'))}`
+      );
+    } finally {
+      callStarting = false;
+    }
+  }
 </script>
 
 <article class="character-card" data-testid={`character-card-${character.id}`}>
@@ -71,6 +96,16 @@
         <MessageSquarePlus size={16} strokeWidth={1.8} />
         <span>Start Chat</span>
       </button>
+      <button
+        class="call-action"
+        type="button"
+        disabled={busy || callStarting || !voiceUsable}
+        aria-describedby={!voiceUsable ? `call-recovery-${character.id}` : undefined}
+        on:click={startCharacterCall}
+      >
+        <Phone size={16} strokeWidth={1.8} />
+        <span>Start Call</span>
+      </button>
       <button type="button" disabled={busy} on:click={() => onEdit(character)}>
         <Pencil size={16} strokeWidth={1.8} />
         <span>Edit</span>
@@ -83,6 +118,9 @@
         <Trash2 size={16} strokeWidth={1.8} />
         <span>Delete</span>
       </button>
+      {#if !voiceUsable}
+        <p id={`call-recovery-${character.id}`} class="call-recovery">{callRecovery}</p>
+      {/if}
     </div>
   </div>
 </article>
@@ -214,8 +252,19 @@
     color: var(--color-surface);
   }
 
+  button.call-action {
+    background: rgba(0, 227, 253, 0.14);
+  }
+
   button.danger {
     color: var(--color-danger);
+  }
+
+  .call-recovery {
+    grid-column: 1 / -1;
+    color: var(--color-text-muted);
+    font-size: var(--font-label);
+    line-height: var(--line-label);
   }
 
   @media (max-width: 520px) {

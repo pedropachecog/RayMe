@@ -38,9 +38,13 @@ async function installMobileRoutes(page: Page) {
       messages: []
     }));
   });
-  await page.route('**/api/calls', async (route) => {
+  await page.route('**/api/characters/*/portrait**', async (route) => {
+    await route.fulfill({ status: 204 });
+  });
+  await page.route('**/api/calls/start', async (route) => {
     await fulfillJson(route, {
       call_id: 'call-mobile-01',
+      session_id: 'rtc-call-mobile-01',
       thread_id: threadId,
       state: 'speaking'
     }, 201);

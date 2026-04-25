@@ -15,7 +15,7 @@ test('starts a call from the thread header Start call control', async ({ page })
   await expect(page.getByRole('heading', { name: 'Call Start Aster' })).toBeVisible();
   await page.getByRole('button', { name: 'Start call' }).click();
 
-  await expect(page.getByText('Listening')).toBeVisible();
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Mute' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'End Call' })).toBeVisible();
   assertNoBrowserErrors();
@@ -31,8 +31,8 @@ test('starts a call from a character card Start Call control', async ({ page }) 
   await expect(card).toBeVisible();
   await card.getByRole('button', { name: 'Start Call' }).click();
 
-  await expect(page).toHaveURL(new RegExp(`/chat/${threadId}`));
-  await expect(page.getByText('Listening')).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`/call/${threadId}`));
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
   assertNoBrowserErrors();
 });
 
@@ -76,10 +76,14 @@ async function installCallStartRoutes(page: Page) {
   await page.route(`**/api/threads/${threadId}`, async (route) => {
     await fulfillJson(route, thread);
   });
-  await page.route('**/api/calls', async (route: Route) => {
+  await page.route('**/api/characters/*/portrait**', async (route) => {
+    await route.fulfill({ status: 204 });
+  });
+  await page.route('**/api/calls/start', async (route: Route) => {
     expect(route.request().method()).toBe('POST');
     await fulfillJson(route, {
       call_id: 'call-start-01',
+      session_id: 'rtc-call-start-01',
       thread_id: threadId,
       state: 'listening'
     }, 201);

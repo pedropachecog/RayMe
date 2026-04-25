@@ -7,7 +7,9 @@ const threadId = 'call-permissions-thread';
 const micBlockedCopy = 'Microphone access is blocked. Allow microphone access in Chrome, then retry.';
 
 test('microphone denial shows public recovery copy and retry action', async ({ context, page }) => {
-  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+    allowConsoleErrors: [/Failed to load resource: the server responded with a status of 403/]
+  });
   await context.grantPermissions([], { origin: 'http://127.0.0.1:4173' });
   await installPermissionRoutes(page);
 
@@ -29,7 +31,10 @@ async function installPermissionRoutes(page: Page) {
       messages: []
     }));
   });
-  await page.route('**/api/calls', async (route) => {
+  await page.route('**/api/characters/*/portrait**', async (route) => {
+    await route.fulfill({ status: 204 });
+  });
+  await page.route('**/api/calls/start', async (route) => {
     await fulfillJson(route, {
       detail: {
         code: 'microphone_blocked',

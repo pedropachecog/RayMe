@@ -2,7 +2,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { createVirtualizer } from '@tanstack/svelte-virtual';
-  import { ArrowDown, ArrowLeft, RefreshCw } from 'lucide-svelte';
+  import { ArrowDown, ArrowLeft, Phone, RefreshCw } from 'lucide-svelte';
   import { tick } from 'svelte';
   import { get } from 'svelte/store';
 
@@ -587,6 +587,12 @@
       .map((part) => part[0]?.toUpperCase())
       .join('');
   }
+
+  function startThreadCall() {
+    if (threadId) {
+      void goto(`/call/${encodeURIComponent(threadId)}`);
+    }
+  }
 </script>
 
 <section class="chat-route">
@@ -607,6 +613,10 @@
       <p>{characterName}</p>
       <h1>{threadTitle}</h1>
     </div>
+
+    <button class="call-button" type="button" aria-label="Start call" onclick={startThreadCall}>
+      <Phone size={18} strokeWidth={1.8} aria-hidden="true" />
+    </button>
 
     <button class="refresh-button" type="button" aria-label="Reload thread" onclick={() => refreshThread()}>
       <RefreshCw size={18} strokeWidth={1.8} aria-hidden="true" />
@@ -749,7 +759,7 @@
     top: 0;
     z-index: 3;
     display: grid;
-    grid-template-columns: 44px 48px minmax(0, 1fr) 44px;
+    grid-template-columns: 44px 48px minmax(0, 1fr) 44px 44px;
     align-items: center;
     gap: var(--space-sm);
     min-height: 72px;
@@ -758,6 +768,7 @@
   }
 
   .back-button,
+  .call-button,
   .refresh-button,
   .chat-state button {
     display: inline-flex;
@@ -769,6 +780,10 @@
     border-radius: var(--radius-md);
     background: rgba(20, 31, 56, 0.72);
     color: var(--color-text);
+  }
+
+  .call-button {
+    background: rgba(0, 227, 253, 0.14);
   }
 
   .portrait {
@@ -1013,7 +1028,7 @@
     }
 
     .chat-header {
-      grid-template-columns: 44px 44px minmax(0, 1fr) 44px;
+      grid-template-columns: 44px 44px minmax(0, 1fr) 44px 44px;
     }
 
     .portrait {
