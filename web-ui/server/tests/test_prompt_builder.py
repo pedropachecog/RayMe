@@ -264,6 +264,7 @@ async def test_call_context_sliding_window_limits_to_recent_24_turn_messages() -
     messages = await _build_call_prompt_context("thread-call", max_turns=24, repository=repository)
 
     assert messages[0]["role"] == "system"
+    assert len(messages) <= 25
     turn_messages = messages[1:]
     assert len(turn_messages) <= 24
     assert [message["content"] for message in turn_messages] == [
