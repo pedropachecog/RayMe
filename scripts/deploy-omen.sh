@@ -26,6 +26,20 @@ if ($expectedHead -and $actualHead -ne $expectedHead) {
   throw "OMEN checkout is $actualHead, expected $expectedHead"
 }
 
+$cudaRuntimeBin = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin"
+if (-not (Test-Path "$cudaRuntimeBin\cublas64_12.dll")) {
+  throw "Missing CUDA 12 runtime at $cudaRuntimeBin. Expected cublas64_12.dll for faster-whisper GPU STT."
+}
+
+Write-Host "== Writing scheduled task launchers"
+$aiLauncher = @"
+@echo off
+cd /d C:\Users\pmpg\rayme\RayMe
+set "PATH=$cudaRuntimeBin;%PATH%"
+ai-backend\.venv\Scripts\python.exe ai-backend\scripts\run_https.py --host 192.168.1.199 --port 9443 --cert C:\Users\pmpg\rayme\phase1-tls\rayme.local+1.pem --key C:\Users\pmpg\rayme\phase1-tls\rayme.local+1-key.pem >> C:\Users\pmpg\rayme\logs\ai-backend.run.log 2>>&1
+"@
+Set-Content -Path "C:\Users\pmpg\rayme\start-ai-backend.cmd" -Value $aiLauncher -Encoding ASCII
+
 Write-Host "== Building web client"
 Set-Location "$repo\web-ui\client"
 npm run build

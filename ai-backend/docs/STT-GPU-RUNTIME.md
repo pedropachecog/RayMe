@@ -12,6 +12,8 @@ production path for the phone-call simulator.
 - Driver observed on 2026-04-25: NVIDIA 560.94, CUDA driver support 12.6
 - Required CTranslate2 GPU libraries: CUDA cuBLAS and cuDNN on the process
   `PATH`
+- CUDA runtime directory:
+  `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin`
 
 ## Failure Signature
 
@@ -28,9 +30,21 @@ to CPU is not.
 ## Required Fix
 
 Install NVIDIA CUDA Toolkit 12.6 on OMEN or otherwise provide a durable CUDA 12
-runtime directory containing `cublas64_12.dll` and the required cuDNN 9 DLLs.
-The scheduled AI backend startup must prepend that CUDA `bin` directory to
-`PATH` before launching Python.
+runtime directory containing `cublas64_12.dll`, `cublasLt64_12.dll`,
+`cudart64_12.dll`, and the required cuDNN 9 DLLs. The scheduled AI backend
+startup must prepend that CUDA `bin` directory to `PATH` before launching
+Python.
+
+If the full CUDA Toolkit installer cannot complete without elevation, extract
+the runtime DLLs from the verified NVIDIA CUDA 12.6 installer with 7-Zip into a
+durable RayMe-owned runtime directory, then update `scripts/deploy-omen.sh` to
+prepend that directory. The installed OMEN runtime layout is:
+
+```text
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin\cublas64_12.dll
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin\cublasLt64_12.dll
+C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin\cudart64_12.dll
+```
 
 Do not install CUDA 13.x for this runtime unless CTranslate2 and the NVIDIA
 driver baseline are intentionally updated and revalidated. OMEN currently has
@@ -42,6 +56,7 @@ Run against a real saved voice sample:
 
 ```powershell
 cd C:\Users\pmpg\rayme\RayMe\ai-backend
+set PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin;%PATH%
 .\.venv\Scripts\python.exe -c "from faster_whisper import WhisperModel; m=WhisperModel('distil-large-v3', device='cuda', compute_type='int8_float16'); print('cuda-ready')"
 ```
 
