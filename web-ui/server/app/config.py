@@ -22,7 +22,7 @@ class Settings(BaseModel, frozen=True):
     tls_key: Path | None = None
     allowed_origins: list[str] = Field(default_factory=lambda: list(DEFAULT_ALLOWED_ORIGINS))
     ai_backend_base_url: str = "https://127.0.0.1:9443"
-    ai_backend_synthesis_timeout_seconds: float = Field(default=120.0, gt=0, le=600)
+    ai_backend_synthesis_timeout_seconds: float = Field(default=300.0, gt=0, le=600)
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: str = ""
     llm_model: str = "gpt-4.1-mini"
