@@ -2,10 +2,16 @@ from __future__ import annotations
 
 import importlib.util
 from collections.abc import Iterable, Mapping, Sequence
-from enum import StrEnum
+from enum import Enum
 from typing import Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
+
+try:
+    from enum import StrEnum
+except ImportError:  # pragma: no cover - exercised by OMEN-PC Python 3.10 runtime.
+    class StrEnum(str, Enum):
+        pass
 
 
 class EngineSwitchState(StrEnum):
