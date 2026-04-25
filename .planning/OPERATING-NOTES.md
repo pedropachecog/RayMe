@@ -41,6 +41,23 @@ as durable context, not one-off preferences.
   corresponding run result under the relevant phase directory with the command,
   timestamp, commit, and pass/fail outcome. Do not rely on unsaved one-off
   browser scripts or transient terminal output as final evidence.
+- Before every user handoff that says a feature is ready, complete and report a
+  pre-handoff verification checklist:
+  1. relevant unit/API tests run,
+  2. browser/Playwright workflow run for UI changes,
+  3. live OMEN-PC deployed verification run when LAN/GPU behavior matters,
+  4. result artifacts saved under the phase directory,
+  5. commit SHA and deployed target stated.
+  If any item is skipped, explicitly say why and mark the handoff as not fully
+  verified.
+- If the user reports "you gave me an untested path," treat that as an incident,
+  not feedback to smooth over. Add or update durable tests/evidence, then add a
+  brief note to `.planning/LEARNINGS.md` identifying the false assumption, the
+  missing verification layer, and the guard that now prevents recurrence.
+- Do not rely on tone management as the fix for repeated technical failures.
+  The acceptable response pattern is: acknowledge the exact miss, identify the
+  verification gap, add an executable or procedural guard, run it, save evidence,
+  and then hand off with the evidence path.
 - Do not launch backend runtime tasks through visible `.cmd` windows. On
   `OMEN-PC`, scheduled tasks must use hidden PowerShell launchers or another
   no-console mechanism so the user's desktop is not littered with completed
