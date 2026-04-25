@@ -90,9 +90,11 @@ class AiBackendClient:
         *,
         http_client: httpx.AsyncClient | None = None,
         timeout: float = 5.0,
+        synthesis_timeout: float = 120.0,
     ) -> None:
         self._http_client = http_client
         self._timeout = timeout
+        self._synthesis_timeout = synthesis_timeout
 
     async def get_status(self, base_url: str) -> AiBackendStatus:
         response = await self._request("GET", _join_endpoint(base_url, "/health"))
@@ -129,6 +131,7 @@ class AiBackendClient:
             json=dict(payload),
             processing_message=SYNTHESIS_FAILED_MESSAGE,
             processing_code="synthesis_failed",
+            timeout=self._synthesis_timeout,
         )
         response_payload = _json_payload(response)
         try:
@@ -143,13 +146,14 @@ class AiBackendClient:
         *,
         processing_message: str | None = None,
         processing_code: str | None = None,
+        timeout: float | None = None,
         **kwargs: Any,
     ) -> httpx.Response:
         try:
             if self._http_client is not None:
                 response = await self._http_client.request(method, url, **kwargs)
             else:
-                async with httpx.AsyncClient(timeout=self._timeout, verify=False) as client:
+                async with httpx.AsyncClient(timeout=timeout or self._timeout, verify=False) as client:
                     response = await client.request(method, url, **kwargs)
         except (httpx.TimeoutException, httpx.NetworkError, httpx.TransportError) as exc:
             raise AiBackendUnavailable(code="unreachable", message=UNREACHABLE_MESSAGE) from exc

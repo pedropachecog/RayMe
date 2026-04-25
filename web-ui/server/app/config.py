@@ -22,6 +22,7 @@ class Settings(BaseModel, frozen=True):
     tls_key: Path | None = None
     allowed_origins: list[str] = Field(default_factory=lambda: list(DEFAULT_ALLOWED_ORIGINS))
     ai_backend_base_url: str = "https://127.0.0.1:9443"
+    ai_backend_synthesis_timeout_seconds: float = Field(default=120.0, gt=0, le=600)
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: str = ""
     llm_model: str = "gpt-4.1-mini"
@@ -79,6 +80,7 @@ ENV_TO_FIELD = {
     "RAYME_TLS_KEY": "tls_key",
     "RAYME_ALLOWED_ORIGINS": "allowed_origins",
     "RAYME_AI_BACKEND_BASE_URL": "ai_backend_base_url",
+    "RAYME_AI_BACKEND_SYNTHESIS_TIMEOUT_SECONDS": "ai_backend_synthesis_timeout_seconds",
     "RAYME_LLM_BASE_URL": "llm_base_url",
     "RAYME_LLM_API_KEY": "llm_api_key",
     "RAYME_LLM_MODEL": "llm_model",

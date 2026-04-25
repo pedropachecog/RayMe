@@ -116,7 +116,10 @@ def get_runtime_settings(request: Request) -> Settings:
 
 
 def get_voice_processor(settings: Settings = Depends(get_runtime_settings)) -> object:
-    return AiBackendVoiceProcessor(AiBackendClient(), settings.ai_backend_base_url)
+    return AiBackendVoiceProcessor(
+        AiBackendClient(synthesis_timeout=settings.ai_backend_synthesis_timeout_seconds),
+        settings.ai_backend_base_url,
+    )
 
 
 def get_voice_service(

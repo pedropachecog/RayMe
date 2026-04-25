@@ -58,6 +58,20 @@ DEFAULT_SETTINGS_EXTENSIONS = {
 }
 
 
+def test_runtime_settings_include_long_ai_synthesis_timeout() -> None:
+    from app.config import load_settings
+
+    settings = load_settings(
+        {
+            "RAYME_AI_BACKEND_BASE_URL": "https://ai.local:9443",
+            "RAYME_AI_BACKEND_SYNTHESIS_TIMEOUT_SECONDS": "180",
+        }
+    )
+
+    assert settings.ai_backend_base_url == "https://ai.local:9443"
+    assert settings.ai_backend_synthesis_timeout_seconds == 180
+
+
 @pytest.fixture()
 def settings_client(tmp_path: Path) -> Iterator[TestClient]:
     engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'rayme-settings.sqlite3'}")
