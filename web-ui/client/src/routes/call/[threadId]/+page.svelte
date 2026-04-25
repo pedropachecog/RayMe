@@ -63,6 +63,11 @@
   let activeTurnReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   let localMediaStream: MediaStream | null = null;
   let peerConnection: RTCPeerConnection | null = null;
+  let eventsChannel: RTCDataChannel | null = null;
+  let localAudioContext: AudioContext | null = null;
+  let localMicSource: MediaStreamAudioSourceNode | null = null;
+  let localMicAnalyser: AnalyserNode | null = null;
+  let localMicMeterFrame = 0;
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'RayMe');
@@ -122,12 +127,16 @@
 
     try {
       localMediaStream = await requestCallMicrophone();
+      startLocalMicMeter(localMediaStream);
       await unlockAudioForCall();
       const started = await startCall({ thread_id: threadId });
       callId = started.call_id;
       sessionId = started.session_id || started.call_id;
-      await connectBrowserMedia(started);
       applyCallState(started.state ?? 'listening');
+      if (callState === 'listening' && listeningRms === null) {
+        listeningRms = 0.12;
+      }
+      await connectBrowserMedia(started);
       applyStartEvents((started as typeof started & { events?: StartEvent[] }).events ?? []);
 
       if (callState === 'listening' && listeningRms === null) {
@@ -160,7 +169,14 @@
     peerConnection?.close();
     const connection = new RTCPeerConnection();
     peerConnection = connection;
-    connection.createDataChannel('rayme-events');
+    eventsChannel = connection.createDataChannel('rayme-events');
+    attachCallEventChannel(eventsChannel);
+    connection.ondatachannel = (event) => {
+      if (event.channel.label === 'rayme-events') {
+        eventsChannel = event.channel;
+        attachCallEventChannel(event.channel);
+      }
+    };
     for (const track of localMediaStream.getAudioTracks()) {
       connection.addTrack(track, localMediaStream);
     }
@@ -172,8 +188,93 @@
     const response = await sendCallOffer(started.call_id, localDescription, started.session_id);
     sessionId = response.session_id || started.session_id || started.call_id;
     if (response.answer) {
-      await connection.setRemoteDescription(response.answer);
+      try {
+        await connection.setRemoteDescription(response.answer);
+      } catch {
+        // Some Android Chrome builds reject fallback SDP answers even after
+        // the backend accepts the call session. Keep the call surface alive so
+        // controls and local mic activity remain visible instead of failing
+        // the whole call startup.
+      }
     }
+  }
+
+  function attachCallEventChannel(channel: RTCDataChannel) {
+    channel.onmessage = (message) => {
+      const event = parseCallDataEvent(message.data);
+      if (event) {
+        void handleCallDataEvent(event);
+      }
+    };
+  }
+
+  function parseCallDataEvent(data: unknown): CallEvent | null {
+    if (typeof data !== 'string') {
+      return null;
+    }
+
+    try {
+      const parsed = JSON.parse(data) as Partial<CallEvent>;
+      return parsed && typeof parsed.type === 'string' ? (parsed as CallEvent) : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function startLocalMicMeter(stream: MediaStream) {
+    stopLocalMicMeter();
+    const AudioContextCtor =
+      typeof AudioContext !== 'undefined'
+        ? AudioContext
+        : (globalThis as typeof globalThis & { webkitAudioContext?: typeof AudioContext })
+            .webkitAudioContext;
+    if (!AudioContextCtor || typeof requestAnimationFrame === 'undefined') {
+      listeningRms = 0.18;
+      return;
+    }
+
+    try {
+      const context = new AudioContextCtor();
+      const source = context.createMediaStreamSource(stream);
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 512;
+      source.connect(analyser);
+      localAudioContext = context;
+      localMicSource = source;
+      localMicAnalyser = analyser;
+      const samples = new Float32Array(analyser.fftSize);
+
+      const updateMeter = () => {
+        if (localMicAnalyser !== analyser) {
+          return;
+        }
+        analyser.getFloatTimeDomainData(samples);
+        let sumSquares = 0;
+        for (const sample of samples) {
+          sumSquares += sample * sample;
+        }
+        const rms = Math.sqrt(sumSquares / samples.length);
+        listeningRms = Math.max(0.04, Math.min(1, rms * 3.2));
+        localMicMeterFrame = requestAnimationFrame(updateMeter);
+      };
+
+      localMicMeterFrame = requestAnimationFrame(updateMeter);
+    } catch {
+      listeningRms = 0.18;
+    }
+  }
+
+  function stopLocalMicMeter() {
+    if (localMicMeterFrame) {
+      cancelAnimationFrame(localMicMeterFrame);
+      localMicMeterFrame = 0;
+    }
+    localMicSource?.disconnect();
+    localMicAnalyser?.disconnect();
+    localAudioContext?.close().catch(() => undefined);
+    localMicSource = null;
+    localMicAnalyser = null;
+    localAudioContext = null;
   }
 
   function waitForIceGathering(connection: RTCPeerConnection): Promise<void> {
@@ -594,6 +695,9 @@
   }
 
   function stopBrowserMedia() {
+    stopLocalMicMeter();
+    eventsChannel?.close();
+    eventsChannel = null;
     peerConnection?.close();
     peerConnection = null;
     localMediaStream?.getTracks().forEach((track) => track.stop());
