@@ -35,3 +35,23 @@ Additional live checks after deploy:
   editable transcript for Libb.
 - Voice Library cleanup verified only `Libb` remained; no generated test voices
   were left in the library.
+
+## Live GPU Runtime Regression Check
+
+- Saved result:
+  `playwright-results/live-gpu-runtime-20260425T123812Z.json`
+- Deployed commit: `0f34713`
+- Deploy path: `scripts/deploy-omen.sh`
+- Deploy GPU gate: passed with `torch 2.10.0+cu126`, CUDA `12.6`,
+  `torchaudio 2.10.0+cu126`, device `NVIDIA GeForce RTX 3060`
+
+Results:
+
+- F5 preview via `POST /api/voices/preview` for saved Libb voice returned
+  playable `audio/wav` JSON. Cold after restart: 12 seconds. Warm repeat:
+  1 second.
+- STT via `POST /stt/transcribe` for saved Libb sample returned the expected
+  transcript with `compute_type: int8_float16`. Cold after restart: 82 seconds.
+  Warm repeat: 1 second.
+- The cold timings are model-load warmup; the warm timings are the steady-state
+  runtime path relevant to call-latency behavior.

@@ -1,0 +1,50 @@
+{
+  "timestamp_utc": "20260425T123812Z",
+  "commit": "0f347138d9e5a035fefd8713b5d061ef7af86701",
+  "target": {
+    "web": "https://192.168.1.199:8443",
+    "ai": "https://192.168.1.199:9443"
+  },
+  "deploy_gate": {
+    "script": "scripts/deploy-omen.sh",
+    "torch": "2.10.0+cu126",
+    "torch_cuda": "12.6",
+    "torchaudio": "2.10.0+cu126",
+    "device": "NVIDIA GeForce RTX 3060"
+  },
+  "f5_preview": {
+    "route": "POST /api/voices/preview",
+    "voice": "Libb",
+    "cold_after_restart": {
+      "elapsed_seconds": 12,
+      "response_bytes": 66456,
+      "engine_id": "f5",
+      "content_type": "audio/wav"
+    },
+    "warm": {
+      "elapsed_seconds": 1,
+      "response_bytes": 66456,
+      "engine_id": "f5",
+      "content_type": "audio/wav"
+    }
+  },
+  "stt": {
+    "route": "POST /stt/transcribe",
+    "voice_sample": "Libb",
+    "cold_after_restart": {
+      "elapsed_seconds": 82,
+      "status": "accepted",
+      "compute_type": "int8_float16",
+      "speech_detected": true,
+      "transcript": "I passed up a job at the Vulcan Science Academy a few months ago, or maybe I'll just live on a station for a while."
+    },
+    "warm": {
+      "elapsed_seconds": 1,
+      "status": "accepted",
+      "compute_type": "int8_float16",
+      "speech_detected": true,
+      "transcript": "I passed up a job at the Vulcan Science Academy a few months ago, or maybe I'll just live on a station for a while."
+    }
+  },
+  "result": "passed"
+}
