@@ -10,6 +10,7 @@ import { createThread } from '../../src/lib/api/threads';
 import type { CharacterSummary } from '../../src/lib/api/types';
 import characterCardSource from '../../src/lib/components/CharacterCard.svelte?raw';
 import importCardDialogSource from '../../src/lib/components/ImportCardDialog.svelte?raw';
+import voiceStateBadgeSource from '../../src/lib/components/voice/VoiceStateBadge.svelte?raw';
 import gallerySource from '../../src/routes/gallery/+page.svelte?raw';
 
 const sampleCharacter: CharacterSummary = {
@@ -21,6 +22,45 @@ const sampleCharacter: CharacterSummary = {
   tags: ['operator', 'relay', 'calm'],
   portrait_url: '/portraits/aster.png'
 };
+
+const voiceStateCharacters: CharacterSummary[] = [
+  {
+    id: 'assigned-character',
+    name: 'Assigned Aster',
+    description: 'Has a voice.',
+    default_voice_id: 'voice-a',
+    default_voice_state: 'assigned',
+    default_voice_label: 'Aster Saved Voice',
+    default_voice: {
+      id: 'voice-a',
+      name: 'Aster Saved Voice',
+      default_engine: 'f5',
+      status: 'available'
+    }
+  },
+  {
+    id: 'no-voice-character',
+    name: 'Quiet Basil',
+    description: 'No voice set.',
+    default_voice_id: null,
+    default_voice_state: 'none',
+    default_voice_label: 'No voice',
+    default_voice: null
+  },
+  {
+    id: 'unavailable-character',
+    name: 'Deleted Cato',
+    description: 'References a deleted voice.',
+    default_voice_id: 'voice-deleted',
+    default_voice_state: 'unavailable',
+    default_voice_label: 'Voice unavailable',
+    default_voice: {
+      id: 'voice-deleted',
+      deleted_name: 'Deleted voice',
+      status: 'deleted'
+    }
+  }
+];
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -75,6 +115,27 @@ describe('Gallery character grid', () => {
     expect(characterCardSource).toContain('Edit');
     expect(characterCardSource).toContain('Export JSON');
     expect(characterCardSource).toContain('Delete');
+  });
+
+  it('renders assigned, no voice, and unavailable Gallery badge states', async () => {
+    const fetchMock = installFetch({
+      '/api/characters::GET': { items: voiceStateCharacters }
+    });
+
+    const characters = await listCharacters();
+
+    expect(characters).toHaveLength(3);
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/characters',
+      init: { method: 'GET' }
+    });
+    expect(characterCardSource).toContain('<VoiceStateBadge');
+    expect(characterCardSource).toContain('default_voice_state');
+    expect(characterCardSource).toContain('default_voice_label');
+    expect(voiceStateBadgeSource).toContain('Voice:');
+    expect(voiceStateBadgeSource).toContain('No voice');
+    expect(voiceStateBadgeSource).toContain('Voice unavailable');
+    expect(voiceStateBadgeSource).toContain('AlertTriangle');
   });
 
   it('routes create and edit actions to the real editor paths', () => {

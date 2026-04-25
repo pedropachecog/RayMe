@@ -161,6 +161,48 @@ test('Voice Library blocked delete lists character referent before force delete'
   assertNoBrowserErrors();
 });
 
+test('Gallery voice badges show assigned, none, and force-deleted unavailable states', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+    allowConsoleErrors: [/Failed to load resource: the server responded with a status of 409/]
+  });
+  const voiceEvents: string[] = [];
+  let voiceForceDeleted = false;
+
+  page.on('request', (request) => {
+    expectRayMeApiRequest(request);
+    recordVoiceApiRequest(request, voiceEvents);
+  });
+
+  await routeVoiceDeleteApis(page, () => {
+    voiceForceDeleted = true;
+  });
+  await routeGalleryVoiceStateApis(page, () => voiceForceDeleted);
+
+  await page.goto('/gallery');
+  await expect(page.getByTestId('character-card-assigned-character')).toContainText(
+    'Voice: Referenced Saved Voice'
+  );
+  await expect(page.getByTestId('character-card-no-voice-character')).toContainText('No voice');
+
+  await page.goto('/voice-lab');
+  const row = page.getByRole('listitem', { name: /Referenced Saved Voice/ });
+  await row.getByRole('button', { name: 'Delete Voice' }).click();
+  await page.getByRole('button', { name: 'Force Delete Voice' }).click();
+  await expect(page.getByText('Voice unavailable')).toBeVisible();
+
+  await page.goto('/gallery');
+  await expect(page.getByTestId('character-card-assigned-character')).toContainText(
+    'Voice unavailable'
+  );
+  await expect(page.getByTestId('character-card-no-voice-character')).toContainText('No voice');
+  expect(voiceEvents).toEqual(
+    expect.arrayContaining(['DELETE /api/voices/voice-a?force=true'])
+  );
+  assertNoBrowserErrors();
+});
+
 async function routeVoiceLabApis(page: Page) {
   await page.route('**/api/settings', async (route) => {
     await fulfillJson(route, {
@@ -322,7 +364,7 @@ async function routeVoiceLibraryApis(page: Page) {
   });
 }
 
-async function routeVoiceDeleteApis(page: Page) {
+async function routeVoiceDeleteApis(page: Page, onForceDelete: () => void = () => {}) {
   await page.route('**/api/settings', async (route) => {
     await fulfillJson(route, {
       web_url: 'http://127.0.0.1:4173',
@@ -349,6 +391,7 @@ async function routeVoiceDeleteApis(page: Page) {
     expect(route.request().method()).toBe('DELETE');
     const url = new URL(route.request().url());
     if (url.searchParams.get('force') === 'true') {
+      onForceDelete();
       await fulfillJson(route, {
         voice_id: 'voice-a',
         deleted: true,
@@ -383,6 +426,49 @@ async function routeVoiceDeleteApis(page: Page) {
           created_at: '2026-04-25T01:00:00Z',
           updated_at: '2026-04-25T01:15:00Z',
           metadata: { assignment_status: 'Assigned to 1 character' }
+        }
+      ]
+    });
+  });
+}
+
+async function routeGalleryVoiceStateApis(page: Page, isVoiceForceDeleted: () => boolean) {
+  await page.route('**/api/characters', async (route) => {
+    expect(route.request().method()).toBe('GET');
+    await fulfillJson(route, {
+      items: [
+        {
+          id: 'assigned-character',
+          name: 'Assigned Aster',
+          description: 'Assigned voice character.',
+          tags: [],
+          default_voice_id: 'voice-a',
+          default_voice_state: isVoiceForceDeleted() ? 'unavailable' : 'assigned',
+          default_voice_label: isVoiceForceDeleted()
+            ? 'Voice unavailable'
+            : 'Referenced Saved Voice',
+          default_voice: isVoiceForceDeleted()
+            ? {
+                id: 'voice-a',
+                deleted_name: 'Referenced Saved Voice',
+                status: 'deleted'
+              }
+            : {
+                id: 'voice-a',
+                name: 'Referenced Saved Voice',
+                default_engine: 'f5',
+                status: 'available'
+              }
+        },
+        {
+          id: 'no-voice-character',
+          name: 'Quiet Basil',
+          description: 'No voice character.',
+          tags: [],
+          default_voice_id: null,
+          default_voice_state: 'none',
+          default_voice_label: 'No voice',
+          default_voice: null
         }
       ]
     });
