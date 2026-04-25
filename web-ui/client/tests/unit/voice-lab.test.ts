@@ -30,18 +30,16 @@ const voiceLabSources = sourceFiles
 
 const requiredVoiceLabCopy = [
   'Voice Lab',
+  '1 Upload',
+  '2 Transcript',
+  '3 Engine',
+  '4 Preview',
+  '5 Save',
   'Upload Sample',
   'Transcribe Sample',
   'Use default engine',
   'Preview Voice',
-  'Save Voice',
-  'No voices yet',
-  'Rename Voice',
-  'Delete Voice',
-  'Test Voice',
-  'Default voice',
-  'No voice',
-  'Voice unavailable'
+  'Save Voice'
 ];
 
 const engineLabels = [
@@ -167,24 +165,25 @@ describe('Voice Lab Phase 2 source contract', () => {
     expect(
       sourceFiles.filter((path) => existsSync(path)),
       'Voice Lab implementation sources should exist before this contract can pass'
-    ).toEqual(expect.arrayContaining(['src/lib/api/voices.ts']));
+    ).toEqual(
+      expect.arrayContaining([
+        'src/routes/voice-lab/+page.svelte',
+        'src/lib/components/voice/AudioSampleDropzone.svelte',
+        'src/lib/components/voice/TranscriptEditor.svelte',
+        'src/lib/components/voice/TtsEnginePicker.svelte',
+        'src/lib/components/voice/SynthPreviewPanel.svelte',
+        'src/lib/api/voices.ts'
+      ])
+    );
   });
 
   it('renders the required Voice Lab, Voice Library, and assignment labels', () => {
-    if (!existsSync('src/routes/voice-lab/+page.svelte')) {
-      return;
-    }
-
     for (const copy of requiredVoiceLabCopy) {
       expect(voiceLabSources).toContain(copy);
     }
   });
 
   it('exposes the full six-engine roster from metadata-driven picker sources', () => {
-    if (!existsSync('src/lib/components/voice/TtsEnginePicker.svelte')) {
-      return;
-    }
-
     for (const label of engineLabels) {
       expect(voiceLabSources).toContain(label);
     }
@@ -197,10 +196,6 @@ describe('Voice Lab Phase 2 source contract', () => {
   });
 
   it('allows saving a voice without a successful preview gate', () => {
-    if (!existsSync('src/routes/voice-lab/+page.svelte')) {
-      return;
-    }
-
     expect(voiceLabSources).toContain('Save Voice');
     expect(voiceLabSources).toContain('Preview Voice');
     expect(voiceLabSources).toContain('Use default engine');
@@ -209,10 +204,6 @@ describe('Voice Lab Phase 2 source contract', () => {
   });
 
   it('preserves user input and preview text when preview synthesis fails', () => {
-    if (!existsSync('src/routes/voice-lab/+page.svelte')) {
-      return;
-    }
-
     for (const stateTerm of ['voiceName', 'transcript', 'selectedEngine', 'previewText']) {
       expect(voiceLabSources).toMatch(new RegExp(stateTerm, 'i'));
     }

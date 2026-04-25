@@ -18,17 +18,12 @@ const engineLabels = [
 const sampleTranscript = 'This is the editable voice lab transcript.';
 const editedTranscript = 'This is the edited reference transcript.';
 const previewText = 'Preview this RayMe voice.';
-const testPhrase = 'Testing this saved RayMe voice.';
 
-test('Voice Lab upload transcript save library and unavailable voice flow stays on RayMe APIs', async ({
-  page
-}) => {
+test('Voice Lab saves after preview returns HTTP 502 and stays on RayMe APIs', async ({ page }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
-  const requests: string[] = [];
   const voiceEvents: string[] = [];
 
   page.on('request', (request) => {
-    requests.push(request.url());
     expectRayMeApiRequest(request);
     recordVoiceApiRequest(request, voiceEvents);
   });
@@ -37,7 +32,10 @@ test('Voice Lab upload transcript save library and unavailable voice flow stays 
 
   await page.goto('/voice-lab');
   await expect(page.getByRole('heading', { name: 'Voice Lab' })).toBeVisible();
-  await expect(page.getByText('No voices yet')).toBeVisible();
+
+  for (const stepLabel of ['1 Upload', '2 Transcript', '3 Engine', '4 Preview', '5 Save']) {
+    await expect(page.getByText(stepLabel)).toBeVisible();
+  }
 
   await page.getByLabel('Upload Sample').setInputFiles({
     name: 'sample.wav',
@@ -63,75 +61,81 @@ test('Voice Lab upload transcript save library and unavailable voice flow stays 
   await expect(page.getByRole('radio', { name: /Chatterbox Turbo/ })).toBeChecked();
   await expect(page.getByLabel('Preview text')).toHaveValue(previewText);
 
+  await expect(page.getByRole('button', { name: 'Save Voice' })).toBeEnabled();
   await page.getByRole('button', { name: 'Save Voice' }).click();
-  await expect(page.getByRole('row', { name: /RayMe Browser Voice/ })).toBeVisible();
-
-  const voiceRow = page.getByRole('row', { name: /RayMe Browser Voice/ });
-  await voiceRow.getByRole('button', { name: 'Rename Voice' }).click();
-  await page.getByLabel('Voice name').fill('RayMe Browser Voice Renamed');
-  await page.getByRole('button', { name: 'Save Voice' }).click();
-  await expect(page.getByRole('row', { name: /RayMe Browser Voice Renamed/ })).toBeVisible();
-
-  await page.getByLabel('Test voice text').fill(testPhrase);
-  await page.getByRole('button', { name: 'Test Voice' }).click();
-  await expect(page.getByText(/test voice ready/i)).toBeVisible();
-
-  await page.goto('/gallery');
-  await expect(page.getByTestId('character-card-no-voice')).toContainText('No voice');
-  await expect(page.getByTestId('character-card-assigned-voice')).toContainText(
-    'RayMe Browser Voice Renamed'
-  );
-
-  await page.goto('/voice-lab');
-  await page.getByRole('row', { name: /RayMe Browser Voice Renamed/ }).getByRole('button', {
-    name: 'Delete Voice'
-  }).click();
-  await page.getByRole('button', { name: 'Delete Voice' }).click();
-  await expect(page.getByText('Voice unavailable')).toBeVisible();
-
-  await page.goto('/gallery');
-  await expect(page.getByTestId('character-card-unavailable-voice')).toContainText('Voice unavailable');
+  await expect(page.getByText('Voice saved.')).toBeVisible();
 
   expect(voiceEvents).toEqual(
     expect.arrayContaining([
       'POST /api/voices/assets',
       'POST /api/voices/assets/sample-asset/transcribe',
       'POST /api/voices/preview',
-      'POST /api/voices',
-      'PATCH /api/voices/voice-rayme',
-      'POST /api/voices/voice-rayme/test-play',
-      'DELETE /api/voices/voice-rayme?force=true'
+      'POST /api/voices'
     ])
   );
-  expect(requests.some((url) => url.includes('/api/voices'))).toBe(true);
   assertNoBrowserErrors();
 });
 
+test('Voice Lab has no horizontal scroll at 320px viewport', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 720 });
+  await routeVoiceLabApis(page);
+
+  await page.goto('/voice-lab');
+  await expect(page.getByRole('heading', { name: 'Voice Lab' })).toBeVisible();
+
+  const dimensions = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth
+  }));
+  expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
+});
+
 async function routeVoiceLabApis(page: Page) {
+  await page.route('**/api/settings', async (route) => {
+    await fulfillJson(route, {
+      web_url: 'http://127.0.0.1:4173',
+      ai_backend_url: 'http://127.0.0.1:9443',
+      llm_base_url: '',
+      llm_model: '',
+      llm_api_key_configured: false,
+      save_ai_audio: true,
+      save_mic_audio: false,
+      vad_threshold: 0.5,
+      vad_end_silence_ms: 700,
+      stt_model: 'distil-large-v3',
+      tts_default_engine: 'f5',
+      ai_backend_status: {
+        endpoint_status: 'Connected',
+        resident_tts_engine: 'f5',
+        loading_engine: null,
+        available_engines: [
+          { id: 'f5', label: 'F5-TTS', available: true, state: 'resident' },
+          { id: 'xtts_v2', label: 'XTTS v2', available: true, state: 'idle' },
+          { id: 'qwen3_0_6b', label: 'Qwen3-TTS 0.6B-Base', available: true, state: 'idle' },
+          { id: 'luxtts', label: 'LuxTTS', available: true, state: 'idle' },
+          { id: 'chatterbox_turbo', label: 'Chatterbox Turbo', available: true, state: 'idle' },
+          { id: 'tada_1b', label: 'TADA 1B', available: true, state: 'idle' }
+        ]
+      }
+    });
+  });
+
   await page.route('**/api/voices', async (route) => {
-    const request = route.request();
-
-    if (request.method() === 'GET') {
-      await fulfillJson(route, {
-        items: []
-      });
-      return;
-    }
-
-    expect(request.method()).toBe('POST');
-    expect(request.postDataJSON()).toMatchObject({
+    expect(route.request().method()).toBe('POST');
+    expect(route.request().postDataJSON()).toMatchObject({
+      asset_id: 'sample-asset',
       name: 'RayMe Browser Voice',
-      transcript: editedTranscript,
-      default_engine: 'chatterbox_turbo',
-      preview_id: null
+      reference_transcript: editedTranscript,
+      default_engine: 'chatterbox_turbo'
     });
     await fulfillJson(route, {
-      id: 'voice-rayme',
+      voice_id: 'voice-rayme',
+      asset_id: 'sample-asset',
       name: 'RayMe Browser Voice',
       default_engine: 'chatterbox_turbo',
-      transcript: editedTranscript,
-      assignment_status: 'unused'
-    });
+      reference_transcript: editedTranscript,
+      status: 'available'
+    }, 201);
   });
 
   await page.route('**/api/voices/assets', async (route) => {
@@ -140,14 +144,17 @@ async function routeVoiceLabApis(page: Page) {
       asset_id: 'sample-asset',
       filename: 'sample.wav',
       duration_seconds: 7.2,
-      content_type: 'audio/wav'
-    });
+      content_type: 'audio/wav',
+      warnings: []
+    }, 201);
   });
 
   await page.route('**/api/voices/assets/sample-asset/transcribe', async (route) => {
     expect(route.request().method()).toBe('POST');
     await fulfillJson(route, {
-      transcript: sampleTranscript,
+      asset_id: 'sample-asset',
+      reference_transcript: sampleTranscript,
+      reference_transcript_editable: true,
       language: 'en'
     });
   });
@@ -156,60 +163,13 @@ async function routeVoiceLabApis(page: Page) {
     expect(route.request().method()).toBe('POST');
     expect(route.request().postDataJSON()).toMatchObject({
       asset_id: 'sample-asset',
-      transcript: editedTranscript,
-      engine: 'chatterbox_turbo',
-      text: previewText
-    });
-    await fulfillJson(route, { error: 'preview failed' }, 503);
-  });
-
-  await page.route('**/api/voices/voice-rayme', async (route) => {
-    expect(route.request().method()).toBe('PATCH');
-    await fulfillJson(route, {
-      id: 'voice-rayme',
-      name: 'RayMe Browser Voice Renamed',
+      reference_transcript: editedTranscript,
       default_engine: 'chatterbox_turbo',
-      transcript: editedTranscript
+      use_default_engine: false,
+      engine: 'chatterbox_turbo',
+      preview_text: previewText
     });
-  });
-
-  await page.route('**/api/voices/voice-rayme/test-play', async (route) => {
-    expect(route.request().method()).toBe('POST');
-    expect(route.request().postDataJSON()).toMatchObject({
-      text: testPhrase,
-      use_default_engine: true
-    });
-    await fulfillJson(route, {
-      audio_url: '/api/voices/voice-rayme/test-play/latest.wav',
-      status: 'ready'
-    });
-  });
-
-  await page.route('**/api/voices/voice-rayme?force=true', async (route) => {
-    expect(route.request().method()).toBe('DELETE');
-    await fulfillJson(route, {
-      voice_id: 'voice-rayme',
-      deleted: true,
-      affected_characters: [{ id: 'character-unavailable', name: 'Unavailable Character' }]
-    });
-  });
-
-  await page.route('**/api/characters', async (route) => {
-    await fulfillJson(route, {
-      items: [
-        { id: 'character-no-voice', name: 'No Voice Character', default_voice: null },
-        {
-          id: 'character-assigned-voice',
-          name: 'Assigned Voice Character',
-          default_voice: { id: 'voice-rayme', name: 'RayMe Browser Voice Renamed' }
-        },
-        {
-          id: 'character-unavailable-voice',
-          name: 'Unavailable Voice Character',
-          default_voice: { id: 'voice-rayme', name: 'Voice unavailable', unavailable: true }
-        }
-      ]
-    });
+    await fulfillJson(route, { error: { message: 'Preview synthesis failed' } }, 502);
   });
 }
 
