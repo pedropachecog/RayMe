@@ -289,11 +289,13 @@ def test_tts_synthesize_accepts_web_ui_reference_audio_alias() -> None:
     client = TestClient(app)
     payload = _synthesis_payload()
     payload["reference_audio_base64"] = payload.pop("reference_audio_b64")
+    payload["speech_speed"] = 0.75
 
     response = client.post("/tts/synthesize", json=payload)
 
     assert response.status_code == 200
     assert adapter.last_request.reference_audio == b"reference wav"
+    assert adapter.last_request.speech_speed == 0.75
 
 
 def test_tts_synthesize_use_default_engine_switches_to_caller_default() -> None:
@@ -346,7 +348,7 @@ def test_f5_adapter_uses_runtime_infer_and_returns_wav_bytes() -> None:
             self.calls: list[tuple[str, str, str]] = []
 
         def infer(self, ref_file: str, ref_text: str, gen_text: str, **_: Any) -> tuple[Any, int, None]:
-            self.calls.append((ref_file, ref_text, gen_text))
+            self.calls.append((ref_file, ref_text, gen_text, _))
             sample_rate = 24_000
             t = np.linspace(0, 0.05, int(sample_rate * 0.05), endpoint=False)
             return (0.1 * np.sin(2 * math.pi * 440 * t), sample_rate, None)
@@ -359,11 +361,14 @@ def test_f5_adapter_uses_runtime_infer_and_returns_wav_bytes() -> None:
             text="Generated RayMe audio.",
             reference_audio=b"fake-reference-wav",
             reference_transcript="Reference transcript.",
+            speech_speed=0.75,
         )
     )
 
     assert runtime.calls
-    assert runtime.calls[0][1:] == ("Reference transcript.", "Generated RayMe audio.")
+    assert runtime.calls[0][1] == "Reference transcript."
+    assert runtime.calls[0][2] == "Generated RayMe audio."
+    assert runtime.calls[0][3]["speed"] == 0.75
     assert result.engine_id == "f5"
     assert result.sample_rate == 24_000
     assert result.duration_ms and result.duration_ms > 0

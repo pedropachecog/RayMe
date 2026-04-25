@@ -6,12 +6,14 @@
   export let voice: VoiceSummary;
   export let engineLabel = '';
   export let testing = false;
+  export let testAudioUrl: string | null = null;
   export let onTestPlay: (voice: VoiceSummary, payload: VoiceTestPlayPayload) => void = () => {};
   export let onRename: (voice: VoiceSummary) => void = () => {};
   export let onDelete: (voice: VoiceSummary) => void = () => {};
 
   let testText = '';
   let useDefaultEngine = true;
+  let speechSpeed = voiceSpeechSpeed(voice);
 
   $: transcriptLabel = voice.reference_transcript?.trim()
     ? 'Transcript present'
@@ -27,8 +29,28 @@
     onTestPlay(voice, {
       text: testText.trim(),
       use_default_engine: useDefaultEngine,
-      engine: useDefaultEngine ? null : voice.default_engine
+      engine: useDefaultEngine ? null : voice.default_engine,
+      speech_speed: speechSpeed
     });
+  }
+
+  function voiceSpeechSpeed(value: VoiceSummary) {
+    const metadata = value.metadata ?? {};
+    const rawSpeed = metadata.speech_speed;
+    if (typeof rawSpeed === 'number') {
+      return rawSpeed;
+    }
+    const engineSettings = metadata.engine_settings;
+    if (engineSettings && typeof engineSettings === 'object' && !Array.isArray(engineSettings)) {
+      const engineValue = (engineSettings as Record<string, unknown>)[value.default_engine];
+      if (engineValue && typeof engineValue === 'object' && !Array.isArray(engineValue)) {
+        const speed = (engineValue as Record<string, unknown>).speech_speed;
+        if (typeof speed === 'number') {
+          return speed;
+        }
+      }
+    }
+    return 1.0;
   }
 
   function formatTimestamp(value?: string | null) {
@@ -73,6 +95,18 @@
     <span>Use default engine</span>
   </label>
 
+  <label class="speed-control">
+    <span>Speech speed {speechSpeed.toFixed(2)}x</span>
+    <input
+      aria-label={`${voice.name} speech speed`}
+      type="range"
+      min="0.5"
+      max="1.5"
+      step="0.05"
+      bind:value={speechSpeed}
+    />
+  </label>
+
   <div class="actions">
     <button type="button" disabled={testing} on:click={playVoice}>
       <Play size={16} strokeWidth={1.8} aria-hidden="true" />
@@ -90,6 +124,12 @@
 
   {#if testing}
     <p class="row-status" role="status">Testing voice...</p>
+  {/if}
+  {#if testAudioUrl}
+    <div class="test-player" aria-label={`${voice.name} test playback`}>
+      <span>Generated test</span>
+      <audio aria-label={`${voice.name} generated test audio`} controls preload="metadata" src={testAudioUrl}></audio>
+    </div>
   {/if}
 </li>
 
@@ -147,7 +187,9 @@
   }
 
   .test-text,
-  .toggle {
+  .toggle,
+  .speed-control,
+  .test-player {
     color: var(--color-text);
     font-size: var(--font-label);
     font-weight: 600;
@@ -173,6 +215,11 @@
     color: var(--color-text);
     font-size: var(--font-body);
     line-height: var(--line-body);
+  }
+
+  input[type='range'],
+  audio {
+    width: 100%;
   }
 
   button {

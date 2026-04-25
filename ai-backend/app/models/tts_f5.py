@@ -58,6 +58,7 @@ class F5TtsAdapter(ImportGatedTtsAdapter):
                 show_info=lambda *_args, **_kwargs: None,
                 progress=None,
                 nfe_step=7,
+                speed=request.speech_speed,
             )
 
         wav_array = np.asarray(wav, dtype=np.float32).flatten()

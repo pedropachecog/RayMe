@@ -2,6 +2,7 @@
   import { Save } from 'lucide-svelte';
   import { onMount } from 'svelte';
 
+  import { toApiPath } from '$lib/api/client';
   import { getSettings } from '$lib/api/settings';
   import {
     deleteVoice,
@@ -100,6 +101,7 @@
   let selectedEngine = 'f5';
   let previewText = 'The line is open. This is how the saved RayMe voice will sound.';
   let useDefaultEngine = true;
+  let speechSpeed = 0.85;
   let engines: TtsEngineMetadata[] = DEFAULT_TTS_ENGINES;
   let uploadState: 'idle' | 'uploading' | 'ready' | 'error' = 'idle';
   let transcriptState: 'idle' | 'pending' | 'ready' | 'error' = 'idle';
@@ -115,6 +117,7 @@
   let libraryError = '';
   let libraryStatus = '';
   let testingVoiceId: string | null = null;
+  let testAudioByVoiceId: Record<string, string> = {};
   let renamingVoice: VoiceSummary | null = null;
   let deletingVoice: VoiceSummary | null = null;
   let deleteReferents: Array<Record<string, string>> = [];
@@ -124,6 +127,7 @@
 
   $: canPreview = Boolean(asset && transcript.trim() && selectedEngine && previewText.trim());
   $: canSave = Boolean(asset && voiceName.trim() && transcript.trim() && selectedEngine);
+  $: uploadedSampleUrl = asset ? toApiPath(`/voices/assets/${encodeURIComponent(asset.asset_id)}/sample`) : null;
   $: if (transcriptState === 'error' && transcript.trim()) {
     transcriptState = 'ready';
     transcriptError = '';
@@ -194,6 +198,7 @@
     transcriptError = '';
     previewError = '';
     saveError = '';
+    testAudioByVoiceId = {};
     previewState = 'idle';
     saveState = 'idle';
 
@@ -248,7 +253,8 @@
         reference_transcript: transcript.trim(),
         preview_text: previewText,
         use_default_engine: useDefaultEngine,
-        engine: useDefaultEngine ? null : selectedEngine
+        engine: useDefaultEngine ? null : selectedEngine,
+        speech_speed: speechSpeed
       });
       previewAudioUrl = synthesisAudioUrl(result);
       previewState = previewAudioUrl ? 'ready' : 'error';
@@ -275,7 +281,16 @@
         name: voiceName.trim(),
         default_engine: selectedEngine,
         reference_transcript: transcript.trim(),
-        metadata: { source: 'voice-lab', sample_filename: selectedFile?.name ?? null }
+        metadata: {
+          source: 'voice-lab',
+          sample_filename: selectedFile?.name ?? null,
+          speech_speed: speechSpeed,
+          engine_settings: {
+            [selectedEngine]: {
+              speech_speed: speechSpeed
+            }
+          }
+        }
       });
       saveState = 'saved';
       libraryStatus = 'Voice Library refreshed.';
@@ -337,6 +352,7 @@
       });
       const audioUrl = synthesisAudioUrl(result);
       if (audioUrl) {
+        testAudioByVoiceId = { ...testAudioByVoiceId, [voice.voice_id]: audioUrl };
         activeAudio = new Audio(audioUrl);
         void activeAudio.play().catch(() => {
           libraryStatus = 'Test voice ready.';
@@ -447,6 +463,7 @@
     <div class="creation-flow">
       <AudioSampleDropzone
         {asset}
+        sampleUrl={uploadedSampleUrl}
         busy={uploadState === 'uploading'}
         errorMessage={uploadError}
         onFileSelected={handleSampleSelected}
@@ -465,6 +482,7 @@
       <SynthPreviewPanel
         bind:previewText
         bind:useDefaultEngine
+        bind:speechSpeed
         disabled={!canPreview}
         state={previewState}
         audioUrl={previewAudioUrl}
@@ -501,6 +519,7 @@
         loading={libraryLoading}
         errorMessage={libraryError}
         {testingVoiceId}
+        testAudioByVoiceId={testAudioByVoiceId}
         onTestPlay={playLibraryVoice}
         onRename={openRenameDialog}
         onDelete={deleteLibraryVoice}

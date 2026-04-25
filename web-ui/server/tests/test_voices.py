@@ -379,6 +379,7 @@ def test_preview_failure_preserves_unsaved_voice_payload_state(
         "preview_text": "This preview text should still be visible after failure.",
         "use_default_engine": False,
         "engine": "LuxTTS",
+        "speech_speed": 1.0,
     }
 
     response = client.post("/api/voices/preview", json=payload)
@@ -499,6 +500,7 @@ def test_ai_backend_voice_processor_uses_asset_id_for_unsaved_preview_voice_id()
             payload = json.loads(request.content)
             assert payload["voice_id"] == "voice_asset_preview_test"
             assert payload["asset_id"] == "voice_asset_preview_test"
+            assert payload["speech_speed"] == 0.75
             assert payload["reference_audio_base64"]
             return httpx.Response(
                 200,
@@ -525,6 +527,7 @@ def test_ai_backend_voice_processor_uses_asset_id_for_unsaved_preview_voice_id()
                 preview_text="Preview this voice.",
                 default_engine="f5",
                 use_default_engine=True,
+                speech_speed=0.75,
             )
 
     result = asyncio.run(exercise())
@@ -544,7 +547,11 @@ def test_voice_library_detail_and_test_play_routes(
     detail = client.get(f"/api/voices/{voice.voice_id}")
     test_play = client.post(
         f"/api/voices/{voice.voice_id}/test-play",
-        json={"text": "This is a stock test phrase.", "use_default_engine": True},
+        json={
+            "text": "This is a stock test phrase.",
+            "use_default_engine": True,
+            "speech_speed": 0.75,
+        },
     )
 
     assert listing.status_code == 200
@@ -557,6 +564,7 @@ def test_voice_library_detail_and_test_play_routes(
     assert test_play.json()["engine"] == voice.body["default_engine"]
     assert test_play.json()["audio_url"]
     assert voice_fixture.processor.calls[-1]["reference_transcript"] == "Editable transcript for saved voice."
+    assert voice_fixture.processor.calls[-1]["speech_speed"] == 0.75
 
 
 def test_voice_test_play_returns_bad_gateway_when_synthesis_produces_no_audio(

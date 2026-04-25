@@ -3,6 +3,7 @@
 
   export let previewText = 'The line is open. This is how the saved RayMe voice will sound.';
   export let useDefaultEngine = true;
+  export let speechSpeed = 0.85;
   export let disabled = true;
   export let state: 'idle' | 'synthesizing' | 'ready' | 'error' = 'idle';
   export let audioUrl: string | null = null;
@@ -52,6 +53,18 @@
   <label>
     <span>Preview text</span>
     <textarea aria-label="Preview text" bind:value={previewText} rows="3"></textarea>
+  </label>
+
+  <label class="speed-control">
+    <span>Speech speed {speechSpeed.toFixed(2)}x</span>
+    <input
+      aria-label="Speech speed"
+      type="range"
+      min="0.5"
+      max="1.5"
+      step="0.05"
+      bind:value={speechSpeed}
+    />
   </label>
 
   <div class="preview-actions">
@@ -148,6 +161,12 @@
     font-size: var(--font-body);
     font-weight: 400;
     line-height: var(--line-body);
+  }
+
+  input[type='range'] {
+    width: 100%;
+    max-width: 420px;
+    accent-color: var(--color-primary);
   }
 
   button {

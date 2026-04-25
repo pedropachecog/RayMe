@@ -26,6 +26,7 @@ class TtsSynthesizeRequest(BaseModel):
     reference_transcript: str | None = Field(default=None, max_length=10000)
     reference_audio_content_type: str | None = Field(default=None, max_length=120)
     use_default_engine: bool = False
+    speech_speed: float = Field(default=1.0, ge=0.5, le=1.5)
 
 
 @router.post("/tts/synthesize")
@@ -43,6 +44,7 @@ def synthesize(request: Request, payload: TtsSynthesizeRequest) -> dict[str, Any
                 reference_audio=reference_audio,
                 reference_audio_content_type=payload.reference_audio_content_type,
                 reference_transcript=payload.reference_transcript,
+                speech_speed=payload.speech_speed,
             )
         )
         if not result.wav_bytes:

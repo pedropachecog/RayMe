@@ -311,12 +311,14 @@ export interface VoicePreviewPayload {
   preview_text?: string | null;
   use_default_engine?: boolean;
   engine?: TtsEngineId | null;
+  speech_speed?: number;
 }
 
 export interface VoiceTestPlayPayload {
   text: string;
   use_default_engine?: boolean;
   engine?: TtsEngineId | null;
+  speech_speed?: number;
 }
 
 export interface VoiceSynthesisResult {

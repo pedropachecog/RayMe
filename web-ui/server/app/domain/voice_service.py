@@ -183,6 +183,7 @@ class VoiceService:
             reference_transcript=voice.reference_transcript,
             content=sample.path.read_bytes(),
             content_type=asset.content_type,
+            speech_speed=payload.get("speech_speed", _voice_speech_speed(voice)),
         )
         audio_url = result.get("audio_url")
         audio_base64 = result.get("audio_base64")
@@ -291,3 +292,20 @@ __all__ = [
     "new_voice_asset_id",
     "new_voice_id",
 ]
+
+
+def _voice_speech_speed(voice: Voice) -> float:
+    metadata = dict(voice.metadata_json or {})
+    value = metadata.get("speech_speed")
+    if isinstance(value, int | float):
+        return float(value)
+
+    engine_settings = metadata.get("engine_settings")
+    if isinstance(engine_settings, dict):
+        engine_value = engine_settings.get(voice.default_engine)
+        if isinstance(engine_value, dict):
+            speed = engine_value.get("speech_speed")
+            if isinstance(speed, int | float):
+                return float(speed)
+
+    return 1.0

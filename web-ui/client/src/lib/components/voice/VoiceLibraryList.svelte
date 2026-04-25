@@ -7,6 +7,7 @@
   export let loading = false;
   export let errorMessage = '';
   export let testingVoiceId: string | null = null;
+  export let testAudioByVoiceId: Record<string, string> = {};
   export let onTestPlay: (voice: VoiceSummary, payload: VoiceTestPlayPayload) => void = () => {};
   export let onRename: (voice: VoiceSummary) => void = () => {};
   export let onDelete: (voice: VoiceSummary) => void = () => {};
@@ -36,6 +37,7 @@
           {voice}
           engineLabel={engineLabels.get(voice.default_engine) ?? voice.default_engine}
           testing={testingVoiceId === voice.voice_id}
+          testAudioUrl={testAudioByVoiceId[voice.voice_id] ?? null}
           {onTestPlay}
           {onRename}
           {onDelete}

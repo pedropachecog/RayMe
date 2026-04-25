@@ -4,6 +4,7 @@
   import type { VoiceAsset } from '$lib/api/types';
 
   export let asset: VoiceAsset | null = null;
+  export let sampleUrl: string | null = null;
   export let busy = false;
   export let errorMessage = '';
   export let onFileSelected: (file: File) => void = () => {};
@@ -67,6 +68,12 @@
 
   {#if durationWarning}
     <p class="warning" role="status">{durationWarning}</p>
+  {/if}
+  {#if sampleUrl}
+    <div class="sample-player" aria-label="Uploaded sample playback">
+      <span>Uploaded sample</span>
+      <audio aria-label="Play uploaded sample" controls preload="metadata" src={sampleUrl}></audio>
+    </div>
   {/if}
   {#if errorMessage}
     <p class="error" role="alert">{errorMessage}</p>
@@ -138,6 +145,20 @@
     min-height: 32px;
     flex-wrap: wrap;
     gap: var(--space-sm);
+  }
+
+  .sample-player {
+    display: grid;
+    gap: var(--space-xs);
+    color: var(--color-text);
+    font-size: var(--font-label);
+    font-weight: 600;
+    line-height: var(--line-label);
+  }
+
+  audio {
+    width: 100%;
+    max-width: 520px;
   }
 
   .sample-status span,

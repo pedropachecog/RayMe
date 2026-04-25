@@ -45,6 +45,9 @@ const requiredVoiceLabCopy = [
   'Upload Sample',
   'Transcribe Sample',
   'Use default engine',
+  'Speech speed',
+  'Uploaded sample',
+  'Generated test',
   'Preview Voice',
   'Save Voice',
   'No voices yet',
@@ -115,11 +118,15 @@ describe('Voice Lab API wrappers', () => {
       reference_transcript: 'Reference text',
       preview_text: 'Preview this voice.',
       use_default_engine: false,
-      engine: 'xtts_v2'
+      engine: 'xtts_v2',
+      speech_speed: 0.75
     });
     expect(lastRequest(fetchMock)).toMatchObject({
       url: '/api/voices/preview',
       init: { method: 'POST' }
+    });
+    expect(JSON.parse(lastRequest(fetchMock).init.body as string)).toMatchObject({
+      speech_speed: 0.75
     });
 
     await saveVoice({
@@ -169,11 +176,15 @@ describe('Voice Lab API wrappers', () => {
 
     await testPlayVoice('voice 1', {
       text: 'Test this voice.',
-      use_default_engine: true
+      use_default_engine: true,
+      speech_speed: 0.75
     });
     expect(lastRequest(fetchMock)).toMatchObject({
       url: '/api/voices/voice%201/test-play',
       init: { method: 'POST' }
+    });
+    expect(JSON.parse(lastRequest(fetchMock).init.body as string)).toMatchObject({
+      speech_speed: 0.75
     });
   });
 

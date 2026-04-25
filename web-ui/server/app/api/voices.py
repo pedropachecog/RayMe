@@ -56,6 +56,7 @@ class VoicePreview(BaseModel):
     preview_text: str | None = None
     use_default_engine: bool = True
     engine: str | None = Field(default=None, max_length=80)
+    speech_speed: float = Field(default=1.0, ge=0.5, le=1.5)
 
 
 class VoiceTestPlay(BaseModel):
@@ -64,6 +65,7 @@ class VoiceTestPlay(BaseModel):
     text: str = Field(min_length=1, max_length=2000)
     use_default_engine: bool = True
     engine: str | None = Field(default=None, max_length=80)
+    speech_speed: float = Field(default=1.0, ge=0.5, le=1.5)
 
 
 class AiBackendVoiceProcessor:
@@ -310,4 +312,5 @@ def _synthesis_payload(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         "reference_audio_content_type": payload.get("content_type"),
         "voice_id": payload.get("voice_id") or payload.get("asset_id"),
         "asset_id": payload.get("asset_id"),
+        "speech_speed": payload.get("speech_speed", 1.0),
     }

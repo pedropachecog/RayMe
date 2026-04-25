@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Request } from '@playwright/test';
+import { expect, test, type Locator, type Page, type Request } from '@playwright/test';
 
 import {
   expectRayMeApiRequest,
@@ -46,6 +46,7 @@ test('Voice Lab saves after preview returns HTTP 502 and stays on RayMe APIs', a
   });
   await expect(page.getByLabel('Voice name')).toHaveValue('sample');
   await page.getByRole('button', { name: 'Transcribe Sample' }).click();
+  await expect(page.getByLabel('Play uploaded sample')).toBeVisible();
   await expect(page.getByLabel('Reference transcript')).toHaveValue(sampleTranscript);
   await page.getByLabel('Reference transcript').fill(editedTranscript);
 
@@ -55,12 +56,14 @@ test('Voice Lab saves after preview returns HTTP 502 and stays on RayMe APIs', a
 
   await page.getByLabel('Voice name').fill('RayMe Browser Voice');
   await page.getByLabel('Preview text').fill(previewText);
+  await setRangeValue(page.getByLabel('Speech speed'), '0.75');
   await page.getByRole('button', { name: 'Preview Voice' }).click();
   await expect(page.getByText(/preview failed/i)).toBeVisible();
   await expect(page.getByLabel('Voice name')).toHaveValue('RayMe Browser Voice');
   await expect(page.getByLabel('Reference transcript')).toHaveValue(editedTranscript);
   await expect(page.getByRole('radio', { name: /F5-TTS/ })).toBeChecked();
   await expect(page.getByLabel('Preview text')).toHaveValue(previewText);
+  await expect(page.getByLabel('Speech speed')).toHaveValue('0.75');
 
   await expect(page.getByRole('button', { name: 'Save Voice' })).toBeEnabled();
   await page.getByRole('button', { name: 'Save Voice' }).click();
@@ -104,6 +107,7 @@ test('Voice Lab unlocks preview and save after failed transcription with manual 
     buffer: makeTinyWav()
   });
   await expect(page.getByLabel('Voice name')).toHaveValue('android-sample');
+  await expect(page.getByLabel('Play uploaded sample')).toBeVisible();
   await page.getByRole('button', { name: 'Transcribe Sample' }).click();
   await expect(page.getByText(/transcription failed/i)).toBeVisible();
 
@@ -165,9 +169,11 @@ test('Voice Library test-play keeps another row rename action available', async 
 
   await firstRow.getByPlaceholder('Type a test phrase').fill('Read this library test phrase.');
   await firstRow.getByLabel('Use default engine').check();
+  await setRangeValue(firstRow.getByLabel('Aster Saved Voice speech speed'), '0.75');
   await firstRow.getByRole('button', { name: 'Test Voice' }).click();
   await expect(firstRow.getByText('Testing voice...')).toBeVisible();
   await expect(secondRow.getByRole('button', { name: 'Rename Voice' })).toBeEnabled();
+  await expect(firstRow.getByLabel('Aster Saved Voice generated test audio')).toBeVisible();
 
   expect(voiceEvents).toEqual(
     expect.arrayContaining(['GET /api/voices', 'POST /api/voices/voice-a/test-play'])
@@ -328,7 +334,10 @@ async function routeVoiceLabApis(
       asset_id: 'sample-asset',
       name: options.transcribeFails ? 'android-sample' : 'RayMe Browser Voice',
       reference_transcript: options.expectedTranscript ?? editedTranscript,
-      default_engine: 'f5'
+      default_engine: 'f5',
+      metadata: {
+        speech_speed: options.transcribeFails ? 0.85 : 0.75
+      }
     });
     await fulfillJson(route, {
       voice_id: 'voice-rayme',
@@ -336,6 +345,10 @@ async function routeVoiceLabApis(
       name: options.transcribeFails ? 'android-sample' : 'RayMe Browser Voice',
       default_engine: 'f5',
       reference_transcript: options.expectedTranscript ?? editedTranscript,
+      metadata: {
+        speech_speed: options.transcribeFails ? 0.85 : 0.75,
+        engine_settings: { f5: { speech_speed: options.transcribeFails ? 0.85 : 0.75 } }
+      },
       status: 'available'
     }, 201);
   });
@@ -349,6 +362,15 @@ async function routeVoiceLabApis(
       content_type: 'audio/wav',
       warnings: []
     }, 201);
+  });
+
+  await page.route('**/api/voices/assets/sample-asset/sample', async (route) => {
+    expect(route.request().method()).toBe('GET');
+    await route.fulfill({
+      status: 200,
+      contentType: 'audio/wav',
+      body: makeTinyWav()
+    });
   });
 
   await page.route('**/api/voices/assets/sample-asset/transcribe', async (route) => {
@@ -375,14 +397,16 @@ async function routeVoiceLabApis(
           reference_transcript: options.expectedTranscript,
           default_engine: 'f5',
           use_default_engine: true,
-          preview_text: 'The line is open. This is how the saved RayMe voice will sound.'
+          preview_text: 'The line is open. This is how the saved RayMe voice will sound.',
+          speech_speed: 0.85
         }
       : {
           asset_id: 'sample-asset',
           reference_transcript: editedTranscript,
           default_engine: 'f5',
           use_default_engine: true,
-          preview_text: previewText
+          preview_text: previewText,
+          speech_speed: 0.75
         };
     expect(route.request().postDataJSON()).toMatchObject(expectedPayload);
     if (options.transcribeFails) {
@@ -433,13 +457,23 @@ async function routeVoiceLibraryApis(page: Page) {
     expect(route.request().method()).toBe('POST');
     expect(route.request().postDataJSON()).toMatchObject({
       text: 'Read this library test phrase.',
-      use_default_engine: true
+      use_default_engine: true,
+      speech_speed: 0.75
     });
     await new Promise((resolve) => setTimeout(resolve, 250));
     await fulfillJson(route, {
       voice_id: 'voice-a',
       engine: 'f5',
       audio_url: '/api/voices/voice-a/test-play/audio'
+    });
+  });
+
+  await page.route('**/api/voices/voice-a/test-play/audio', async (route) => {
+    expect(route.request().method()).toBe('GET');
+    await route.fulfill({
+      status: 200,
+      contentType: 'audio/wav',
+      body: makeTinyWav()
     });
   });
 
@@ -455,7 +489,7 @@ async function routeVoiceLibraryApis(page: Page) {
           status: 'available',
           created_at: '2026-04-25T01:00:00Z',
           updated_at: '2026-04-25T01:15:00Z',
-          metadata: { assignment_status: 'Assigned to 1 character' }
+          metadata: { assignment_status: 'Assigned to 1 character', speech_speed: 0.85 }
         },
         {
           voice_id: 'voice-b',
@@ -590,6 +624,15 @@ function recordVoiceApiRequest(request: Request, events: string[]) {
   }
 
   events.push(`${request.method()} ${url.pathname}${url.search}`);
+}
+
+async function setRangeValue(locator: Locator, value: string) {
+  await locator.evaluate((node, nextValue) => {
+    const input = node as HTMLInputElement;
+    input.value = nextValue;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }, value);
 }
 
 function makeTinyWav() {

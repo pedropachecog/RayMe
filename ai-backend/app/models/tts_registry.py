@@ -57,6 +57,7 @@ class TtsSynthesisInput(BaseModel):
     reference_audio: bytes
     reference_audio_content_type: str | None = None
     reference_transcript: str | None = None
+    speech_speed: float = Field(default=1.0, ge=0.5, le=1.5)
 
 
 class TtsSynthesisOutput(BaseModel):
