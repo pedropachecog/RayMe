@@ -124,6 +124,41 @@ test('Voice Library test-play keeps another row rename action available', async 
   assertNoBrowserErrors();
 });
 
+test('Voice Library blocked delete lists character referent before force delete', async ({ page }) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  const voiceEvents: string[] = [];
+
+  page.on('request', (request) => {
+    expectRayMeApiRequest(request);
+    recordVoiceApiRequest(request, voiceEvents);
+  });
+
+  await routeVoiceDeleteApis(page);
+
+  await page.goto('/voice-lab');
+  await expect(page.getByRole('heading', { name: 'Voice Lab' })).toBeVisible();
+
+  const row = page.getByRole('listitem', { name: /Referenced Saved Voice/ });
+  await row.getByRole('button', { name: 'Delete Voice' }).click();
+
+  await expect(page.getByRole('dialog', { name: 'Delete voice: Delete this voice?' })).toBeVisible();
+  await expect(page.getByText('Readable referent')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Force Delete Voice' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Force Delete Voice' }).click();
+  await expect(page.getByText('Voice unavailable')).toBeVisible();
+  await expect(row).toBeHidden();
+
+  expect(voiceEvents).toEqual(
+    expect.arrayContaining([
+      'GET /api/voices',
+      'DELETE /api/voices/voice-a',
+      'DELETE /api/voices/voice-a?force=true'
+    ])
+  );
+  assertNoBrowserErrors();
+});
+
 async function routeVoiceLabApis(page: Page) {
   await page.route('**/api/settings', async (route) => {
     await fulfillJson(route, {
@@ -279,6 +314,73 @@ async function routeVoiceLibraryApis(page: Page) {
           created_at: '2026-04-25T01:30:00Z',
           updated_at: '2026-04-25T01:30:00Z',
           metadata: { assignment_status: 'No assignments' }
+        }
+      ]
+    });
+  });
+}
+
+async function routeVoiceDeleteApis(page: Page) {
+  await page.route('**/api/settings', async (route) => {
+    await fulfillJson(route, {
+      web_url: 'http://127.0.0.1:4173',
+      ai_backend_url: 'http://127.0.0.1:9443',
+      llm_base_url: '',
+      llm_model: '',
+      llm_api_key_configured: false,
+      save_ai_audio: true,
+      save_mic_audio: false,
+      vad_threshold: 0.5,
+      vad_end_silence_ms: 700,
+      stt_model: 'distil-large-v3',
+      tts_default_engine: 'f5',
+      ai_backend_status: {
+        endpoint_status: 'Connected',
+        resident_tts_engine: 'f5',
+        loading_engine: null,
+        available_engines: [{ id: 'f5', label: 'F5-TTS', available: true, state: 'resident' }]
+      }
+    });
+  });
+
+  await page.route('**/api/voices/voice-a**', async (route) => {
+    expect(route.request().method()).toBe('DELETE');
+    const url = new URL(route.request().url());
+    if (url.searchParams.get('force') === 'true') {
+      await fulfillJson(route, {
+        voice_id: 'voice-a',
+        deleted: true,
+        strategy: 'soft_delete',
+        referents: [{ kind: 'character', id: 'character-1', name: 'Readable referent' }]
+      });
+      return;
+    }
+
+    await fulfillJson(
+      route,
+      {
+        detail: {
+          message: 'Voice is referenced',
+          referents: [{ kind: 'character', id: 'character-1', name: 'Readable referent' }]
+        }
+      },
+      409
+    );
+  });
+
+  await page.route('**/api/voices', async (route) => {
+    expect(route.request().method()).toBe('GET');
+    await fulfillJson(route, {
+      items: [
+        {
+          voice_id: 'voice-a',
+          name: 'Referenced Saved Voice',
+          default_engine: 'f5',
+          reference_transcript: 'Referenced transcript.',
+          status: 'available',
+          created_at: '2026-04-25T01:00:00Z',
+          updated_at: '2026-04-25T01:15:00Z',
+          metadata: { assignment_status: 'Assigned to 1 character' }
         }
       ]
     });

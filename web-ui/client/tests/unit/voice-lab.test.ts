@@ -22,6 +22,7 @@ const sourceFiles = [
   'src/lib/components/voice/VoiceLibraryList.svelte',
   'src/lib/components/voice/VoiceLibraryRow.svelte',
   'src/lib/components/voice/VoiceRenameDialog.svelte',
+  'src/lib/components/voice/VoiceDeleteDialog.svelte',
   'src/lib/api/voices.ts',
   'src/lib/api/types.ts'
 ];
@@ -51,7 +52,10 @@ const requiredVoiceLabCopy = [
   'Test Voice',
   'Rename Voice',
   'Delete Voice',
-  'Type a test phrase'
+  'Type a test phrase',
+  'Delete voice: Delete this voice?',
+  'Force Delete Voice',
+  'Voice unavailable'
 ];
 
 const engineLabels = [
@@ -151,6 +155,12 @@ describe('Voice Lab API wrappers', () => {
       name: 'Renamed Voice'
     });
 
+    await deleteVoice('voice 1', false);
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/voices/voice%201',
+      init: { method: 'DELETE' }
+    });
+
     await deleteVoice('voice 1', true);
     expect(lastRequest(fetchMock)).toMatchObject({
       url: '/api/voices/voice%201?force=true',
@@ -170,6 +180,29 @@ describe('Voice Lab API wrappers', () => {
   it('keeps voice wrapper routes behind RayMe-owned /api URLs', async () => {
     await expect(getVoice('https://provider.example/voice')).rejects.toThrow(/RayMe backend routes/);
   });
+
+  it('returns readable referents from blocked delete responses', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        mockJsonResponse(
+          {
+            detail: {
+              message: 'Voice is referenced',
+              referents: [{ kind: 'character', id: 'character-1', name: 'Readable referent' }]
+            }
+          },
+          { status: 409, statusText: 'Conflict' }
+        )
+      )
+    );
+
+    await expect(deleteVoice('voice 1', false)).resolves.toMatchObject({
+      voice_id: 'voice 1',
+      deleted: false,
+      referents: [{ kind: 'character', id: 'character-1', name: 'Readable referent' }]
+    });
+  });
 });
 
 describe('Voice Lab Phase 2 source contract', () => {
@@ -187,6 +220,7 @@ describe('Voice Lab Phase 2 source contract', () => {
         'src/lib/components/voice/VoiceLibraryList.svelte',
         'src/lib/components/voice/VoiceLibraryRow.svelte',
         'src/lib/components/voice/VoiceRenameDialog.svelte',
+        'src/lib/components/voice/VoiceDeleteDialog.svelte',
         'src/lib/api/voices.ts'
       ])
     );
@@ -243,5 +277,19 @@ describe('Voice Lab Phase 2 source contract', () => {
 
     expect(voiceLabSources).toMatch(/listVoices/);
     expect(voiceLabSources).toMatch(/testingVoiceId|testPlayState|row.*loading/i);
+  });
+
+  it('wires referenced delete confirmation through explicit force semantics', () => {
+    for (const copy of [
+      'Delete voice: Delete this voice?',
+      'Force Delete Voice',
+      'Voice unavailable',
+      'referents'
+    ]) {
+      expect(voiceLabSources).toContain(copy);
+    }
+
+    expect(voiceLabSources).toMatch(/deleteVoice\([^)]*false/);
+    expect(voiceLabSources).toMatch(/deleteVoice\([^)]*true/);
   });
 });
