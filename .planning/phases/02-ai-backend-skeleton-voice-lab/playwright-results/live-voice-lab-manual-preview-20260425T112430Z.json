@@ -1,0 +1,157 @@
+{
+  "config": {
+    "configFile": "/d/Pedro/Repos/Program/RayMe/web-ui/client/playwright.config.ts",
+    "rootDir": "/d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e",
+    "forbidOnly": false,
+    "fullyParallel": true,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/d/Pedro/Repos/Program/RayMe/web-ui/client/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "desktop-chromium",
+        "name": "desktop-chromium",
+        "testDir": "/d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/d/Pedro/Repos/Program/RayMe/web-ui/client/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "mobile-chromium",
+        "name": "mobile-chromium",
+        "testDir": "/d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "quiet": false,
+    "reporter": [
+      [
+        "json"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.59.1",
+    "workers": 12,
+    "webServer": {
+      "command": "npm run build && npm run preview -- --host 127.0.0.1 --port 4173",
+      "url": "http://127.0.0.1:4173",
+      "reuseExistingServer": true,
+      "timeout": 120000
+    }
+  },
+  "suites": [
+    {
+      "title": "live-voice-lab-manual-preview.spec.ts",
+      "file": "live-voice-lab-manual-preview.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "live OMEN-PC Voice Lab manual transcript preview returns playable audio before handoff",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 420000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectId": "desktop-chromium",
+              "projectName": "desktop-chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 155356,
+                  "error": {
+                    "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoEqual\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // deep equality\u001b[22m\n\n\u001b[32m- Expected  - 1\u001b[39m\n\u001b[31m+ Received  + 3\u001b[39m\n\n\u001b[32m- Array []\u001b[39m\n\u001b[31m+ Array [\u001b[39m\n\u001b[31m+   \"console.error: Loading media from  'data:audio/wav;base64,UklGRiQyCABXQVZFZm10IBAAAAABAAEAwF0AAIC7AAACABAAZGF0YQAyCAAAAAAAAAD/////AAAAAAAA////////////////AAAAAAAAAAAAAAAAAAD//////////////////wAA//////////8AAP///////////////////////////////wAAAAAAAAAAAAD/////AAAAAAAAAAAAAP////8AAAAA/////////////////////////////////////////////wAAAAAAAP////////////8AAAAAAAD/////////////AAAAAP///////////////wAA////////////////////////////////////////////////////////////////////////////////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//////////8AAAAAAAAAAAAAAAD/////AAAAAAAAA...8L/wj/BP/5/un+1/7J/sT+w/69/q7+mf6H/nz+dv5z/m/+av5n/mb+bP54/oT+jf6W/qj+v/7T/uX++/4Y/zj/VP9u/4f/mv+p/73/2f/4/w8AHwAtADwATgBlAIAAlgCjAKsAvADUAOwA/wAMARgBJAEwAT8BUQFeAWYBagFuAXMBcgFrAWcBZwFkAVsBUQFLAUUBOQErASMBHgEUAQUB9ADnANsA0ADFALcAmwB4AF8AUABEAC4AEQD6/+3/4f/X/87/xP+5/6z/qP+t/6v/nv+Q/4z/j/+N/4f/iv+T/5r/ov+0/8b/xv+5/7j/0//6/xYAJQAxADcAOgBEAFEASwAfAOr/1f/Z/9b/wv+s/6H/l/+G/4D/hf99/2n/Wv9h/3P/ff+H/6H/wP/Q/8//zP/R/9X/1P/g//r/BQDw/9f/4v8OADMANAAeAAAA3P/F/9D/6//r/8X/nf+l/8r/3//b/9H/1P/Y/8r/uv+6/73/vP/E/+H/CQAVAPr/' violates the following Content Security Policy directive: \\\"default-src 'self'\\\". Note that 'media-src' was not explicitly set, so 'default-src' is used as a fallback. The action has been blocked.\",\u001b[39m\n\u001b[31m+ ]\u001b[39m",
+                    "stack": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoEqual\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // deep equality\u001b[22m\n\n\u001b[32m- Expected  - 1\u001b[39m\n\u001b[31m+ Received  + 3\u001b[39m\n\n\u001b[32m- Array []\u001b[39m\n\u001b[31m+ Array [\u001b[39m\n\u001b[31m+   \"console.error: Loading media from  'data:audio/wav;base64,UklGRiQyCABXQVZFZm10IBAAAAABAAEAwF0AAIC7AAACABAAZGF0YQAyCAAAAAAAAAD/////AAAAAAAA////////////////AAAAAAAAAAAAAAAAAAD//////////////////wAA//////////8AAP///////////////////////////////wAAAAAAAAAAAAD/////AAAAAAAAAAAAAP////8AAAAA/////////////////////////////////////////////wAAAAAAAP////////////8AAAAAAAD/////////////AAAAAP///////////////wAA////////////////////////////////////////////////////////////////////////////////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//////////8AAAAAAAAAAAAAAAD/////AAAAAAAAA...8L/wj/BP/5/un+1/7J/sT+w/69/q7+mf6H/nz+dv5z/m/+av5n/mb+bP54/oT+jf6W/qj+v/7T/uX++/4Y/zj/VP9u/4f/mv+p/73/2f/4/w8AHwAtADwATgBlAIAAlgCjAKsAvADUAOwA/wAMARgBJAEwAT8BUQFeAWYBagFuAXMBcgFrAWcBZwFkAVsBUQFLAUUBOQErASMBHgEUAQUB9ADnANsA0ADFALcAmwB4AF8AUABEAC4AEQD6/+3/4f/X/87/xP+5/6z/qP+t/6v/nv+Q/4z/j/+N/4f/iv+T/5r/ov+0/8b/xv+5/7j/0//6/xYAJQAxADcAOgBEAFEASwAfAOr/1f/Z/9b/wv+s/6H/l/+G/4D/hf99/2n/Wv9h/3P/ff+H/6H/wP/Q/8//zP/R/9X/1P/g//r/BQDw/9f/4v8OADMANAAeAAAA3P/F/9D/6//r/8X/nf+l/8r/3//b/9H/1P/Y/8r/uv+6/73/vP/E/+H/CQAVAPr/' violates the following Content Security Policy directive: \\\"default-src 'self'\\\". Note that 'media-src' was not explicitly set, so 'default-src' is used as a fallback. The action has been blocked.\",\u001b[39m\n\u001b[31m+ ]\u001b[39m\n    at assertNoBrowserErrors (/d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e/helpers/acceptance.ts:35:47)\n    at /d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e/live-voice-lab-manual-preview.spec.ts:80:3",
+                    "location": {
+                      "file": "/d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e/helpers/acceptance.ts",
+                      "column": 47,
+                      "line": 35
+                    },
+                    "snippet": "\u001b[90m   at \u001b[39mhelpers/acceptance.ts:35\n\n  33 |\n  34 |   return () => {\n> 35 |     expect([...consoleErrors, ...pageErrors]).toEqual([]);\n     |                                               ^\n  36 |   };\n  37 | }\n  38 |"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e/helpers/acceptance.ts",
+                        "column": 47,
+                        "line": 35
+                      },
+                      "message": "Error: \u001b[2mexpect(\u001b[22m\u001b[31mreceived\u001b[39m\u001b[2m).\u001b[22mtoEqual\u001b[2m(\u001b[22m\u001b[32mexpected\u001b[39m\u001b[2m) // deep equality\u001b[22m\n\n\u001b[32m- Expected  - 1\u001b[39m\n\u001b[31m+ Received  + 3\u001b[39m\n\n\u001b[32m- Array []\u001b[39m\n\u001b[31m+ Array [\u001b[39m\n\u001b[31m+   \"console.error: Loading media from  'data:audio/wav;base64,UklGRiQyCABXQVZFZm10IBAAAAABAAEAwF0AAIC7AAACABAAZGF0YQAyCAAAAAAAAAD/////AAAAAAAA////////////////AAAAAAAAAAAAAAAAAAD//////////////////wAA//////////8AAP///////////////////////////////wAAAAAAAAAAAAD/////AAAAAAAAAAAAAP////8AAAAA/////////////////////////////////////////////wAAAAAAAP////////////8AAAAAAAD/////////////AAAAAP///////////////wAA////////////////////////////////////////////////////////////////////////////////AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA//////////8AAAAAAAAAAAAAAAD/////AAAAAAAAA...8L/wj/BP/5/un+1/7J/sT+w/69/q7+mf6H/nz+dv5z/m/+av5n/mb+bP54/oT+jf6W/qj+v/7T/uX++/4Y/zj/VP9u/4f/mv+p/73/2f/4/w8AHwAtADwATgBlAIAAlgCjAKsAvADUAOwA/wAMARgBJAEwAT8BUQFeAWYBagFuAXMBcgFrAWcBZwFkAVsBUQFLAUUBOQErASMBHgEUAQUB9ADnANsA0ADFALcAmwB4AF8AUABEAC4AEQD6/+3/4f/X/87/xP+5/6z/qP+t/6v/nv+Q/4z/j/+N/4f/iv+T/5r/ov+0/8b/xv+5/7j/0//6/xYAJQAxADcAOgBEAFEASwAfAOr/1f/Z/9b/wv+s/6H/l/+G/4D/hf99/2n/Wv9h/3P/ff+H/6H/wP/Q/8//zP/R/9X/1P/g//r/BQDw/9f/4v8OADMANAAeAAAA3P/F/9D/6//r/8X/nf+l/8r/3//b/9H/1P/Y/8r/uv+6/73/vP/E/+H/CQAVAPr/' violates the following Content Security Policy directive: \\\"default-src 'self'\\\". Note that 'media-src' was not explicitly set, so 'default-src' is used as a fallback. The action has been blocked.\",\u001b[39m\n\u001b[31m+ ]\u001b[39m\n\n\u001b[90m   at \u001b[39mhelpers/acceptance.ts:35\n\n  33 |\n  34 |   return () => {\n> 35 |     expect([...consoleErrors, ...pageErrors]).toEqual([]);\n     |                                               ^\n  36 |   };\n  37 | }\n  38 |\n\u001b[2m    at assertNoBrowserErrors (/d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e/helpers/acceptance.ts:35:47)\u001b[22m\n\u001b[2m    at /d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e/live-voice-lab-manual-preview.spec.ts:80:3\u001b[22m"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-04-25T11:26:17.773Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/d/Pedro/Repos/Program/RayMe/web-ui/client/test-results/live-voice-lab-manual-prev-c86a9-ayable-audio-before-handoff-desktop-chromium/error-context.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/d/Pedro/Repos/Program/RayMe/web-ui/client/tests/e2e/helpers/acceptance.ts",
+                    "column": 47,
+                    "line": 35
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "2a5ce985b93a23e78854-8b8cbc0b56a8c26263b3",
+          "file": "live-voice-lab-manual-preview.spec.ts",
+          "line": 19,
+          "column": 1
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-04-25T11:25:02.047Z",
+    "duration": 231389.769,
+    "expected": 0,
+    "skipped": 0,
+    "unexpected": 1,
+    "flaky": 0
+  }
+}
