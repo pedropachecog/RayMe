@@ -19,6 +19,9 @@ const sourceFiles = [
   'src/lib/components/voice/TranscriptEditor.svelte',
   'src/lib/components/voice/TtsEnginePicker.svelte',
   'src/lib/components/voice/SynthPreviewPanel.svelte',
+  'src/lib/components/voice/VoiceLibraryList.svelte',
+  'src/lib/components/voice/VoiceLibraryRow.svelte',
+  'src/lib/components/voice/VoiceRenameDialog.svelte',
   'src/lib/api/voices.ts',
   'src/lib/api/types.ts'
 ];
@@ -42,7 +45,13 @@ const requiredVoiceLabCopy = [
   'Transcribe Sample',
   'Use default engine',
   'Preview Voice',
-  'Save Voice'
+  'Save Voice',
+  'No voices yet',
+  'Upload a 6-15 second WAV, MP3, or FLAC sample to create the first voice.',
+  'Test Voice',
+  'Rename Voice',
+  'Delete Voice',
+  'Type a test phrase'
 ];
 
 const engineLabels = [
@@ -175,6 +184,9 @@ describe('Voice Lab Phase 2 source contract', () => {
         'src/lib/components/voice/TranscriptEditor.svelte',
         'src/lib/components/voice/TtsEnginePicker.svelte',
         'src/lib/components/voice/SynthPreviewPanel.svelte',
+        'src/lib/components/voice/VoiceLibraryList.svelte',
+        'src/lib/components/voice/VoiceLibraryRow.svelte',
+        'src/lib/components/voice/VoiceRenameDialog.svelte',
         'src/lib/api/voices.ts'
       ])
     );
@@ -213,5 +225,23 @@ describe('Voice Lab Phase 2 source contract', () => {
     }
 
     expect(voiceLabSources).toMatch(/preview.*(?:error|failed|failure)/i);
+  });
+
+  it('wires Voice Library list, rename, and test-play through row-scoped sources', () => {
+    for (const copy of [
+      'Voice Library',
+      'Test Voice',
+      'Rename Voice',
+      'Delete Voice',
+      'Type a test phrase',
+      'Use default engine',
+      'renameVoice',
+      'testPlayVoice'
+    ]) {
+      expect(voiceLabSources).toContain(copy);
+    }
+
+    expect(voiceLabSources).toMatch(/listVoices/);
+    expect(voiceLabSources).toMatch(/testingVoiceId|testPlayState|row.*loading/i);
   });
 });

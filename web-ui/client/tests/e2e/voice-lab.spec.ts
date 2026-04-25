@@ -92,6 +92,38 @@ test('Voice Lab has no horizontal scroll at 320px viewport', async ({ page }) =>
   expect(dimensions.scrollWidth).toBeLessThanOrEqual(dimensions.clientWidth);
 });
 
+test('Voice Library test-play keeps another row rename action available', async ({ page }) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  const voiceEvents: string[] = [];
+
+  page.on('request', (request) => {
+    expectRayMeApiRequest(request);
+    recordVoiceApiRequest(request, voiceEvents);
+  });
+
+  await routeVoiceLibraryApis(page);
+
+  await page.goto('/voice-lab');
+  await expect(page.getByRole('heading', { name: 'Voice Lab' })).toBeVisible();
+
+  const firstRow = page.getByRole('listitem', { name: /Aster Saved Voice/ });
+  const secondRow = page.getByRole('listitem', { name: /Basil Saved Voice/ });
+  await expect(firstRow).toContainText('Assigned to 1 character');
+  await expect(firstRow.getByRole('button', { name: 'Test Voice' })).toBeEnabled();
+  await expect(secondRow.getByRole('button', { name: 'Rename Voice' })).toBeEnabled();
+
+  await firstRow.getByPlaceholder('Type a test phrase').fill('Read this library test phrase.');
+  await firstRow.getByLabel('Use default engine').check();
+  await firstRow.getByRole('button', { name: 'Test Voice' }).click();
+  await expect(firstRow.getByText('Testing voice...')).toBeVisible();
+  await expect(secondRow.getByRole('button', { name: 'Rename Voice' })).toBeEnabled();
+
+  expect(voiceEvents).toEqual(
+    expect.arrayContaining(['GET /api/voices', 'POST /api/voices/voice-a/test-play'])
+  );
+  assertNoBrowserErrors();
+});
+
 async function routeVoiceLabApis(page: Page) {
   await page.route('**/api/settings', async (route) => {
     await fulfillJson(route, {
@@ -172,6 +204,79 @@ async function routeVoiceLabApis(page: Page) {
       preview_text: previewText
     });
     await fulfillJson(route, { error: { message: 'Preview synthesis failed' } }, 502);
+  });
+}
+
+async function routeVoiceLibraryApis(page: Page) {
+  await page.route('**/api/settings', async (route) => {
+    await fulfillJson(route, {
+      web_url: 'http://127.0.0.1:4173',
+      ai_backend_url: 'http://127.0.0.1:9443',
+      llm_base_url: '',
+      llm_model: '',
+      llm_api_key_configured: false,
+      save_ai_audio: true,
+      save_mic_audio: false,
+      vad_threshold: 0.5,
+      vad_end_silence_ms: 700,
+      stt_model: 'distil-large-v3',
+      tts_default_engine: 'f5',
+      ai_backend_status: {
+        endpoint_status: 'Connected',
+        resident_tts_engine: 'f5',
+        loading_engine: null,
+        available_engines: [
+          { id: 'f5', label: 'F5-TTS', available: true, state: 'resident' },
+          { id: 'xtts_v2', label: 'XTTS v2', available: true, state: 'idle' },
+          { id: 'qwen3_0_6b', label: 'Qwen3-TTS 0.6B-Base', available: true, state: 'idle' },
+          { id: 'luxtts', label: 'LuxTTS', available: true, state: 'idle' },
+          { id: 'chatterbox_turbo', label: 'Chatterbox Turbo', available: true, state: 'idle' },
+          { id: 'tada_1b', label: 'TADA 1B', available: true, state: 'idle' }
+        ]
+      }
+    });
+  });
+
+  await page.route('**/api/voices/voice-a/test-play', async (route) => {
+    expect(route.request().method()).toBe('POST');
+    expect(route.request().postDataJSON()).toMatchObject({
+      text: 'Read this library test phrase.',
+      use_default_engine: true
+    });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    await fulfillJson(route, {
+      voice_id: 'voice-a',
+      engine: 'f5',
+      audio_url: '/api/voices/voice-a/test-play/audio'
+    });
+  });
+
+  await page.route('**/api/voices', async (route) => {
+    expect(route.request().method()).toBe('GET');
+    await fulfillJson(route, {
+      items: [
+        {
+          voice_id: 'voice-a',
+          name: 'Aster Saved Voice',
+          default_engine: 'f5',
+          reference_transcript: 'Aster reference transcript.',
+          status: 'available',
+          created_at: '2026-04-25T01:00:00Z',
+          updated_at: '2026-04-25T01:15:00Z',
+          metadata: { assignment_status: 'Assigned to 1 character' }
+        },
+        {
+          voice_id: 'voice-b',
+          name: 'Basil Saved Voice',
+          default_engine: 'xtts_v2',
+          reference_transcript: null,
+          status: 'available',
+          created_at: '2026-04-25T01:30:00Z',
+          updated_at: '2026-04-25T01:30:00Z',
+          metadata: { assignment_status: 'No assignments' }
+        }
+      ]
+    });
   });
 }
 
