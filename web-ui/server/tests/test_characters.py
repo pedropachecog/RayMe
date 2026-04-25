@@ -21,7 +21,7 @@ from app.domain.cards import (
 )
 from app.domain.character_service import ACTIVE_PORTRAIT_KIND
 from app.main import create_app
-from app.storage.models import Base, CharacterAsset, Message, Thread
+from app.storage.models import Base, CharacterAsset, Message, Thread, Voice, utc_now
 from app.storage.session import create_engine
 
 CARD_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "cards"
@@ -137,6 +137,69 @@ def test_character_crud_routes_persist_editor_fields(
     assert deleted.status_code == 200
     assert deleted.json()["strategy"] == "soft_delete"
     assert client.get("/api/characters").json()["items"] == []
+
+
+def test_character_default_voice_id_persists_across_writes_and_reads(
+    character_client: tuple[TestClient, Path, async_sessionmaker],
+) -> None:
+    client, _, sessionmaker = character_client
+    first_voice_id = "voice_default_first"
+    second_voice_id = "voice_default_second"
+    asyncio.run(_insert_voice(sessionmaker, first_voice_id, name="First assigned voice"))
+    asyncio.run(_insert_voice(sessionmaker, second_voice_id, name="Second assigned voice"))
+
+    created = client.post(
+        "/api/characters",
+        json=_character_payload(default_voice_id=first_voice_id),
+    )
+    character_id = created.json()["id"]
+    updated = client.put(
+        f"/api/characters/{character_id}",
+        json=_character_payload(
+            name="Updated Character",
+            default_voice_id=second_voice_id,
+        ),
+    )
+    detail = client.get(f"/api/characters/{character_id}")
+    listing = client.get("/api/characters")
+
+    assert created.status_code == 201
+    assert created.json()["default_voice_id"] == first_voice_id
+    assert updated.status_code == 200
+    assert updated.json()["default_voice_id"] == second_voice_id
+    assert detail.status_code == 200
+    assert detail.json()["default_voice_id"] == second_voice_id
+    assert listing.status_code == 200
+    assert listing.json()["items"][0]["default_voice_id"] == second_voice_id
+
+
+def test_character_default_voice_id_rejects_missing_or_deleted_voice(
+    character_client: tuple[TestClient, Path, async_sessionmaker],
+) -> None:
+    client, _, sessionmaker = character_client
+    deleted_voice_id = "voice_deleted_default"
+    asyncio.run(_insert_voice(sessionmaker, deleted_voice_id, name="Deleted default voice"))
+    asyncio.run(_soft_delete_voice(sessionmaker, deleted_voice_id))
+
+    missing = client.post(
+        "/api/characters",
+        json=_character_payload(default_voice_id="voice_missing_default"),
+    )
+    deleted = client.post(
+        "/api/characters",
+        json=_character_payload(default_voice_id=deleted_voice_id),
+    )
+    no_voice = client.post(
+        "/api/characters",
+        json=_character_payload(default_voice_id=""),
+    )
+
+    assert missing.status_code == 400
+    assert missing.json()["detail"] == "Default voice not found"
+    assert deleted.status_code == 400
+    assert deleted.json()["detail"] == "Default voice not found"
+    assert no_voice.status_code == 201
+    assert no_voice.json()["default_voice_id"] is None
 
 
 def test_character_delete_keeps_threads_and_messages_queryable(
@@ -374,3 +437,30 @@ async def _load_assets(
             select(CharacterAsset).where(CharacterAsset.character_id == character_id)
         )
         return list(result.scalars())
+
+
+async def _insert_voice(
+    sessionmaker: async_sessionmaker,
+    voice_id: str,
+    *,
+    name: str,
+) -> None:
+    async with sessionmaker() as session:
+        session.add(
+            Voice(
+                id=voice_id,
+                name=name,
+                default_engine="F5-TTS",
+                reference_transcript="A saved reference transcript.",
+                metadata_json={"source": "test"},
+            )
+        )
+        await session.commit()
+
+
+async def _soft_delete_voice(sessionmaker: async_sessionmaker, voice_id: str) -> None:
+    async with sessionmaker() as session:
+        voice = await session.get(Voice, voice_id)
+        assert voice is not None
+        voice.deleted_at = utc_now()
+        await session.commit()
