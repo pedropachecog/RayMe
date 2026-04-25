@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 
-import { installBrowserErrorGuard } from './helpers/acceptance';
+import { installBrowserErrorGuard, installEmptyVoiceLibraryRoute } from './helpers/acceptance';
 
 test.use({ viewport: { width: 393, height: 851 }, isMobile: true });
 
@@ -118,6 +118,8 @@ function detail(messages: Message[]) {
 }
 
 async function installMobileRoutes(page: Page) {
+  await installEmptyVoiceLibraryRoute(page);
+
   const messages: Message[] = [ai('mobile-opening', 0, 'Mobile alternate selected.', 'first_mes')];
   let saved = false;
 

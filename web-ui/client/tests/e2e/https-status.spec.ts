@@ -71,7 +71,7 @@ test('secure context media readiness and endpoint statuses are visible', async (
   await expect(page.getByText('Secure context').first()).toBeVisible();
   await expect(page.getByText('Media devices available')).toBeVisible();
   await expect(page.locator('[data-testid="web-ui-status"]')).toHaveText('Connected');
-  await expect(page.locator('[data-testid="ai-backend-status"]')).toHaveText('Not configured');
+  await expect(page.locator('[data-testid="ai-backend-status"]')).toHaveText('Unreachable');
   await expect(page.locator('[data-testid="llm-status"]')).toHaveText('Not configured');
   await expect(page.getByPlaceholder('API key configured')).toHaveAttribute('type', 'password');
   await expect(page.getByText(/server-secret|sk-/i)).toHaveCount(0);

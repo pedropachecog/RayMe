@@ -4,7 +4,7 @@ import base64
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from app.config import AiBackendSettings
 from app.models.model_manager import ModelManager
@@ -14,10 +14,15 @@ router = APIRouter()
 
 
 class TtsSynthesizeRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     voice_id: str = Field(min_length=1, max_length=128)
     engine_id: str | None = Field(default=None, max_length=64)
     text: str = Field(min_length=1, max_length=5000)
-    reference_audio_b64: str = Field(min_length=1)
+    reference_audio_b64: str = Field(
+        min_length=1,
+        validation_alias=AliasChoices("reference_audio_b64", "reference_audio_base64"),
+    )
     reference_transcript: str | None = Field(default=None, max_length=10000)
     use_default_engine: bool = False
 

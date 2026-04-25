@@ -44,6 +44,17 @@ export async function fulfillJson(route: Route, body: unknown, status = 200) {
   });
 }
 
+export async function installEmptyVoiceLibraryRoute(page: Page) {
+  await page.route('**/api/voices', async (route) => {
+    if (route.request().method() === 'GET') {
+      await fulfillJson(route, { items: [] });
+      return;
+    }
+
+    await route.fallback();
+  });
+}
+
 export async function fulfillSse(route: Route, events: unknown[]) {
   await route.fulfill({
     status: 200,

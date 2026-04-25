@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 
-import { installBrowserErrorGuard } from './helpers/acceptance';
+import { installBrowserErrorGuard, installEmptyVoiceLibraryRoute } from './helpers/acceptance';
 
 const forbiddenCopy = [
   'Account',
@@ -25,6 +25,8 @@ async function fulfillJson(route: Route, body: unknown) {
 }
 
 async function installContractRoutes(page: Page) {
+  await installEmptyVoiceLibraryRoute(page);
+
   const character = {
     id: 'contract-character',
     name: 'Contract Aster',

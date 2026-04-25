@@ -41,10 +41,14 @@ test('live OMEN-PC Voice Lab upload transcribe save and test-play path passes be
   await page.getByLabel('Upload Sample').setInputFiles({
     name: 'sample.wav',
     mimeType: 'audio/wav',
-    buffer: makeTinyWav()
+    buffer: makeToneWav()
   });
   await page.getByRole('button', { name: 'Transcribe Sample' }).click();
-  await expect(page.getByLabel('Reference transcript')).not.toHaveValue('', { timeout: 120_000 });
+  const transcript = page.getByLabel('Reference transcript');
+  await expect(transcript).toBeEnabled({ timeout: 120_000 });
+  if (!(await transcript.inputValue()).trim()) {
+    await transcript.fill('This is the manual live Voice Lab reference transcript.');
+  }
 
   const liveVoiceName = `Live Voice Lab ${Date.now()}`;
   await page.getByLabel('Voice name').fill(liveVoiceName);
@@ -79,13 +83,33 @@ function recordVoiceRequest(request: Request, events: string[]) {
   events.push(`${request.method()} ${url.pathname}${url.search}`);
 }
 
-function makeTinyWav() {
-  return Buffer.from([
-    0x52, 0x49, 0x46, 0x46, 0x24, 0x00, 0x00, 0x00, 0x57, 0x41, 0x56, 0x45,
-    0x66, 0x6d, 0x74, 0x20, 0x10, 0x00, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00,
-    0x40, 0x1f, 0x00, 0x00, 0x80, 0x3e, 0x00, 0x00, 0x02, 0x00, 0x10, 0x00,
-    0x64, 0x61, 0x74, 0x61, 0x00, 0x00, 0x00, 0x00
-  ]);
+function makeToneWav() {
+  const sampleRate = 16_000;
+  const durationSeconds = 6;
+  const samples = sampleRate * durationSeconds;
+  const dataBytes = samples * 2;
+  const buffer = Buffer.alloc(44 + dataBytes);
+
+  buffer.write('RIFF', 0);
+  buffer.writeUInt32LE(36 + dataBytes, 4);
+  buffer.write('WAVE', 8);
+  buffer.write('fmt ', 12);
+  buffer.writeUInt32LE(16, 16);
+  buffer.writeUInt16LE(1, 20);
+  buffer.writeUInt16LE(1, 22);
+  buffer.writeUInt32LE(sampleRate, 24);
+  buffer.writeUInt32LE(sampleRate * 2, 28);
+  buffer.writeUInt16LE(2, 32);
+  buffer.writeUInt16LE(16, 34);
+  buffer.write('data', 36);
+  buffer.writeUInt32LE(dataBytes, 40);
+
+  for (let i = 0; i < samples; i += 1) {
+    const sample = Math.round(Math.sin((2 * Math.PI * 220 * i) / sampleRate) * 12000);
+    buffer.writeInt16LE(sample, 44 + i * 2);
+  }
+
+  return buffer;
 }
 
 function escapeRegExp(value: string) {

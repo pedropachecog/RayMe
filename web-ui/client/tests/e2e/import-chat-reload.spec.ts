@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 
-import { installBrowserErrorGuard } from './helpers/acceptance';
+import { installBrowserErrorGuard, installEmptyVoiceLibraryRoute } from './helpers/acceptance';
 
 const maliciousDescription = '<img src=x onerror=alert(1)> javascript:alert(1)';
 const characterId = 'imported-character';
@@ -136,6 +136,8 @@ function threadDetail(messages: ThreadMessage[]) {
 }
 
 async function installAcceptanceRoutes(page: Page) {
+  await installEmptyVoiceLibraryRoute(page);
+
   const messages: ThreadMessage[] = [
     aiMessage('opening-message', 0, 'Alternate greeting two persisted.', 'first_mes', 1)
   ];

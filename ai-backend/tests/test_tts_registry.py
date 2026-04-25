@@ -277,6 +277,21 @@ def test_tts_synthesize_switches_engine_and_returns_transient_json() -> None:
     assert adapter.last_request.reference_transcript == "Reference transcript."
 
 
+def test_tts_synthesize_accepts_web_ui_reference_audio_alias() -> None:
+    adapter = FakeSynthesisAdapter()
+    manager = FakeSwitchingManager(adapter)
+    app = create_app()
+    app.state.model_manager = manager
+    client = TestClient(app)
+    payload = _synthesis_payload()
+    payload["reference_audio_base64"] = payload.pop("reference_audio_b64")
+
+    response = client.post("/tts/synthesize", json=payload)
+
+    assert response.status_code == 200
+    assert adapter.last_request.reference_audio == b"reference wav"
+
+
 def test_tts_synthesize_use_default_engine_switches_to_caller_default() -> None:
     adapter = FakeSynthesisAdapter()
     manager = FakeSwitchingManager(adapter)

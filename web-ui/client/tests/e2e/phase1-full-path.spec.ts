@@ -2,7 +2,12 @@ import { readFile } from 'node:fs/promises';
 
 import { expect, test, type Page, type Route } from '@playwright/test';
 
-import { fulfillJson, fulfillSse, installBrowserErrorGuard } from './helpers/acceptance';
+import {
+  fulfillJson,
+  fulfillSse,
+  installBrowserErrorGuard,
+  installEmptyVoiceLibraryRoute
+} from './helpers/acceptance';
 
 type AlternateSourceAction = 'first_mes' | 'regenerate' | 'swipe' | 'continue';
 
@@ -168,6 +173,8 @@ function threadSummary(title = renameDeleteInitialTitle) {
 }
 
 async function installFullPathRoutes(page: Page) {
+  await installEmptyVoiceLibraryRoute(page);
+
   const messages: ThreadMessage[] = [
     aiMessage(
       'phase1-full-opening',

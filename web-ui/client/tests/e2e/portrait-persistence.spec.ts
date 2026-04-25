@@ -3,7 +3,8 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import {
   expectRayMeApiRequest,
   fulfillJson,
-  installBrowserErrorGuard
+  installBrowserErrorGuard,
+  installEmptyVoiceLibraryRoute
 } from './helpers/acceptance';
 import { makeAiMessage, makeCharacter, makeThreadDetail } from './helpers/fixtures';
 import { alternatePortraitPng, fulfillPortraitImage, portraitPng } from './helpers/images';
@@ -23,6 +24,7 @@ const uploadFallbackInitials = 'PU';
 
 test('PNG import persists portrait across Editor Gallery Home Chat and reload', async ({ page }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installEmptyVoiceLibraryRoute(page);
   const portraitRequests = new Set<string>();
   const importedCharacter = makeCharacter({
     id: importCharacterId,
@@ -165,6 +167,7 @@ test('PNG import persists portrait across Editor Gallery Home Chat and reload', 
 
 test('direct portrait upload replaces and removes portrait across surfaces', async ({ page }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installEmptyVoiceLibraryRoute(page);
   const portraitRequests = new Set<string>();
   let currentPortraitUrl: string | null = null;
   let currentPortraitAssetId: string | null = null;
