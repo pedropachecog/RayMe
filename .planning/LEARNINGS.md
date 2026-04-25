@@ -125,6 +125,11 @@ find the next failure.
   from it.
 - Operating rule: interactive GSD workflows must present plain-text numbered
   choices and stop for the user when structured prompts are unavailable.
+- Operating rule: discussion workflows run one question at a time when the user
+  wants sequential discussion, with the recommended option and a brief "why"
+  shown before the answer is requested.
+- Operating rule: fresh discussions must not derail into "Skip", "Use existing
+  context", or "View it" prompts unless the user explicitly asks for a bypass.
 - Operating rule: canonical decision/context/spec/approval artifacts require
   actual user answers or an explicitly requested `--auto`/`--chain` mode.
 - Attempted local GSD skill adapter patch was blocked because installed skill

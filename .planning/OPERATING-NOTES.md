@@ -27,6 +27,16 @@ as durable context, not one-off preferences.
   `$gsd-spec-phase`, `$gsd-plan-phase` approval gates, `$gsd-next` when it
   routes into an interactive workflow, and any workflow that writes decisions,
   context, requirements, plans, or approvals.
+- For discussion workflows, ask one decision at a time. Do not batch multiple
+  discussion questions into one prompt when the user has asked for sequential
+  discussion.
+- For each discussion question, state the recommended option first and include a
+  short "why" before waiting for the user's answer. Recommendations guide the
+  discussion; they do not lock decisions.
+- Do not ask "Skip", "Use existing context as-is", "View it", or similar
+  bypass prompts during a fresh discussion unless the user explicitly asks for a
+  bypass or invokes an auto mode. If prior draft context exists, invalidate it
+  and continue with the fresh discussion flow instead of asking whether to skip.
 - A discussion artifact is valid only if it contains actual user answers or an
   explicitly requested `--auto`/`--chain` mode. Do not create or commit
   canonical `*-CONTEXT.md`, `*-SPEC.md`, approval, or decision artifacts from

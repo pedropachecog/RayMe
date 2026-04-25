@@ -43,6 +43,9 @@ cmd_start() {
   require_contains ".planning/OPERATING-NOTES.md" "pre-handoff verification checklist"
   require_contains ".planning/OPERATING-NOTES.md" "product-owner acceptance"
   require_contains ".planning/OPERATING-NOTES.md" "must never auto-select defaults"
+  require_contains ".planning/OPERATING-NOTES.md" "ask one decision at a time"
+  require_contains ".planning/OPERATING-NOTES.md" "recommended option first"
+  require_contains ".planning/OPERATING-NOTES.md" "Do not ask \"Skip\", \"Use existing context as-is\", \"View it\""
   require_contains ".planning/OPERATING-NOTES.md" "scripts/deploy-omen.sh"
   require_contains ".planning/OPERATING-NOTES.md" "GPU acceleration is mandatory"
   require_contains ".planning/LEARNINGS.md" "False Assumptions"
@@ -51,6 +54,8 @@ cmd_start() {
   require_contains ".planning/SESSION-START.md" "Required Reads"
   require_contains ".planning/SESSION-START.md" "Handoff Gate"
   require_contains ".planning/SESSION-START.md" "Interactive Workflow Rule"
+  require_contains ".planning/SESSION-START.md" "Show the recommendation first"
+  require_contains ".planning/SESSION-START.md" "Do not insert \"Skip\", \"Use existing context as-is\", \"View it\""
 
   if [[ -f ".planning/.continue-here.md" ]]; then
     fail "unresolved checkpoint exists: .planning/.continue-here.md"

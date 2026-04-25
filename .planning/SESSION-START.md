@@ -50,6 +50,16 @@ numbered choices and stop for the user's answer. Never infer defaults for
 interactive GSD decisions unless the user explicitly invoked `--auto` or
 `--chain`.
 
+For discussion workflows, ask one decision at a time when the user wants a
+sequential discussion format. Show the recommendation first, include a short
+reason why it is recommended, then stop for the answer before asking the next
+question.
+
+Do not insert "Skip", "Use existing context as-is", "View it", or similar
+bypass prompts into a fresh discussion unless the user explicitly asks for that
+path. If a prior draft or invalid context exists, treat it as non-canonical and
+continue the fresh discussion instead of asking whether to bypass it.
+
 Before planning from any `*-CONTEXT.md` or `*-SPEC.md`, confirm the artifact was
 created from actual user answers or explicit auto mode. Draft files marked
 `NOT-USER-DISCUSSED` are invalid for planning.

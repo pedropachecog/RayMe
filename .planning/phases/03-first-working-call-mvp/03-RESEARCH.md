@@ -434,20 +434,18 @@ if (canSelectOutput) {
 
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
-| A1 | Add structured metadata to `messages` now for `call_start` / `call_end` / speech rows instead of keeping purely text-only payloads. | Common Pitfalls / Architecture Patterns | Could cause an unnecessary migration now, or delay a necessary one until Phase 4/5. |
-| A2 | Use a WebRTC data channel in Phase 3 for transcript/state/control events instead of a separate SSE/polling path. | System Architecture / State of the Art | Could add avoidable implementation complexity now if the team prefers plain HTTP control for MVP. |
+| A1 | RESOLVED in planning: Phase 3 intentionally ships text-only `messages.content_text` call rows and no message metadata migration. Required duration, voice, start/end, and call state details are written into the `call_start` / `call_end` content text and evidence files. Structured metadata can be added later only if Phase 4+ proves the string contract insufficient. | Common Pitfalls / Architecture Patterns | Could delay richer analytics, but avoids an unnecessary migration while the existing unified message kind model already satisfies Phase 3 user-visible truth. |
+| A2 | RESOLVED in planning: Phase 3 uses WebRTC for browser-to-AI-backend audio plus a WebRTC `rayme-events` data channel for AI-backend call events such as `user_final` and `ai_audio_started`. Browser-to-Web-UI-server transcript/LLM streaming uses same-origin HTTP/SSE through `/api/calls/{call_id}/turns`. Server-to-AI-backend control and TTS playback uses HTTP routes under `/webrtc/sessions/{session_id}`. | System Architecture / State of the Art | Adds one data-channel schema now, but prevents the impossible gap where finalized speech appears without a transport from aiortc/STT to the browser/server turn loop. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should Phase 3 extend `messages` with structured metadata now, or intentionally ship text-only call rows first?**
    - What we know: the current `Message` model has no metadata field, but REQ-50 wants duration, voice used, and truthful call-end data. [VERIFIED: repo file] [VERIFIED: repo grep]
-   - What's unclear: whether the team wants an MVP migration in Phase 3 or will accept derived/string-only rendering until later. [ASSUMED]
-   - Recommendation: lock this in planning before task breakdown, because it changes migrations, API shapes, and client rendering. [ASSUMED]
+   - Decision: ship text-only call rows first. `call_start` and `call_end` rows must include human-readable duration, voice, start/end timestamp, and reason text. `user_speech` and `ai_speech` rows store finalized transcript text. No Phase 3 schema migration is required unless implementation discovers an existing testable blocker. [PLANNING DECISION: 2026-04-25]
 
 2. **Will the live transcript/state path use a data channel or server-polling/SSE?**
    - What we know: the context locks live in-call transcript and interrupt behavior, and both browser WebRTC and aiortc support data channels. [VERIFIED: repo file] [CITED: https://developer.mozilla.org/en-US/docs/Web/API/RTCPeerConnection/createDataChannel] [CITED: https://aiortc.readthedocs.io/en/latest/api.html?highlight=createOffer]
-   - What's unclear: the project has not yet locked this event transport. [ASSUMED]
-   - Recommendation: prefer data channels unless a simpler same-origin bridge proves materially lower risk in implementation planning. [ASSUMED]
+   - Decision: use a narrow WebRTC `rayme-events` data channel only for AI-backend-originated call events (`user_final`, `ai_audio_started`, `muted`, `interrupted`, `ended`, `failed`). Browser-to-Web-UI-server LLM transcript streaming remains same-origin HTTP/SSE through `/api/calls/{call_id}/turns`, and server-to-AI-backend TTS/control remains HTTP. [PLANNING DECISION: 2026-04-25]
 
 ## Environment Availability
 
