@@ -3,8 +3,6 @@ import { expect, test, type Page, type Route } from '@playwright/test';
 import { installBrowserErrorGuard } from './helpers/acceptance';
 
 const forbiddenCopy = [
-  'Voice Lab',
-  'Call',
   'Account',
   'Billing',
   'Logout',
@@ -115,7 +113,7 @@ async function expectNoFutureControls(page: Page) {
   }
 }
 
-test('phase 1 ui omits future controls from shipped screens', async ({ page }) => {
+test('phase 2 ui exposes Voice Lab navigation without call controls', async ({ page }) => {
   const expectNoBrowserErrors = installBrowserErrorGuard(page);
   await installContractRoutes(page);
 
@@ -125,11 +123,14 @@ test('phase 1 ui omits future controls from shipped screens', async ({ page }) =
   }
 
   await page.goto('/');
-  await expect(page.locator('nav[aria-label="Top-level"] a')).toHaveCount(3);
-  await expect(page.locator('nav[aria-label="Primary mobile"] a')).toHaveCount(3);
+  await expect(page.locator('nav[aria-label="Top-level"] a')).toHaveCount(4);
+  await expect(page.locator('nav[aria-label="Primary mobile"] a')).toHaveCount(4);
   await expect(page.getByRole('link', { name: 'Home' }).first()).toBeVisible();
   await expect(page.getByRole('link', { name: 'Gallery' }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Voice Lab' }).first()).toBeVisible();
   await expect(page.getByRole('link', { name: 'Settings' }).first()).toBeVisible();
   await expect(page.getByRole('button', { name: 'Start Chat' }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: /^Call$/i })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Call$/i })).toHaveCount(0);
   await expectNoBrowserErrors();
 });
