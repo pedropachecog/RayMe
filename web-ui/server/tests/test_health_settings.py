@@ -38,12 +38,14 @@ from app.storage.session import create_engine
 STATUS_VALUES = {CONNECTED, UNREACHABLE, UNAUTHORIZED, NOT_CONFIGURED}
 AI_BACKEND_STATUS_FIELDS = {
     "endpoint_status",
+    "status",
     "stt_model",
+    "stt_compute_type",
     "vad_ready",
     "resident_tts_engine",
-    "available_tts_engines",
-    "loading_state",
-    "vram_mb",
+    "available_engines",
+    "loading_engine",
+    "vram_used_mb",
     "vram_headroom_mb",
 }
 DEFAULT_SETTINGS_EXTENSIONS = {
@@ -151,6 +153,71 @@ def test_settings_defaults_include_audio_vad_and_ai_backend_status(
 
     assert "ai_backend_status" in body
     assert AI_BACKEND_STATUS_FIELDS.issubset(body["ai_backend_status"])
+
+
+def test_settings_rejects_vad_values_outside_call_phase_bounds(
+    settings_client: TestClient,
+) -> None:
+    assert (
+        settings_client.patch("/api/settings", json={"vad_threshold": -0.01}).status_code == 422
+    )
+    assert (
+        settings_client.patch("/api/settings", json={"vad_threshold": 1.01}).status_code == 422
+    )
+    assert (
+        settings_client.patch("/api/settings", json={"vad_end_silence_ms": 99}).status_code
+        == 422
+    )
+    assert (
+        settings_client.patch("/api/settings", json={"vad_end_silence_ms": 3001}).status_code
+        == 422
+    )
+
+
+def test_settings_response_includes_compact_live_ai_backend_status(
+    settings_client: TestClient,
+) -> None:
+    class FakeAiBackendClient:
+        async def get_status(self, base_url: str) -> AiBackendStatus:
+            assert base_url == "https://ai.local:9443"
+            return AiBackendStatus(
+                status="ok",
+                stt_model="distil-large-v3",
+                stt_compute_type="int8_float16",
+                vad_ready=True,
+                resident_tts_engine="f5",
+                available_engines=[
+                    EngineStatus(
+                        id="f5",
+                        label="F5-TTS",
+                        available=True,
+                        state="resident",
+                    )
+                ],
+                loading_engine=None,
+                vram_used_mb=2300,
+                vram_headroom_mb=8700,
+            )
+
+    settings_client.patch("/api/settings", json={"ai_backend_url": "https://ai.local:9443"})
+    settings_client.app.dependency_overrides[get_ai_backend_client] = FakeAiBackendClient
+
+    body = settings_client.get("/api/settings").json()
+
+    assert body["ai_backend_status"] == {
+        "endpoint_status": "ok",
+        "status": "ok",
+        "stt_model": "distil-large-v3",
+        "stt_compute_type": "int8_float16",
+        "vad_ready": True,
+        "resident_tts_engine": "f5",
+        "available_engines": [
+            {"id": "f5", "label": "F5-TTS", "available": True, "state": "resident"}
+        ],
+        "loading_engine": None,
+        "vram_used_mb": 2300,
+        "vram_headroom_mb": 8700,
+    }
 
 
 async def test_settings_service_persists_phase2_defaults_with_json_types(tmp_path: Path) -> None:
