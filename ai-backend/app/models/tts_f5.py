@@ -22,6 +22,7 @@ from app.models.tts_registry import (
 class F5TtsAdapter(ImportGatedTtsAdapter):
     engine_id = "f5"
     required_modules = ("f5_tts",)
+    synthesis_enabled = True
 
     def __init__(self, runtime_factory: Callable[[], Any] | None = None) -> None:
         super().__init__()

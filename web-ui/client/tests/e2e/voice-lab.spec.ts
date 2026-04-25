@@ -54,14 +54,12 @@ test('Voice Lab saves after preview returns HTTP 502 and stays on RayMe APIs', a
   }
 
   await page.getByLabel('Voice name').fill('RayMe Browser Voice');
-  await page.getByRole('radio', { name: /Chatterbox Turbo/ }).check();
-  await page.getByLabel('Use default engine').uncheck();
   await page.getByLabel('Preview text').fill(previewText);
   await page.getByRole('button', { name: 'Preview Voice' }).click();
   await expect(page.getByText(/preview failed/i)).toBeVisible();
   await expect(page.getByLabel('Voice name')).toHaveValue('RayMe Browser Voice');
   await expect(page.getByLabel('Reference transcript')).toHaveValue(editedTranscript);
-  await expect(page.getByRole('radio', { name: /Chatterbox Turbo/ })).toBeChecked();
+  await expect(page.getByRole('radio', { name: /F5-TTS/ })).toBeChecked();
   await expect(page.getByLabel('Preview text')).toHaveValue(previewText);
 
   await expect(page.getByRole('button', { name: 'Save Voice' })).toBeEnabled();
@@ -279,11 +277,41 @@ async function routeVoiceLabApis(
         loading_engine: null,
         available_engines: [
           { id: 'f5', label: 'F5-TTS', available: true, state: 'resident' },
-          { id: 'xtts_v2', label: 'XTTS v2', available: true, state: 'idle' },
-          { id: 'qwen3_0_6b', label: 'Qwen3-TTS 0.6B-Base', available: true, state: 'idle' },
-          { id: 'luxtts', label: 'LuxTTS', available: true, state: 'idle' },
-          { id: 'chatterbox_turbo', label: 'Chatterbox Turbo', available: true, state: 'idle' },
-          { id: 'tada_1b', label: 'TADA 1B', available: true, state: 'idle' }
+          {
+            id: 'xtts_v2',
+            label: 'XTTS v2',
+            available: false,
+            state: 'unavailable',
+            unavailable_reason: 'engine synthesis is not implemented in Phase 02'
+          },
+          {
+            id: 'qwen3_0_6b',
+            label: 'Qwen3-TTS 0.6B-Base',
+            available: false,
+            state: 'unavailable',
+            unavailable_reason: 'engine synthesis is not implemented in Phase 02'
+          },
+          {
+            id: 'luxtts',
+            label: 'LuxTTS',
+            available: false,
+            state: 'unavailable',
+            unavailable_reason: 'engine synthesis is not implemented in Phase 02'
+          },
+          {
+            id: 'chatterbox_turbo',
+            label: 'Chatterbox Turbo',
+            available: false,
+            state: 'unavailable',
+            unavailable_reason: 'engine synthesis is not implemented in Phase 02'
+          },
+          {
+            id: 'tada_1b',
+            label: 'TADA 1B',
+            available: false,
+            state: 'unavailable',
+            unavailable_reason: 'engine synthesis is not implemented in Phase 02'
+          }
         ]
       }
     });
@@ -300,13 +328,13 @@ async function routeVoiceLabApis(
       asset_id: 'sample-asset',
       name: options.transcribeFails ? 'android-sample' : 'RayMe Browser Voice',
       reference_transcript: options.expectedTranscript ?? editedTranscript,
-      default_engine: options.transcribeFails ? 'f5' : 'chatterbox_turbo'
+      default_engine: 'f5'
     });
     await fulfillJson(route, {
       voice_id: 'voice-rayme',
       asset_id: 'sample-asset',
       name: options.transcribeFails ? 'android-sample' : 'RayMe Browser Voice',
-      default_engine: options.transcribeFails ? 'f5' : 'chatterbox_turbo',
+      default_engine: 'f5',
       reference_transcript: options.expectedTranscript ?? editedTranscript,
       status: 'available'
     }, 201);
@@ -352,9 +380,8 @@ async function routeVoiceLabApis(
       : {
           asset_id: 'sample-asset',
           reference_transcript: editedTranscript,
-          default_engine: 'chatterbox_turbo',
-          use_default_engine: false,
-          engine: 'chatterbox_turbo',
+          default_engine: 'f5',
+          use_default_engine: true,
           preview_text: previewText
         };
     expect(route.request().postDataJSON()).toMatchObject(expectedPayload);

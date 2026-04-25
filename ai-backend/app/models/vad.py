@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from os import PathLike
 from typing import Any
 
 import numpy as np
+import soundfile as sf
 
 GetSpeechTimestamps = Callable[..., list[dict[str, int | float]]]
 
@@ -56,4 +58,10 @@ class SileroVadAdapter:
     def _coerce_audio(self, audio: Any) -> Any:
         if isinstance(audio, np.ndarray):
             return audio.astype(np.float32, copy=False)
+        if isinstance(audio, (str, PathLike)):
+            samples, sample_rate = sf.read(audio, dtype="float32", always_2d=True)
+            mono = np.asarray(samples, dtype=np.float32).mean(axis=1)
+            if int(sample_rate) != self.sampling_rate:
+                raise RuntimeError("Silero VAD audio sample rate mismatch")
+            return mono
         return audio

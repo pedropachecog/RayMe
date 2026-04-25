@@ -41,33 +41,53 @@
     {
       id: 'xtts_v2',
       label: 'XTTS v2',
-      caveat_chips: ['Transcript portable', 'Native streaming'],
-      requires_transcript: true,
-      availability: { available: true, state: 'idle' }
+      caveat_chips: ['No transcript required', 'Native streaming'],
+      requires_transcript: false,
+      availability: {
+        available: false,
+        state: 'unavailable',
+        unavailable_reason: 'engine synthesis is not implemented in Phase 02'
+      }
     },
     {
       id: 'qwen3_0_6b',
       label: 'Qwen3-TTS 0.6B-Base',
       caveat_chips: ['Opt-in', 'Latency caveat', 'Accent caveat'],
-      availability: { available: true, state: 'idle' }
+      availability: {
+        available: false,
+        state: 'unavailable',
+        unavailable_reason: 'engine synthesis is not implemented in Phase 02'
+      }
     },
     {
       id: 'luxtts',
       label: 'LuxTTS',
       caveat_chips: ['Quality caveat', 'Retest references'],
-      availability: { available: true, state: 'idle' }
+      availability: {
+        available: false,
+        state: 'unavailable',
+        unavailable_reason: 'engine synthesis is not implemented in Phase 02'
+      }
     },
     {
       id: 'chatterbox_turbo',
       label: 'Chatterbox Turbo',
       caveat_chips: ['Experimental', 'Avoid baseline long-form'],
-      availability: { available: true, state: 'idle' }
+      availability: {
+        available: false,
+        state: 'unavailable',
+        unavailable_reason: 'engine synthesis is not implemented in Phase 02'
+      }
     },
     {
       id: 'tada_1b',
       label: 'TADA 1B',
       caveat_chips: ['Experimental', 'High VRAM', 'WSL caution'],
-      availability: { available: true, state: 'idle' }
+      availability: {
+        available: false,
+        state: 'unavailable',
+        unavailable_reason: 'engine synthesis is not implemented in Phase 02'
+      }
     }
   ];
 

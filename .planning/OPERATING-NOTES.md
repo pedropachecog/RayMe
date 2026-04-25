@@ -36,6 +36,11 @@ as durable context, not one-off preferences.
   for that workflow before calling the phase complete. Manual reproduction by
   the user is evidence of missing test coverage, not a substitute for agent-run
   verification.
+- Any Playwright/browser check used as acceptance evidence must be persisted as
+  a repository test file or a saved phase artifact before handoff. Save the
+  corresponding run result under the relevant phase directory with the command,
+  timestamp, commit, and pass/fail outcome. Do not rely on unsaved one-off
+  browser scripts or transient terminal output as final evidence.
 - Do not launch backend runtime tasks through visible `.cmd` windows. On
   `OMEN-PC`, scheduled tasks must use hidden PowerShell launchers or another
   no-console mechanism so the user's desktop is not littered with completed

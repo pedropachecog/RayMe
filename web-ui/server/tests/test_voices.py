@@ -41,12 +41,20 @@ class UploadedAudio:
 
 @dataclass(slots=True)
 class FakeVoiceProcessor:
+    fail_transcribe: bool = False
     fail_preview: bool = False
     return_tts_failed: bool = False
     calls: list[dict[str, Any]] | None = None
 
     async def transcribe(self, **_: Any) -> dict[str, str | float]:
         self._record("transcribe", _)
+        if self.fail_transcribe:
+            from app.domain.ai_backend_client import AiBackendProcessingError
+
+            raise AiBackendProcessingError(
+                code="transcription_failed",
+                message="Transcription failed",
+            )
         return {
             "transcript": "This is the editable reference transcript.",
             "language": "en",
@@ -226,6 +234,26 @@ def test_voice_asset_transcribe_returns_editable_reference_transcript(
     assert call["operation"] == "transcribe"
     assert call["content"] == _wav_audio("transcribe-source.wav").content
     assert call["content_type"] == "audio/wav"
+
+
+def test_voice_asset_transcribe_backend_failure_returns_manual_fallback_json(
+    voice_fixture: VoiceFixture,
+) -> None:
+    client = voice_fixture.client
+    voice_fixture.processor.fail_transcribe = True
+    uploaded = _upload_voice_asset(client, _wav_audio("transcribe-failure.wav"))
+    assert uploaded.status_code == 201
+
+    response = client.post(f"/api/voices/assets/{uploaded.json()['asset_id']}/transcribe")
+
+    assert response.status_code == 502
+    assert response.headers["content-type"].startswith("application/json")
+    body = response.json()
+    assert body["error"]["code"] == "transcription_failed"
+    assert body["reference_transcript"] == ""
+    assert body["reference_transcript_editable"] is True
+    assert body["retry_allowed"] is True
+    assert body["manual_transcript_allowed"] is True
 
 
 def test_voice_save_without_preview_covers_full_engine_roster(

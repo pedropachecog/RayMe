@@ -168,6 +168,17 @@ async def transcribe_voice_asset(
         return await service.transcribe_asset(asset_id)
     except VoiceAssetNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Voice asset not found") from exc
+    except AiBackendClientError as exc:
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": exc.to_public_dict(),
+                "reference_transcript": "",
+                "reference_transcript_editable": True,
+                "retry_allowed": True,
+                "manual_transcript_allowed": True,
+            },
+        )
 
 
 @router.post("/preview")

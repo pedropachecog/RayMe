@@ -44,7 +44,7 @@ ENGINE_REQUIREMENTS = {
     },
     "xtts_v2": {
         "model_license": "CPML",
-        "requires_transcript": True,
+        "requires_transcript": False,
         "supports_streaming": True,
     },
     "qwen3_0_6b": {
@@ -176,7 +176,7 @@ def test_registry_metadata_captures_engine_specific_contracts_registry_metadata(
 
     assert "Default" in by_id["f5"]["caveat_chips"]
     assert "Requires transcript" in by_id["f5"]["caveat_chips"]
-    assert "Transcript stored for portability" in by_id["xtts_v2"]["quality_notes"]
+    assert "Reference audio is sufficient" in by_id["xtts_v2"]["quality_notes"]
     assert "Native streaming inside safe chunks" in by_id["xtts_v2"]["quality_notes"]
     assert "Opt-in" in by_id["qwen3_0_6b"]["caveat_chips"]
     assert "0.6B-Base" in by_id["qwen3_0_6b"]["quality_notes"]

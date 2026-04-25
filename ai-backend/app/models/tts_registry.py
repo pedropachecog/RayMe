@@ -90,6 +90,7 @@ class TtsAdapter(Protocol):
 class ImportGatedTtsAdapter:
     engine_id: str
     required_modules: tuple[str, ...] = ()
+    synthesis_enabled = False
 
     def __init__(self) -> None:
         self.loaded = False
@@ -135,11 +136,11 @@ TTS_ENGINE_METADATA: tuple[TtsEngineMetadata, ...] = (
         label="XTTS v2",
         code_license="MPL-2.0",
         model_license="CPML",
-        caveat_chips=["Transcript portable", "Native streaming", "Non-commercial model"],
+        caveat_chips=["No transcript required", "Native streaming", "Non-commercial model"],
         runtime_evidence="Phase 0 WSL short TTFA 489.9 ms and 30-min soak peak 2104.0 MB; scenario matrix measured native streaming inside chunk-safe paths.",
-        requires_transcript=True,
+        requires_transcript=False,
         supports_streaming=True,
-        quality_notes="Transcript stored for portability. Native streaming inside safe chunks; long text must honor the 400-token stream cap.",
+        quality_notes="Reference audio is sufficient for cloning. Native streaming inside safe chunks; long text must honor the 400-token stream cap.",
     ),
     TtsEngineMetadata(
         id="qwen3_0_6b",

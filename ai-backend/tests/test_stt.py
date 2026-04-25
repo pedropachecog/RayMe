@@ -275,6 +275,30 @@ def test_silero_vad_adapter_uses_configurable_threshold_and_silence() -> None:
     assert calls[0]["kwargs"]["sampling_rate"] == 16000
 
 
+def test_silero_vad_adapter_loads_temp_wav_paths_before_timestamping(tmp_path: Any) -> None:
+    vad_module = importlib.import_module("app.models.vad")
+    SileroVadAdapter = getattr(vad_module, "SileroVadAdapter")
+    audio_path = tmp_path / "sample.wav"
+    sf.write(audio_path, np.zeros(16000, dtype=np.float32), 16000, format="WAV")
+    calls: list[dict[str, Any]] = []
+
+    def fake_get_speech_timestamps(audio: Any, model: Any, **kwargs: Any) -> list[dict[str, int]]:
+        calls.append({"audio": audio, "model": model, "kwargs": kwargs})
+        return [{"start": 0, "end": 16000}]
+
+    adapter = SileroVadAdapter(
+        model=object(),
+        get_speech_timestamps_fn=fake_get_speech_timestamps,
+    )
+
+    result = adapter.speech_timestamps(str(audio_path))
+
+    assert result == [{"start": 0, "end": 16000}]
+    assert isinstance(calls[0]["audio"], np.ndarray)
+    assert calls[0]["audio"].dtype == np.float32
+    assert calls[0]["audio"].shape == (16000,)
+
+
 def _wav_upload() -> tuple[str, bytes, str]:
     samples = np.zeros(1600, dtype=np.float32)
     source = BytesIO()

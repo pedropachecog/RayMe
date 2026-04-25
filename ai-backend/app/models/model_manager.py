@@ -53,6 +53,12 @@ class ModelManager:
         for engine_id, adapter in self.tts_adapters.items():
             if engine_id not in self._statuses:
                 continue
+            if getattr(adapter, "synthesis_enabled", True) is False:
+                self._mark_unavailable(
+                    engine_id,
+                    "engine synthesis is not implemented in Phase 02",
+                )
+                continue
             try:
                 self._run_self_test(adapter)
             except Exception:

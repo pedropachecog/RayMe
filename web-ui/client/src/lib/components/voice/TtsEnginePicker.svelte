@@ -6,7 +6,7 @@
 
   const fallbackCaveats: Record<string, string[]> = {
     f5: ['Default', 'Requires transcript'],
-    xtts_v2: ['Transcript portable', 'Streaming capable'],
+    xtts_v2: ['No transcript required', 'Streaming capable'],
     qwen3_0_6b: ['Opt-in', 'Latency caveat', 'Accent caveat'],
     luxtts: ['Quality caveat', 'Retest references'],
     chatterbox_turbo: ['Experimental', 'Avoid baseline long-form'],
@@ -41,12 +41,14 @@
         />
         <span class="engine-name">{engine.label}</span>
         <span class="engine-meta">
-          {#if engine.id === 'qwen3_0_6b'}
+          {#if !available}
+            {engine.availability?.unavailable_reason || 'This engine is not available in the current runtime.'}
+          {:else if engine.id === 'qwen3_0_6b'}
             Qwen3-TTS 0.6B-Base is experimental and non-default; use it only when you want the Apache-2.0 path despite current latency and accent caveats.
           {:else if engine.requires_transcript}
             Transcript required for this voice clone path.
           {:else}
-            Metadata-driven selectable engine.
+            Reference transcript not required for this engine.
           {/if}
         </span>
         <span class="chips">
