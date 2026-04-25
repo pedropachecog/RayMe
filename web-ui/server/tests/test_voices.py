@@ -41,8 +41,11 @@ class UploadedAudio:
 @dataclass(slots=True)
 class FakeVoiceProcessor:
     fail_preview: bool = False
+    return_tts_failed: bool = False
+    calls: list[dict[str, Any]] | None = None
 
     async def transcribe(self, **_: Any) -> dict[str, str | float]:
+        self._record("transcribe", _)
         return {
             "transcript": "This is the editable reference transcript.",
             "language": "en",
@@ -50,15 +53,24 @@ class FakeVoiceProcessor:
         }
 
     async def preview(self, **_: Any) -> dict[str, str]:
+        self._record("preview", _)
         if self.fail_preview:
             raise RuntimeError("preview synthesis failed")
+        if self.return_tts_failed:
+            return {"status": "tts_failed", "error": "typed processing failure"}
         return {"preview_id": "preview-1", "preview_url": "/api/voices/previews/preview-1.wav"}
 
     async def synthesize_preview(self, **kwargs: Any) -> dict[str, str]:
         return await self.preview(**kwargs)
 
     async def test_play(self, **_: Any) -> dict[str, str]:
+        self._record("test_play", _)
         return {"audio_url": "/api/voices/test-play/test-play-1.wav"}
+
+    def _record(self, operation: str, payload: dict[str, Any]) -> None:
+        if self.calls is None:
+            self.calls = []
+        self.calls.append({"operation": operation, **payload})
 
 
 @dataclass(frozen=True, slots=True)
@@ -175,6 +187,22 @@ def test_voice_asset_upload_accepts_wav_mp3_flac_and_rejects_txt(
     assert "audio" in rejected.json()["detail"].lower()
 
 
+def test_voice_asset_upload_rejects_unsupported_files_without_traceback(
+    voice_fixture: VoiceFixture,
+) -> None:
+    response = voice_fixture.client.post(
+        "/api/voices/assets",
+        files={"file": ("notes.txt", b"not audio", "text/plain")},
+    )
+
+    body = response.json()
+    serialized = json.dumps(body).lower()
+    assert response.status_code == 400
+    assert "traceback" not in serialized
+    assert "runtimeerror" not in serialized
+    assert "valueerror" not in serialized
+
+
 def test_voice_asset_transcribe_returns_editable_reference_transcript(
     voice_fixture: VoiceFixture,
 ) -> None:
@@ -190,6 +218,11 @@ def test_voice_asset_transcribe_returns_editable_reference_transcript(
     assert body["asset_id"] == asset_id
     assert body["reference_transcript"] == "This is the editable reference transcript."
     assert body["reference_transcript_editable"] is True
+    assert voice_fixture.processor.calls
+    call = voice_fixture.processor.calls[-1]
+    assert call["operation"] == "transcribe"
+    assert call["content"] == _wav_audio("transcribe-source.wav").content
+    assert call["content_type"] == "audio/wav"
 
 
 def test_voice_save_without_preview_covers_full_engine_roster(
@@ -223,6 +256,46 @@ def test_voice_save_without_preview_covers_full_engine_roster(
         assert "preview_url" not in body
 
 
+def test_voice_save_succeeds_after_preview_returns_tts_failed(
+    voice_fixture: VoiceFixture,
+) -> None:
+    client = voice_fixture.client
+    voice_fixture.processor.return_tts_failed = True
+    uploaded = _upload_voice_asset(client, _wav_audio("tts-failed-preview.wav"))
+    assert uploaded.status_code == 201
+    asset_id = uploaded.json()["asset_id"]
+
+    preview = client.post(
+        "/api/voices/preview",
+        json={
+            "asset_id": asset_id,
+            "name": "Preview failure can still save",
+            "default_engine": "F5-TTS",
+            "reference_transcript": "Save does not require successful synthesis.",
+            "preview_text": "Preview can fail.",
+        },
+    )
+    saved = client.post(
+        "/api/voices",
+        json={
+            **_voice_payload(
+                asset_id=asset_id,
+                name="Preview failure can still save",
+                default_engine="F5-TTS",
+                reference_transcript="Save does not require successful synthesis.",
+            ),
+            "metadata": {"source": "voice_lab", "preview_status": "tts_failed"},
+        },
+    )
+
+    assert preview.status_code == 200
+    assert preview.json()["status"] == "tts_failed"
+    assert saved.status_code == 201
+    assert saved.json()["metadata"]["sample_asset_id"] == asset_id
+    assert saved.json()["metadata"]["source"] == "voice_lab"
+    assert saved.json()["metadata"]["preview_status"] == "tts_failed"
+
+
 def test_voice_id_is_stable_across_rename_and_character_reference(
     voice_fixture: VoiceFixture,
 ) -> None:
@@ -252,8 +325,8 @@ def test_voice_id_is_stable_across_rename_and_character_reference(
     assert renamed.status_code == 200
     assert renamed.json()["voice_id"] == voice.voice_id
     assert renamed.json()["name"] == "Renamed display name"
-    assert renamed.json()["default_engine"] == "XTTS v2"
-    assert renamed.json()["reference_transcript"] == "Updated editable transcript."
+    assert renamed.json()["default_engine"] == "F5-TTS"
+    assert renamed.json()["reference_transcript"] == "Editable transcript for saved voice."
     assert character_after_rename.status_code == 200
     assert character_after_rename.json()["default_voice"]["voice_id"] == voice.voice_id
     assert character_after_rename.json()["default_voice"]["name"] == "Renamed display name"
@@ -316,6 +389,28 @@ def test_force_delete_tombstones_voice_and_characters_show_unavailable_state(
         "status": "unavailable",
         "label": "Voice unavailable",
     }
+
+
+def test_delete_referenced_voice_requires_force_and_returns_readable_referents(
+    voice_fixture: VoiceFixture,
+) -> None:
+    client = voice_fixture.client
+    voice = _create_voice(client, name="Still referenced voice")
+    character = _create_character(client)
+    assigned = client.put(
+        f"/api/characters/{character['id']}",
+        json={**_character_payload(name="Readable referent"), "default_voice_id": voice.voice_id},
+    )
+    assert assigned.status_code == 200
+
+    blocked = client.delete(f"/api/voices/{voice.voice_id}")
+    detail = blocked.json()["detail"]
+
+    assert blocked.status_code == 409
+    assert detail["message"] == "Voice is referenced"
+    assert detail["referents"] == [
+        {"kind": "character", "id": character["id"], "name": "Readable referent"}
+    ]
 
 
 def test_voice_library_detail_and_test_play_routes(
