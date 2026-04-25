@@ -19,6 +19,7 @@ from app.domain.ai_backend_client import (
     AiBackendUnavailable,
     EngineStatus,
 )
+from app.domain.settings_service import SETTINGS_KEY, SettingsService
 from app.domain.llm_probe import (
     CONNECTED,
     NOT_CONFIGURED,
@@ -31,7 +32,7 @@ from app.domain.llm_probe import (
     probe_openai_compatible_llm,
 )
 from app.main import create_app
-from app.storage.models import Base
+from app.storage.models import AppSetting, Base
 from app.storage.session import create_engine
 
 STATUS_VALUES = {CONNECTED, UNREACHABLE, UNAUTHORIZED, NOT_CONFIGURED}
@@ -50,6 +51,8 @@ DEFAULT_SETTINGS_EXTENSIONS = {
     "save_mic_audio": False,
     "vad_threshold": 0.5,
     "vad_end_silence_ms": 700,
+    "stt_model": "distil-large-v3",
+    "tts_default_engine": "f5",
 }
 
 
@@ -148,6 +151,58 @@ def test_settings_defaults_include_audio_vad_and_ai_backend_status(
 
     assert "ai_backend_status" in body
     assert AI_BACKEND_STATUS_FIELDS.issubset(body["ai_backend_status"])
+
+
+async def test_settings_service_persists_phase2_defaults_with_json_types(tmp_path: Path) -> None:
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'typed-settings.sqlite3'}")
+    sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+
+    runtime_settings = Settings(
+        web_public_url="https://127.0.0.1:8443",
+        ai_backend_base_url="https://127.0.0.1:9443",
+        llm_base_url="https://api.openai.com/v1",
+        llm_model="gpt-test-default",
+    )
+
+    try:
+        async with sessionmaker() as session:
+            service = SettingsService(session, runtime_settings)
+            defaults = await service.read()
+
+            assert defaults.save_ai_audio is True
+            assert defaults.save_mic_audio is False
+            assert defaults.vad_threshold == 0.5
+            assert defaults.vad_end_silence_ms == 700
+            assert defaults.stt_model == "distil-large-v3"
+            assert defaults.tts_default_engine == "f5"
+            assert await session.get(AppSetting, SETTINGS_KEY) is None
+
+            await service.update(
+                {
+                    "save_ai_audio": False,
+                    "save_mic_audio": True,
+                    "vad_threshold": "0.65",
+                    "vad_end_silence_ms": "900",
+                    "stt_model": " distil-large-v3 ",
+                    "tts_default_engine": " f5 ",
+                }
+            )
+
+            row = await session.get(AppSetting, SETTINGS_KEY)
+            assert row is not None
+            assert row.value_json["save_ai_audio"] is False
+            assert row.value_json["save_mic_audio"] is True
+            assert row.value_json["vad_threshold"] == 0.65
+            assert isinstance(row.value_json["vad_threshold"], float)
+            assert row.value_json["vad_end_silence_ms"] == 900
+            assert isinstance(row.value_json["vad_end_silence_ms"], int)
+            assert row.value_json["stt_model"] == "distil-large-v3"
+            assert row.value_json["tts_default_engine"] == "f5"
+    finally:
+        await engine.dispose()
 
 
 def test_connection_test_routes_return_only_allowed_status_values(
