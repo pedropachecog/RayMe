@@ -69,7 +69,28 @@ export interface CharacterBaseFields {
   character_version?: string | null;
 }
 
-export interface CharacterSummary extends CharacterBaseFields, CharacterPortraitMetadata {
+export type CharacterDefaultVoiceState = 'none' | 'assigned' | 'unavailable';
+
+export interface CharacterDefaultVoice {
+  id?: string | null;
+  voice_id?: string | null;
+  name?: string | null;
+  deleted_name?: string | null;
+  default_engine?: TtsEngineId | null;
+  status?: 'available' | 'deleted' | string;
+}
+
+export interface CharacterDefaultVoiceFields {
+  default_voice_id?: string | null;
+  default_voice_state?: CharacterDefaultVoiceState;
+  default_voice_label?: string | null;
+  default_voice?: CharacterDefaultVoice | null;
+}
+
+export interface CharacterSummary
+  extends CharacterBaseFields,
+    CharacterPortraitMetadata,
+    CharacterDefaultVoiceFields {
   id: string;
   deleted_at?: string | null;
   updated_at?: string | null;
@@ -83,7 +104,10 @@ export interface CharacterDetail extends CharacterSummary {
   warnings?: string[];
 }
 
-export interface CharacterEditorPayload extends CharacterBaseFields, CharacterPortraitMetadata {}
+export interface CharacterEditorPayload
+  extends CharacterBaseFields,
+    CharacterPortraitMetadata,
+    Pick<CharacterDefaultVoiceFields, 'default_voice_id'> {}
 
 export interface CharacterImportResult {
   character: CharacterDetail;

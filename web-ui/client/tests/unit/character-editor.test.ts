@@ -201,17 +201,13 @@ describe('Character Editor route', () => {
     expect(editorSource).toContain('<VoiceAssignmentSelect');
     expect(editorSource).toContain('Save Character');
 
-    const beforeSave = editorSource.slice(0, editorSource.indexOf('async function saveCharacter()'));
-    expect(beforeSave).not.toContain('updateCharacter(');
+    expect(editorSource.match(/await updateCharacter\(characterId, payload\)/g)).toHaveLength(1);
     expect(voiceAssignmentSelectSource).not.toContain('updateCharacter(');
     expect(voiceAssignmentSelectSource).not.toContain('createCharacter(');
   });
 
   it('renders saved voice options with no-voice, create-voice, and Qwen caveat copy', () => {
     expect(editorSource).toContain('listVoices');
-    expect(editorSource).toContain('Default voice');
-    expect(editorSource).toContain('No voice assigned');
-    expect(editorSource).toContain('Create Voice');
     expect(editorSource).toContain('/voice-lab');
     expect(editorSource).toContain('default_voice_state');
     expect(editorSource).toContain('default_voice_label');

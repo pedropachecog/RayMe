@@ -11,9 +11,11 @@
     updateCharacter,
     uploadPortrait
   } from '$lib/api/characters';
-  import type { CharacterDetail, CharacterEditorPayload } from '$lib/api/types';
+  import { listVoices } from '$lib/api/voices';
+  import type { CharacterDetail, CharacterEditorPayload, VoiceSummary } from '$lib/api/types';
   import CharacterFormSection from '$lib/components/CharacterFormSection.svelte';
   import PortraitDropzone from '$lib/components/PortraitDropzone.svelte';
+  import VoiceAssignmentSelect from '$lib/components/voice/VoiceAssignmentSelect.svelte';
 
   type EditorMode = 'create' | 'review' | 'edit';
 
@@ -32,6 +34,7 @@
     post_history_instructions: string;
     creator: string;
     character_version: string;
+    default_voice_id: string | null;
   }
 
   const discardConfirmation =
@@ -54,12 +57,17 @@
   let localPreviewUrl: string | null = null;
   let selectedPortraitFile: File | null = null;
   let lorebookPresent = false;
+  let voices: VoiceSummary[] = [];
+  let voicesLoading = false;
+  let voicesError = '';
 
   $: modeLabel = mode === 'create' ? 'Create character' : mode === 'review' ? 'Review character' : 'Edit character';
   $: portraitBusy = portraitState !== 'idle' || saveState === 'saving';
   $: portraitFallbackInitials = initialsFor(form.name);
 
   onMount(() => {
+    void loadSavedVoices();
+
     if (isCreateMode) {
       return;
     }
@@ -86,8 +94,22 @@
       alternate_greetings: [],
       post_history_instructions: '',
       creator: '',
-      character_version: ''
+      character_version: '',
+      default_voice_id: null
     };
+  }
+
+  async function loadSavedVoices() {
+    voicesLoading = true;
+    voicesError = '';
+
+    try {
+      voices = await listVoices();
+    } catch {
+      voicesError = 'RayMe could not load saved voices.';
+    } finally {
+      voicesLoading = false;
+    }
   }
 
   async function loadCharacter() {
@@ -120,7 +142,8 @@
       alternate_greetings: [...(character.alternate_greetings ?? [])],
       post_history_instructions: character.post_history_instructions ?? '',
       creator: character.creator ?? '',
-      character_version: character.character_version ?? ''
+      character_version: character.character_version ?? '',
+      default_voice_id: character.default_voice_id ?? null
     };
     selectedPortraitFile = null;
     setPreviewUrl(character.portrait_url ?? null);
@@ -163,7 +186,8 @@
         .filter(Boolean),
       post_history_instructions: form.post_history_instructions,
       creator: form.creator,
-      character_version: form.character_version
+      character_version: form.character_version,
+      default_voice_id: form.default_voice_id || null
     };
   }
 
@@ -322,6 +346,55 @@
       void loadCharacter();
     }
   }
+
+  function selectDefaultVoice(voiceId: string | null) {
+    form = {
+      ...form,
+      default_voice_id: voiceId
+    };
+  }
+
+  function hasUnsavedChanges(): boolean {
+    if (selectedPortraitFile) {
+      return true;
+    }
+
+    if (!originalCharacter) {
+      const payload = buildPayload();
+      return Object.values(payload).some((value) =>
+        Array.isArray(value) ? value.length > 0 : Boolean(value)
+      );
+    }
+
+    const payload = buildPayload();
+    const originalPayload: CharacterEditorPayload = {
+      name: originalCharacter.name ?? '',
+      description: originalCharacter.description ?? '',
+      personality: originalCharacter.personality ?? '',
+      scenario: originalCharacter.scenario ?? '',
+      first_mes: originalCharacter.first_mes ?? '',
+      mes_example: originalCharacter.mes_example ?? '',
+      system_prompt: originalCharacter.system_prompt ?? '',
+      creator_notes: originalCharacter.creator_notes ?? '',
+      character_notes: originalCharacter.character_notes ?? '',
+      tags: originalCharacter.tags ?? [],
+      alternate_greetings: originalCharacter.alternate_greetings ?? [],
+      post_history_instructions: originalCharacter.post_history_instructions ?? '',
+      creator: originalCharacter.creator ?? '',
+      character_version: originalCharacter.character_version ?? '',
+      default_voice_id: originalCharacter.default_voice_id ?? null
+    };
+
+    return JSON.stringify(payload) !== JSON.stringify(originalPayload);
+  }
+
+  function createVoice() {
+    if (hasUnsavedChanges() && !window.confirm('Discard unsaved changes and open Voice Lab?')) {
+      return;
+    }
+
+    void goto('/voice-lab');
+  }
 </script>
 
 <section class="editor" aria-labelledby="character-editor-title">
@@ -373,6 +446,18 @@
             errorMessage={portraitError}
             onSelect={handlePortraitSelected}
             onRemove={handlePortraitRemove}
+          />
+
+          <VoiceAssignmentSelect
+            {voices}
+            selectedVoiceId={form.default_voice_id}
+            defaultVoiceState={originalCharacter?.default_voice_state ?? 'none'}
+            defaultVoiceLabel={originalCharacter?.default_voice_label ?? null}
+            loading={voicesLoading}
+            errorMessage={voicesError}
+            disabled={saveState === 'saving'}
+            onChange={selectDefaultVoice}
+            onCreateVoice={createVoice}
           />
 
           <label>
