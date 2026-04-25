@@ -7,6 +7,8 @@ import {
   testWebSettings,
   updateSettings
 } from '../../src/lib/api/settings';
+import settingsApiSource from '../../src/lib/api/settings.ts?raw';
+import typesSource from '../../src/lib/api/types.ts?raw';
 import endpointPanelSource from '../../src/lib/components/EndpointSettingsPanel.svelte?raw';
 import settingsSource from '../../src/routes/settings/+page.svelte?raw';
 
@@ -15,7 +17,23 @@ const publicSettings = {
   ai_backend_url: 'https://192.168.1.199:9443',
   llm_base_url: 'https://api.openai.com/v1',
   llm_model: 'gpt-4o-mini',
-  llm_api_key_configured: true
+  llm_api_key_configured: true,
+  save_ai_audio: true,
+  save_mic_audio: false,
+  vad_threshold: 0.5,
+  vad_end_silence_ms: 700,
+  stt_model: 'distil-large-v3',
+  tts_default_engine: 'f5',
+  ai_backend_status: {
+    endpoint_status: 'Connected',
+    stt_model: 'distil-large-v3',
+    vad_ready: true,
+    resident_tts_engine: 'f5',
+    available_engines: ['f5', 'xtts_v2', 'qwen3_0_6b'],
+    loading_engine: null,
+    vram_used_mb: 2104,
+    vram_headroom_mb: 9896
+  }
 };
 
 afterEach(() => {
@@ -63,10 +81,16 @@ describe('Settings route', () => {
       'Media-device availability status',
       'Save AI audio',
       'Save mic audio',
+      'Off by default; future calls will not store your microphone audio unless enabled.',
       'VAD threshold',
       'End-of-utterance silence',
       'Coming in Call Feel',
+      'STT model',
+      'VAD ready',
       'Resident TTS engine',
+      'Available engines',
+      'Loading engine',
+      'VRAM headroom',
       'Test Connection',
       'Connected',
       'Unreachable',
@@ -90,6 +114,46 @@ describe('Settings route', () => {
       expect(settingsSource).not.toContain(forbidden);
       expect(endpointPanelSource).not.toContain(forbidden);
     }
+  });
+
+  it('declares Phase 2 Settings payload fields and sends them through the API wrapper', async () => {
+    for (const field of [
+      'save_ai_audio',
+      'save_mic_audio',
+      'vad_threshold',
+      'vad_end_silence_ms',
+      'stt_model',
+      'tts_default_engine',
+      'ai_backend_status'
+    ]) {
+      expect(typesSource).toContain(field);
+    }
+
+    expect(settingsApiSource).toContain('SettingsUpdatePayload');
+    expect(settingsApiSource).toContain("apiFetch<SettingsPayload>('/settings'");
+
+    const fetchMock = installFetch({
+      '/api/settings::PATCH': publicSettings
+    });
+
+    await updateSettings({
+      save_ai_audio: true,
+      save_mic_audio: false,
+      vad_threshold: 0.6,
+      vad_end_silence_ms: 900,
+      stt_model: 'distil-large-v3',
+      tts_default_engine: 'f5'
+    });
+
+    const request = lastRequest(fetchMock);
+    expect(JSON.parse(request.init.body as string)).toMatchObject({
+      save_ai_audio: true,
+      save_mic_audio: false,
+      vad_threshold: 0.6,
+      vad_end_silence_ms: 900,
+      stt_model: 'distil-large-v3',
+      tts_default_engine: 'f5'
+    });
   });
 
   it('does not expose raw API keys, tracebacks, or backend exception copy in status UI', () => {

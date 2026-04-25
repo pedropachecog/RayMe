@@ -13,10 +13,26 @@ type SettingsState = {
   llm_base_url: string;
   llm_model: string;
   llm_api_key_configured: boolean;
+  save_ai_audio: boolean;
+  save_mic_audio: boolean;
+  vad_threshold: number;
+  vad_end_silence_ms: number;
+  stt_model: string;
+  tts_default_engine: string;
+  ai_backend_status: {
+    endpoint_status: string;
+    stt_model: string;
+    vad_ready: boolean;
+    resident_tts_engine: string | null;
+    available_engines: string[];
+    loading_engine: string | null;
+    vram_used_mb: number | null;
+    vram_headroom_mb: number | null;
+  };
 };
 
 type SettingsPayload = Partial<
-  Omit<SettingsState, 'llm_api_key_configured'> & {
+  Omit<SettingsState, 'llm_api_key_configured' | 'ai_backend_status'> & {
     llm_api_key: string | null;
   }
 >;
@@ -36,7 +52,23 @@ const staleSettings: SettingsState = {
   ai_backend_url: 'https://127.0.0.1:9443',
   llm_base_url: 'https://api.openai.com/v1',
   llm_model: 'gpt-stale-default',
-  llm_api_key_configured: true
+  llm_api_key_configured: true,
+  save_ai_audio: true,
+  save_mic_audio: false,
+  vad_threshold: 0.5,
+  vad_end_silence_ms: 700,
+  stt_model: 'distil-large-v3',
+  tts_default_engine: 'f5',
+  ai_backend_status: {
+    endpoint_status: 'Connected',
+    stt_model: 'distil-large-v3',
+    vad_ready: true,
+    resident_tts_engine: 'f5',
+    available_engines: ['f5', 'xtts_v2', 'qwen3_0_6b'],
+    loading_engine: null,
+    vram_used_mb: 2104,
+    vram_headroom_mb: 9896
+  }
 };
 
 test('Settings Test Connection saves current form values before probing endpoints', async ({
@@ -68,6 +100,13 @@ test('Settings Test Connection saves current form values before probing endpoint
       ai_backend_url: payload.ai_backend_url ?? currentSettings.ai_backend_url,
       llm_base_url: payload.llm_base_url ?? currentSettings.llm_base_url,
       llm_model: payload.llm_model ?? currentSettings.llm_model,
+      save_ai_audio: payload.save_ai_audio ?? currentSettings.save_ai_audio,
+      save_mic_audio: payload.save_mic_audio ?? currentSettings.save_mic_audio,
+      vad_threshold: payload.vad_threshold ?? currentSettings.vad_threshold,
+      vad_end_silence_ms: payload.vad_end_silence_ms ?? currentSettings.vad_end_silence_ms,
+      stt_model: payload.stt_model ?? currentSettings.stt_model,
+      tts_default_engine: payload.tts_default_engine ?? currentSettings.tts_default_engine,
+      ai_backend_status: currentSettings.ai_backend_status,
       llm_api_key_configured:
         typeof payload.llm_api_key === 'string' && payload.llm_api_key.trim().length > 0
     };
@@ -97,7 +136,13 @@ test('Settings Test Connection saves current form values before probing endpoint
     {
       method: 'PATCH',
       payload: expect.objectContaining({
-        web_url: 'https://192.168.1.199:8443'
+        web_url: 'https://192.168.1.199:8443',
+        save_ai_audio: true,
+        save_mic_audio: false,
+        vad_threshold: 0.5,
+        vad_end_silence_ms: 700,
+        stt_model: 'distil-large-v3',
+        tts_default_engine: 'f5'
       })
     },
     { method: 'POST', path: '/api/settings/test/web' }
@@ -109,7 +154,9 @@ test('Settings Test Connection saves current form values before probing endpoint
     {
       method: 'PATCH',
       payload: expect.objectContaining({
-        ai_backend_url: 'https://192.168.1.199:9443'
+        ai_backend_url: 'https://192.168.1.199:9443',
+        save_ai_audio: true,
+        save_mic_audio: false
       })
     },
     { method: 'POST', path: '/api/settings/test/ai-backend' }
