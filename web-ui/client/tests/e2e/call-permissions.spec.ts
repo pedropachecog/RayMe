@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { fulfillJson, installBrowserErrorGuard } from './helpers/acceptance';
+import { fulfillJson, installBlockedCallMicrophone, installBrowserErrorGuard } from './helpers/acceptance';
 import { makeThreadDetail } from './helpers/fixtures';
 
 const threadId = 'call-permissions-thread';
@@ -10,6 +10,7 @@ test('microphone denial shows public recovery copy and retry action', async ({ c
   const assertNoBrowserErrors = installBrowserErrorGuard(page, {
     allowConsoleErrors: [/Failed to load resource: the server responded with a status of 403/]
   });
+  await installBlockedCallMicrophone(page);
   await context.grantPermissions([], { origin: 'http://127.0.0.1:4173' });
   await installPermissionRoutes(page);
 

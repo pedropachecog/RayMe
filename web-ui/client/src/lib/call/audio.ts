@@ -70,6 +70,20 @@ export async function unlockCallAudioContext(
   return { state: audioContext.state };
 }
 
+export async function requestCallMicrophone(): Promise<MediaStream> {
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    throw new DOMException('Microphone capture is not available in this browser.', 'NotAllowedError');
+  }
+
+  return navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true
+    }
+  });
+}
+
 export function createRmsMeter(): {
   pushSamples: (samples: Float32Array) => void;
   read: () => number;

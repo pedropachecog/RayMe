@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 
-import { fulfillJson, installBrowserErrorGuard } from './helpers/acceptance';
+import { fulfillJson, installBrowserErrorGuard, installMockCallMedia } from './helpers/acceptance';
 import { makeCharacter, makeThreadDetail } from './helpers/fixtures';
 
 const characterId = 'call-start-character';
@@ -8,6 +8,7 @@ const threadId = 'call-start-thread';
 
 test('starts a call from the thread header Start call control', async ({ page }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
   await installCallStartRoutes(page);
 
   await page.goto(`/chat/${threadId}`);
@@ -23,6 +24,7 @@ test('starts a call from the thread header Start call control', async ({ page })
 
 test('starts a call from a character card Start Call control', async ({ page }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
   await installCallStartRoutes(page);
 
   await page.goto('/gallery');
@@ -40,6 +42,7 @@ test('streams two user to AI cycles in one call and returns durable speech rows'
   page
 }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
   await installMultiTurnCallRoutes(page);
 
   await page.goto(`/chat/${threadId}`);
@@ -113,8 +116,13 @@ async function installCallStartRoutes(page: Page) {
       state: 'listening'
     }, 201);
   });
-  await page.route('**/webrtc/offer', async (route) => {
-    await fulfillJson(route, { type: 'answer', sdp: 'v=0\r\n' });
+  await page.route('**/api/calls/*/offer', async (route) => {
+    await fulfillJson(route, {
+      call_id: 'call-start-01',
+      session_id: 'rtc-call-start-01',
+      answer: { type: 'answer', sdp: 'v=0\r\n' },
+      event_channel: 'rayme-events'
+    });
   });
 }
 
@@ -164,6 +172,14 @@ async function installMultiTurnCallRoutes(page: Page) {
         }
       ]
     }, 201);
+  });
+  await page.route('**/api/calls/*/offer', async (route) => {
+    await fulfillJson(route, {
+      call_id: 'call-start-01',
+      session_id: 'rtc-call-start-01',
+      answer: { type: 'answer', sdp: 'v=0\r\n' },
+      event_channel: 'rayme-events'
+    });
   });
   await page.route('**/api/calls/*/turns', async (route) => {
     turnCount += 1;

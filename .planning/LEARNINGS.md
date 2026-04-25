@@ -99,6 +99,35 @@ Before telling the user a workflow is ready, report the exact evidence:
 If that evidence does not exist yet, keep working instead of asking the user to
 find the next failure.
 
+## 2026-04-25: Phase 3 Call Startup Did Not Request Microphone Or Create Backend Session
+
+### What Went Wrong
+
+- The call UI entered the active call surface without calling
+  `navigator.mediaDevices.getUserMedia`, so Chrome did not ask for microphone
+  permission and no real mic track was captured.
+- The browser also skipped the `/api/calls/{call_id}/offer` negotiation step,
+  so the Web UI had a durable call row but the AI backend had no matching
+  `/webrtc/sessions/{session_id}` entry.
+- Mute and End Call then proxied to the AI backend with a non-existent session
+  and returned `404`, which the UI surfaced as a generic failed call.
+
+### False Assumptions
+
+- Passing mocked browser call specs was treated as enough proof of call startup,
+  even though they did not verify a real mic permission request or backend
+  session negotiation.
+- A Web UI call row was treated as equivalent to an AI backend live call
+  session.
+
+### Guards Added
+
+- Call startup now requests microphone access before creating the call.
+- The browser creates a WebRTC offer with the mic track and posts it through
+  `/api/calls/{call_id}/offer` before enabling call controls.
+- Focused Playwright call specs now mock browser media deliberately and verify
+  the same-origin offer route used by production call startup.
+
 ## 2026-04-25: Interactive GSD Discussion Was Replaced By Inferred Defaults
 
 ### What Went Wrong

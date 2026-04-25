@@ -1,12 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { fulfillJson, installBrowserErrorGuard } from './helpers/acceptance';
+import { fulfillJson, installBrowserErrorGuard, installMockCallMedia } from './helpers/acceptance';
 import { makeThreadDetail } from './helpers/fixtures';
 
 const threadId = 'call-visualizer-thread';
 
 test('voice visualizer reflects Listening, Thinking, and Speaking call states', async ({ page }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
   await installVisualizerRoutes(page);
 
   await page.goto(`/chat/${threadId}`);
@@ -52,7 +53,12 @@ async function installVisualizerRoutes(page: Page) {
       ]
     }, 201);
   });
-  await page.route('**/webrtc/offer', async (route) => {
-    await fulfillJson(route, { type: 'answer', sdp: 'v=0\r\n' });
+  await page.route('**/api/calls/*/offer', async (route) => {
+    await fulfillJson(route, {
+      call_id: 'call-visualizer-01',
+      session_id: 'rtc-call-visualizer-01',
+      answer: { type: 'answer', sdp: 'v=0\r\n' },
+      event_channel: 'rayme-events'
+    });
   });
 }

@@ -4,10 +4,18 @@
   import { ArrowLeft, RefreshCw, Settings, UserRound } from 'lucide-svelte';
   import { onDestroy, onMount } from 'svelte';
 
-  import { CallApiError, endCall, interruptCall, setCallMuted, startCall, submitCallTurn } from '$lib/api/calls';
+  import {
+    CallApiError,
+    endCall,
+    interruptCall,
+    sendCallOffer,
+    setCallMuted,
+    startCall,
+    submitCallTurn
+  } from '$lib/api/calls';
   import { loadThread } from '$lib/api/chat';
   import type { CallEvent, CallStateName, CallTranscriptTurn, ThreadDetail } from '$lib/api/types';
-  import { unlockCallAudioContext } from '$lib/call/audio';
+  import { requestCallMicrophone, unlockCallAudioContext } from '$lib/call/audio';
   import CallToolbar from '$lib/components/call/CallToolbar.svelte';
   import CallTranscript from '$lib/components/call/CallTranscript.svelte';
   import VoiceVisualizer from '$lib/components/call/VoiceVisualizer.svelte';
@@ -53,6 +61,8 @@
   let timers: number[] = [];
   let activeTurnAbort: AbortController | null = null;
   let activeTurnReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let localMediaStream: MediaStream | null = null;
+  let peerConnection: RTCPeerConnection | null = null;
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'RayMe');
@@ -71,6 +81,7 @@
   onDestroy(() => {
     clearEventTimers();
     cancelActiveTurnStream();
+    stopBrowserMedia();
   });
 
   async function initializeCall() {
@@ -110,10 +121,12 @@
     clearEventTimers();
 
     try {
+      localMediaStream = await requestCallMicrophone();
       await unlockAudioForCall();
       const started = await startCall({ thread_id: threadId });
       callId = started.call_id;
       sessionId = started.session_id || started.call_id;
+      await connectBrowserMedia(started);
       applyCallState(started.state ?? 'listening');
       applyStartEvents((started as typeof started & { events?: StartEvent[] }).events ?? []);
 
@@ -127,6 +140,60 @@
     } catch (error) {
       showBlockingPanel(error);
     }
+  }
+
+  async function connectBrowserMedia(started: { call_id: string; session_id?: string | null }) {
+    if (!localMediaStream) {
+      return;
+    }
+
+    if (typeof RTCPeerConnection === 'undefined') {
+      const offer = {
+        type: 'offer' as RTCSdpType,
+        sdp: 'v=0\r\ns=RayMe microphone fallback\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=ice-ufrag:rayme\r\n'
+      };
+      const response = await sendCallOffer(started.call_id, offer, started.session_id);
+      sessionId = response.session_id || started.session_id || started.call_id;
+      return;
+    }
+
+    peerConnection?.close();
+    const connection = new RTCPeerConnection();
+    peerConnection = connection;
+    connection.createDataChannel('rayme-events');
+    for (const track of localMediaStream.getAudioTracks()) {
+      connection.addTrack(track, localMediaStream);
+    }
+
+    const offer = await connection.createOffer();
+    await connection.setLocalDescription(offer);
+    await waitForIceGathering(connection);
+    const localDescription = connection.localDescription ?? offer;
+    const response = await sendCallOffer(started.call_id, localDescription, started.session_id);
+    sessionId = response.session_id || started.session_id || started.call_id;
+    if (response.answer) {
+      await connection.setRemoteDescription(response.answer);
+    }
+  }
+
+  function waitForIceGathering(connection: RTCPeerConnection): Promise<void> {
+    if (connection.iceGatheringState === 'complete') {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve) => {
+      const timeout = window.setTimeout(resolve, 1500);
+      connection.addEventListener(
+        'icegatheringstatechange',
+        () => {
+          if (connection.iceGatheringState === 'complete') {
+            window.clearTimeout(timeout);
+            resolve();
+          }
+        },
+        { once: false }
+      );
+    });
   }
 
   async function unlockAudioForCall() {
@@ -426,6 +493,7 @@
       if (callId && sessionId) {
         await endCall(callId, sessionId);
       }
+      stopBrowserMedia();
       callState = 'ended';
     } catch {
       callState = 'failed';
@@ -484,6 +552,20 @@
       }
     }
 
+    if (
+      error instanceof DOMException &&
+      (error.name === 'NotAllowedError' ||
+        error.name === 'PermissionDeniedError' ||
+        error.name === 'NotFoundError')
+    ) {
+      blockingPanel = {
+        body: 'Microphone access is blocked. Allow microphone access in Chrome, then retry.',
+        action: 'Retry Microphone',
+        tone: 'danger'
+      };
+      return;
+    }
+
     blockingPanel = {
       body: 'The call ended because the connection dropped. Your transcript so far was saved.',
       action: 'Return to Thread',
@@ -509,6 +591,13 @@
     }
 
     void returnToThread();
+  }
+
+  function stopBrowserMedia() {
+    peerConnection?.close();
+    peerConnection = null;
+    localMediaStream?.getTracks().forEach((track) => track.stop());
+    localMediaStream = null;
   }
 
   function labelForState(state: ActiveCallState): string {

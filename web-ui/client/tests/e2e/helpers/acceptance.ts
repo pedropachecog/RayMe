@@ -68,6 +68,87 @@ export async function fulfillSse(route: Route, events: unknown[]) {
   });
 }
 
+export async function installMockCallMedia(page: Page) {
+  await page.addInitScript(() => {
+    const mediaDevices = {
+      async getUserMedia() {
+        return new MediaStream();
+      },
+      async enumerateDevices() {
+        return [];
+      }
+    };
+    Object.defineProperty(Navigator.prototype, 'mediaDevices', {
+      configurable: true,
+      get() {
+        return mediaDevices;
+      }
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: mediaDevices
+    });
+
+    class MockRTCPeerConnection {
+      iceGatheringState = 'complete';
+      localDescription: RTCSessionDescriptionInit | null = null;
+
+      createDataChannel() {
+        return {};
+      }
+
+      addTrack() {
+        return {};
+      }
+
+      async createOffer() {
+        return {
+          type: 'offer' as RTCSdpType,
+          sdp: 'v=0\r\ns=RayMe test\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=ice-ufrag:test\r\n'
+        };
+      }
+
+      async setLocalDescription(description: RTCSessionDescriptionInit) {
+        this.localDescription = description;
+      }
+
+      async setRemoteDescription() {}
+
+      addEventListener() {}
+
+      close() {}
+    }
+
+    Object.defineProperty(window, 'RTCPeerConnection', {
+      configurable: true,
+      value: MockRTCPeerConnection
+    });
+  });
+}
+
+export async function installBlockedCallMicrophone(page: Page) {
+  await page.addInitScript(() => {
+    const mediaDevices = {
+      async getUserMedia() {
+        throw new DOMException('Permission denied', 'NotAllowedError');
+      },
+      async enumerateDevices() {
+        return [];
+      }
+    };
+    Object.defineProperty(Navigator.prototype, 'mediaDevices', {
+      configurable: true,
+      get() {
+        return mediaDevices;
+      }
+    });
+    Object.defineProperty(navigator, 'mediaDevices', {
+      configurable: true,
+      value: mediaDevices
+    });
+  });
+}
+
 export function expectRayMeApiRequest(request: Request) {
   const rawUrl = request.url();
   const url = new URL(rawUrl);

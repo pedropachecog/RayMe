@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { fulfillJson, installBrowserErrorGuard } from './helpers/acceptance';
+import { fulfillJson, installBrowserErrorGuard, installMockCallMedia } from './helpers/acceptance';
 import { makeThreadDetail } from './helpers/fixtures';
 
 const threadId = 'call-mobile-thread';
@@ -12,6 +12,7 @@ test.describe('mobile-chromium call path', () => {
     }
 
     const assertNoBrowserErrors = installBrowserErrorGuard(page);
+    await installMockCallMedia(page);
     await installMobileRoutes(page);
 
     await page.goto(`/chat/${threadId}`);
@@ -67,7 +68,12 @@ async function installMobileRoutes(page: Page) {
       state: 'speaking'
     }, 201);
   });
-  await page.route('**/webrtc/offer', async (route) => {
-    await fulfillJson(route, { type: 'answer', sdp: 'v=0\r\n' });
+  await page.route('**/api/calls/*/offer', async (route) => {
+    await fulfillJson(route, {
+      call_id: 'call-mobile-01',
+      session_id: 'rtc-call-mobile-01',
+      answer: { type: 'answer', sdp: 'v=0\r\n' },
+      event_channel: 'rayme-events'
+    });
   });
 }
