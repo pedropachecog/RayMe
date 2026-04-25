@@ -25,6 +25,11 @@ Results:
   was not configured.
 - `playwright-results/live-voice-lab-manual-preview-20260425T113230Z.json`:
   passed, 1 passed / 0 failed, duration 212401.167 ms.
+- `playwright-results/live-voice-lab-manual-preview-20260425T123912Z.json`:
+  passed, 1 passed / 0 failed, duration 86492.028 ms. This run was after the
+  GPU runtime guard deployment and verified the live browser flow still
+  uploads, transcribes, accepts an edited manual transcript, previews, and
+  exposes playable preview audio.
 
 Additional live checks after deploy:
 
