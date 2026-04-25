@@ -59,7 +59,13 @@ class ModelManager:
                 self._mark_unavailable(engine_id, "engine startup self-test failed")
 
         if self._statuses[self.settings.default_tts_engine].available:
-            self.switch_tts_engine(self.settings.default_tts_engine)
+            try:
+                self.switch_tts_engine(self.settings.default_tts_engine)
+            except Exception:
+                self._mark_unavailable(
+                    self.settings.default_tts_engine,
+                    "default engine load failed",
+                )
         self._started = True
 
     def shutdown(self) -> None:

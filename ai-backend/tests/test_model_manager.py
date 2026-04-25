@@ -35,10 +35,12 @@ class FakeTtsAdapter:
         events: list[str],
         *,
         fail_self_test: bool = False,
+        fail_load: bool = False,
     ) -> None:
         self.engine_id = engine_id
         self.events = events
         self.fail_self_test = fail_self_test
+        self.fail_load = fail_load
         self.loaded = False
 
     def startup_self_test(self) -> None:
@@ -53,6 +55,10 @@ class FakeTtsAdapter:
 
     def load(self) -> None:
         self.events.append(f"{self.engine_id}:load")
+        if self.fail_load:
+            raise RuntimeError(
+                "Traceback: CUDA out of memory while loading C:\\secret\\model.bin"
+            )
         self.loaded = True
 
     def unload(self) -> None:
@@ -117,7 +123,11 @@ def _assert_no_raw_exception_text(payload: Any) -> None:
         assert forbidden not in rendered
 
 
-def _build_manager(*, failing_engine: str | None = None) -> tuple[Any, dict[str, FakeTtsAdapter], list[str]]:
+def _build_manager(
+    *,
+    failing_engine: str | None = None,
+    load_failing_engine: str | None = None,
+) -> tuple[Any, dict[str, FakeTtsAdapter], list[str]]:
     config_module = importlib.import_module("app.config")
     manager_module = importlib.import_module("app.models.model_manager")
 
@@ -131,6 +141,7 @@ def _build_manager(*, failing_engine: str | None = None) -> tuple[Any, dict[str,
             engine_id,
             events,
             fail_self_test=engine_id == failing_engine,
+            fail_load=engine_id == load_failing_engine,
         )
         for engine_id in EXPECTED_TTS_ENGINE_IDS
     }
@@ -228,4 +239,22 @@ def test_failed_engine_self_test_degrades_only_that_engine_with_typed_reason() -
     assert statuses["f5"]["available"] is True
     assert statuses["qwen3_0_6b"]["available"] is True
     _assert_no_raw_exception_text(statuses["xtts_v2"]["unavailable_reason"])
+    _assert_no_raw_exception_text(health)
+
+
+def test_default_engine_load_failure_degrades_health_without_blocking_startup() -> None:
+    manager, _, events = _build_manager(load_failing_engine="f5")
+
+    _complete(manager.startup())
+    health = _health_mapping(manager)
+    statuses = _engine_statuses(health)
+
+    assert health["status"] == "degraded"
+    assert health["resident_tts_engine"] is None
+    assert health["loading_engine"] is None
+    assert statuses["f5"]["available"] is False
+    assert statuses["f5"]["resident"] is False
+    assert statuses["f5"]["state"] == "unavailable"
+    assert statuses["f5"]["unavailable_reason"] == "default engine load failed"
+    assert "f5:load" in events
     _assert_no_raw_exception_text(health)
