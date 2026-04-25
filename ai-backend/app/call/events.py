@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Literal, NotRequired, TypedDict
+from typing import Any, Literal, TypedDict
+
+from typing_extensions import NotRequired
 
 USER_FINAL_EVENT = "user_final"
 AI_AUDIO_STARTED_EVENT = "ai_audio_started"
