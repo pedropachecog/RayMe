@@ -31,6 +31,10 @@ if (-not (Test-Path "$cudaRuntimeBin\cublas64_12.dll")) {
   throw "Missing CUDA 12 runtime at $cudaRuntimeBin. Expected cublas64_12.dll for faster-whisper GPU STT."
 }
 
+Write-Host "== Verifying AI GPU runtime"
+$env:PATH = "$cudaRuntimeBin;$env:PATH"
+& "$repo\ai-backend\.venv\Scripts\python.exe" -c "import torch, torchaudio; assert '+cpu' not in torch.__version__.lower(), torch.__version__; assert torch.version.cuda, torch.__version__; assert torch.cuda.is_available(), torch.__version__; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'device', torch.cuda.get_device_name(0)); print('torchaudio', torchaudio.__version__)"
+
 Write-Host "== Writing scheduled task launchers"
 $aiLauncher = @"
 @echo off

@@ -1,8 +1,9 @@
-# STT GPU Runtime
+# AI GPU Runtime
 
-RayMe STT uses `faster-whisper` through CTranslate2 and is expected to run on
-the OMEN RTX 3060 GPU for call-latency work. CPU fallback is not an acceptable
-production path for the phone-call simulator.
+RayMe AI runtime uses GPU acceleration for call-latency work. STT uses
+`faster-whisper` through CTranslate2, and F5-TTS uses PyTorch/torchaudio. Both
+must run on the OMEN RTX 3060. CPU fallback is not an acceptable production path
+for the phone-call simulator.
 
 ## OMEN Baseline
 
@@ -10,8 +11,9 @@ production path for the phone-call simulator.
 - Runtime checkout: `C:\Users\pmpg\rayme\RayMe`
 - AI venv: `C:\Users\pmpg\rayme\RayMe\ai-backend\.venv`
 - Driver observed on 2026-04-25: NVIDIA 560.94, CUDA driver support 12.6
-- Required CTranslate2 GPU libraries: CUDA cuBLAS and cuDNN on the process
-  `PATH`
+- Required CTranslate2 GPU libraries for STT: CUDA cuBLAS and cuDNN on the
+  process `PATH`
+- Required PyTorch runtime for F5-TTS: CUDA wheel, not a `+cpu` wheel
 - CUDA runtime directory:
   `C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin`
 
@@ -34,6 +36,20 @@ runtime directory containing `cublas64_12.dll`, `cublasLt64_12.dll`,
 `cudart64_12.dll`, and the required cuDNN 9 DLLs. The scheduled AI backend
 startup must prepend that CUDA `bin` directory to `PATH` before launching
 Python.
+
+F5-TTS must have CUDA PyTorch installed in the AI venv. The verified OMEN
+baseline after the 2026-04-25 repair is:
+
+```text
+torch==2.10.0+cu126
+torchaudio==2.10.0+cu126
+torch.version.cuda == 12.6
+torch.cuda.is_available() == True
+device == NVIDIA GeForce RTX 3060
+```
+
+If PyTorch reports `+cpu`, fix the environment. Do not accept slower synthesis
+as a temporary workaround.
 
 If the full CUDA Toolkit installer cannot complete without elevation, extract
 the runtime DLLs from the verified NVIDIA CUDA 12.6 installer with 7-Zip into a
@@ -60,7 +76,7 @@ set PATH=C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin;%PATH%
 .\.venv\Scripts\python.exe -c "from faster_whisper import WhisperModel; m=WhisperModel('distil-large-v3', device='cuda', compute_type='int8_float16'); print('cuda-ready')"
 ```
 
-Then verify the live API:
+Then verify the live STT API:
 
 ```bash
 curl -k -sS -X POST \
@@ -70,3 +86,12 @@ curl -k -sS -X POST \
 
 The response must be HTTP 200 and must report `"compute_type":"int8_float16"`,
 not CPU `int8`.
+
+Verify the live F5 preview path with a saved voice sample through
+`/api/voices/preview`. On 2026-04-25 after CUDA PyTorch was installed, the Libb
+short-line preview returned playable WAV JSON in about one second. A two-minute
+short preview is a GPU runtime regression until proven otherwise.
+
+`scripts/deploy-omen.sh` must remain the deploy gate. It verifies CUDA Toolkit
+runtime DLLs and refuses deployment if the AI venv has CPU-only PyTorch or
+`torch.cuda.is_available()` is false.

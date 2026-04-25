@@ -60,6 +60,10 @@ progress:
 - Phase 02-06 AI backend residency policy: model health starts from a metadata-driven six-engine roster with F5 as the default resident engine; lightweight adapters keep unit tests model-download-free until real STT/TTS adapter plans wire runtime loading.
 - Phase 02-06 health disclosure policy: public AI backend health uses fixed sanitized degradation reasons rather than raw adapter exceptions, tracebacks, or local model paths.
 - Phase 02-07 STT policy: uploaded samples are decoded to generated temporary WAV paths, faster-whisper runs English transcribe with `condition_on_previous_text=False`, and no-speech/hallucination/failure paths preserve retry plus manual transcript fallback.
+- Phase 02 GPU runtime policy: the AI backend must fail fast instead of falling
+  back to CPU for production AI models. faster-whisper STT is CUDA
+  `int8_float16`; F5-TTS requires CUDA PyTorch/torchaudio. OMEN deploy verifies
+  the CUDA Toolkit runtime and rejects CPU-only Torch before restart.
 - Phase 02-08 TTS registry policy: TTS runtime packages are locked behind the AI backend optional `tts` extra, the canonical synthesis route is `/tts/synthesize`, and per-engine adapter modules are import-gated until live runtime evidence enables real model synthesis paths.
 - Phase 02-08 TTS error policy: synthesis failures return fixed public `tts_failed` details and never expose local paths, tracebacks, or adapter exception text.
 - Phase 02-09 voice API policy: voice save persists metadata plus sample linkage without a preview-success gate; rename updates display name only; Web UI transcription uses the AI backend `/stt/transcribe` route with stored sample bytes.

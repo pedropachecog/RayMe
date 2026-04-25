@@ -70,7 +70,16 @@ as durable context, not one-off preferences.
   root. Do not manually retype pull/build/kill/restart/health sequences unless
   repairing the script itself. The script is responsible for using the SSH alias,
   fast-forwarding the canonical checkout, rebuilding the client, killing stale
-  8443/9443 listeners, starting scheduled tasks, and verifying live health.
+  8443/9443 listeners, starting scheduled tasks, verifying the AI GPU runtime,
+  and verifying live health.
+- RayMe is a real-time phone-call simulator. GPU acceleration is mandatory for
+  AI model runtime. Do not switch STT, TTS, VAD, LLM, or embedding model paths
+  to CPU to make an error disappear. Fix CUDA, drivers, wheels, PATH, model
+  placement, or deployment instead, and add a failing guard/test for the broken
+  path before handoff.
+- `faster-whisper` STT must use CUDA with `int8_float16`; CPU `int8` fallback is
+  a regression. F5-TTS must use CUDA PyTorch/torchaudio wheels; `torch+cpu` in
+  the AI venv is a deployment blocker.
 - Backend Git sync uses the GitHub HTTPS remote
   `https://github.com/pedropachecog/RayMe.git`. If credentials fail, fix Git
   Credential Manager on `OMEN-PC`; do not invent bundle or copied-tree sync

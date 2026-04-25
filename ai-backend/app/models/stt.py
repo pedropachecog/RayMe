@@ -5,6 +5,7 @@ from typing import Any
 
 from app.audio.filters import HALLUCINATION_BLOCKLIST, is_blocklisted_transcript
 from app.config import AiBackendSettings
+from app.models.gpu_runtime import require_cuda_device_config
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,11 @@ class WhisperSttAdapter:
 
     def _ensure_model(self) -> Any:
         if self.model is None:
+            require_cuda_device_config(
+                component="faster-whisper STT",
+                device=self.device,
+                compute_type=self.compute_type,
+            )
             from faster_whisper import WhisperModel
 
             self.model = WhisperModel(

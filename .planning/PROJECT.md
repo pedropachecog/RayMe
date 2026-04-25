@@ -109,6 +109,10 @@ It must feel like an actual phone call with an AI — low-latency full-duplex au
 - **TTS chunking requirement (REQ-45):** all engines need a shared chunk planner before final long-form decisions. The planner must enforce model-specific limits such as XTTS `inference_stream`'s 400-token cap, preserve natural sentence boundaries where possible, and benchmark first chunk, total stitched playback, inter-chunk gaps, and the stitched WAV.
 - **FA2 (Qwen3-TTS 1.7B eligibility):** not installed; reason: `windows_build_compile_error`. Qwen3-TTS 1.7B is ineligible for v1, so the included Qwen path is `0.6B-Base` only.
 - **Hardware note:** measured directly on the target RTX 3060; no 4090-to-3060 extrapolation was needed. Per-engine 3060 fit: F5=`yes`, XTTS=`yes`, Qwen3-0.6B=`yes`.
+- **Runtime mandate:** AI model paths for the real-time call simulator are GPU
+  paths. CPU fallback for STT/TTS/VAD/LLM/embedding runtime is a regression, not
+  a quick fix. Deployments must fail fast when CUDA runtime, CUDA PyTorch, or
+  model device configuration is missing.
 - **Overrides:** none.
 
 ## Evolution

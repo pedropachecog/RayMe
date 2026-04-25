@@ -17,6 +17,7 @@ from app.models.tts_registry import (
     TtsSynthesisInput,
     TtsSynthesisOutput,
 )
+from app.models.gpu_runtime import require_torch_cuda_runtime
 
 
 class F5TtsAdapter(ImportGatedTtsAdapter):
@@ -31,6 +32,8 @@ class F5TtsAdapter(ImportGatedTtsAdapter):
 
     def load(self) -> None:
         self._ensure_runtime_available()
+        if self._runtime_factory is None:
+            require_torch_cuda_runtime("F5-TTS")
         self.loaded = True
 
     def unload(self) -> None:
@@ -73,6 +76,7 @@ class F5TtsAdapter(ImportGatedTtsAdapter):
     def _build_runtime(self) -> Any:
         if self._runtime_factory is not None:
             return self._runtime_factory()
+        require_torch_cuda_runtime("F5-TTS")
         _install_f5_runtime_shims()
         from f5_tts.api import F5TTS
 
