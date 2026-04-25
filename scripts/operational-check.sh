@@ -42,12 +42,19 @@ cmd_start() {
 
   require_contains ".planning/OPERATING-NOTES.md" "pre-handoff verification checklist"
   require_contains ".planning/OPERATING-NOTES.md" "product-owner acceptance"
+  require_contains ".planning/OPERATING-NOTES.md" "must never auto-select defaults"
   require_contains ".planning/OPERATING-NOTES.md" "scripts/deploy-omen.sh"
   require_contains ".planning/OPERATING-NOTES.md" "GPU acceleration is mandatory"
   require_contains ".planning/LEARNINGS.md" "False Assumptions"
+  require_contains ".planning/LEARNINGS.md" "Interactive GSD Discussion Was Replaced By Inferred Defaults"
   require_contains ".planning/LEARNINGS.md" "Standing Handoff Rule"
   require_contains ".planning/SESSION-START.md" "Required Reads"
   require_contains ".planning/SESSION-START.md" "Handoff Gate"
+  require_contains ".planning/SESSION-START.md" "Interactive Workflow Rule"
+
+  if [[ -f ".planning/.continue-here.md" ]]; then
+    fail "unresolved checkpoint exists: .planning/.continue-here.md"
+  fi
 
   echo "operational-check: start gate passed"
   echo "Read next: .planning/PROJECT.md, .planning/STATE.md, .planning/OPERATING-NOTES.md, .planning/LEARNINGS.md"
@@ -144,4 +151,3 @@ case "${1:-}" in
     fail "unknown command: $1"
     ;;
 esac
-
