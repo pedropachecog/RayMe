@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from app.api import tts, webrtc
 from app.api.health import router as health_router
 from app.api.stt import router as stt_router
+from app.call.session import CallSessionManager
 from app.config import AiBackendSettings
 from app.models.model_manager import ModelManager
 
@@ -27,7 +28,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="RayMe AI Backend", version="0.2.0", lifespan=lifespan)
-    app.state.model_manager = ModelManager(AiBackendSettings())
+    settings = AiBackendSettings()
+    app.state.model_manager = ModelManager(settings)
+    app.state.call_session_manager = CallSessionManager(settings=settings)
     app.include_router(health_router)
     app.include_router(stt_router)
     app.include_router(tts.router)
