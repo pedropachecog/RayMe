@@ -4,6 +4,7 @@
 
   import { getSettings } from '$lib/api/settings';
   import {
+    deleteVoice,
     listVoices,
     previewVoice,
     renameVoice,
@@ -24,6 +25,7 @@
   import SynthPreviewPanel from '$lib/components/voice/SynthPreviewPanel.svelte';
   import TranscriptEditor from '$lib/components/voice/TranscriptEditor.svelte';
   import TtsEnginePicker from '$lib/components/voice/TtsEnginePicker.svelte';
+  import VoiceDeleteDialog from '$lib/components/voice/VoiceDeleteDialog.svelte';
   import VoiceLibraryList from '$lib/components/voice/VoiceLibraryList.svelte';
   import VoiceRenameDialog from '$lib/components/voice/VoiceRenameDialog.svelte';
 
@@ -94,7 +96,10 @@
   let libraryStatus = '';
   let testingVoiceId: string | null = null;
   let renamingVoice: VoiceSummary | null = null;
+  let deletingVoice: VoiceSummary | null = null;
+  let deleteReferents: Array<Record<string, string>> = [];
   let renameState: 'idle' | 'saving' = 'idle';
+  let deleteState: 'idle' | 'deleting' = 'idle';
   let activeAudio: HTMLAudioElement | null = null;
 
   $: canPreview = Boolean(asset && voiceName.trim() && transcript.trim() && selectedEngine);
@@ -314,6 +319,60 @@
     }
   }
 
+  async function deleteLibraryVoice(voice: VoiceSummary) {
+    libraryStatus = '';
+    libraryError = '';
+    deleteState = 'deleting';
+
+    try {
+      const result = await deleteVoice(voice.voice_id, false);
+      if (result.referents?.length) {
+        deletingVoice = voice;
+        deleteReferents = result.referents;
+        return;
+      }
+
+      removeVoiceFromLibrary(voice.voice_id);
+      libraryStatus = 'Voice deleted.';
+    } catch {
+      libraryError = 'RayMe could not delete this voice. Try again after checking current assignments.';
+    } finally {
+      deleteState = 'idle';
+    }
+  }
+
+  async function forceDeleteLibraryVoice() {
+    if (!deletingVoice) {
+      return;
+    }
+
+    const voiceId = deletingVoice.voice_id;
+    deleteState = 'deleting';
+    libraryError = '';
+
+    try {
+      await deleteVoice(voiceId, true);
+      removeVoiceFromLibrary(voiceId);
+      deletingVoice = null;
+      deleteReferents = [];
+      libraryStatus = 'Referenced characters will show Voice unavailable.';
+    } catch {
+      libraryError = 'RayMe could not force delete this voice. Try again after checking current assignments.';
+    } finally {
+      deleteState = 'idle';
+    }
+  }
+
+  function cancelDeleteDialog() {
+    deletingVoice = null;
+    deleteReferents = [];
+    deleteState = 'idle';
+  }
+
+  function removeVoiceFromLibrary(voiceId: string) {
+    libraryVoices = libraryVoices.filter((voice) => voice.voice_id !== voiceId);
+  }
+
   function pauseActiveAudio() {
     if (activeAudio) {
       activeAudio.pause();
@@ -398,6 +457,7 @@
         {testingVoiceId}
         onTestPlay={playLibraryVoice}
         onRename={openRenameDialog}
+        onDelete={deleteLibraryVoice}
       />
 
       {#if libraryStatus}
@@ -413,6 +473,15 @@
   submitting={renameState === 'saving'}
   onSave={saveRename}
   onCancel={() => (renamingVoice = null)}
+/>
+
+<VoiceDeleteDialog
+  open={Boolean(deletingVoice)}
+  voice={deletingVoice}
+  referents={deleteReferents}
+  submitting={deleteState === 'deleting'}
+  onForceConfirm={forceDeleteLibraryVoice}
+  onCancel={cancelDeleteDialog}
 />
 
 <style>

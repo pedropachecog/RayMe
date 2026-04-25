@@ -125,7 +125,9 @@ test('Voice Library test-play keeps another row rename action available', async 
 });
 
 test('Voice Library blocked delete lists character referent before force delete', async ({ page }) => {
-  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+    allowConsoleErrors: [/Failed to load resource: the server responded with a status of 409/]
+  });
   const voiceEvents: string[] = [];
 
   page.on('request', (request) => {

@@ -1,4 +1,4 @@
-import { apiFetch } from './client';
+import { apiFetch, toApiPath } from './client';
 import type {
   ListResponse,
   VoiceAsset,
@@ -64,11 +64,29 @@ export function renameVoice(voiceId: string, name: string): Promise<VoiceDetail>
   });
 }
 
-export function deleteVoice(voiceId: string, force = false): Promise<VoiceDeleteResult> {
+export async function deleteVoice(voiceId: string, force = false): Promise<VoiceDeleteResult> {
   const query = force ? '?force=true' : '';
-  return apiFetch<VoiceDeleteResult>(`/voices/${encodeRouteId(voiceId)}${query}`, {
+  const path = `/voices/${encodeRouteId(voiceId)}${query}`;
+  const response = await fetch(toApiPath(path), {
     method: 'DELETE'
   });
+
+  if (response.ok) {
+    return (await response.json()) as VoiceDeleteResult;
+  }
+
+  if (response.status === 409) {
+    const payload = (await response.json().catch(() => ({}))) as {
+      detail?: { referents?: Array<Record<string, string>> };
+    };
+    return {
+      voice_id: voiceId,
+      deleted: false,
+      referents: payload.detail?.referents ?? []
+    };
+  }
+
+  throw new Error(`RayMe API request failed: ${response.status} ${response.statusText}`.trim());
 }
 
 export function testPlayVoice(
