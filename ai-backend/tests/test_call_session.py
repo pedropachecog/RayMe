@@ -29,9 +29,56 @@ class FakeAiTurn:
         self.cancel_calls += 1
 
 
-def _new_session(*, session_id: str = "call-session-1") -> tuple[Any, FakePeerConnection]:
+class FakeInboundAudioFrame:
+    def __init__(self, pcm: bytes) -> None:
+        self.pcm = pcm
+        self.sample_rate = 16000
+        self.channels = 1
+
+
+class FakeInboundAudioFrameSource:
+    def __init__(self, *frames: bytes) -> None:
+        self.frames = [FakeInboundAudioFrame(frame) for frame in frames]
+
+
+class FakeVadAdapter:
+    def __init__(self) -> None:
+        self.frames: list[bytes] = []
+
+    def accept_audio_frame(self, pcm: bytes) -> dict[str, bool]:
+        self.frames.append(pcm)
+        return {
+            "speech_detected": True,
+            "end_of_turn": len(self.frames) >= 2,
+        }
+
+
+class FakeSttAdapter:
+    def __init__(self) -> None:
+        self.calls: list[list[bytes]] = []
+
+    def transcribe_pcm(self, pcm_frames: list[bytes], **_: Any) -> dict[str, Any]:
+        self.calls.append(list(pcm_frames))
+        return {
+            "status": "accepted",
+            "transcript": "hello from mic",
+            "language": "en",
+        }
+
+
+def _new_session(
+    *,
+    session_id: str = "call-session-1",
+    vad_adapter: Any | None = None,
+    stt_adapter: Any | None = None,
+) -> tuple[Any, FakePeerConnection]:
     peer = FakePeerConnection()
-    session = CallSession(session_id=session_id, peer_connection=peer)
+    session = CallSession(
+        session_id=session_id,
+        peer_connection=peer,
+        vad_adapter=vad_adapter,
+        stt_adapter=stt_adapter,
+    )
     return session, peer
 
 
@@ -59,12 +106,41 @@ def test_mute_stops_server_consumption() -> None:
 
 
 def test_inbound_audio_emits_user_final_after_vad_end() -> None:
-    session, _ = _new_session()
+    vad = FakeVadAdapter()
+    stt = FakeSttAdapter()
+    source = FakeInboundAudioFrameSource(b"pcm-frame-1", b"pcm-frame-2")
+    session, _ = _new_session(vad_adapter=vad, stt_adapter=stt)
 
-    result = _run(session.handle_inbound_audio_frame(b"pcm-frame-1"))
+    first_event = _run(session.handle_inbound_audio_frame(source.frames[0]))
+    final_event = _run(session.handle_inbound_audio_frame(source.frames[1]))
 
-    assert result is not None
+    assert first_event is None
+    assert stt.calls == [[b"pcm-frame-1", b"pcm-frame-2"]]
+    assert final_event == {
+        "type": "user_final",
+        "session_id": "call-session-1",
+        "turn_id": "user-turn-1",
+        "text": "hello from mic",
+    }
+    assert session.stats()["incoming_audio_frames"] == 2
+    assert session.stats()["dropped_audio_frames"] == 0
+
+
+def test_muted_inbound_audio_counts_dropped_frames_without_stt() -> None:
+    vad = FakeVadAdapter()
+    stt = FakeSttAdapter()
+    source = FakeInboundAudioFrameSource(b"muted-pcm-frame")
+    session, _ = _new_session(vad_adapter=vad, stt_adapter=stt)
+
+    _run(session.set_muted(True))
+    event = _run(session.handle_inbound_audio_frame(source.frames[0]))
+
+    assert event is None
+    assert stt.calls == []
+    assert vad.frames == []
     assert session.stats()["incoming_audio_frames"] == 1
+    assert session.stats()["dropped_audio_frames"] == 1
+    assert session.stats()["muted"] is True
 
 
 def test_interrupt_cancels_active_ai_turn() -> None:
