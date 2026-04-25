@@ -155,6 +155,11 @@ async function routeVoiceLabApis(page: Page) {
   });
 
   await page.route('**/api/voices', async (route) => {
+    if (route.request().method() === 'GET') {
+      await fulfillJson(route, { items: [] });
+      return;
+    }
+
     expect(route.request().method()).toBe('POST');
     expect(route.request().postDataJSON()).toMatchObject({
       asset_id: 'sample-asset',

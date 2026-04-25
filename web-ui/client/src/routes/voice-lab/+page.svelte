@@ -4,8 +4,11 @@
 
   import { getSettings } from '$lib/api/settings';
   import {
+    listVoices,
     previewVoice,
+    renameVoice,
     saveVoice,
+    testPlayVoice,
     transcribeVoiceAsset,
     uploadVoiceAsset
   } from '$lib/api/voices';
@@ -13,12 +16,16 @@
     AiBackendEngineStatus,
     TtsEngineMetadata,
     VoiceAsset,
+    VoiceSummary,
+    VoiceTestPlayPayload,
     VoiceSynthesisResult
   } from '$lib/api/types';
   import AudioSampleDropzone from '$lib/components/voice/AudioSampleDropzone.svelte';
   import SynthPreviewPanel from '$lib/components/voice/SynthPreviewPanel.svelte';
   import TranscriptEditor from '$lib/components/voice/TranscriptEditor.svelte';
   import TtsEnginePicker from '$lib/components/voice/TtsEnginePicker.svelte';
+  import VoiceLibraryList from '$lib/components/voice/VoiceLibraryList.svelte';
+  import VoiceRenameDialog from '$lib/components/voice/VoiceRenameDialog.svelte';
 
   const DEFAULT_TTS_ENGINES: TtsEngineMetadata[] = [
     {
@@ -81,12 +88,21 @@
   let previewError = '';
   let saveError = '';
   let previewAudioUrl: string | null = null;
+  let libraryVoices: VoiceSummary[] = [];
+  let libraryLoading = true;
+  let libraryError = '';
+  let libraryStatus = '';
+  let testingVoiceId: string | null = null;
+  let renamingVoice: VoiceSummary | null = null;
+  let renameState: 'idle' | 'saving' = 'idle';
+  let activeAudio: HTMLAudioElement | null = null;
 
   $: canPreview = Boolean(asset && voiceName.trim() && transcript.trim() && selectedEngine);
   $: canSave = Boolean(asset && voiceName.trim() && transcript.trim() && selectedEngine);
 
   onMount(() => {
     void loadEngineMetadata();
+    void loadVoiceLibrary();
   });
 
   async function loadEngineMetadata() {
@@ -229,9 +245,79 @@
         metadata: { source: 'voice-lab', sample_filename: selectedFile?.name ?? null }
       });
       saveState = 'saved';
+      libraryStatus = 'Voice Library refreshed.';
+      await loadVoiceLibrary();
     } catch {
       saveState = 'error';
       saveError = 'RayMe could not save this voice. Check the required fields and try again.';
+    }
+  }
+
+  async function loadVoiceLibrary() {
+    libraryLoading = true;
+    libraryError = '';
+
+    try {
+      libraryVoices = await listVoices();
+    } catch {
+      libraryError = 'RayMe could not load the Voice Library. Try again after checking the Web UI server.';
+    } finally {
+      libraryLoading = false;
+    }
+  }
+
+  function openRenameDialog(voice: VoiceSummary) {
+    renamingVoice = voice;
+    libraryStatus = '';
+  }
+
+  async function saveRename(name: string) {
+    if (!renamingVoice) {
+      return;
+    }
+
+    const voiceId = renamingVoice.voice_id;
+    renameState = 'saving';
+    libraryStatus = '';
+
+    try {
+      const renamed = await renameVoice(voiceId, name);
+      libraryVoices = libraryVoices.map((voice) => (voice.voice_id === voiceId ? renamed : voice));
+      renamingVoice = null;
+      libraryStatus = 'Voice renamed.';
+    } catch {
+      libraryError = 'RayMe could not rename this voice. Check the name and try again.';
+    } finally {
+      renameState = 'idle';
+    }
+  }
+
+  async function playLibraryVoice(voice: VoiceSummary, payload: VoiceTestPlayPayload) {
+    pauseActiveAudio();
+    testingVoiceId = voice.voice_id;
+    libraryStatus = '';
+
+    try {
+      const result = await testPlayVoice(voice.voice_id, {
+        ...payload,
+        text: payload.text.trim() || 'The line is open. This is the saved RayMe voice.'
+      });
+      const audioUrl = result.audio_url ?? result.preview_url ?? null;
+      if (audioUrl) {
+        activeAudio = new Audio(audioUrl);
+      }
+      libraryStatus = 'Test voice ready.';
+    } catch {
+      libraryError = 'RayMe could not test this voice. Try a different phrase or engine.';
+    } finally {
+      testingVoiceId = null;
+    }
+  }
+
+  function pauseActiveAudio() {
+    if (activeAudio) {
+      activeAudio.pause();
+      activeAudio = null;
     }
   }
 </script>
@@ -282,28 +368,52 @@
       />
     </div>
 
-    <aside class="save-panel" aria-label="Save voice">
-      <label>
-        <span>Voice name</span>
-        <input aria-label="Voice name" type="text" bind:value={voiceName} autocomplete="off" />
-      </label>
+    <aside class="side-rail" aria-label="Voice Lab side rail">
+      <div class="save-panel" aria-label="Save voice">
+        <label>
+          <span>Voice name</span>
+          <input aria-label="Voice name" type="text" bind:value={voiceName} autocomplete="off" />
+        </label>
 
-      <div class="save-state">
-        <p>Save Voice is available once sample, name, transcript, and engine are valid. Preview success is not required.</p>
-        {#if saveState === 'saved'}
-          <p class="success" role="status">Voice saved.</p>
-        {:else if saveError}
-          <p class="error" role="alert">{saveError}</p>
-        {/if}
+        <div class="save-state">
+          <p>Save Voice is available once sample, name, transcript, and engine are valid. Preview success is not required.</p>
+          {#if saveState === 'saved'}
+            <p class="success" role="status">Voice saved.</p>
+          {:else if saveError}
+            <p class="error" role="alert">{saveError}</p>
+          {/if}
+        </div>
+
+        <button class="primary" type="button" disabled={!canSave || saveState === 'saving'} on:click={saveCurrentVoice}>
+          <Save size={16} strokeWidth={1.8} aria-hidden="true" />
+          <span>{saveState === 'saving' ? 'Saving...' : 'Save Voice'}</span>
+        </button>
       </div>
 
-      <button class="primary" type="button" disabled={!canSave || saveState === 'saving'} on:click={saveCurrentVoice}>
-        <Save size={16} strokeWidth={1.8} aria-hidden="true" />
-        <span>{saveState === 'saving' ? 'Saving...' : 'Save Voice'}</span>
-      </button>
+      <VoiceLibraryList
+        voices={libraryVoices}
+        {engines}
+        loading={libraryLoading}
+        errorMessage={libraryError}
+        {testingVoiceId}
+        onTestPlay={playLibraryVoice}
+        onRename={openRenameDialog}
+      />
+
+      {#if libraryStatus}
+        <p class="success" role="status">{libraryStatus}</p>
+      {/if}
     </aside>
   </div>
 </section>
+
+<VoiceRenameDialog
+  open={Boolean(renamingVoice)}
+  voice={renamingVoice}
+  submitting={renameState === 'saving'}
+  onSave={saveRename}
+  onCancel={() => (renamingVoice = null)}
+/>
 
 <style>
   .voice-lab {
@@ -372,10 +482,15 @@
     gap: var(--space-lg);
   }
 
+  .side-rail,
   .save-panel {
     display: grid;
-    align-content: start;
+    min-width: 0;
     gap: var(--space-md);
+  }
+
+  .save-panel {
+    align-content: start;
     border-radius: var(--radius-md);
     padding: var(--space-lg);
     background: rgba(20, 31, 56, 0.78);
