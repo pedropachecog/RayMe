@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 03-05-PLAN.md
-last_updated: "2026-04-25T20:42:12.813Z"
+stopped_at: Completed 03-06-PLAN.md
+last_updated: "2026-04-25T20:48:03.911Z"
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 69
-  completed_plans: 62
-  percent: 90
+  completed_plans: 63
+  percent: 91
 ---
 
 ## Phase Status
@@ -45,6 +45,7 @@ progress:
 - Phase 03 plan 03-03 completed on 2026-04-25: RED client call FSM, audio helper, desktop/mobile browser, and opt-in live LAN acceptance contracts committed; expected implementation failures remain for later Phase 3 plans.
 - Phase 03 plan 03-04 completed on 2026-04-25: AI backend now owns live call sessions, typed `rayme-events`, inbound VAD/STT `user_final` finalization, and Phase 3 `/webrtc` offer/mute/interrupt/end controls.
 - Phase 03 plan 03-05 completed on 2026-04-25: Web UI server now owns same-origin `/api/calls` start/offer/mute/interrupt/end facade routes, `call_` to `rtc_` mappings, voice preflight, backend readiness checks, and durable call writeback.
+- Phase 03 plan 03-06 completed on 2026-04-25: call prompt context was verified to hydrate selected non-stale text and speech rows, exclude call boundary events, and cap the LLM context at 24 recent conversational turns plus the optional system prompt.
 
 ## Current Decisions
 
@@ -110,6 +111,7 @@ progress:
 - Phase 03-04 call event policy: data-channel call events use the `rayme-events` label and fixed public failure codes such as `call_stt_failed`, `webrtc_offer_failed`, `call_session_not_found`, and `call_control_failed`.
 - Phase 03-05 Web UI call facade policy: browser call controls use same-origin `/api/calls` routes only; the Web UI server owns `call_` IDs, maps them to server-generated `rtc_` sessions, checks backend readiness before creating active calls, and rejects foreign Origin headers.
 - Phase 03-05 call prompt policy: call offers hydrate recent selected non-stale text and speech rows through `build_call_prompt_context(max_turns=24)` while excluding `call_start` and `call_end` event rows.
+- Phase 03-06 prompt window policy: the Plan 03-05 `build_call_prompt_context` helper is the canonical call prompt path, and tests explicitly lock the total cap to 24 conversational turns plus the optional system message.
 
 ## Evidence
 
@@ -135,8 +137,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-04-25T20:42:12.792Z
-Stopped at: Completed 03-05-PLAN.md
+Last session: 2026-04-25T20:48:03.891Z
+Stopped at: Completed 03-06-PLAN.md
 Resume file: None
 
 **Planned Phase:** 03 (First Working Call (MVP)) — 12 plans — 2026-04-25T19:41:06.684Z

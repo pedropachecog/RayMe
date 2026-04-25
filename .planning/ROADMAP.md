@@ -268,7 +268,7 @@ Plans:
 - [x] 03-03-PLAN.md - Client Wave 0 call state, media helper, permissions, toolbar, transcript, summary, and mobile tests
 - [x] 03-04-PLAN.md - AI backend live call session manager and `/webrtc` signaling/control implementation
 - [x] 03-05-PLAN.md - Web UI server call facade and durable call service
-- [ ] 03-06-PLAN.md - Sliding-window prompt context for Phase 3 calls
+- [x] 03-06-PLAN.md - Sliding-window prompt context for Phase 3 calls
 - [ ] 03-07-PLAN.md - Client call API wrappers, media helpers, and call state machine
 - [ ] 03-08-PLAN.md - Phase 3 call UI surface, entry points, toolbar, visualizer, transcript, and thread row rendering
 - [ ] 03-09-PLAN.md - Full Phase 3 MVP call loop wiring across browser, Web UI server, and AI backend
