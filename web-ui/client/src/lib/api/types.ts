@@ -208,3 +208,114 @@ export interface AiBackendSettingsStatus {
   vram_used_mb?: number | null;
   vram_headroom_mb?: number | null;
 }
+
+export type TtsEngineId =
+  | 'f5'
+  | 'xtts_v2'
+  | 'qwen3_0_6b'
+  | 'luxtts'
+  | 'chatterbox_turbo'
+  | 'tada_1b'
+  | (string & {});
+
+export interface TtsEngineAvailability {
+  state?: 'idle' | 'loading' | 'resident' | 'unavailable' | string;
+  available?: boolean;
+  unavailable_reason?: string | null;
+  resident?: boolean | null;
+}
+
+export interface TtsEngineMetadata {
+  id: TtsEngineId;
+  label: string;
+  is_default?: boolean;
+  code_license?: string | null;
+  model_license?: string | null;
+  caveat_chips?: string[];
+  caveats?: string[];
+  runtime_evidence?: string | null;
+  requires_transcript?: boolean;
+  supports_streaming?: boolean;
+  quality_notes?: string | null;
+  availability?: TtsEngineAvailability;
+}
+
+export interface VoiceAsset {
+  asset_id: string;
+  voice_id?: string | null;
+  asset_kind?: string | null;
+  storage_path?: string | null;
+  content_type?: string | null;
+  byte_size?: number | null;
+  sha256?: string | null;
+  duration_seconds?: number | null;
+  sample_rate_hz?: number | null;
+  channel_count?: number | null;
+  warnings?: string[];
+}
+
+export interface VoiceSummary {
+  voice_id: string;
+  id?: string;
+  asset_id?: string | null;
+  name: string;
+  default_engine: TtsEngineId;
+  reference_transcript?: string | null;
+  metadata?: Record<string, unknown>;
+  status?: 'available' | 'deleted' | string;
+  unavailable_label?: string | null;
+  deleted_at?: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export interface VoiceDetail extends VoiceSummary {}
+
+export interface VoiceSavePayload {
+  asset_id: string;
+  name: string;
+  default_engine: TtsEngineId;
+  reference_transcript?: string | null;
+  metadata?: Record<string, unknown>;
+}
+
+export interface VoicePreviewPayload {
+  asset_id: string;
+  name?: string | null;
+  default_engine?: TtsEngineId | null;
+  reference_transcript?: string | null;
+  preview_text?: string | null;
+  use_default_engine?: boolean;
+  engine?: TtsEngineId | null;
+}
+
+export interface VoiceTestPlayPayload {
+  text: string;
+  use_default_engine?: boolean;
+  engine?: TtsEngineId | null;
+}
+
+export interface VoiceSynthesisResult {
+  voice_id?: string | null;
+  engine?: TtsEngineId | null;
+  engine_id?: TtsEngineId | null;
+  status?: string | null;
+  preview_id?: string | null;
+  preview_url?: string | null;
+  audio_url?: string | null;
+  audio_base64?: string | null;
+  content_type?: string | null;
+  duration_ms?: number | null;
+  error?: unknown;
+  payload_state?: Record<string, unknown>;
+}
+
+export interface VoiceDeleteResult {
+  voice_id: string;
+  deleted?: boolean;
+  deleted_at?: string | null;
+  strategy?: 'soft_delete' | string;
+  referents?: Array<Record<string, string>>;
+  affected_characters?: Array<Record<string, string>>;
+  tombstone?: { name?: string | null };
+}
