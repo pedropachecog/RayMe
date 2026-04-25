@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 02-08-PLAN.md
-last_updated: "2026-04-25T01:00:37.944Z"
+stopped_at: Completed 02-11-PLAN.md
+last_updated: "2026-04-25T01:09:00.426Z"
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 57
-  completed_plans: 49
-  percent: 86
+  completed_plans: 50
+  percent: 88
 ---
 
 ## Phase Status
@@ -31,6 +31,7 @@ progress:
 - Phase 02 plan 02-08 completed on 2026-04-25: six-engine TTS registry metadata, optional TTS runtime pins, import-gated adapter modules, and transient `/tts/synthesize` route passed AI backend TTS/health contracts.
 - Phase 02 plan 02-09 completed on 2026-04-25: durable Web UI voice service/API now uploads, transcribes, previews, saves without preview gate, lists, reads, renames, soft-deletes with referents, and test-plays voices.
 - Phase 02 plan 02-10 completed on 2026-04-25: Settings now persists audio/VAD/STT/TTS defaults, enforces VAD bounds, and returns compact AI backend residency status.
+- Phase 02 plan 02-11 completed on 2026-04-25: character writes now persist validated default voice IDs and character reads hydrate `none`, `assigned`, and `unavailable` voice states.
 
 ## Current Decisions
 
@@ -57,6 +58,7 @@ progress:
 - Phase 02-08 TTS error policy: synthesis failures return fixed public `tts_failed` details and never expose local paths, tracebacks, or adapter exception text.
 - Phase 02-09 voice API policy: voice save persists metadata plus sample linkage without a preview-success gate; rename updates display name only; Web UI transcription uses the AI backend `/stt/transcribe` route with stored sample bytes.
 - Phase 02-10 Settings policy: server-side Settings persists `stt_model` and `tts_default_engine` with audio/VAD defaults, uses compact AI backend status fields matching the RayMe-owned bridge, and unit tests override backend status dependencies instead of probing live LAN services.
+- Phase 02-11 character default voice policy: assignments use stable voice IDs, reject missing or soft-deleted voices on write, and keep deleted references visible as `Voice unavailable` with tombstoned voice names.
 
 ## Evidence
 
@@ -82,8 +84,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-04-25T01:00:37.923Z
-Stopped at: Completed 02-08-PLAN.md
+Last session: 2026-04-25T01:09:00.403Z
+Stopped at: Completed 02-11-PLAN.md
 Resume file: None
 
 **Planned Phase:** 02 (AI Backend Skeleton & Voice Lab) — 18 plans — 2026-04-24T22:37:51.511Z

@@ -225,7 +225,7 @@ Plans:
 - [x] 02-08-PLAN.md — AI backend TTS registry, adapters, switching, and transient synthesis API
 - [x] 02-09-PLAN.md — Web UI voice domain/API for upload, transcribe, save, library, delete, and test-play
 - [x] 02-10-PLAN.md — Web UI Settings service/API for save-audio, VAD values, and AI backend status
-- [ ] 02-11-PLAN.md — Character default voice server persistence and unavailable state
+- [x] 02-11-PLAN.md — Character default voice server persistence and unavailable state
 - [ ] 02-12-PLAN.md — Client Voice Lab creation flow with six-engine picker and optional preview
 - [ ] 02-13-PLAN.md — Client Voice Library list, rename, delete, and test-play
 - [ ] 02-14-PLAN.md — Client Settings panels and Voice Lab navigation
