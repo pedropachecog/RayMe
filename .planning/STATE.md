@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 03-08-PLAN.md
-last_updated: "2026-04-25T21:29:29.473Z"
+stopped_at: Completed 03-09-PLAN.md
+last_updated: "2026-04-25T21:53:09.928Z"
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 69
-  completed_plans: 65
-  percent: 94
+  completed_plans: 66
+  percent: 96
 ---
 
 ## Phase Status
@@ -48,6 +48,7 @@ progress:
 - Phase 03 plan 03-06 completed on 2026-04-25: call prompt context was verified to hydrate selected non-stale text and speech rows, exclude call boundary events, and cap the LLM context at 24 recent conversational turns plus the optional system prompt.
 - Phase 03 plan 03-07 completed on 2026-04-25: client call API wrappers, WebRTC `rayme-events` helpers, call FSM, AudioContext unlock, device fallback copy, and split mic/AI RMS metering passed RED unit contracts.
 - Phase 03 plan 03-08 completed on 2026-04-25: operational call UI route, thread and character Start Call entry points, RMS visualizer, toolbar, live transcript, call row rendering, and mobile control layout passed client unit plus desktop/mobile Playwright contracts.
+- Phase 03 plan 03-09 completed on 2026-04-25: full MVP call loop now carries `user_final` turns through server-owned `/turns` SSE orchestration, LLM token streaming, saved-voice TTS playback, durable speech rows, and interrupt-safe cancellation.
 
 ## Current Decisions
 
@@ -119,6 +120,9 @@ progress:
 - Phase 03-08 call UI route policy: the approved operational call surface lives at `/call/{threadId}` and is entered from thread headers or character cards.
 - Phase 03-08 call browser contract policy: local Playwright call contracts mock the canonical same-origin `/api/calls/start` route and scope live state assertions to the visualizer to avoid collisions with approved transcript copy.
 - Phase 03-08 mobile layout policy: the AppShell bottom navigation remains visible on mobile call routes while sticky call controls reserve enough space and expose 44px touch targets above it.
+- Phase 03-09 call loop policy: Web UI server owns call/session validation for every `user_final` turn, streams `ai_token` events, and persists final `ai_speech` from the exact visible accumulated text.
+- Phase 03-09 TTS policy: call playback forwards saved voice sample audio and reference transcript to the AI backend; placeholder reference audio is invalid for generic TTS adapters.
+- Phase 03-09 interrupt policy: button interrupt cancels browser SSE reading, server LLM generation, and AI backend speech playback before returning to listening.
 
 ## Evidence
 
@@ -144,8 +148,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-04-25T21:29:29.453Z
-Stopped at: Completed 03-08-PLAN.md
+Last session: 2026-04-25T21:53:09.906Z
+Stopped at: Completed 03-09-PLAN.md
 Resume file: None
 
 **Planned Phase:** 03 (First Working Call (MVP)) — 12 plans — 2026-04-25T19:41:06.684Z
