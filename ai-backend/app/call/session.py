@@ -257,8 +257,17 @@ class CallSession:
         if adapter is not None and hasattr(adapter, "accept_audio_frame"):
             return dict(adapter.accept_audio_frame(frame.pcm))
 
+        buffered_samples = self._buffered_turn_samples()
+        if adapter is not None and hasattr(adapter, "speech_timestamps"):
+            timestamps = adapter.speech_timestamps(buffered_samples)
+            if timestamps:
+                self._speech_seen = True
+
         if len(frame.pcm) < 2 or len(frame.pcm) % 2 != 0:
-            return {"speech_detected": True, "end_of_turn": False}
+            return {
+                "speech_detected": self._speech_seen or True,
+                "end_of_turn": False,
+            }
 
         samples = np.frombuffer(frame.pcm, dtype=np.int16).astype(np.float32)
         energy = float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
@@ -276,6 +285,17 @@ class CallSession:
             "end_of_turn": self._speech_seen
             and self._silence_ms >= int(self.settings.vad_end_silence_ms),
         }
+
+    def _buffered_turn_samples(self) -> np.ndarray:
+        chunks: list[np.ndarray] = []
+        for frame in self._turn_frames:
+            if len(frame.pcm) < 2 or len(frame.pcm) % 2 != 0:
+                continue
+            samples = np.frombuffer(frame.pcm, dtype=np.int16).astype(np.float32)
+            chunks.append(samples / float(np.iinfo(np.int16).max))
+        if not chunks:
+            return np.asarray([], dtype=np.float32)
+        return np.concatenate(chunks).astype(np.float32, copy=False)
 
     def _transcribe_turn(self, frames: list[PcmAudioFrame]) -> dict[str, Any]:
         adapter = self.stt_adapter
@@ -304,9 +324,14 @@ class CallSession:
                 vad_threshold=self.settings.vad_threshold,
                 vad_end_silence_ms=self.settings.vad_end_silence_ms,
             )
-            return dict(result)
+            return self._mapping_from_result(result)
         finally:
             audio.cleanup()
+
+    def _mapping_from_result(self, result: Any) -> dict[str, Any]:
+        if hasattr(result, "model_dump"):
+            return dict(result.model_dump())
+        return dict(result)
 
 
 class CallSessionManager:
