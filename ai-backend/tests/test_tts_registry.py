@@ -22,8 +22,28 @@ REQUIRED_METADATA_FIELDS = {
     "model_license",
     "caveat_chips",
     "runtime_evidence",
+    "requires_transcript",
+    "supports_streaming",
+    "quality_notes",
     "is_default",
     "availability",
+}
+ENGINE_REQUIREMENTS = {
+    "f5": {
+        "model_license": "CC-BY-NC",
+        "requires_transcript": True,
+        "supports_streaming": False,
+    },
+    "xtts_v2": {
+        "model_license": "CPML",
+        "requires_transcript": True,
+        "supports_streaming": True,
+    },
+    "qwen3_0_6b": {
+        "model_license": "Apache-2.0",
+        "requires_transcript": False,
+        "supports_streaming": False,
+    },
 }
 SWITCH_STATES = {"idle", "loading", "resident", "unavailable"}
 
@@ -135,6 +155,40 @@ def test_registry_metadata_includes_license_runtime_and_availability_fields_regi
         assert _availability_state(entry) in SWITCH_STATES
 
     assert defaults == ["f5"]
+
+
+def test_registry_metadata_captures_engine_specific_contracts_registry_metadata() -> None:
+    _, _, entries = _registry_and_entries()
+    by_id = {entry.get("id") or entry.get("engine_id"): entry for entry in entries}
+
+    for engine_id, required in ENGINE_REQUIREMENTS.items():
+        entry = by_id[engine_id]
+        for field, expected in required.items():
+            assert entry[field] == expected
+
+    assert "Default" in by_id["f5"]["caveat_chips"]
+    assert "Requires transcript" in by_id["f5"]["caveat_chips"]
+    assert "Transcript stored for portability" in by_id["xtts_v2"]["quality_notes"]
+    assert "Native streaming inside safe chunks" in by_id["xtts_v2"]["quality_notes"]
+    assert "Opt-in" in by_id["qwen3_0_6b"]["caveat_chips"]
+    assert "0.6B-Base" in by_id["qwen3_0_6b"]["quality_notes"]
+    assert "latency" in by_id["qwen3_0_6b"]["quality_notes"].lower()
+    assert "accent" in by_id["qwen3_0_6b"]["quality_notes"].lower()
+    assert by_id["luxtts"]["runtime_evidence"]
+    assert by_id["chatterbox_turbo"]["runtime_evidence"]
+    assert by_id["tada_1b"]["runtime_evidence"]
+
+
+def test_registry_metadata_rejects_missing_engine_registry_metadata() -> None:
+    registry_module, _, entries = _registry_and_entries()
+    TtsEngineRegistry = getattr(registry_module, "TtsEngineRegistry")
+
+    incomplete_entries = [
+        entry for entry in entries if (entry.get("id") or entry.get("engine_id")) != "tada_1b"
+    ]
+
+    with pytest.raises(ValueError, match="missing.*tada_1b"):
+        TtsEngineRegistry(engines=incomplete_entries)
 
 
 def test_registry_switch_state_contract_is_idle_loading_resident_unavailable_registry_metadata() -> None:
