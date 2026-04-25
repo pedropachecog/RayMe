@@ -42,6 +42,18 @@ browser UI, identify the required verification layers before editing:
 - GPU runtime checks for AI models,
 - Android product-owner acceptance only after agent verification.
 
+## Interactive Workflow Rule
+
+If a GSD workflow needs user decisions, approvals, context, requirements, or
+planning confirmation, and structured prompt UI is unavailable, use plain-text
+numbered choices and stop for the user's answer. Never infer defaults for
+interactive GSD decisions unless the user explicitly invoked `--auto` or
+`--chain`.
+
+Before planning from any `*-CONTEXT.md` or `*-SPEC.md`, confirm the artifact was
+created from actual user answers or explicit auto mode. Draft files marked
+`NOT-USER-DISCUSSED` are invalid for planning.
+
 ## Handoff Gate
 
 Before saying a workflow is ready, run:
@@ -71,4 +83,3 @@ When reporting readiness, include:
 
 Do not bury known failures, slow paths, CPU fallbacks, stale deployments, or
 untested routes. Report them as blockers or residual risk.
-

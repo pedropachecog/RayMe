@@ -1,4 +1,4 @@
-# Phase 3: First Working Call (MVP) - Discussion Log
+# Phase 3: First Working Call (MVP) - Draft Discussion Log, Not User Discussed
 
 > **Audit trail only.** Do not use as input to planning, research, or execution agents.
 > Decisions are captured in CONTEXT.md - this log preserves the alternatives considered.
@@ -6,7 +6,10 @@
 **Date:** 2026-04-25
 **Phase:** 03-first-working-call-mvp
 **Areas discussed:** Call entry and screen shape, service boundary, MVP turn semantics, browser and mobile audio, verification and evidence
-**Mode:** Non-interactive fallback from `$gsd-next`; structured prompts unavailable, so recommended defaults were selected from prior project context and existing code.
+**Mode:** Invalid non-interactive fallback from `$gsd-next`; structured prompts were unavailable and recommended defaults were selected instead of stopping for plain-text user answers.
+
+> This is not a valid discussion log. It is retained only to document the
+> failure mode. Rerun `$gsd-discuss-phase 3 --text` before Phase 3 planning.
 
 ---
 

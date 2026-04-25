@@ -20,6 +20,17 @@ as durable context, not one-off preferences.
 
 - The agent owns execution. Do not hand the user a full command sequence for
   work the agent can do through available tools.
+- Interactive GSD workflows must never auto-select defaults when the prompt UI
+  is unavailable. If `request_user_input` cannot be used, or if
+  `workflow.text_mode` is true, present the plain-text numbered choices and stop
+  for the user's answer. This applies especially to `$gsd-discuss-phase`,
+  `$gsd-spec-phase`, `$gsd-plan-phase` approval gates, `$gsd-next` when it
+  routes into an interactive workflow, and any workflow that writes decisions,
+  context, requirements, plans, or approvals.
+- A discussion artifact is valid only if it contains actual user answers or an
+  explicitly requested `--auto`/`--chain` mode. Do not create or commit
+  canonical `*-CONTEXT.md`, `*-SPEC.md`, approval, or decision artifacts from
+  inferred defaults merely because structured prompts are unavailable.
 - Ask the user only for the narrow interactive action that cannot be completed
   through tools, such as approving a browser/device credential prompt, then
   immediately continue the remaining steps.
@@ -70,6 +81,10 @@ as durable context, not one-off preferences.
   not feedback to smooth over. Add or update durable tests/evidence, then add a
   brief note to `.planning/LEARNINGS.md` identifying the false assumption, the
   missing verification layer, and the guard that now prevents recurrence.
+- If the user reports that a GSD workflow skipped discussion, confirmation, or
+  approval, treat that as an incident. Invalidate any affected canonical
+  artifacts, record the false assumption in `.planning/LEARNINGS.md`, and add a
+  structural guard before continuing the workflow.
 - Do not rely on tone management as the fix for repeated technical failures.
   The acceptable response pattern is: acknowledge the exact miss, identify the
   verification gap, add an executable or procedural guard, run it, save evidence,

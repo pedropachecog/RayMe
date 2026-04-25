@@ -1,7 +1,13 @@
-# Phase 3: First Working Call (MVP) - Context
+# Phase 3: First Working Call (MVP) - Draft Context, Not User Discussed
 
 **Gathered:** 2026-04-25
-**Status:** Ready for planning
+**Status:** Invalid for planning - discussion must be rerun with real user answers
+
+> This file was produced by an incorrect non-interactive fallback that selected
+> defaults without user discussion. It is retained only as a diagnostic draft.
+> Downstream agents must not treat it as Phase 3 context. Rerun
+> `$gsd-discuss-phase 3 --text` and write a canonical `03-CONTEXT.md` from
+> actual user answers before planning.
 
 <domain>
 ## Phase Boundary
@@ -16,7 +22,7 @@ This phase is intentionally an MVP transport/proof phase. It does not implement 
 ## Implementation Decisions
 
 ### Workflow Note
-- **D-01:** This context was generated from `$gsd-next` -> `$gsd-discuss-phase 3` using the non-interactive fallback because structured user prompts were unavailable. The choices below are recommended defaults grounded in prior context and existing code; review before planning if any product preference should change.
+- **D-01:** This context was generated from `$gsd-next` -> `$gsd-discuss-phase 3` using an invalid non-interactive fallback because structured user prompts were unavailable. The choices below are diagnostic defaults only, not user decisions.
 
 ### Call Entry And Screen Shape
 - **D-02:** Calls are contextual, not a top-level global destination. Add a Call affordance to the chat thread header; character-card entry should create or choose the appropriate thread, then enter the same call route.

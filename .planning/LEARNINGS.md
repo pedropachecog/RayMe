@@ -99,6 +99,41 @@ Before telling the user a workflow is ready, report the exact evidence:
 If that evidence does not exist yet, keep working instead of asking the user to
 find the next failure.
 
+## 2026-04-25: Interactive GSD Discussion Was Replaced By Inferred Defaults
+
+### What Went Wrong
+
+- `$gsd-next` routed into `$gsd-discuss-phase 3`, but the session did not ask
+  the user any Phase 3 discussion questions.
+- The agent treated unavailable structured prompt UI as permission to infer
+  defaults and wrote canonical Phase 3 context from those defaults.
+- This violated an already-recorded Phase 1 decision: `workflow.text_mode: true`
+  means use plain numbered prompts and wait; it does not mean skip discussion.
+
+### False Assumptions
+
+- "Execute mode fallback" was interpreted as "pick defaults" even for
+  workflows whose purpose is to gather user decisions.
+- Prior project context was treated as a substitute for explicit user answers.
+- Creating a context file was treated as completing the discussion phase, even
+  though no discussion happened.
+
+### Guards Added
+
+- The invalid Phase 3 context was moved out of canonical `03-CONTEXT.md` to
+  `03-CONTEXT-DRAFT-NOT-USER-DISCUSSED.md`, so planning cannot silently proceed
+  from it.
+- Operating rule: interactive GSD workflows must present plain-text numbered
+  choices and stop for the user when structured prompts are unavailable.
+- Operating rule: canonical decision/context/spec/approval artifacts require
+  actual user answers or an explicitly requested `--auto`/`--chain` mode.
+- Attempted local GSD skill adapter patch was blocked because installed skill
+  files under `/home/agent/.codex/skills/gsd-*` are root-owned in this
+  environment. The project-level guard is therefore enforced through
+  `.planning/OPERATING-NOTES.md`, `.planning/SESSION-START.md`,
+  `scripts/operational-check.sh start`, and the active checkpoint until the
+  upstream/root-owned adapter text can be updated.
+
 ## 2026-04-25: Context Resets Need Explicit Rehydration
 
 ### What Went Wrong
