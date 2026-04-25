@@ -41,6 +41,7 @@ class FakeCallBackend:
     def __init__(self, *, ready: bool = True, voice_available: bool = True) -> None:
         self.ready = ready
         self.voice_available = voice_available
+        self.fail_end = False
         self.created_sessions: list[dict[str, Any]] = []
         self.speak_calls: list[dict[str, Any]] = []
         self.interrupt_calls: list[dict[str, Any]] = []
@@ -76,6 +77,13 @@ class FakeCallBackend:
     async def interrupt_call(self, base_url: str, session_id: str) -> dict[str, Any]:
         self.interrupt_calls.append({"base_url": base_url, "session_id": session_id})
         return {"session_id": session_id, "interrupted": True}
+
+    async def end_call(self, base_url: str, session_id: str, reason: str) -> dict[str, Any]:
+        if self.fail_end:
+            from app.domain.ai_backend_client import AiBackendProcessingError
+
+            raise AiBackendProcessingError(code="call_control_failed", message="Call control request failed")
+        return {"session_id": session_id, "reason": reason}
 
 
 class FakeCompletionClient:
@@ -299,6 +307,24 @@ def test_start_and_end_write_chronological_call_boundary_rows(
         ("call_start", "event", "Call started"),
         ("call_end", "event", "Call ended"),
     ]
+
+
+def test_end_writes_local_boundary_even_when_backend_session_control_fails(
+    call_fixture: CallFixture,
+) -> None:
+    call_fixture.backend.fail_end = True
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/end",
+        json={"session_id": started["session_id"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reason"] == "hangup"
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert rows[-1] == ("call_end", "event", "Call ended")
 
 
 def test_two_turns_stream_tokens_and_write_exact_speech_rows_before_call_end(

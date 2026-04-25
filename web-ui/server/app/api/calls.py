@@ -384,13 +384,14 @@ async def end_call(
         session_id = service.session_for_call(call_id)
         _reject_mismatched_session(session_id, payload.session_id if payload else None)
         endpoint_settings = await SettingsService(session, runtime_settings).read()
-        await _end_call(backend, endpoint_settings.ai_backend_url, session_id, reason)
+        try:
+            await _end_call(backend, endpoint_settings.ai_backend_url, session_id, reason)
+        except AiBackendClientError:
+            pass
         ended = await service.end_call(call_id, reason=reason)
         return {"call_id": call_id, "session_id": session_id, "reason": ended["reason"]}
     except CallServiceError as exc:
         raise _call_error(exc) from exc
-    except AiBackendClientError as exc:
-        raise _backend_error(exc) from exc
 
 
 async def _ensure_backend_ready(backend: Any, base_url: str) -> None:

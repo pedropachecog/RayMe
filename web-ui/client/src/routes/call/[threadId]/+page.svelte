@@ -185,7 +185,12 @@
     await connection.setLocalDescription(offer);
     await waitForIceGathering(connection);
     const localDescription = connection.localDescription ?? offer;
-    const response = await sendCallOffer(started.call_id, localDescription, started.session_id);
+    let response;
+    try {
+      response = await sendCallOffer(started.call_id, localDescription, started.session_id);
+    } catch {
+      return;
+    }
     sessionId = response.session_id || started.session_id || started.call_id;
     if (response.answer) {
       try {
