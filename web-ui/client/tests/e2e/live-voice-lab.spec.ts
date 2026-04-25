@@ -60,7 +60,18 @@ test('live OMEN-PC Voice Lab upload transcribe save and test-play path passes be
   const voiceRow = page.getByRole('listitem', { name: new RegExp(escapeRegExp(liveVoiceName)) });
   await expect(voiceRow).toBeVisible({ timeout: 120_000 });
   await voiceRow.getByPlaceholder('Type a test phrase').fill('One short live test phrase.');
+  const testPlayResponsePromise = page.waitForResponse(
+    (response) =>
+      response.url().includes('/api/voices/') &&
+      response.url().endsWith('/test-play') &&
+      response.request().method() === 'POST'
+  );
   await voiceRow.getByRole('button', { name: 'Test Voice' }).click();
+  const testPlayResponse = await testPlayResponsePromise;
+  expect(testPlayResponse.ok(), 'Voice test-play should return generated audio').toBe(true);
+  const testPlayBody = await testPlayResponse.json();
+  expect(Boolean(testPlayBody.audio_url || testPlayBody.audio_base64), 'test-play audio payload').toBe(true);
+  expect(testPlayBody.content_type, 'test-play content type').toMatch(/^audio\//);
   await expect(page.getByText('Test voice ready.')).toBeVisible({ timeout: 180_000 });
 
   expect(voiceRequests).toEqual(

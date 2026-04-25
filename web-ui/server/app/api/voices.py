@@ -20,6 +20,7 @@ from app.domain.voice_service import (
     VoiceNotFoundError,
     VoiceReferencedError,
     VoiceService,
+    VoiceSynthesisFailedError,
 )
 from app.storage.session import SERVER_ROOT, get_session
 
@@ -251,6 +252,11 @@ async def test_play_voice(
         raise HTTPException(status_code=404, detail="Voice not found") from exc
     except VoiceAssetNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Voice asset not found") from exc
+    except VoiceSynthesisFailedError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={"message": "Voice test-play did not produce generated audio"},
+        ) from exc
 
 
 __all__ = [

@@ -66,6 +66,8 @@ class FakeVoiceProcessor:
 
     async def test_play(self, **_: Any) -> dict[str, str]:
         self._record("test_play", _)
+        if self.return_tts_failed:
+            return {"status": "tts_failed", "error": "typed processing failure"}
         return {"audio_url": "/api/voices/test-play/test-play-1.wav"}
 
     def _record(self, operation: str, payload: dict[str, Any]) -> None:
@@ -479,6 +481,22 @@ def test_voice_library_detail_and_test_play_routes(
     assert test_play.json()["voice_id"] == voice.voice_id
     assert test_play.json()["engine"] == voice.body["default_engine"]
     assert test_play.json()["audio_url"]
+
+
+def test_voice_test_play_returns_bad_gateway_when_synthesis_produces_no_audio(
+    voice_fixture: VoiceFixture,
+) -> None:
+    client = voice_fixture.client
+    voice_fixture.processor.return_tts_failed = True
+    voice = _create_voice(client, name="Library voice with failing test play")
+
+    test_play = client.post(
+        f"/api/voices/{voice.voice_id}/test-play",
+        json={"text": "This should fail without audio.", "use_default_engine": True},
+    )
+
+    assert test_play.status_code == 502
+    assert test_play.json()["detail"]["message"] == "Voice test-play did not produce generated audio"
 
 
 def _install_test_dependencies(

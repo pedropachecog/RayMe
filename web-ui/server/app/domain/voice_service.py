@@ -36,6 +36,10 @@ class VoiceReferencedError(ValueError):
         self.referents = referents
 
 
+class VoiceSynthesisFailedError(RuntimeError):
+    """Raised when a voice test-play request does not produce audio."""
+
+
 @dataclass(frozen=True, slots=True)
 class VoiceSampleBlob:
     path: Path
@@ -179,11 +183,15 @@ class VoiceService:
             content=sample.path.read_bytes(),
             content_type=asset.content_type,
         )
+        audio_url = result.get("audio_url")
+        audio_base64 = result.get("audio_base64")
+        if result.get("status") == "tts_failed" or not (audio_url or audio_base64):
+            raise VoiceSynthesisFailedError("Voice test-play did not produce generated audio")
         return {
             "voice_id": voice.id,
             "engine": engine,
-            "audio_url": result.get("audio_url"),
-            "audio_base64": result.get("audio_base64"),
+            "audio_url": audio_url,
+            "audio_base64": audio_base64,
             "content_type": result.get("content_type"),
             "duration_ms": result.get("duration_ms"),
         }
@@ -277,6 +285,7 @@ __all__ = [
     "VoiceNotFoundError",
     "VoiceReferencedError",
     "VoiceSampleValidationError",
+    "VoiceSynthesisFailedError",
     "VoiceService",
     "new_voice_asset_id",
     "new_voice_id",
