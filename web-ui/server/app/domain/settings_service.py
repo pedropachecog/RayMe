@@ -178,12 +178,14 @@ def _clean_persisted_setting(key: str, value: Any) -> object:
 def _default_ai_backend_status() -> dict[str, object]:
     return {
         "endpoint_status": "Not configured",
+        "status": "error",
         "stt_model": None,
+        "stt_compute_type": None,
         "vad_ready": False,
         "resident_tts_engine": None,
-        "available_tts_engines": [],
-        "loading_state": None,
-        "vram_mb": None,
+        "available_engines": [],
+        "loading_engine": None,
+        "vram_used_mb": None,
         "vram_headroom_mb": None,
     }
 

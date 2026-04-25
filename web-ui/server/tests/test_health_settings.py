@@ -85,6 +85,29 @@ def settings_client(tmp_path: Path) -> Iterator[TestClient]:
 
     app.dependency_overrides[get_settings_session] = override_session
 
+    class DefaultAiBackendClient:
+        async def get_status(self, _base_url: str) -> AiBackendStatus:
+            return AiBackendStatus(
+                status="ok",
+                stt_model="distil-large-v3",
+                stt_compute_type="int8_float16",
+                vad_ready=True,
+                resident_tts_engine="f5",
+                available_engines=[
+                    EngineStatus(
+                        id="f5",
+                        label="F5-TTS",
+                        available=True,
+                        state="resident",
+                    )
+                ],
+                loading_engine=None,
+                vram_used_mb=2300,
+                vram_headroom_mb=8700,
+            )
+
+    app.dependency_overrides[get_ai_backend_client] = DefaultAiBackendClient
+
     with TestClient(app) as client:
         yield client
 
@@ -199,8 +222,8 @@ def test_settings_response_includes_compact_live_ai_backend_status(
                 vram_headroom_mb=8700,
             )
 
-    settings_client.patch("/api/settings", json={"ai_backend_url": "https://ai.local:9443"})
     settings_client.app.dependency_overrides[get_ai_backend_client] = FakeAiBackendClient
+    settings_client.patch("/api/settings", json={"ai_backend_url": "https://ai.local:9443"})
 
     body = settings_client.get("/api/settings").json()
 

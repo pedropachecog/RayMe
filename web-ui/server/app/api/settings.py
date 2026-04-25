@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.domain.ai_backend_client import AiBackendClient, AiBackendUnavailable
+from app.domain.ai_backend_client import AiBackendClient, AiBackendStatus, AiBackendUnavailable
 from app.domain.llm_probe import (
     CONNECTED,
     NOT_CONFIGURED,
@@ -37,7 +37,7 @@ class SettingsPatch(BaseModel):
     save_ai_audio: bool | None = None
     save_mic_audio: bool | None = None
     vad_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
-    vad_end_silence_ms: int | None = Field(default=None, ge=100, le=5000)
+    vad_end_silence_ms: int | None = Field(default=None, ge=100, le=3000)
     stt_model: str | None = Field(default=None, max_length=200)
     tts_default_engine: str | None = Field(default=None, max_length=100)
 
@@ -113,17 +113,21 @@ def get_llm_probe() -> LlmProbe:
 @router.get("", response_model=PublicSettings)
 async def read_settings(
     service: SettingsService = Depends(get_settings_service),
-) -> dict[str, str | bool]:
-    return (await service.read()).to_public_dict()
+    client: AiBackendClient = Depends(get_ai_backend_client),
+) -> dict[str, object]:
+    settings = await service.read()
+    return await _public_settings(settings, client)
 
 
 @router.patch("", response_model=PublicSettings)
 async def update_settings(
     payload: SettingsPatch,
     service: SettingsService = Depends(get_settings_service),
-) -> dict[str, str | bool]:
+    client: AiBackendClient = Depends(get_ai_backend_client),
+) -> dict[str, object]:
     updates = payload.model_dump(exclude_unset=True)
-    return (await service.update(updates)).to_public_dict()
+    settings = await service.update(updates)
+    return await _public_settings(settings, client)
 
 
 @router.post("/test/web", response_model=ConnectionTestResponse)
@@ -168,6 +172,62 @@ async def _probe_llm(settings: EndpointSettings, probe: LlmProbe) -> ConnectionS
         api_key=settings.llm_api_key,
         model=settings.llm_model,
     )
+
+
+async def _public_settings(
+    settings: EndpointSettings,
+    client: AiBackendClient,
+) -> dict[str, object]:
+    payload = settings.to_public_dict()
+    payload["ai_backend_status"] = await _settings_ai_backend_status(settings, client)
+    return payload
+
+
+async def _settings_ai_backend_status(
+    settings: EndpointSettings,
+    client: AiBackendClient,
+) -> dict[str, object]:
+    if not _is_configured(settings.ai_backend_url):
+        return _unavailable_ai_backend_status("Not configured")
+    try:
+        status = await client.get_status(settings.ai_backend_url)
+    except AiBackendUnavailable as exc:
+        endpoint_status = "Unauthorized" if exc.code == "unauthorized" else "Unreachable"
+        return _unavailable_ai_backend_status(endpoint_status)
+
+    return _compact_ai_backend_status(status)
+
+
+def _compact_ai_backend_status(status: AiBackendStatus) -> dict[str, object]:
+    return {
+        "endpoint_status": status.status,
+        "status": status.status,
+        "stt_model": status.stt_model,
+        "stt_compute_type": status.stt_compute_type,
+        "vad_ready": status.vad_ready,
+        "resident_tts_engine": status.resident_tts_engine,
+        "available_engines": [
+            engine.model_dump(exclude_none=True) for engine in status.available_engines
+        ],
+        "loading_engine": status.loading_engine,
+        "vram_used_mb": status.vram_used_mb,
+        "vram_headroom_mb": status.vram_headroom_mb,
+    }
+
+
+def _unavailable_ai_backend_status(endpoint_status: str) -> dict[str, object]:
+    return {
+        "endpoint_status": endpoint_status,
+        "status": "error",
+        "stt_model": None,
+        "stt_compute_type": None,
+        "vad_ready": False,
+        "resident_tts_engine": None,
+        "available_engines": [],
+        "loading_engine": None,
+        "vram_used_mb": None,
+        "vram_headroom_mb": None,
+    }
 
 
 def _is_configured(value: str | None) -> bool:
