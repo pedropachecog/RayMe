@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
+from app.api import tts
 from app.api.health import router as health_router
 from app.api.stt import router as stt_router
 from app.config import AiBackendSettings
@@ -29,4 +30,5 @@ def create_app() -> FastAPI:
     app.state.model_manager = ModelManager(AiBackendSettings())
     app.include_router(health_router)
     app.include_router(stt_router)
+    app.include_router(tts.router)
     return app

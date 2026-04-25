@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.util
 from collections.abc import Iterable, Mapping, Sequence
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
@@ -58,6 +59,10 @@ class TtsSynthesisOutput(BaseModel):
     duration_ms: float | None = None
 
 
+class TtsAdapterUnavailable(RuntimeError):
+    pass
+
+
 @runtime_checkable
 class TtsAdapter(Protocol):
     engine_id: str
@@ -73,6 +78,36 @@ class TtsAdapter(Protocol):
 
     def synthesize(self, request: TtsSynthesisInput) -> TtsSynthesisOutput:
         ...
+
+
+class ImportGatedTtsAdapter:
+    engine_id: str
+    required_modules: tuple[str, ...] = ()
+
+    def __init__(self) -> None:
+        self.loaded = False
+
+    def startup_self_test(self) -> None:
+        return None
+
+    def load(self) -> None:
+        self.loaded = True
+
+    def unload(self) -> None:
+        self.loaded = False
+
+    def synthesize(self, request: TtsSynthesisInput) -> TtsSynthesisOutput:
+        self._ensure_runtime_available()
+        raise TtsAdapterUnavailable("TTS runtime adapter is not enabled for synthesis")
+
+    def _ensure_runtime_available(self) -> None:
+        missing = [
+            module
+            for module in self.required_modules
+            if importlib.util.find_spec(module) is None
+        ]
+        if missing:
+            raise TtsAdapterUnavailable("TTS runtime package unavailable")
 
 
 TTS_ENGINE_METADATA: tuple[TtsEngineMetadata, ...] = (
@@ -243,15 +278,37 @@ class TtsEngineRegistry:
         _ = self.default_engine_id
 
 
+def build_default_tts_adapters() -> dict[str, TtsAdapter]:
+    from app.models.tts_chatterbox import ChatterboxTurboTtsAdapter
+    from app.models.tts_f5 import F5TtsAdapter
+    from app.models.tts_luxtts import LuxTtsAdapter
+    from app.models.tts_qwen3 import Qwen3TtsAdapter
+    from app.models.tts_tada import TadaTtsAdapter
+    from app.models.tts_xtts import XttsV2TtsAdapter
+
+    adapters: tuple[TtsAdapter, ...] = (
+        F5TtsAdapter(),
+        XttsV2TtsAdapter(),
+        Qwen3TtsAdapter(),
+        LuxTtsAdapter(),
+        ChatterboxTurboTtsAdapter(),
+        TadaTtsAdapter(),
+    )
+    return {adapter.engine_id: adapter for adapter in adapters}
+
+
 __all__ = [
     "EXPECTED_ENGINE_IDS",
     "SWITCH_STATES",
     "EngineSwitchState",
+    "ImportGatedTtsAdapter",
     "TTS_ENGINE_METADATA",
     "TtsAdapter",
+    "TtsAdapterUnavailable",
     "TtsEngineAvailability",
     "TtsEngineMetadata",
     "TtsEngineRegistry",
     "TtsSynthesisInput",
     "TtsSynthesisOutput",
+    "build_default_tts_adapters",
 ]

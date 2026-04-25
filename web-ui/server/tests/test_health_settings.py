@@ -609,7 +609,7 @@ async def test_ai_backend_client_maps_status_transcription_and_synthesis_shapes(
                     "manual_transcript_allowed": False,
                 },
             )
-        if request.url.path == "/base/synthesize":
+        if request.url.path == "/base/tts/synthesize":
             return httpx.Response(
                 200,
                 json={
@@ -652,7 +652,7 @@ async def test_ai_backend_client_maps_status_transcription_and_synthesis_shapes(
     assert [request.url.path for request in requests] == [
         "/base/health",
         "/base/stt/transcribe",
-        "/base/synthesize",
+        "/base/tts/synthesize",
     ]
 
 

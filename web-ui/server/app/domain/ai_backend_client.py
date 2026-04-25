@@ -125,7 +125,7 @@ class AiBackendClient:
     async def synthesize(self, base_url: str, payload: Mapping[str, Any]) -> SynthesisResult:
         response = await self._request(
             "POST",
-            _join_endpoint(base_url, "/synthesize"),
+            _join_endpoint(base_url, "/tts/synthesize"),
             json=dict(payload),
             processing_message=SYNTHESIS_FAILED_MESSAGE,
             processing_code="synthesis_failed",

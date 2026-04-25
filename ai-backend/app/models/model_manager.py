@@ -5,6 +5,7 @@ from typing import Any
 
 from app.config import AiBackendSettings
 from app.models.engine_metadata import ENGINE_METADATA, EngineMetadata, EngineStatus
+from app.models.tts_registry import build_default_tts_adapters
 
 
 VramProbe = Callable[[], Mapping[str, int | float]]
@@ -132,7 +133,10 @@ class ModelManager:
         return ENGINE_METADATA
 
     def _build_null_adapters(self) -> dict[str, NullTtsAdapter]:
-        return {engine.id: NullTtsAdapter(engine.id) for engine in ENGINE_METADATA}
+        try:
+            return build_default_tts_adapters()
+        except Exception:
+            return {engine.id: NullTtsAdapter(engine.id) for engine in ENGINE_METADATA}
 
     def _run_self_test(self, adapter: Any) -> None:
         if hasattr(adapter, "startup_self_test"):
