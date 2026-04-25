@@ -8,6 +8,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.types import Scope
 
 from app.api.ai_backend import router as ai_backend_router
+from app.api.calls import router as calls_router
 from app.api.chat import router as chat_router
 from app.api.characters import router as characters_router
 from app.api.health import router as health_router
@@ -60,6 +61,7 @@ def create_app(
     app.include_router(characters_router)
     app.include_router(threads_router)
     app.include_router(chat_router)
+    app.include_router(calls_router)
     app.include_router(messages_router)
     app.include_router(voices_router)
 

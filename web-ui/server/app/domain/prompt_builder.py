@@ -87,6 +87,49 @@ async def build_prompt_context(
     return context
 
 
+async def build_call_prompt_context(
+    thread_id: str,
+    *,
+    repository: PromptContextRepository | None = None,
+    max_turns: int = 24,
+) -> list[PromptContextMessage]:
+    """Build call prompt context from recent selected text and speech rows."""
+
+    if repository is None:
+        async with async_session_factory() as session:
+            return await build_call_prompt_context(
+                thread_id,
+                repository=SqlAlchemyPromptRepository(session),
+                max_turns=max_turns,
+            )
+
+    prompt_thread = await repository.get_prompt_thread(thread_id)
+    context: list[PromptContextMessage] = []
+    system_prompt = _system_prompt(prompt_thread)
+    if system_prompt:
+        context.append({"role": "system", "content": system_prompt})
+
+    turn_messages: list[PromptContextMessage] = []
+    for message in _messages(prompt_thread):
+        if _is_stale(message):
+            continue
+        if _message_kind(message) not in {"user_text", "ai_text", "user_speech", "ai_speech"}:
+            continue
+
+        role = _message_role(message)
+        if role not in {"user", "assistant"}:
+            continue
+
+        content = _selected_content(message)
+        if content:
+            turn_messages.append({"role": role, "content": content})
+
+    if max_turns > 0:
+        turn_messages = turn_messages[-max_turns:]
+    context.extend(turn_messages)
+    return context
+
+
 def _system_prompt(prompt_thread: object) -> str:
     thread = _thread(prompt_thread)
     character_snapshot = _field(prompt_thread, "character_snapshot")
@@ -178,6 +221,11 @@ def _message_role(message: object) -> str | None:
     return str(role) if role is not None else None
 
 
+def _message_kind(message: object) -> str | None:
+    kind = _field(message, "message_kind")
+    return str(kind) if kind is not None else None
+
+
 def _is_stale(message: object) -> bool:
     return bool(_field(message, "stale_after_edit"))
 
@@ -204,5 +252,6 @@ __all__ = [
     "PromptContextMessage",
     "PromptContextRepository",
     "SqlAlchemyPromptRepository",
+    "build_call_prompt_context",
     "build_prompt_context",
 ]

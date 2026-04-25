@@ -12,6 +12,7 @@ UNREACHABLE_MESSAGE = "AI backend unreachable"
 INVALID_RESPONSE_MESSAGE = "AI backend returned an invalid response"
 TRANSCRIPTION_FAILED_MESSAGE = "Transcription failed"
 SYNTHESIS_FAILED_MESSAGE = "Synthesis failed"
+WEBRTC_FAILED_MESSAGE = "Call control request failed"
 
 
 class EngineStatus(BaseModel):
@@ -141,6 +142,72 @@ class AiBackendClient:
             return SynthesisResult.model_validate(response_payload)
         except ValidationError as exc:
             raise _invalid_response() from exc
+
+    async def get_webrtc_status(self, base_url: str) -> dict[str, Any]:
+        response = await self._request("GET", _join_endpoint(base_url, "/webrtc/status"))
+        payload = _json_payload(response)
+        if not isinstance(payload, dict):
+            raise _invalid_response()
+        return dict(payload)
+
+    async def create_webrtc_offer(
+        self,
+        base_url: str,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        response = await self._request(
+            "POST",
+            _join_endpoint(base_url, "/webrtc/offer"),
+            json=dict(payload),
+            processing_message=WEBRTC_FAILED_MESSAGE,
+            processing_code="webrtc_offer_failed",
+            timeout=self._timeout,
+        )
+        response_payload = _json_payload(response)
+        if not isinstance(response_payload, dict):
+            raise _invalid_response()
+        return dict(response_payload)
+
+    async def mute_call(self, base_url: str, session_id: str, muted: bool) -> dict[str, Any]:
+        response = await self._request(
+            "POST",
+            _join_endpoint(base_url, f"/webrtc/sessions/{session_id}/mute"),
+            json={"muted": muted},
+            processing_message=WEBRTC_FAILED_MESSAGE,
+            processing_code="call_control_failed",
+            timeout=self._timeout,
+        )
+        payload = _json_payload(response)
+        if not isinstance(payload, dict):
+            raise _invalid_response()
+        return dict(payload)
+
+    async def interrupt_call(self, base_url: str, session_id: str) -> dict[str, Any]:
+        response = await self._request(
+            "POST",
+            _join_endpoint(base_url, f"/webrtc/sessions/{session_id}/interrupt"),
+            processing_message=WEBRTC_FAILED_MESSAGE,
+            processing_code="call_control_failed",
+            timeout=self._timeout,
+        )
+        payload = _json_payload(response)
+        if not isinstance(payload, dict):
+            raise _invalid_response()
+        return dict(payload)
+
+    async def end_call(self, base_url: str, session_id: str, reason: str) -> dict[str, Any]:
+        response = await self._request(
+            "POST",
+            _join_endpoint(base_url, f"/webrtc/sessions/{session_id}/end"),
+            json={"reason": reason},
+            processing_message=WEBRTC_FAILED_MESSAGE,
+            processing_code="call_control_failed",
+            timeout=self._timeout,
+        )
+        payload = _json_payload(response)
+        if not isinstance(payload, dict):
+            raise _invalid_response()
+        return dict(payload)
 
     async def _request(
         self,
