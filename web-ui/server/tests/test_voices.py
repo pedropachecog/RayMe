@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import httpx
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.ext.asyncio import async_sessionmaker
@@ -411,6 +412,50 @@ def test_delete_referenced_voice_requires_force_and_returns_readable_referents(
     assert detail["referents"] == [
         {"kind": "character", "id": character["id"], "name": "Readable referent"}
     ]
+
+
+def test_ai_backend_voice_processor_uses_stt_route_and_stored_sample_bytes() -> None:
+    from app.api.voices import AiBackendVoiceProcessor
+    from app.domain.ai_backend_client import AiBackendClient
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/base/stt/transcribe":
+            assert b"stored-sample-bytes" in request.content
+            return httpx.Response(
+                200,
+                json={
+                    "status": "ok",
+                    "transcript": "Transcript from stored sample",
+                    "language": "en",
+                    "model": "distil-large-v3",
+                    "compute_type": "int8_float16",
+                    "segments": [],
+                    "speech_detected": True,
+                    "retry_allowed": False,
+                    "manual_transcript_allowed": False,
+                },
+            )
+        return httpx.Response(404)
+
+    async def exercise() -> dict[str, Any]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+            processor = AiBackendVoiceProcessor(
+                AiBackendClient(http_client=http_client),
+                "https://ai.local:9443/base",
+            )
+            return await processor.transcribe(
+                asset_id="voice_asset_route_test",
+                content=b"stored-sample-bytes",
+                content_type="audio/wav",
+            )
+
+    result = asyncio.run(exercise())
+
+    assert result["transcript"] == "Transcript from stored sample"
+    assert [request.url.path for request in requests] == ["/base/stt/transcribe"]
 
 
 def test_voice_library_detail_and_test_play_routes(
