@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 02-16-PLAN.md
-last_updated: "2026-04-25T02:09:46.416Z"
+stopped_at: Completed 02-17-PLAN.md
+last_updated: "2026-04-25T02:16:40.261Z"
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 57
-  completed_plans: 53
-  percent: 93
+  completed_plans: 54
+  percent: 95
 ---
 
 ## Phase Status
@@ -35,6 +35,7 @@ progress:
 - Phase 02 plan 02-12 completed on 2026-04-25: client Voice Lab now uploads samples, transcribes editable references, renders the full six-engine picker, previews optionally, and saves voices without a preview gate.
 - Phase 02 plan 02-14 completed on 2026-04-25: Settings UI now exposes audio defaults, VAD values, compact AI backend residency status, and top-level Voice Lab navigation.
 - Phase 02 plan 02-16 completed on 2026-04-25: license notices, runtime evidence gates, Voice Lab operations, safe cleanup paths, and OMEN-PC live evidence templates now document Phase 2 handoff rules.
+- Phase 02 plan 02-17 completed on 2026-04-25: AI backend now exposes only a non-call `/webrtc` skeleton with explicit non-readiness flags and fixed Phase 3 offer rejection.
 
 ## Current Decisions
 
@@ -69,6 +70,7 @@ progress:
 - Phase 02-16 license policy: TTS notices distinguish package/code licenses from model/weights licenses and keep default engine selection separate from commercial-use clearance.
 - Phase 02-16 runtime evidence policy: runtime promotion requires one-runtime evidence first; split runtime, WSL, Docker, or subprocess paths require logged one-runtime failure evidence while preserving one public AI backend API.
 - Phase 02-16 cleanup policy: Voice Lab cleanup guidance uses exact durable blob paths and protects the canonical OMEN-PC checkout plus reusable TLS material.
+- Phase 02-17 signaling policy: Phase 2 exposes only `/webrtc/status` and `/webrtc/offer`; live media, captions, barge-in, and peer connection allocation remain Phase 3+ scope.
 
 ## Evidence
 
@@ -94,8 +96,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-04-25T02:09:46.390Z
-Stopped at: Completed 02-16-PLAN.md
+Last session: 2026-04-25T02:16:40.261Z
+Stopped at: Completed 02-17-PLAN.md
 Resume file: None
 
 **Planned Phase:** 02 (AI Backend Skeleton & Voice Lab) — 18 plans — 2026-04-24T22:37:51.511Z

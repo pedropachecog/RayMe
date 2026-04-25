@@ -231,7 +231,7 @@ Plans:
 - [x] 02-14-PLAN.md — Client Settings panels and Voice Lab navigation
 - [ ] 02-15-PLAN.md — Character Editor/Gallery default voice assignment and badges
 - [x] 02-16-PLAN.md — License, runtime evidence, Voice Lab, and LAN runbook documentation
-- [ ] 02-17-PLAN.md — Non-call aiortc signaling skeleton
+- [x] 02-17-PLAN.md — Non-call aiortc signaling skeleton
 - [ ] 02-18-PLAN.md — Full local, live OMEN-PC, and Android product-owner acceptance
 
 **UI hint:** yes
@@ -363,7 +363,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 0. Measurement Gate | 0/? | Not started | - |
 | 1. Foundations & Text Chat | 0/? | Not started | - |
-| 2. AI Backend Skeleton & Voice Lab | 13/18 | In Progress | - |
+| 2. AI Backend Skeleton & Voice Lab | 15/18 | In Progress | - |
 | 3. First Working Call (MVP) | 0/? | Not started | - |
 | 4. Call Feel | 0/? | Not started | - |
 | 5. Voice Breadth & Unified Thread Polish | 0/? | Not started | - |
