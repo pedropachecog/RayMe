@@ -29,7 +29,8 @@ Results:
 Additional live checks after deploy:
 
 - Direct AI STT accepted the saved Libb sample and returned a transcript using
-  CPU `int8` fallback.
+  GPU `int8_float16` on deployed commit `f4846ca` after CUDA 12.6 runtime
+  installation.
 - Web `/api/voices/assets/{asset_id}/transcribe` returned HTTP 200 with an
   editable transcript for Libb.
 - Voice Library cleanup verified only `Libb` remained; no generated test voices
