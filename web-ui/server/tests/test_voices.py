@@ -322,14 +322,14 @@ def test_voice_id_is_stable_across_rename_and_character_reference(
     character_after_rename = client.get(f"/api/characters/{character['id']}")
 
     assert assigned.status_code == 200
-    assert assigned.json()["default_voice"]["voice_id"] == voice.voice_id
+    assert assigned.json()["default_voice"]["id"] == voice.voice_id
     assert renamed.status_code == 200
     assert renamed.json()["voice_id"] == voice.voice_id
     assert renamed.json()["name"] == "Renamed display name"
     assert renamed.json()["default_engine"] == "F5-TTS"
     assert renamed.json()["reference_transcript"] == "Editable transcript for saved voice."
     assert character_after_rename.status_code == 200
-    assert character_after_rename.json()["default_voice"]["voice_id"] == voice.voice_id
+    assert character_after_rename.json()["default_voice"]["id"] == voice.voice_id
     assert character_after_rename.json()["default_voice"]["name"] == "Renamed display name"
 
 

@@ -223,6 +223,7 @@ class CharacterService:
 
     async def character_to_response(self, character: Character) -> dict[str, Any]:
         active_portrait = await self._active_portrait(character.id)
+        default_voice = await self._default_voice_response(character.default_voice_id)
         return {
             "id": character.id,
             "name": character.name,
@@ -256,36 +257,49 @@ class CharacterService:
                 else None
             ),
             "default_voice_id": character.default_voice_id,
-            "default_voice": await self._default_voice_response(character.default_voice_id),
+            "default_voice_state": default_voice["state"],
+            "default_voice_label": default_voice["label"],
+            "default_voice": default_voice["voice"],
             "created_at": character.created_at.isoformat() if character.created_at else None,
             "updated_at": character.updated_at.isoformat() if character.updated_at else None,
             "deleted_at": character.deleted_at.isoformat() if character.deleted_at else None,
         }
 
-    async def _default_voice_response(self, voice_id: str | None) -> dict[str, str] | None:
+    async def _default_voice_response(self, voice_id: str | None) -> dict[str, Any]:
         if voice_id is None:
-            return None
+            return {"state": "none", "label": "No voice", "voice": None}
 
         voice = await self.session.get(Voice, voice_id)
         if voice is None:
             return {
-                "voice_id": voice_id,
-                "name": "Voice unavailable",
-                "status": "unavailable",
+                "state": "unavailable",
                 "label": "Voice unavailable",
+                "voice": {
+                    "id": voice_id,
+                    "deleted_name": None,
+                    "deleted_at": None,
+                },
             }
         if voice.deleted_at is not None:
             return {
-                "voice_id": voice.id,
-                "name": voice.name,
-                "status": "unavailable",
+                "state": "unavailable",
                 "label": "Voice unavailable",
+                "voice": {
+                    "id": voice.id,
+                    "deleted_name": voice.name,
+                    "default_engine": voice.default_engine,
+                    "deleted_at": voice.deleted_at.isoformat(),
+                },
             }
         return {
-            "voice_id": voice.id,
-            "name": voice.name,
-            "status": "available",
+            "state": "assigned",
             "label": voice.name,
+            "voice": {
+                "id": voice.id,
+                "name": voice.name,
+                "default_engine": voice.default_engine,
+                "deleted_at": None,
+            },
         }
 
     async def _active_portrait(self, character_id: str) -> CharacterAsset | None:
