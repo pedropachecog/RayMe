@@ -5,10 +5,12 @@ import enum
 import importlib
 import math
 from dataclasses import asdict, is_dataclass
+from pathlib import Path
 from typing import Any
 
 import numpy as np
 import pytest
+import soundfile as sf
 from fastapi.testclient import TestClient
 
 from app.main import create_app
@@ -366,6 +368,21 @@ def test_f5_adapter_uses_runtime_infer_and_returns_wav_bytes() -> None:
     assert result.sample_rate == 24_000
     assert result.duration_ms and result.duration_ms > 0
     assert result.wav_bytes.startswith(b"RIFF")
+
+
+def test_f5_runtime_audio_loader_avoids_torchcodec_dependency(tmp_path: Path) -> None:
+    f5_module = importlib.import_module("app.models.tts_f5")
+    load_audio = getattr(f5_module, "_load_audio_with_soundfile")
+    sample_path = tmp_path / "reference.wav"
+    sample_rate = 16_000
+    tone = np.zeros((sample_rate // 10, 1), dtype=np.float32)
+    sf.write(sample_path, tone, sample_rate, format="WAV")
+
+    audio, actual_sample_rate = load_audio(sample_path)
+
+    assert actual_sample_rate == sample_rate
+    assert tuple(audio.shape) == (1, sample_rate // 10)
+    assert str(audio.device) == "cpu"
 
 
 def test_create_app_includes_tts_router_without_voice_library_persistence_routes() -> None:

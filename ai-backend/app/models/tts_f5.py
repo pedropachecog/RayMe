@@ -80,7 +80,10 @@ class F5TtsAdapter(ImportGatedTtsAdapter):
 
 def _install_f5_runtime_shims() -> None:
     """Avoid F5 import crashes from training deps and librosa/numba."""
+    import torchaudio
     import torchaudio.functional as audio_functional
+
+    torchaudio.load = _load_audio_with_soundfile
 
     def mel_filter(
         *,
@@ -132,6 +135,14 @@ def _install_f5_runtime_shims() -> None:
 
     trainer_mod.Trainer = Trainer
     sys.modules["f5_tts.model.trainer"] = trainer_mod
+
+
+def _load_audio_with_soundfile(filepath: str | Path, *_args: Any, **_kwargs: Any) -> tuple[Any, int]:
+    import torch
+
+    audio, sample_rate = sf.read(filepath, always_2d=True, dtype="float32")
+    channels_first = np.asarray(audio, dtype=np.float32).T.copy()
+    return torch.from_numpy(channels_first), int(sample_rate)
 
 
 def _audio_suffix(content_type: str | None) -> str:
