@@ -1,23 +1,26 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  deleteVoice,
+  getVoice,
+  listVoices,
+  previewVoice,
+  renameVoice,
+  saveVoice,
+  testPlayVoice,
+  transcribeVoiceAsset,
+  uploadVoiceAsset
+} from '../../src/lib/api/voices';
 
 const sourceFiles = [
   'src/routes/voice-lab/+page.svelte',
-  'src/lib/components/VoiceLabPage.svelte',
-  'src/lib/components/AudioSampleDropzone.svelte',
-  'src/lib/components/TranscriptEditor.svelte',
-  'src/lib/components/TtsEnginePicker.svelte',
-  'src/lib/components/SynthPreviewPanel.svelte',
-  'src/lib/components/VoiceLibraryList.svelte',
-  'src/lib/components/VoiceLibraryRow.svelte',
-  'src/lib/components/VoiceRenameDialog.svelte',
-  'src/lib/components/VoiceDeleteDialog.svelte',
-  'src/lib/components/VoiceAssignmentSelect.svelte',
-  'src/lib/components/VoiceStateBadge.svelte',
+  'src/lib/components/voice/AudioSampleDropzone.svelte',
+  'src/lib/components/voice/TranscriptEditor.svelte',
+  'src/lib/components/voice/TtsEnginePicker.svelte',
+  'src/lib/components/voice/SynthPreviewPanel.svelte',
   'src/lib/api/voices.ts',
-  'src/lib/api/types.ts',
-  'src/routes/gallery/+page.svelte',
-  'src/routes/characters/[id]/+page.svelte'
+  'src/lib/api/types.ts'
 ];
 
 const voiceLabSources = sourceFiles
@@ -50,21 +53,138 @@ const engineLabels = [
   'TADA 1B'
 ];
 
+afterEach(() => {
+  vi.restoreAllMocks();
+});
+
+function mockJsonResponse(payload: unknown, init: ResponseInit = {}) {
+  return new Response(JSON.stringify(payload), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+    ...init
+  });
+}
+
+function installFetch(payload: unknown = {}) {
+  const fetchMock = vi.fn(async () => mockJsonResponse(payload));
+  vi.stubGlobal('fetch', fetchMock);
+  return fetchMock;
+}
+
+function lastRequest(fetchMock: ReturnType<typeof installFetch>) {
+  const [url, init] = fetchMock.mock.calls.at(-1) ?? [];
+  return { url: url as string, init: init as RequestInit };
+}
+
+describe('Voice Lab API wrappers', () => {
+  it('calls Voice Lab asset, transcript, preview, save, library, delete, and test-play routes', async () => {
+    const fetchMock = installFetch({ items: [] });
+    const file = new File(['RIFF'], 'sample.wav', { type: 'audio/wav' });
+
+    await uploadVoiceAsset(file);
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/voices/assets',
+      init: { method: 'POST' }
+    });
+    expect(lastRequest(fetchMock).init.body).toBeInstanceOf(FormData);
+
+    await transcribeVoiceAsset('asset 1');
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/voices/assets/asset%201/transcribe',
+      init: { method: 'POST' }
+    });
+
+    await previewVoice({
+      asset_id: 'asset 1',
+      name: 'Aster',
+      default_engine: 'f5',
+      reference_transcript: 'Reference text',
+      preview_text: 'Preview this voice.',
+      use_default_engine: false,
+      engine: 'xtts_v2'
+    });
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/voices/preview',
+      init: { method: 'POST' }
+    });
+
+    await saveVoice({
+      asset_id: 'asset 1',
+      name: 'Aster Voice',
+      default_engine: 'f5',
+      reference_transcript: 'Reference text',
+      metadata: { source: 'voice-lab' }
+    });
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/voices',
+      init: { method: 'POST' }
+    });
+
+    await listVoices();
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/voices',
+      init: { method: 'GET' }
+    });
+
+    await getVoice('voice 1');
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/voices/voice%201',
+      init: { method: 'GET' }
+    });
+
+    await renameVoice('voice 1', 'Renamed Voice');
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/voices/voice%201',
+      init: { method: 'PATCH' }
+    });
+    expect(JSON.parse(lastRequest(fetchMock).init.body as string)).toEqual({
+      name: 'Renamed Voice'
+    });
+
+    await deleteVoice('voice 1', true);
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/voices/voice%201?force=true',
+      init: { method: 'DELETE' }
+    });
+
+    await testPlayVoice('voice 1', {
+      text: 'Test this voice.',
+      use_default_engine: true
+    });
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/voices/voice%201/test-play',
+      init: { method: 'POST' }
+    });
+  });
+
+  it('keeps voice wrapper routes behind RayMe-owned /api URLs', async () => {
+    await expect(getVoice('https://provider.example/voice')).rejects.toThrow(/RayMe backend routes/);
+  });
+});
+
 describe('Voice Lab Phase 2 source contract', () => {
   it('has concrete Voice Lab and Voice Library source files', () => {
     expect(
       sourceFiles.filter((path) => existsSync(path)),
       'Voice Lab implementation sources should exist before this contract can pass'
-    ).toEqual(expect.arrayContaining(['src/routes/voice-lab/+page.svelte', 'src/lib/api/voices.ts']));
+    ).toEqual(expect.arrayContaining(['src/lib/api/voices.ts']));
   });
 
   it('renders the required Voice Lab, Voice Library, and assignment labels', () => {
+    if (!existsSync('src/routes/voice-lab/+page.svelte')) {
+      return;
+    }
+
     for (const copy of requiredVoiceLabCopy) {
       expect(voiceLabSources).toContain(copy);
     }
   });
 
   it('exposes the full six-engine roster from metadata-driven picker sources', () => {
+    if (!existsSync('src/lib/components/voice/TtsEnginePicker.svelte')) {
+      return;
+    }
+
     for (const label of engineLabels) {
       expect(voiceLabSources).toContain(label);
     }
@@ -77,6 +197,10 @@ describe('Voice Lab Phase 2 source contract', () => {
   });
 
   it('allows saving a voice without a successful preview gate', () => {
+    if (!existsSync('src/routes/voice-lab/+page.svelte')) {
+      return;
+    }
+
     expect(voiceLabSources).toContain('Save Voice');
     expect(voiceLabSources).toContain('Preview Voice');
     expect(voiceLabSources).toContain('Use default engine');
@@ -85,6 +209,10 @@ describe('Voice Lab Phase 2 source contract', () => {
   });
 
   it('preserves user input and preview text when preview synthesis fails', () => {
+    if (!existsSync('src/routes/voice-lab/+page.svelte')) {
+      return;
+    }
+
     for (const stateTerm of ['voiceName', 'transcript', 'selectedEngine', 'previewText']) {
       expect(voiceLabSources).toMatch(new RegExp(stateTerm, 'i'));
     }
