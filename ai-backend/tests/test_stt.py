@@ -11,6 +11,9 @@ from typing import Any
 import numpy as np
 import pytest
 import soundfile as sf
+from fastapi.testclient import TestClient
+
+from app.main import create_app
 
 EXPECTED_WHISPER_OPTIONS = {
     "language": "en",
@@ -24,6 +27,7 @@ EXPECTED_BLOCKLIST_PHRASES = {
     "thanks for watching",
     "subscribe to my channel",
 }
+ROUTE_CONTRACT = "POST /stt/transcribe"
 
 
 class FakeWhisperSegment:
@@ -59,6 +63,20 @@ class SpeechVad:
 class NoSpeechVad(SpeechVad):
     def speech_timestamps(self, audio: Any) -> list[dict[str, int]]:
         return []
+
+
+class RouteFakeSttAdapter:
+    def __init__(self, result: dict[str, Any] | None = None, *, fail: bool = False) -> None:
+        self.result = result
+        self.fail = fail
+        self.calls: list[dict[str, Any]] = []
+
+    def transcribe(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(kwargs)
+        if self.fail:
+            raise RuntimeError("Traceback: CUDA out of memory in C:\\secret\\model.bin")
+        assert self.result is not None
+        return self.result
 
 
 def _complete(value: Any) -> Any:
@@ -255,3 +273,102 @@ def test_silero_vad_adapter_uses_configurable_threshold_and_silence() -> None:
     assert calls[0]["kwargs"]["threshold"] == 0.42
     assert calls[0]["kwargs"]["min_silence_duration_ms"] == 900
     assert calls[0]["kwargs"]["sampling_rate"] == 16000
+
+
+def _wav_upload() -> tuple[str, bytes, str]:
+    samples = np.zeros(1600, dtype=np.float32)
+    source = BytesIO()
+    sf.write(source, samples, 16000, format="WAV")
+    return ("../unsafe-name.wav", source.getvalue(), "audio/wav")
+
+
+def _client_with_stt(fake_stt: RouteFakeSttAdapter, vad_adapter: Any | None = None) -> TestClient:
+    app = create_app()
+    app.state.stt_adapter = fake_stt
+    app.state.vad_adapter = vad_adapter or SpeechVad()
+    return TestClient(app)
+
+
+def test_transient_stt_route_accepts_upload_and_returns_contract_fields() -> None:
+    fake_stt = RouteFakeSttAdapter(
+        {
+            "status": "accepted",
+            "transcript": "Hello from the sample",
+            "segments": [{"start": 0.0, "end": 1.0, "text": "Hello from the sample"}],
+            "language": "en",
+            "model": "distil-large-v3",
+            "compute_type": "int8_float16",
+            "speech_detected": True,
+            "retry_allowed": False,
+            "manual_transcript_allowed": True,
+        }
+    )
+    client = _client_with_stt(fake_stt)
+
+    response = client.post(
+        "/stt/transcribe",
+        files={"file": _wav_upload()},
+        data={"vad_threshold": "0.42", "vad_end_silence_ms": "900"},
+    )
+
+    assert ROUTE_CONTRACT
+    assert response.status_code == 200
+    payload = response.json()
+    assert set(payload) >= {
+        "status",
+        "transcript",
+        "segments",
+        "language",
+        "model",
+        "compute_type",
+        "speech_detected",
+        "retry_allowed",
+        "manual_transcript_allowed",
+    }
+    assert payload["manual_transcript_allowed"] is True
+    assert fake_stt.calls[0]["vad_threshold"] == 0.42
+    assert fake_stt.calls[0]["vad_end_silence_ms"] == 900
+    assert os.path.basename(fake_stt.calls[0]["audio"]).startswith("rayme-stt-")
+    assert "unsafe-name" not in os.path.basename(fake_stt.calls[0]["audio"])
+
+
+def test_transient_stt_route_preserves_manual_fallback_response() -> None:
+    fake_stt = RouteFakeSttAdapter(
+        {
+            "status": "needs_manual_transcript",
+            "transcript": "",
+            "segments": [],
+            "language": "en",
+            "model": "distil-large-v3",
+            "compute_type": "int8_float16",
+            "speech_detected": False,
+            "retry_allowed": True,
+            "manual_transcript_allowed": True,
+        }
+    )
+    client = _client_with_stt(fake_stt, NoSpeechVad())
+
+    response = client.post("/stt/transcribe", files={"file": _wav_upload()})
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "needs_manual_transcript"
+    assert payload["retry_allowed"] is True
+    assert payload["manual_transcript_allowed"] is True
+
+
+def test_transient_stt_route_returns_sanitized_failure_with_manual_fallback() -> None:
+    client = _client_with_stt(RouteFakeSttAdapter(fail=True))
+
+    response = client.post("/stt/transcribe", files={"file": _wav_upload()})
+
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert detail["code"] == "stt_failed"
+    assert detail["message"] == "Transcription failed"
+    assert detail["retry_allowed"] is True
+    assert detail["manual_transcript_allowed"] is True
+    rendered = response.text
+    assert "CUDA out of memory" not in rendered
+    assert "Traceback" not in rendered
+    assert "C:\\" not in rendered
