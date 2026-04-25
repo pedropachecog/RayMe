@@ -123,6 +123,10 @@ export function createCallStore(options: CallStoreOptions = {}): CallStore {
       if (options?.source === 'button') {
         cleanupActiveWork();
       }
+      if (activeAiTurn) {
+        activeAiTurn = { ...activeAiTurn, interrupted: true };
+        transcript = transcript.map((turn) => (turn.id === activeAiTurn?.id ? activeAiTurn : turn));
+      }
       state = 'interrupted';
     },
     setServerMuted(muted: boolean) {

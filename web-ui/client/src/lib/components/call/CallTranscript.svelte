@@ -15,7 +15,7 @@
   }
 
   function chipFor(turn: CallTranscriptTurn): 'Final' | 'Streaming' | 'Interrupted' {
-    if (interrupted && turn.role === 'assistant') {
+    if ((interrupted && turn.role === 'assistant') || turn.interrupted) {
       return 'Interrupted';
     }
 

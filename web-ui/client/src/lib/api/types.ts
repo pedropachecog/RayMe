@@ -238,6 +238,7 @@ export interface CallTranscriptTurn {
   role: 'user' | 'assistant' | 'event';
   type?: 'user_speech' | 'ai_speech' | 'call_start' | 'call_end' | string;
   text: string;
+  interrupted?: boolean;
   created_at?: string | null;
 }
 
@@ -255,6 +256,11 @@ export type CallEvent =
       session_id: string;
       turn_id?: string | null;
       text?: string | null;
+    }
+  | {
+      type: 'ai_done';
+      session_id: string;
+      turn_id?: string | null;
     }
   | {
       type: 'muted';

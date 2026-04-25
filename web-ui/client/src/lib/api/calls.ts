@@ -75,10 +75,15 @@ export function sendCallOffer(
   });
 }
 
-export function submitCallTurn(callId: string, payload: CallTurnRequest): Promise<Response> {
+export function submitCallTurn(
+  callId: string,
+  payload: CallTurnRequest,
+  options: { signal?: AbortSignal } = {}
+): Promise<Response> {
   return fetch(`/api/calls/${encodeURIComponent(callId)}/turns`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal: options.signal,
     body: JSON.stringify(payload)
   });
 }

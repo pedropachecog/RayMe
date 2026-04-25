@@ -36,6 +36,31 @@ test('starts a call from a character card Start Call control', async ({ page }) 
   assertNoBrowserErrors();
 });
 
+test('streams two user to AI cycles in one call and returns durable speech rows', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMultiTurnCallRoutes(page);
+
+  await page.goto(`/chat/${threadId}`);
+  await page.getByRole('button', { name: 'Start call' }).click();
+
+  await expect(page.getByText('First user turn.')).toBeVisible();
+  await expect(page.getByText('First AI answer.')).toBeVisible();
+  await expect(page.getByText('Second user turn.')).toBeVisible();
+  await expect(page.getByText('Second AI answer.')).toBeVisible();
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+
+  await page.getByRole('button', { name: 'End Call' }).click();
+  await page.getByRole('button', { name: 'Return to Thread' }).click();
+
+  const rows = page.locator('[data-message-kind="ai_speech"]');
+  await expect(rows).toHaveCount(2);
+  await expect(rows.nth(0)).toContainText('First AI answer.');
+  await expect(rows.nth(1)).toContainText('Second AI answer.');
+  assertNoBrowserErrors();
+});
+
 async function installCallStartRoutes(page: Page) {
   const character = makeCharacter({
     id: characterId,
@@ -91,4 +116,94 @@ async function installCallStartRoutes(page: Page) {
   await page.route('**/webrtc/offer', async (route) => {
     await fulfillJson(route, { type: 'answer', sdp: 'v=0\r\n' });
   });
+}
+
+async function installMultiTurnCallRoutes(page: Page) {
+  let ended = false;
+  let turnCount = 0;
+  const thread = makeThreadDetail({
+    id: threadId,
+    character_id: characterId,
+    title: 'Call Start Aster',
+    character_name: 'Call Start Aster',
+    messages: []
+  });
+  const finalRows = [
+    callRow('call-start-row', 'call_start', 0, 'Call started'),
+    callRow('user-speech-1', 'user_speech', 1, 'First user turn.'),
+    callRow('ai-speech-1', 'ai_speech', 2, 'First AI answer.'),
+    callRow('user-speech-2', 'user_speech', 3, 'Second user turn.'),
+    callRow('ai-speech-2', 'ai_speech', 4, 'Second AI answer.'),
+    callRow('call-end-row', 'call_end', 5, 'Call ended')
+  ];
+
+  await page.route(`**/api/threads/${threadId}`, async (route) => {
+    await fulfillJson(route, { ...thread, messages: ended ? finalRows : [] });
+  });
+  await page.route('**/api/characters/*/portrait**', async (route) => {
+    await route.fulfill({ status: 204 });
+  });
+  await page.route('**/api/calls/start', async (route) => {
+    await fulfillJson(route, {
+      call_id: 'call-start-01',
+      session_id: 'rtc-call-start-01',
+      thread_id: threadId,
+      state: 'listening',
+      events: [
+        {
+          type: 'user_final',
+          session_id: 'rtc-call-start-01',
+          turn_id: 'turn-1',
+          text: 'First user turn.'
+        },
+        {
+          type: 'user_final',
+          session_id: 'rtc-call-start-01',
+          turn_id: 'turn-2',
+          text: 'Second user turn.'
+        }
+      ]
+    }, 201);
+  });
+  await page.route('**/api/calls/*/turns', async (route) => {
+    turnCount += 1;
+    const text = turnCount === 1 ? 'First AI answer.' : 'Second AI answer.';
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: [
+        `data: ${JSON.stringify({ type: 'ai_token', turn_id: `turn-${turnCount}`, text })}`,
+        '',
+        `data: ${JSON.stringify({ type: 'ai_done', turn_id: `turn-${turnCount}` })}`,
+        '',
+        ''
+      ].join('\n')
+    });
+  });
+  await page.route('**/api/calls/*/end', async (route) => {
+    ended = true;
+    await fulfillJson(route, { state: 'ended', duration_ms: 18_000 });
+  });
+  await page.route('**/api/calls/*/interrupt', async (route) => {
+    await fulfillJson(route, { state: 'listening' });
+  });
+  await page.route('**/api/calls/*/mute', async (route) => {
+    await fulfillJson(route, { muted: true });
+  });
+}
+
+function callRow(id: string, message_kind: string, sequence: number, content_text: string) {
+  return {
+    id,
+    thread_id: threadId,
+    message_kind,
+    role: message_kind === 'user_speech' ? 'user' : message_kind === 'ai_speech' ? 'assistant' : 'event',
+    sequence,
+    content_text,
+    selected_alternate_id: null,
+    alternates: [],
+    stale_after_edit: false,
+    created_at: null,
+    updated_at: null
+  };
 }

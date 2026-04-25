@@ -4,9 +4,9 @@
   import { ArrowLeft, RefreshCw, Settings, UserRound } from 'lucide-svelte';
   import { onDestroy, onMount } from 'svelte';
 
-  import { CallApiError, endCall, interruptCall, setCallMuted, startCall } from '$lib/api/calls';
+  import { CallApiError, endCall, interruptCall, setCallMuted, startCall, submitCallTurn } from '$lib/api/calls';
   import { loadThread } from '$lib/api/chat';
-  import type { CallStateName, CallTranscriptTurn, ThreadDetail } from '$lib/api/types';
+  import type { CallEvent, CallStateName, CallTranscriptTurn, ThreadDetail } from '$lib/api/types';
   import { unlockCallAudioContext } from '$lib/call/audio';
   import CallToolbar from '$lib/components/call/CallToolbar.svelte';
   import CallTranscript from '$lib/components/call/CallTranscript.svelte';
@@ -25,11 +25,18 @@
 
   interface StartEvent {
     type?: string;
+    session_id?: string;
+    turn_id?: string;
     state?: string;
     listeningRms?: number;
     speakingRms?: number;
     text?: string;
   }
+
+  type CallTurnStreamEvent =
+    | { type: 'ai_token'; turn_id?: string; text?: string }
+    | { type: 'ai_done'; turn_id?: string }
+    | { type: 'error'; turn_id?: string; code?: string; message?: string };
 
   let thread = $state<ThreadDetail | null>(null);
   let loadState = $state<'loading' | 'ready' | 'error'>('loading');
@@ -44,6 +51,8 @@
   let blockingPanel = $state<BlockingPanel | null>(null);
   let ending = $state(false);
   let timers: number[] = [];
+  let activeTurnAbort: AbortController | null = null;
+  let activeTurnReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'RayMe');
@@ -61,6 +70,7 @@
 
   onDestroy(() => {
     clearEventTimers();
+    cancelActiveTurnStream();
   });
 
   async function initializeCall() {
@@ -141,8 +151,21 @@
         if (typeof event.speakingRms === 'number') {
           speakingRms = event.speakingRms;
         }
-        if (event.type === 'ai_audio_started' && event.text) {
-          appendAiText(event.text);
+        if (event.type === 'user_final' && event.text) {
+          void handleCallDataEvent({
+            type: 'user_final',
+            session_id: event.session_id ?? sessionId,
+            turn_id: event.turn_id ?? `user-final-${Date.now()}`,
+            text: event.text
+          });
+        }
+        if (event.type === 'ai_audio_started') {
+          void handleCallDataEvent({
+            type: 'ai_audio_started',
+            session_id: event.session_id ?? sessionId,
+            turn_id: event.turn_id ?? null,
+            text: event.text ?? null
+          });
         }
       }, index * 800);
       timers = [...timers, timer];
@@ -171,7 +194,147 @@
     }
   }
 
-  function appendAiText(text: string) {
+  async function handleCallDataEvent(event: CallEvent) {
+    if (event.type === 'user_final') {
+      appendUserFinal(event.text, event.turn_id);
+      await submitUserTurn(event);
+      return;
+    }
+
+    if (event.type === 'ai_audio_started') {
+      callState = 'speaking';
+      if (event.text) {
+        appendAiText(event.text, event.turn_id ?? undefined);
+      }
+      return;
+    }
+
+    if (event.type === 'ai_done') {
+      finishAiTurn();
+      return;
+    }
+
+    if (event.type === 'failed') {
+      callState = 'failed';
+      blockingPanel = {
+        body: 'The call ended because the connection dropped. Your transcript so far was saved.',
+        action: 'Return to Thread',
+        tone: 'danger'
+      };
+    }
+  }
+
+  function appendUserFinal(text: string, turnId?: string) {
+    transcript = [
+      ...transcript,
+      {
+        id: `user-${turnId ?? Date.now()}`,
+        turn_id: turnId,
+        role: 'user',
+        type: 'user_speech',
+        text,
+        created_at: null
+      }
+    ];
+    activeAiText = '';
+    callState = 'thinking';
+  }
+
+  async function submitUserTurn(event: Extract<CallEvent, { type: 'user_final' }>) {
+    if (!callId || !sessionId) {
+      return;
+    }
+
+    cancelActiveTurnStream();
+    activeTurnAbort = new AbortController();
+
+    try {
+      const response = await submitCallTurn(
+        callId,
+        {
+          session_id: sessionId,
+          turn_id: event.turn_id,
+          text: event.text,
+          source: 'user_final'
+        },
+        { signal: activeTurnAbort.signal }
+      );
+      await readTurnStream(response);
+    } catch (error) {
+      if ((error as DOMException)?.name !== 'AbortError') {
+        callState = 'failed';
+      }
+    } finally {
+      activeTurnAbort = null;
+      activeTurnReader = null;
+    }
+  }
+
+  async function readTurnStream(response: Response) {
+    if (!response.body) {
+      throw new Error('No call turn stream');
+    }
+
+    activeTurnReader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (activeTurnReader) {
+      const { value, done } = await activeTurnReader.read();
+      if (done) {
+        break;
+      }
+      buffer += decoder.decode(value, { stream: true });
+      buffer = dispatchTurnEvents(buffer);
+    }
+
+    buffer += decoder.decode();
+    dispatchTurnEvents(`${buffer}\n\n`);
+  }
+
+  function dispatchTurnEvents(buffer: string): string {
+    const parts = buffer.split(/\r?\n\r?\n/);
+    const remainder = parts.pop() ?? '';
+
+    for (const part of parts) {
+      const data = part
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith('data: '))
+        .map((line) => line.slice('data: '.length))
+        .join('\n');
+      if (!data) {
+        continue;
+      }
+      try {
+        handleTurnStreamEvent(JSON.parse(data) as CallTurnStreamEvent);
+      } catch {
+        // Malformed stream events are ignored; the server emits fixed public errors.
+      }
+    }
+
+    return remainder;
+  }
+
+  function handleTurnStreamEvent(event: CallTurnStreamEvent) {
+    if (event.type === 'ai_token' && event.text) {
+      if (callState === 'thinking') {
+        callState = 'speaking';
+      }
+      appendAiText(event.text, event.turn_id);
+      return;
+    }
+
+    if (event.type === 'ai_done') {
+      finishAiTurn();
+      return;
+    }
+
+    if (event.type === 'error') {
+      callState = 'listening';
+    }
+  }
+
+  function appendAiText(text: string, turnId?: string) {
     activeAiText = `${activeAiText}${text}`;
     const existing = transcript.at(-1);
     if (existing?.role === 'assistant' && existing.type === 'ai_speech') {
@@ -185,12 +348,18 @@
       ...transcript,
       {
         id: `active-ai-${Date.now()}`,
+        turn_id: turnId,
         role: 'assistant',
         type: 'ai_speech',
         text: activeAiText,
         created_at: null
       }
     ];
+  }
+
+  function finishAiTurn() {
+    activeAiText = '';
+    callState = 'listening';
   }
 
   async function toggleMute() {
@@ -211,6 +380,8 @@
   }
 
   async function interrupt() {
+    cancelActiveTurnStream();
+    markLastAiTurnInterrupted();
     if (callId && sessionId) {
       try {
         await interruptCall(callId, sessionId);
@@ -227,9 +398,29 @@
     }, 250);
   }
 
+  function cancelActiveTurnStream() {
+    activeTurnAbort?.abort();
+    activeTurnReader?.cancel().catch(() => undefined);
+    activeTurnAbort = null;
+    activeTurnReader = null;
+  }
+
+  function markLastAiTurnInterrupted() {
+    for (let index = transcript.length - 1; index >= 0; index -= 1) {
+      const turn = transcript[index];
+      if (turn.role === 'assistant' && turn.type === 'ai_speech') {
+        transcript = transcript.map((current, currentIndex) =>
+          currentIndex === index ? { ...current, interrupted: true } : current
+        );
+        break;
+      }
+    }
+  }
+
   async function hangup() {
     ending = true;
     clearEventTimers();
+    cancelActiveTurnStream();
 
     try {
       if (callId && sessionId) {
@@ -382,7 +573,7 @@
   {:else}
     <div class="call-canvas">
       <VoiceVisualizer state={visualState} {listeningRms} {speakingRms} />
-      <CallTranscript {transcript} {activeAiText} interrupted={callState === 'interrupted'} />
+      <CallTranscript turns={transcript} {activeAiText} interrupted={callState === 'interrupted'} />
     </div>
 
     <div class="toolbar-wrap">

@@ -6,6 +6,7 @@ export const RAYME_EVENTS_CHANNEL = 'rayme-events';
 const CALL_EVENT_TYPES = new Set<CallEvent['type']>([
   'user_final',
   'ai_audio_started',
+  'ai_done',
   'muted',
   'interrupted',
   'ended',
