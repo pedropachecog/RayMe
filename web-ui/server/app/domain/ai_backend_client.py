@@ -111,7 +111,7 @@ class AiBackendClient:
     ) -> TranscriptionResult:
         response = await self._request(
             "POST",
-            _join_endpoint(base_url, "/transcribe"),
+            _join_endpoint(base_url, "/stt/transcribe"),
             files={"file": (filename, audio_bytes, content_type)},
             processing_message=TRANSCRIPTION_FAILED_MESSAGE,
             processing_code="transcription_failed",

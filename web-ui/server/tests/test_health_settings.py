@@ -449,7 +449,7 @@ async def test_ai_backend_client_maps_status_transcription_and_synthesis_shapes(
                     "vram_headroom_mb": 8700,
                 },
             )
-        if request.url.path == "/base/transcribe":
+        if request.url.path == "/base/stt/transcribe":
             return httpx.Response(
                 200,
                 json={
@@ -506,7 +506,7 @@ async def test_ai_backend_client_maps_status_transcription_and_synthesis_shapes(
     assert synthesis.content_type == "audio/wav"
     assert [request.url.path for request in requests] == [
         "/base/health",
-        "/base/transcribe",
+        "/base/stt/transcribe",
         "/base/synthesize",
     ]
 
