@@ -226,7 +226,7 @@ Plans:
 - [x] 02-09-PLAN.md — Web UI voice domain/API for upload, transcribe, save, library, delete, and test-play
 - [x] 02-10-PLAN.md — Web UI Settings service/API for save-audio, VAD values, and AI backend status
 - [x] 02-11-PLAN.md — Character default voice server persistence and unavailable state
-- [ ] 02-12-PLAN.md — Client Voice Lab creation flow with six-engine picker and optional preview
+- [x] 02-12-PLAN.md — Client Voice Lab creation flow with six-engine picker and optional preview
 - [ ] 02-13-PLAN.md — Client Voice Library list, rename, delete, and test-play
 - [x] 02-14-PLAN.md — Client Settings panels and Voice Lab navigation
 - [ ] 02-15-PLAN.md — Character Editor/Gallery default voice assignment and badges
@@ -363,7 +363,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 0. Measurement Gate | 0/? | Not started | - |
 | 1. Foundations & Text Chat | 0/? | Not started | - |
-| 2. AI Backend Skeleton & Voice Lab | 8/18 | In Progress | - |
+| 2. AI Backend Skeleton & Voice Lab | 13/18 | In Progress | - |
 | 3. First Working Call (MVP) | 0/? | Not started | - |
 | 4. Call Feel | 0/? | Not started | - |
 | 5. Voice Breadth & Unified Thread Polish | 0/? | Not started | - |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 02-14-PLAN.md
-last_updated: "2026-04-25T01:32:23.100Z"
+stopped_at: Completed 02-12-PLAN.md
+last_updated: "2026-04-25T02:01:24.545Z"
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 57
-  completed_plans: 51
-  percent: 89
+  completed_plans: 52
+  percent: 91
 ---
 
 ## Phase Status
@@ -32,6 +32,7 @@ progress:
 - Phase 02 plan 02-09 completed on 2026-04-25: durable Web UI voice service/API now uploads, transcribes, previews, saves without preview gate, lists, reads, renames, soft-deletes with referents, and test-plays voices.
 - Phase 02 plan 02-10 completed on 2026-04-25: Settings now persists audio/VAD/STT/TTS defaults, enforces VAD bounds, and returns compact AI backend residency status.
 - Phase 02 plan 02-11 completed on 2026-04-25: character writes now persist validated default voice IDs and character reads hydrate `none`, `assigned`, and `unavailable` voice states.
+- Phase 02 plan 02-12 completed on 2026-04-25: client Voice Lab now uploads samples, transcribes editable references, renders the full six-engine picker, previews optionally, and saves voices without a preview gate.
 - Phase 02 plan 02-14 completed on 2026-04-25: Settings UI now exposes audio defaults, VAD values, compact AI backend residency status, and top-level Voice Lab navigation.
 
 ## Current Decisions
@@ -60,6 +61,8 @@ progress:
 - Phase 02-09 voice API policy: voice save persists metadata plus sample linkage without a preview-success gate; rename updates display name only; Web UI transcription uses the AI backend `/stt/transcribe` route with stored sample bytes.
 - Phase 02-10 Settings policy: server-side Settings persists `stt_model` and `tts_default_engine` with audio/VAD defaults, uses compact AI backend status fields matching the RayMe-owned bridge, and unit tests override backend status dependencies instead of probing live LAN services.
 - Phase 02-11 character default voice policy: assignments use stable voice IDs, reject missing or soft-deleted voices on write, and keep deleted references visible as `Voice unavailable` with tombstoned voice names.
+- Phase 02-12 Voice Lab policy: client save is gated by sample asset, name, transcript, and selected engine only; preview success is optional and never required.
+- Phase 02-12 engine-picker policy: Voice Lab renders the full six-engine roster from Settings AI backend metadata with a full-roster fallback.
 - Phase 02-14 Settings UI policy: browser saves include audio, VAD, STT, and TTS defaults before every endpoint test, and backend residency stays a compact endpoint-panel summary rather than a dashboard.
 - Phase 02-14 navigation policy: Voice Lab is a real top-level destination; Call navigation remains out of scope for Phase 2.
 
@@ -87,8 +90,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-04-25T01:32:23.074Z
-Stopped at: Completed 02-14-PLAN.md
+Last session: 2026-04-25T02:01:24.521Z
+Stopped at: Completed 02-12-PLAN.md
 Resume file: None
 
 **Planned Phase:** 02 (AI Backend Skeleton & Voice Lab) — 18 plans — 2026-04-24T22:37:51.511Z
