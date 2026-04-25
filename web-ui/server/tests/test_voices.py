@@ -384,12 +384,11 @@ def test_force_delete_tombstones_voice_and_characters_show_unavailable_state(
     assert voice_detail.json()["status"] == "deleted"
     assert voice_detail.json()["unavailable_label"] == "Voice unavailable"
     assert character_detail.status_code == 200
-    assert character_detail.json()["default_voice"] == {
-        "voice_id": voice.voice_id,
-        "name": "Referenced voice",
-        "status": "unavailable",
-        "label": "Voice unavailable",
-    }
+    assert character_detail.json()["default_voice_id"] == voice.voice_id
+    assert character_detail.json()["default_voice_state"] == "unavailable"
+    assert character_detail.json()["default_voice_label"] == "Voice unavailable"
+    assert character_detail.json()["default_voice"]["id"] == voice.voice_id
+    assert character_detail.json()["default_voice"]["deleted_name"] == "Referenced voice"
 
 
 def test_delete_referenced_voice_requires_force_and_returns_readable_referents(

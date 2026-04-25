@@ -202,6 +202,68 @@ def test_character_default_voice_id_rejects_missing_or_deleted_voice(
     assert no_voice.json()["default_voice_id"] is None
 
 
+def test_character_default_voice_response_hydrates_none_and_assigned_states(
+    character_client: tuple[TestClient, Path, async_sessionmaker],
+) -> None:
+    client, _, sessionmaker = character_client
+    voice_id = "voice_assigned_default"
+    asyncio.run(_insert_voice(sessionmaker, voice_id, name="Assigned voice"))
+
+    no_voice = client.post("/api/characters", json=_character_payload())
+    assigned = client.post(
+        "/api/characters",
+        json=_character_payload(
+            name="Character with assigned voice",
+            default_voice_id=voice_id,
+        ),
+    )
+    listed = client.get("/api/characters")
+
+    assert no_voice.status_code == 201
+    assert no_voice.json()["default_voice_id"] is None
+    assert no_voice.json()["default_voice_state"] == "none"
+    assert no_voice.json()["default_voice_label"] == "No voice"
+    assert no_voice.json()["default_voice"] is None
+    assert assigned.status_code == 201
+    assert assigned.json()["default_voice_id"] == voice_id
+    assert assigned.json()["default_voice_state"] == "assigned"
+    assert assigned.json()["default_voice_label"] == "Assigned voice"
+    assert assigned.json()["default_voice"] == {
+        "id": voice_id,
+        "name": "Assigned voice",
+        "default_engine": "F5-TTS",
+        "deleted_at": None,
+    }
+    assert [item["default_voice_state"] for item in listed.json()["items"]] == [
+        "none",
+        "assigned",
+    ]
+
+
+def test_character_default_voice_response_keeps_deleted_reference_unavailable(
+    character_client: tuple[TestClient, Path, async_sessionmaker],
+) -> None:
+    client, _, sessionmaker = character_client
+    voice_id = "voice_deleted_reference"
+    asyncio.run(_insert_voice(sessionmaker, voice_id, name="Deleted reference voice"))
+    character = client.post(
+        "/api/characters",
+        json=_character_payload(default_voice_id=voice_id),
+    )
+    assert character.status_code == 201
+    asyncio.run(_soft_delete_voice(sessionmaker, voice_id))
+
+    response = client.get(f"/api/characters/{character.json()['id']}")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["default_voice_id"] == voice_id
+    assert body["default_voice_state"] == "unavailable"
+    assert body["default_voice_label"] == "Voice unavailable"
+    assert body["default_voice"]["id"] == voice_id
+    assert body["default_voice"]["deleted_name"] == "Deleted reference voice"
+
+
 def test_character_delete_keeps_threads_and_messages_queryable(
     character_client: tuple[TestClient, Path, async_sessionmaker],
 ) -> None:
