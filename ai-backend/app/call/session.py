@@ -10,6 +10,8 @@ from typing import Any
 import numpy as np
 
 from app.call.events import (
+    AI_AUDIO_STARTED_EVENT,
+    AI_DONE_EVENT,
     ENDED_EVENT,
     FAILED_EVENT,
     INTERRUPTED_EVENT,
@@ -21,11 +23,13 @@ from app.call.events import (
 )
 from app.call.tracks import (
     InboundAudioFrameNormalizer,
+    OutboundAudioBuffer,
     PcmAudioFrame,
     normalize_inbound_audio_frame,
     write_pcm_frames_to_temp_wav,
 )
 from app.config import AiBackendSettings
+from app.models.tts_registry import TtsSynthesisInput
 
 EventSink = Callable[[dict[str, Any]], Awaitable[None] | None]
 
@@ -52,6 +56,8 @@ class CallSession:
         stt_adapter: Any | None = None,
         settings: AiBackendSettings | None = None,
         event_sink: EventSink | None = None,
+        tts_adapter: Any | None = None,
+        outbound_audio_track: Any | None = None,
     ) -> None:
         self.session_id = session_id
         self.thread_id = thread_id
@@ -64,6 +70,9 @@ class CallSession:
         self.stt_adapter = stt_adapter
         self.settings = settings or AiBackendSettings()
         self.event_sink = event_sink
+        self.tts_adapter = tts_adapter
+        self.outbound_audio_track = outbound_audio_track
+        self.outbound_audio_buffer = OutboundAudioBuffer()
         self.state = "listening"
         self.muted = False
         self.incoming_audio_frames = 0
@@ -79,6 +88,7 @@ class CallSession:
         self._turn_index = 0
         self._speech_seen = False
         self._silence_ms = 0
+        self._cancelled_ai_turns: set[str] = set()
 
     @property
     def active_ai_turn(self) -> Any | None:
@@ -179,18 +189,109 @@ class CallSession:
 
     async def interrupt(self) -> dict[str, Any]:
         self.interrupted = True
-        active = self.active_turn_task
-        if active is not None:
-            cancel = getattr(active, "cancel", None)
-            if callable(cancel):
-                cancel()
-        self.active_turn_task = None
+        await self.cancel_ai_turn()
         self.state = "interrupted"
         event = await self.emit_event(
             simple_event(INTERRUPTED_EVENT, session_id=self.session_id)
         )
         self.state = "listening"
         return event
+
+    async def speak_text(
+        self,
+        turn_id: str,
+        text: str,
+        voice_id: str,
+        engine_id: str,
+        final_chunk: bool = False,
+        *,
+        tts_adapter: Any | None = None,
+    ) -> dict[str, Any]:
+        self._cancelled_ai_turns.discard(turn_id)
+        self.state = "speaking"
+        current_task = asyncio.current_task()
+        if current_task is not None:
+            self.active_turn_task = current_task
+
+        await self.emit_event(
+            simple_event(
+                AI_AUDIO_STARTED_EVENT,
+                session_id=self.session_id,
+                turn_id=turn_id,
+                voice_id=voice_id,
+                engine_id=engine_id,
+            )
+        )
+
+        try:
+            result = await self._synthesize_speech(
+                turn_id=turn_id,
+                text=text,
+                voice_id=voice_id,
+                engine_id=engine_id,
+                tts_adapter=tts_adapter,
+            )
+            if turn_id in self._cancelled_ai_turns:
+                return {"status": "cancelled", "turn_id": turn_id}
+            wav_bytes = bytes(result.get("wav_bytes") or b"")
+            await self._queue_outbound_audio(wav_bytes)
+        except asyncio.CancelledError:
+            self._cancelled_ai_turns.add(turn_id)
+            raise
+        except Exception:
+            self.state = "listening"
+            event = failed_event(
+                session_id=self.session_id,
+                turn_id=turn_id,
+                code="call_tts_failed",
+                message="Speech playback failed. Please try again.",
+                retry_allowed=True,
+            )
+            event["engine_id"] = engine_id
+            await self.emit_event(event)
+            return event
+        finally:
+            if self.active_turn_task is current_task:
+                self.active_turn_task = None
+
+        if turn_id in self._cancelled_ai_turns:
+            self.state = "listening"
+            return {"status": "cancelled", "turn_id": turn_id}
+
+        if final_chunk:
+            self.state = "listening"
+            return await self.emit_event(
+                simple_event(
+                    AI_DONE_EVENT,
+                    session_id=self.session_id,
+                    turn_id=turn_id,
+                    voice_id=voice_id,
+                    engine_id=engine_id,
+                )
+            )
+
+        return {
+            "status": "queued",
+            "session_id": self.session_id,
+            "turn_id": turn_id,
+            "engine_id": engine_id,
+        }
+
+    async def cancel_ai_turn(self, turn_id: str | None = None) -> None:
+        active = self.active_turn_task
+        if turn_id is not None:
+            self._cancelled_ai_turns.add(turn_id)
+        if active is not None:
+            cancel = getattr(active, "cancel", None)
+            if callable(cancel):
+                cancel()
+        self.active_turn_task = None
+        stop = getattr(self.outbound_audio_track, "stop_current", None)
+        if callable(stop):
+            result = stop()
+            if inspect.isawaitable(result):
+                await result
+        self.outbound_audio_buffer.drain()
 
     async def end(self, *, reason: str = "ended") -> dict[str, Any]:
         if self.ended_at is None:
@@ -333,6 +434,51 @@ class CallSession:
             return dict(result.model_dump())
         return dict(result)
 
+    async def _synthesize_speech(
+        self,
+        *,
+        turn_id: str,
+        text: str,
+        voice_id: str,
+        engine_id: str,
+        tts_adapter: Any | None,
+    ) -> dict[str, Any]:
+        adapter = tts_adapter or self.tts_adapter
+        if adapter is None:
+            return {"wav_bytes": b"", "sample_rate": 24000, "duration_ms": 0}
+
+        if hasattr(adapter, "synthesize_call_text"):
+            result = adapter.synthesize_call_text(
+                turn_id=turn_id,
+                text=text,
+                voice_id=voice_id,
+                engine_id=engine_id,
+            )
+        else:
+            result = adapter.synthesize(
+                TtsSynthesisInput(
+                    text=text,
+                    reference_audio=b"rayme-call-reference-placeholder",
+                    speech_speed=1.0,
+                )
+            )
+        if inspect.isawaitable(result):
+            result = await result
+        if hasattr(result, "model_dump"):
+            result = result.model_dump()
+        return dict(result)
+
+    async def _queue_outbound_audio(self, wav_bytes: bytes) -> None:
+        if not wav_bytes:
+            return
+        enqueue = getattr(self.outbound_audio_track, "enqueue", None)
+        if callable(enqueue):
+            result = enqueue(wav_bytes)
+            if inspect.isawaitable(result):
+                await result
+            return
+        self.outbound_audio_buffer.append(wav_bytes)
+
 
 class CallSessionManager:
     def __init__(
@@ -360,6 +506,8 @@ class CallSessionManager:
         event_sink: EventSink | None = None,
         vad_adapter: Any | None = None,
         stt_adapter: Any | None = None,
+        tts_adapter: Any | None = None,
+        outbound_audio_track: Any | None = None,
     ) -> CallSession:
         existing = self._sessions.get(session_id)
         if existing is not None:
@@ -367,6 +515,10 @@ class CallSessionManager:
                 existing.data_channel = data_channel
             if event_sink is not None:
                 existing.event_sink = event_sink
+            if tts_adapter is not None:
+                existing.tts_adapter = tts_adapter
+            if outbound_audio_track is not None:
+                existing.outbound_audio_track = outbound_audio_track
             return existing
 
         session = CallSession(
@@ -381,6 +533,8 @@ class CallSessionManager:
             stt_adapter=stt_adapter if stt_adapter is not None else self.stt_adapter,
             settings=self.settings,
             event_sink=event_sink,
+            tts_adapter=tts_adapter,
+            outbound_audio_track=outbound_audio_track,
         )
         self._sessions[session_id] = session
         return session

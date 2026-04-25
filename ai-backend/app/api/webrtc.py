@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from app.api.stt import _settings_from_app, _stt_adapter_from_app, _vad_adapter_from_app
 from app.call.session import CallSession, CallSessionManager
+from app.models.model_manager import ModelManager
 
 router = APIRouter(prefix="/webrtc", tags=["webrtc"])
 
@@ -49,6 +50,16 @@ class EndControlRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: str = Field(default="hangup", min_length=1, max_length=80)
+
+
+class SpeakRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    turn_id: str = Field(min_length=1, max_length=128)
+    text: str = Field(min_length=1, max_length=5000)
+    voice_id: str = Field(min_length=1, max_length=128)
+    engine_id: str = Field(min_length=1, max_length=64)
+    final_chunk: bool = False
 
 
 class CallControlResponse(BaseModel):
@@ -146,6 +157,52 @@ async def interrupt_session(request: Request, session_id: str) -> CallControlRes
         raise _control_error() from exc
 
 
+@router.post("/sessions/{session_id}/speak")
+async def speak_session(
+    request: Request,
+    session_id: str,
+    payload: SpeakRequest,
+) -> dict[str, Any]:
+    session = _session_or_404(request, session_id)
+    try:
+        adapter = _tts_adapter(request, payload.engine_id)
+        event = await session.speak_text(
+            payload.turn_id,
+            payload.text,
+            payload.voice_id,
+            payload.engine_id,
+            final_chunk=payload.final_chunk,
+            tts_adapter=adapter,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "call_tts_failed",
+                "message": "Speech playback failed",
+                "engine_id": payload.engine_id,
+            },
+        ) from exc
+
+    if event.get("type") == "failed" and event.get("code") == "call_tts_failed":
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "call_tts_failed",
+                "message": "Speech playback failed",
+                "engine_id": payload.engine_id,
+            },
+        )
+    return {
+        "session_id": session.session_id,
+        "turn_id": payload.turn_id,
+        "state": session.state,
+        "event": event,
+    }
+
+
 @router.post("/sessions/{session_id}/end", response_model=CallControlResponse)
 async def end_session(
     request: Request,
@@ -213,6 +270,29 @@ def _vad_adapter(request: Request) -> Any:
         settings.vad_threshold,
         settings.vad_end_silence_ms,
     )
+
+
+def _tts_adapter(request: Request, engine_id: str) -> Any:
+    manager = getattr(request.app.state, "model_manager", None)
+    if manager is None:
+        manager = ModelManager(_settings_from_app(request))
+        manager.startup()
+        request.app.state.model_manager = manager
+    switch = getattr(manager, "switch_tts_engine", None)
+    if callable(switch):
+        switch(engine_id)
+    adapters = getattr(manager, "tts_adapters", {})
+    try:
+        return adapters[engine_id]
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "call_tts_failed",
+                "message": "Speech playback failed",
+                "engine_id": engine_id,
+            },
+        ) from exc
 
 
 def _create_peer_connection(offer: SessionDescription) -> Any:

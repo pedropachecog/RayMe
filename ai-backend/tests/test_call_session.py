@@ -29,6 +29,44 @@ class FakeAiTurn:
         self.cancel_calls += 1
 
 
+class FakeOutboundAudioTrack:
+    def __init__(self) -> None:
+        self.chunks: list[bytes] = []
+        self.stop_calls = 0
+
+    async def enqueue(self, chunk: bytes) -> None:
+        self.chunks.append(chunk)
+
+    async def stop_current(self) -> None:
+        self.stop_calls += 1
+
+
+class FakeTtsAdapter:
+    def __init__(self, *, delay: float = 0) -> None:
+        self.delay = delay
+        self.calls: list[dict[str, Any]] = []
+
+    async def synthesize_call_text(
+        self,
+        *,
+        turn_id: str,
+        text: str,
+        voice_id: str,
+        engine_id: str,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            {
+                "turn_id": turn_id,
+                "text": text,
+                "voice_id": voice_id,
+                "engine_id": engine_id,
+            }
+        )
+        if self.delay:
+            await asyncio.sleep(self.delay)
+        return {"wav_bytes": b"fake-wav", "sample_rate": 24000, "duration_ms": 100}
+
+
 class FakeInboundAudioFrame:
     def __init__(self, pcm: bytes) -> None:
         self.pcm = pcm
@@ -71,6 +109,9 @@ def _new_session(
     session_id: str = "call-session-1",
     vad_adapter: Any | None = None,
     stt_adapter: Any | None = None,
+    tts_adapter: Any | None = None,
+    outbound_audio_track: Any | None = None,
+    event_sink: Any | None = None,
 ) -> tuple[Any, FakePeerConnection]:
     peer = FakePeerConnection()
     session = CallSession(
@@ -78,6 +119,9 @@ def _new_session(
         peer_connection=peer,
         vad_adapter=vad_adapter,
         stt_adapter=stt_adapter,
+        tts_adapter=tts_adapter,
+        outbound_audio_track=outbound_audio_track,
+        event_sink=event_sink,
     )
     return session, peer
 
@@ -154,6 +198,75 @@ def test_interrupt_cancels_active_ai_turn() -> None:
     assert active_turn.cancel_calls == 1
     assert event["type"] == "interrupted"
     assert event["session_id"] == "call-session-1"
+
+
+def test_speak_text_queues_audio_and_emits_done_for_final_chunk() -> None:
+    events: list[dict[str, Any]] = []
+    track = FakeOutboundAudioTrack()
+    adapter = FakeTtsAdapter()
+    session, _ = _new_session(
+        tts_adapter=adapter,
+        outbound_audio_track=track,
+        event_sink=events.append,
+    )
+
+    event = _run(
+        session.speak_text(
+            "ai-turn-1",
+            "Hello from AI.",
+            "voice-1",
+            "f5",
+            final_chunk=True,
+        )
+    )
+
+    assert adapter.calls == [
+        {
+            "turn_id": "ai-turn-1",
+            "text": "Hello from AI.",
+            "voice_id": "voice-1",
+            "engine_id": "f5",
+        }
+    ]
+    assert track.chunks == [b"fake-wav"]
+    assert [item["type"] for item in events] == ["ai_audio_started", "ai_done"]
+    assert event["type"] == "ai_done"
+    assert session.state == "listening"
+
+
+def test_interrupt_cancels_active_speech_before_ai_done() -> None:
+    events: list[dict[str, Any]] = []
+    track = FakeOutboundAudioTrack()
+    adapter = FakeTtsAdapter(delay=1)
+    session, _ = _new_session(
+        tts_adapter=adapter,
+        outbound_audio_track=track,
+        event_sink=events.append,
+    )
+
+    async def scenario() -> None:
+        speech = asyncio.create_task(
+            session.speak_text(
+                "ai-turn-cancel",
+                "This should stop.",
+                "voice-1",
+                "f5",
+                final_chunk=True,
+            )
+        )
+        await asyncio.sleep(0)
+        await session.interrupt()
+        try:
+            await speech
+        except asyncio.CancelledError:
+            pass
+
+    _run(scenario())
+
+    assert track.chunks == []
+    assert track.stop_calls == 1
+    assert "ai_audio_started" in [item["type"] for item in events]
+    assert "ai_done" not in [item["type"] for item in events]
 
 
 def test_end_closes_peer_once() -> None:
