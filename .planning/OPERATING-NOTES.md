@@ -62,6 +62,15 @@ as durable context, not one-off preferences.
 - Backend runtime code should be a Git checkout, not an ad hoc copied staging
   tree. Use `C:\Users\pmpg\rayme\RayMe\` as the canonical Windows-side checkout
   on `OMEN-PC`, and use Git to inspect/update the commit that is running.
+- SSH to `OMEN-PC` must use the configured host alias, not a hand-written
+  `user@host` target. Use exactly `ssh rayme-pmpg` for backend-side work. That
+  alias binds the correct user, host, identity file, known-hosts file, and
+  strict host-key behavior in `~/.ssh/config`.
+- Deploying to `OMEN-PC` must go through `scripts/deploy-omen.sh` from the repo
+  root. Do not manually retype pull/build/kill/restart/health sequences unless
+  repairing the script itself. The script is responsible for using the SSH alias,
+  fast-forwarding the canonical checkout, rebuilding the client, killing stale
+  8443/9443 listeners, starting scheduled tasks, and verifying live health.
 - Backend Git sync uses the GitHub HTTPS remote
   `https://github.com/pedropachecog/RayMe.git`. If credentials fail, fix Git
   Credential Manager on `OMEN-PC`; do not invent bundle or copied-tree sync
@@ -108,6 +117,8 @@ as durable context, not one-off preferences.
   `https://192.168.1.199:8443`.
 - Prefer SSH to `OMEN-PC` via the documented `rayme-pmpg` path for backend-side
   work that needs the real LAN IP.
+- Do not type `ssh rayme-pmpg@192.168.1.199`; that bypasses the alias contract
+  and can fail. The correct command is `ssh rayme-pmpg`.
 - If WSL cannot bind `192.168.1.199`, use the Windows side of `OMEN-PC`; the LAN
   IP belongs to Windows, not the local container.
 - Do not waste time searching for ad hoc backend staging directories. Check

@@ -51,11 +51,6 @@ class FakeWhisperModel:
         return [FakeWhisperSegment(self.transcript)], FakeWhisperInfo()
 
 
-class CudaFailingWhisperModel:
-    def transcribe(self, audio: Any, **kwargs: Any) -> tuple[list[FakeWhisperSegment], FakeWhisperInfo]:
-        raise RuntimeError("Library cublas64_12.dll is not found or cannot be loaded")
-
-
 class SpeechVad:
     ready = True
     threshold = 0.5
@@ -171,34 +166,6 @@ def test_stt_adapter_uses_phase_zero_english_whisper_options() -> None:
     assert whisper_kwargs["vad_filter"] is True
     assert whisper_kwargs["vad_parameters"]["threshold"] == 0.5
     assert whisper_kwargs["vad_parameters"]["min_silence_duration_ms"] == 700
-
-
-def test_stt_adapter_retries_on_cpu_when_cuda_runtime_is_unavailable() -> None:
-    stt_module = importlib.import_module("app.models.stt")
-    WhisperSttAdapter = getattr(stt_module, "WhisperSttAdapter")
-    factory_calls: list[dict[str, str]] = []
-
-    def model_factory(model_name: str, device: str, compute_type: str) -> Any:
-        factory_calls.append(
-            {"model_name": model_name, "device": device, "compute_type": compute_type}
-        )
-        if device == "cuda":
-            return CudaFailingWhisperModel()
-        return FakeWhisperModel("CPU fallback transcript")
-
-    adapter = WhisperSttAdapter(
-        model_name="distil-large-v3",
-        compute_type="int8_float16",
-        model_factory=model_factory,
-    )
-
-    result = _call_transcribe(adapter, audio="sample.wav", vad_adapter=SpeechVad())
-
-    assert result["status"] == "accepted"
-    assert result["transcript"] == "CPU fallback transcript"
-    assert result["compute_type"] == "int8"
-    assert [call["device"] for call in factory_calls] == ["cuda", "cpu"]
-    assert factory_calls[1]["compute_type"] == "int8"
 
 
 def test_vad_gate_blocks_no_speech_before_transcript_return() -> None:

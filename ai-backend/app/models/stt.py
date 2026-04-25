@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -25,7 +24,6 @@ class WhisperSttAdapter:
         model_name: str | None = None,
         compute_type: str | None = None,
         device: str = "cuda",
-        model_factory: Callable[[str, str, str], Any] | None = None,
     ) -> None:
         self.settings = settings or AiBackendSettings()
         self.model_name = model_name or self.settings.stt_model
@@ -33,7 +31,6 @@ class WhisperSttAdapter:
         self.language = self.settings.stt_language
         self.device = device
         self.model = model or whisper_model
-        self._model_factory = model_factory
 
     def transcribe(
         self,
@@ -54,28 +51,13 @@ class WhisperSttAdapter:
             return self._manual_response(speech_detected=False)
 
         model = self._ensure_model()
-        try:
-            segments_iter, info = self._transcribe_with_model(
-                model,
-                audio,
-                threshold=threshold,
-                end_silence_ms=end_silence_ms,
-            )
-            segments = [self._segment_to_mapping(segment) for segment in list(segments_iter)]
-        except RuntimeError as exc:
-            if not self._can_retry_on_cpu(exc):
-                raise
-            self.device = "cpu"
-            self.compute_type = "int8"
-            self.model = None
-            model = self._ensure_model()
-            segments_iter, info = self._transcribe_with_model(
-                model,
-                audio,
-                threshold=threshold,
-                end_silence_ms=end_silence_ms,
-            )
-            segments = [self._segment_to_mapping(segment) for segment in list(segments_iter)]
+        segments_iter, info = self._transcribe_with_model(
+            model,
+            audio,
+            threshold=threshold,
+            end_silence_ms=end_silence_ms,
+        )
+        segments = [self._segment_to_mapping(segment) for segment in list(segments_iter)]
         transcript = " ".join(segment["text"].strip() for segment in segments).strip()
 
         if not transcript or is_blocklisted_transcript(transcript):
@@ -101,19 +83,14 @@ class WhisperSttAdapter:
 
     def _ensure_model(self) -> Any:
         if self.model is None:
-            self.model = self._build_model()
+            from faster_whisper import WhisperModel
+
+            self.model = WhisperModel(
+                self.model_name,
+                device=self.device,
+                compute_type=self.compute_type,
+            )
         return self.model
-
-    def _build_model(self) -> Any:
-        if self._model_factory is not None:
-            return self._model_factory(self.model_name, self.device, self.compute_type)
-        from faster_whisper import WhisperModel
-
-        return WhisperModel(
-            self.model_name,
-            device=self.device,
-            compute_type=self.compute_type,
-        )
 
     def _transcribe_with_model(
         self,
@@ -135,12 +112,6 @@ class WhisperSttAdapter:
                 "min_silence_duration_ms": end_silence_ms,
             },
         )
-
-    def _can_retry_on_cpu(self, exc: RuntimeError) -> bool:
-        if self.device == "cpu":
-            return False
-        message = str(exc).lower()
-        return "cuda" in message or "cublas" in message or "cudnn" in message
 
     def _speech_detected(self, audio: Any, vad_adapter: Any | None) -> bool:
         if vad_adapter is None:
