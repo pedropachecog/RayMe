@@ -49,6 +49,12 @@
   }: Props = $props();
 
   const isUser = $derived(message.role === 'user');
+  const isCallStart = $derived(message.message_kind === 'call_start');
+  const isCallEnd = $derived(message.message_kind === 'call_end');
+  const isCallEvent = $derived(isCallStart || isCallEnd);
+  const isUserSpeech = $derived(message.message_kind === 'user_speech');
+  const isAiSpeech = $derived(message.message_kind === 'ai_speech');
+  const isCallSpeech = $derived(isUserSpeech || isAiSpeech);
   const displayName = $derived(isUser ? 'You' : characterName || 'Character');
   const avatarInitial = $derived((characterName || 'R').trim().slice(0, 1).toUpperCase() || 'R');
   const content = $derived(selectedMessageContent(message));
@@ -57,12 +63,16 @@
   const currentAlternateIndex = $derived(selectedAlternateIndex(message));
   const swipeTotal = $derived(Math.max(orderedAlternates.length, 1));
   const canTouchSwipe = $derived(
-    !isUser && !actionBusy && !editing && orderedAlternates.length > 1
+    !isUser && !isCallEvent && !isCallSpeech && !actionBusy && !editing && orderedAlternates.length > 1
   );
   const showActions = $derived(
-    !message.streaming && !message.error && (message.role === 'assistant' || message.role === 'user')
+    !isCallEvent &&
+      !isCallSpeech &&
+      !message.streaming &&
+      !message.error &&
+      (message.role === 'assistant' || message.role === 'user')
   );
-  const showSwipeStepper = $derived(!isUser && !message.streaming && !message.error);
+  const showSwipeStepper = $derived(!isUser && !isCallEvent && !isCallSpeech && !message.streaming && !message.error);
   let pointerStart = $state<{ x: number; y: number; id: number } | null>(null);
   let swipePreview = $state<'previous' | 'next' | null>(null);
 
@@ -167,6 +177,8 @@
 <article
   class:user={isUser}
   class:assistant={!isUser}
+  class:event={isCallEvent}
+  class:speech={isCallSpeech}
   class:stale={message.stale_after_edit}
   class:swipe-preview-previous={swipePreview === 'previous'}
   class:swipe-preview-next={swipePreview === 'next'}
@@ -183,6 +195,14 @@
   onpointerup={handlePointerUp}
   onpointercancel={resetPointerSwipe}
 >
+  {#if isCallEvent}
+    <div class="event-content">
+      <span class="chip selected">{isCallStart ? 'call_start' : 'call_end'}</span>
+      <div class="event-text">
+        {@html renderedContent}
+      </div>
+    </div>
+  {:else}
   {#if !isUser}
     <div class="avatar" aria-hidden="true">
       {#if portraitUrl}
@@ -202,6 +222,14 @@
 
     <div class="message-meta">
       <span>{displayName}</span>
+      {#if isUserSpeech}
+        <span class="chip selected">user_speech</span>
+        <span class="chip">Final</span>
+      {/if}
+      {#if isAiSpeech}
+        <span class="chip selected">ai_speech</span>
+        <span class="chip">Final</span>
+      {/if}
       {#if openingGreeting}
         <span class="chip selected">Selected greeting</span>
       {/if}
@@ -262,6 +290,7 @@
       />
     {/if}
   </div>
+  {/if}
 </article>
 
 <style>
@@ -281,9 +310,36 @@
     justify-content: flex-start;
   }
 
+  .message-row.event {
+    min-height: 36px;
+    justify-content: center;
+  }
+
   .message-row.stale {
     border-left: 2px solid rgba(255, 113, 108, 0.7);
     padding-left: var(--space-sm);
+  }
+
+  .event-content {
+    display: inline-flex;
+    max-width: min(100%, 680px);
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-sm);
+    border-radius: var(--radius-md);
+    padding: var(--space-xs) var(--space-sm);
+    background: rgba(9, 19, 40, 0.72);
+    color: var(--color-text-muted);
+    font-size: var(--font-label);
+    line-height: var(--line-label);
+  }
+
+  .event-text {
+    overflow-wrap: anywhere;
+  }
+
+  .event-text :global(p) {
+    margin: 0;
   }
 
   .avatar {
@@ -330,6 +386,10 @@
 
   .user .bubble {
     background: rgba(182, 160, 255, 0.18);
+  }
+
+  .speech .bubble {
+    box-shadow: 0 16px 42px rgba(0, 0, 0, 0.14);
   }
 
   .message-actions {

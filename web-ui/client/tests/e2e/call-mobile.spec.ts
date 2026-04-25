@@ -19,12 +19,27 @@ test.describe('mobile-chromium call path', () => {
     await expect(toolbar.getByRole('button', { name: 'Mute' })).toBeVisible();
     await expect(toolbar.getByRole('button', { name: 'Interrupt' })).toBeVisible();
     await expect(toolbar.getByRole('button', { name: 'End Call' })).toBeVisible();
+    await expect(toolbar.getByRole('combobox').first()).toBeVisible();
+    await expect(toolbar.getByRole('combobox').nth(1)).toBeVisible();
 
     const toolbarBox = await toolbar.boundingBox();
     const navBox = await bottomNavigation.boundingBox();
     expect(toolbarBox).not.toBeNull();
     expect(navBox).not.toBeNull();
     expect(toolbarBox!.y + toolbarBox!.height).toBeLessThanOrEqual(navBox!.y);
+
+    for (const control of [
+      toolbar.getByRole('button', { name: 'Mute' }),
+      toolbar.getByRole('button', { name: 'Interrupt' }),
+      toolbar.getByRole('button', { name: 'End Call' }),
+      toolbar.getByRole('combobox').first(),
+      toolbar.getByRole('combobox').nth(1)
+    ]) {
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.height).toBeGreaterThanOrEqual(44);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(navBox!.y);
+    }
     assertNoBrowserErrors();
   });
 });

@@ -86,7 +86,7 @@
     </main>
   </div>
 
-  <nav class="bottom-nav" aria-label="Primary mobile">
+  <nav class="bottom-nav" aria-label="Primary mobile" data-testid="bottom-navigation">
     {#each navigation as item}
       {@const Icon = item.icon}
       <a class:active={isActive(item.href)} class="bottom-item" href={item.href} aria-current={isActive(item.href) ? 'page' : undefined}>

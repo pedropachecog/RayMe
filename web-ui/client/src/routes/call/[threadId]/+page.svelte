@@ -345,7 +345,7 @@
 
 <section class="call-route" aria-labelledby="call-title">
   <header class="call-header">
-    <button class="icon-button" type="button" aria-label="Return to Thread" on:click={returnToThread}>
+    <button class="icon-button" type="button" aria-label="Return to Thread" onclick={returnToThread}>
       <ArrowLeft size={18} strokeWidth={1.8} aria-hidden="true" />
     </button>
     <div>
@@ -369,7 +369,7 @@
       {/if}
       <h2>{blockingPanel.action}</h2>
       <p>{blockingPanel.body}</p>
-      <button type="button" on:click={() => handleBlockingAction(blockingPanel!.action)}>
+      <button type="button" onclick={() => handleBlockingAction(blockingPanel!.action)}>
         {blockingPanel.action}
       </button>
     </div>
@@ -377,7 +377,7 @@
     <div class="ended-panel" role="status">
       <h2>Call ended</h2>
       <p>Your transcript so far was saved to the thread.</p>
-      <button type="button" on:click={returnToThread}>Return to Thread</button>
+      <button type="button" onclick={returnToThread}>Return to Thread</button>
     </div>
   {:else}
     <div class="call-canvas">
