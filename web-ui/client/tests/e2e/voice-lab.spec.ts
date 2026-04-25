@@ -78,6 +78,58 @@ test('Voice Lab saves after preview returns HTTP 502 and stays on RayMe APIs', a
   assertNoBrowserErrors();
 });
 
+test('Voice Lab unlocks preview and save after failed transcription with manual transcript', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+    allowConsoleErrors: [
+      /Failed to load resource: the server responded with a status of 500 \(Internal Server Error\)/
+    ]
+  });
+  const voiceEvents: string[] = [];
+  const manualTranscript = 'sjort jist to trst';
+
+  page.on('request', (request) => {
+    expectRayMeApiRequest(request);
+    recordVoiceApiRequest(request, voiceEvents);
+  });
+
+  await routeVoiceLabApis(page, { transcribeFails: true, expectedTranscript: manualTranscript });
+
+  await page.goto('/voice-lab');
+  await expect(page.getByRole('heading', { name: 'Voice Lab' })).toBeVisible();
+
+  await page.getByLabel('Upload Sample').setInputFiles({
+    name: 'android-sample.wav',
+    mimeType: 'audio/wav',
+    buffer: makeTinyWav()
+  });
+  await page.getByRole('button', { name: 'Transcribe Sample' }).click();
+  await expect(page.getByText(/transcription failed/i)).toBeVisible();
+
+  await page.getByLabel('Reference transcript').fill(manualTranscript);
+  await expect(page.getByRole('button', { name: 'Preview Voice' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Save Voice' })).toBeDisabled();
+
+  await page.getByRole('button', { name: 'Preview Voice' }).click();
+  await expect(page.getByText('Preview ready.')).toBeVisible();
+
+  await page.getByLabel('Voice name').fill('Android Manual Transcript Voice');
+  await expect(page.getByRole('button', { name: 'Save Voice' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Save Voice' }).click();
+  await expect(page.getByText('Voice saved.')).toBeVisible();
+
+  expect(voiceEvents).toEqual(
+    expect.arrayContaining([
+      'POST /api/voices/assets',
+      'POST /api/voices/assets/sample-asset/transcribe',
+      'POST /api/voices/preview',
+      'POST /api/voices'
+    ])
+  );
+  assertNoBrowserErrors();
+});
+
 test('Voice Lab has no horizontal scroll at 320px viewport', async ({ page }) => {
   await page.setViewportSize({ width: 320, height: 720 });
   await routeVoiceLabApis(page);
@@ -203,7 +255,10 @@ test('Gallery voice badges show assigned, none, and force-deleted unavailable st
   assertNoBrowserErrors();
 });
 
-async function routeVoiceLabApis(page: Page) {
+async function routeVoiceLabApis(
+  page: Page,
+  options: { transcribeFails?: boolean; expectedTranscript?: string } = {}
+) {
   await page.route('**/api/settings', async (route) => {
     await fulfillJson(route, {
       web_url: 'http://127.0.0.1:4173',
@@ -242,16 +297,16 @@ async function routeVoiceLabApis(page: Page) {
     expect(route.request().method()).toBe('POST');
     expect(route.request().postDataJSON()).toMatchObject({
       asset_id: 'sample-asset',
-      name: 'RayMe Browser Voice',
-      reference_transcript: editedTranscript,
-      default_engine: 'chatterbox_turbo'
+      name: options.transcribeFails ? 'Android Manual Transcript Voice' : 'RayMe Browser Voice',
+      reference_transcript: options.expectedTranscript ?? editedTranscript,
+      default_engine: options.transcribeFails ? 'f5' : 'chatterbox_turbo'
     });
     await fulfillJson(route, {
       voice_id: 'voice-rayme',
       asset_id: 'sample-asset',
-      name: 'RayMe Browser Voice',
-      default_engine: 'chatterbox_turbo',
-      reference_transcript: editedTranscript,
+      name: options.transcribeFails ? 'Android Manual Transcript Voice' : 'RayMe Browser Voice',
+      default_engine: options.transcribeFails ? 'f5' : 'chatterbox_turbo',
+      reference_transcript: options.expectedTranscript ?? editedTranscript,
       status: 'available'
     }, 201);
   });
@@ -269,6 +324,11 @@ async function routeVoiceLabApis(page: Page) {
 
   await page.route('**/api/voices/assets/sample-asset/transcribe', async (route) => {
     expect(route.request().method()).toBe('POST');
+    if (options.transcribeFails) {
+      await fulfillJson(route, { error: { message: 'Transcription failed' } }, 500);
+      return;
+    }
+
     await fulfillJson(route, {
       asset_id: 'sample-asset',
       reference_transcript: sampleTranscript,
@@ -279,14 +339,33 @@ async function routeVoiceLabApis(page: Page) {
 
   await page.route('**/api/voices/preview', async (route) => {
     expect(route.request().method()).toBe('POST');
-    expect(route.request().postDataJSON()).toMatchObject({
-      asset_id: 'sample-asset',
-      reference_transcript: editedTranscript,
-      default_engine: 'chatterbox_turbo',
-      use_default_engine: false,
-      engine: 'chatterbox_turbo',
-      preview_text: previewText
-    });
+    const expectedPayload = options.transcribeFails
+      ? {
+          asset_id: 'sample-asset',
+          reference_transcript: options.expectedTranscript,
+          default_engine: 'f5',
+          use_default_engine: true,
+          preview_text: 'The line is open. This is how the saved RayMe voice will sound.'
+        }
+      : {
+          asset_id: 'sample-asset',
+          reference_transcript: editedTranscript,
+          default_engine: 'chatterbox_turbo',
+          use_default_engine: false,
+          engine: 'chatterbox_turbo',
+          preview_text: previewText
+        };
+    expect(route.request().postDataJSON()).toMatchObject(expectedPayload);
+    if (options.transcribeFails) {
+      await fulfillJson(route, {
+        engine_id: 'f5',
+        content_type: 'audio/wav',
+        audio_base64: 'UklGRg==',
+        duration_ms: 420
+      });
+      return;
+    }
+
     await fulfillJson(route, { error: { message: 'Preview synthesis failed' } }, 502);
   });
 }

@@ -102,8 +102,12 @@
   let deleteState: 'idle' | 'deleting' = 'idle';
   let activeAudio: HTMLAudioElement | null = null;
 
-  $: canPreview = Boolean(asset && voiceName.trim() && transcript.trim() && selectedEngine);
+  $: canPreview = Boolean(asset && transcript.trim() && selectedEngine && previewText.trim());
   $: canSave = Boolean(asset && voiceName.trim() && transcript.trim() && selectedEngine);
+  $: if (transcriptState === 'error' && transcript.trim()) {
+    transcriptState = 'ready';
+    transcriptError = '';
+  }
 
   onMount(() => {
     void loadEngineMetadata();
