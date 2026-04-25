@@ -21,6 +21,8 @@ SETTING_FIELDS = (
     "save_mic_audio",
     "vad_threshold",
     "vad_end_silence_ms",
+    "stt_model",
+    "tts_default_engine",
 )
 
 
@@ -35,6 +37,8 @@ class EndpointSettings:
     save_mic_audio: bool
     vad_threshold: float
     vad_end_silence_ms: int
+    stt_model: str
+    tts_default_engine: str
 
     @property
     def llm_api_key_configured(self) -> bool:
@@ -51,6 +55,8 @@ class EndpointSettings:
             "save_mic_audio": self.save_mic_audio,
             "vad_threshold": self.vad_threshold,
             "vad_end_silence_ms": self.vad_end_silence_ms,
+            "stt_model": self.stt_model,
+            "tts_default_engine": self.tts_default_engine,
             "ai_backend_status": _default_ai_backend_status(),
         }
 
@@ -65,6 +71,8 @@ class EndpointSettings:
             "save_mic_audio": self.save_mic_audio,
             "vad_threshold": self.vad_threshold,
             "vad_end_silence_ms": self.vad_end_silence_ms,
+            "stt_model": self.stt_model,
+            "tts_default_engine": self.tts_default_engine,
         }
 
 
@@ -90,7 +98,7 @@ class SettingsService:
         await self._save(snapshot.to_private_dict())
         return snapshot
 
-    async def _load_persisted(self) -> dict[str, str]:
+    async def _load_persisted(self) -> dict[str, object]:
         row = await self._session.get(AppSetting, SETTINGS_KEY)
         if row is None or not isinstance(row.value_json, dict):
             return {}
@@ -109,7 +117,7 @@ class SettingsService:
             row.value_json = dict(values)
         await self._session.commit()
 
-    def _snapshot(self, persisted: Mapping[str, str]) -> EndpointSettings:
+    def _snapshot(self, persisted: Mapping[str, object]) -> EndpointSettings:
         defaults = {
             "web_url": self._runtime_settings.web_public_url,
             "ai_backend_url": self._runtime_settings.ai_backend_base_url,
@@ -120,6 +128,8 @@ class SettingsService:
             "save_mic_audio": False,
             "vad_threshold": 0.5,
             "vad_end_silence_ms": 700,
+            "stt_model": "distil-large-v3",
+            "tts_default_engine": "f5",
         }
         values = {**defaults, **persisted}
         return EndpointSettings(
@@ -132,6 +142,8 @@ class SettingsService:
             save_mic_audio=bool(values["save_mic_audio"]),
             vad_threshold=float(values["vad_threshold"]),
             vad_end_silence_ms=int(values["vad_end_silence_ms"]),
+            stt_model=str(values["stt_model"]).strip(),
+            tts_default_engine=str(values["tts_default_engine"]).strip(),
         )
 
 

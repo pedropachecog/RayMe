@@ -38,6 +38,8 @@ class SettingsPatch(BaseModel):
     save_mic_audio: bool | None = None
     vad_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
     vad_end_silence_ms: int | None = Field(default=None, ge=100, le=5000)
+    stt_model: str | None = Field(default=None, max_length=200)
+    tts_default_engine: str | None = Field(default=None, max_length=100)
 
     @field_validator("web_url", "ai_backend_url", "llm_base_url")
     @classmethod
@@ -53,7 +55,7 @@ class SettingsPatch(BaseModel):
             raise ValueError(msg)
         return stripped
 
-    @field_validator("llm_api_key", "llm_model")
+    @field_validator("llm_api_key", "llm_model", "stt_model", "tts_default_engine")
     @classmethod
     def strip_optional_text(cls, value: str | None) -> str | None:
         if value is None:
@@ -71,6 +73,8 @@ class PublicSettings(BaseModel):
     save_mic_audio: bool
     vad_threshold: float
     vad_end_silence_ms: int
+    stt_model: str
+    tts_default_engine: str
     ai_backend_status: dict[str, object]
 
 
