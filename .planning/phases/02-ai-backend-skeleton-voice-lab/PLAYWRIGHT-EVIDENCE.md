@@ -101,3 +101,28 @@ Results:
   covers Voice Lab save after preview failure, manual transcript after failed
   transcription, mobile-width layout, row-scoped test-play, blocked delete, and
   gallery voice states with the new playback/speed controls.
+
+## Phase 02 Final Live Acceptance
+
+- Saved test: `web-ui/client/tests/e2e/live-voice-lab.spec.ts`
+- Saved result:
+  `playwright-results/live-voice-lab-02-18-20260425T145656Z.json`
+- Deployed commit: `e5fcccf`
+- Live target: `https://192.168.1.199:8443/voice-lab`
+- AI health target: `https://192.168.1.199:9443/health`
+
+Command:
+
+```bash
+cd web-ui/client
+RAYME_ENABLE_LIVE_E2E=1 \
+RAYME_LIVE_WEB_URL=https://192.168.1.199:8443 \
+RAYME_LIVE_AI_HEALTH_URL=https://192.168.1.199:9443/health \
+npx playwright test tests/e2e/live-voice-lab.spec.ts --project=desktop-chromium --reporter=json
+```
+
+Result:
+
+- `1 expected`, `0 unexpected`, `0 skipped`, `0 flaky`, duration `74671.898 ms`.
+- This final live browser run verified the Voice Lab upload, transcript/manual
+  fallback, save, and test-play path before Android product-owner acceptance.

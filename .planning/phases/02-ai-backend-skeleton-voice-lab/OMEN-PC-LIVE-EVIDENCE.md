@@ -105,11 +105,68 @@ RAYME_ENABLE_LIVE_E2E=1 RAYME_LIVE_WEB_URL=https://192.168.1.199:8443 RAYME_LIVE
 
 ## Android Product-Owner Result
 
-- Android Chrome URL opened: pending handoff
-- Certificate warning absent: pending handoff
-- Voice Lab loaded: pending handoff
-- Sample upload result: pending handoff
-- Transcript retry/manual transcript result: pending handoff
-- Save result: pending handoff
-- Test-play result: pending handoff
-- Product-owner acceptance: pending handoff after passing desktop/live gate
+- Date/time recorded: 2026-04-25T15:00:49Z
+- Android Chrome URL opened: passed per product-owner report
+- Certificate warning absent: passed per product-owner report
+- Voice Lab loaded: passed per product-owner report
+- Sample upload result: passed per product-owner report
+- Transcript retry/manual transcript result: passed per product-owner report
+- Save result: passed per product-owner report
+- Test-play result: passed per product-owner report
+- Product-owner acceptance: approved for Phase 3 call testing
+
+## Final Phase 02 Closure Evidence
+
+- Runtime commit under test: `e5fcccf0f318fd4f658fdd10a680a2a99995ed79`
+- OMEN deployed commit: `e5fcccf0f318fd4f658fdd10a680a2a99995ed79`
+- Live desktop Playwright saved artifact:
+  `.planning/phases/02-ai-backend-skeleton-voice-lab/playwright-results/live-voice-lab-02-18-20260425T145656Z.json`
+- Live desktop Playwright result: `1 expected`, `0 unexpected`, `0 skipped`, `0 flaky`, duration `74671.898 ms`
+- Full local acceptance command passed on 2026-04-25:
+
+```text
+uv run --project web-ui/server pytest web-ui/server/tests -q
+120 passed
+
+uv run --project ai-backend pytest ai-backend/tests -q
+44 passed, 1 warning
+
+npm --prefix web-ui/client run test:unit -- --run
+78 passed
+
+npm --prefix web-ui/client run test:e2e
+40 passed
+```
+
+Current live OMEN-PC health before Android handoff:
+
+```json
+{
+  "service": "rayme-ai-backend",
+  "status": "degraded",
+  "stt_model": "distil-large-v3",
+  "stt_compute_type": "int8_float16",
+  "stt_language": "en",
+  "vad_ready": true,
+  "resident_tts_engine": "f5",
+  "available_engines": [
+    {"id": "f5", "label": "F5-TTS", "available": true, "resident": true, "state": "resident", "unavailable_reason": null},
+    {"id": "xtts_v2", "label": "XTTS v2", "available": false, "resident": false, "state": "unavailable", "unavailable_reason": "engine synthesis is not implemented in Phase 02"},
+    {"id": "qwen3_0_6b", "label": "Qwen3-TTS 0.6B-Base", "available": false, "resident": false, "state": "unavailable", "unavailable_reason": "engine synthesis is not implemented in Phase 02"},
+    {"id": "luxtts", "label": "LuxTTS", "available": false, "resident": false, "state": "unavailable", "unavailable_reason": "engine synthesis is not implemented in Phase 02"},
+    {"id": "chatterbox_turbo", "label": "Chatterbox Turbo", "available": false, "resident": false, "state": "unavailable", "unavailable_reason": "engine synthesis is not implemented in Phase 02"},
+    {"id": "tada_1b", "label": "TADA 1B", "available": false, "resident": false, "state": "unavailable", "unavailable_reason": "engine synthesis is not implemented in Phase 02"}
+  ],
+  "loading_engine": null,
+  "vram_used_mb": 2591.4,
+  "vram_headroom_mb": 8408.6,
+  "phase": "02",
+  "capabilities": ["health", "stt", "vad", "tts"]
+}
+```
+
+`nvidia-smi` before Android handoff:
+
+```text
+NVIDIA GeForce RTX 3060, driver 560.94, 2414 MiB used, 12288 MiB total
+```

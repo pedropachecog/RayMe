@@ -3,14 +3,43 @@ from __future__ import annotations
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 from fastapi.testclient import TestClient
 
+from app.config import AiBackendSettings
 from app.main import create_app
+from app.models.engine_metadata import ENGINE_METADATA
+from app.models.model_manager import ModelManager
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUNNER = PROJECT_ROOT / "scripts" / "run_https.py"
 PYPROJECT = PROJECT_ROOT / "pyproject.toml"
+
+
+class FakeTtsAdapter:
+    def __init__(self, engine_id: str) -> None:
+        self.engine_id = engine_id
+        self.loaded = False
+
+    def startup_self_test(self) -> None:
+        return None
+
+    def load(self) -> None:
+        self.loaded = True
+
+    def unload(self) -> None:
+        self.loaded = False
+
+
+def create_app_with_fake_models() -> Any:
+    app = create_app()
+    app.state.model_manager = ModelManager(
+        AiBackendSettings(load_models_on_startup=False),
+        tts_adapters={engine.id: FakeTtsAdapter(engine.id) for engine in ENGINE_METADATA},
+        vram_probe=lambda: {"used_mb": 2300, "headroom_mb": 8700},
+    )
+    return app
 
 
 def run_runner(*args: str) -> subprocess.CompletedProcess[str]:
@@ -23,7 +52,7 @@ def run_runner(*args: str) -> subprocess.CompletedProcess[str]:
 
 
 def test_health_returns_phase_two_model_residency_contract() -> None:
-    client = TestClient(create_app())
+    client = TestClient(create_app_with_fake_models())
 
     response = client.get("/health")
 
@@ -65,7 +94,7 @@ def test_health_returns_phase_two_model_residency_contract() -> None:
 
 
 def test_health_does_not_return_raw_exception_text_in_public_payload() -> None:
-    client = TestClient(create_app())
+    client = TestClient(create_app_with_fake_models())
 
     response = client.get("/health")
 

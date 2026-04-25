@@ -47,7 +47,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 - [ ] **Phase 0: Measurement Gate** — 2–3 day spike that validates VRAM, STT WER, TTS TTFA, HTTPS-on-Android, and FA2 viability before Phase 1 freezes stack commitments.
 - [x] **Phase 1: Foundations & Text Chat** — Three-service skeleton with HTTPS, the unified `messages` schema, SillyTavern card CRUD + import/export, and full-featured text chat end-to-end against a streaming LLM.
 - [x] **Phase 01.1: UI Acceptance & Regression Test Hardening** — Inserted verification pass to convert manually discovered Phase 1 UI regressions into durable Playwright/API coverage before Phase 2.
-- [ ] **Phase 2: AI Backend Skeleton & Voice Lab** — FastAPI + aiortc signaling, resident Whisper + Silero VAD + one-hot TTS engine on the GPU, Voice Lab upload → auto-transcript → edit → synth-preview → save, Settings with three-endpoint connection tests.
+- [x] **Phase 2: AI Backend Skeleton & Voice Lab** — FastAPI + aiortc signaling, resident Whisper + Silero VAD + one-hot TTS engine on the GPU, Voice Lab upload → auto-transcript → edit → synth-preview → save, Settings with three-endpoint connection tests.
 - [ ] **Phase 3: First Working Call (MVP)** — Voice Call screen with `RTCPeerConnection`, AudioContext gesture unlock, orchestrator FSM skeleton, one-sentence non-streaming reply. Proves the media plumbing end-to-end.
 - [ ] **Phase 4: Call Feel** — Sentence-chunked streaming TTS, VAD-driven barge-in with LIFO cancel and mid-stream LLM abort, live bidirectional captions over data channel, echo-loop mitigation, Voice Visualizer three-state. The core-value phase.
 - [ ] **Phase 5: Voice Breadth & Unified Thread Polish** — Both TTS engines with cold-swap UX, per-character default + per-chat override, saved-audio toggles + inline replay, unified thread visual treatment, full SillyTavern text-UX parity (Regenerate / Edit / Swipes / Continue / alternate greetings / virtualization).
@@ -232,7 +232,7 @@ Plans:
 - [x] 02-15-PLAN.md — Character Editor/Gallery default voice assignment and badges
 - [x] 02-16-PLAN.md — License, runtime evidence, Voice Lab, and LAN runbook documentation
 - [x] 02-17-PLAN.md — Non-call aiortc signaling skeleton
-- [ ] 02-18-PLAN.md — Full local, live OMEN-PC, and Android product-owner acceptance
+- [x] 02-18-PLAN.md — Full local, live OMEN-PC, and Android product-owner acceptance
 
 **UI hint:** yes
 
@@ -363,7 +363,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 0. Measurement Gate | 0/? | Not started | - |
 | 1. Foundations & Text Chat | 0/? | Not started | - |
-| 2. AI Backend Skeleton & Voice Lab | 15/18 | In Progress | - |
+| 2. AI Backend Skeleton & Voice Lab | 18/18 | Complete | 2026-04-25 |
 | 3. First Working Call (MVP) | 0/? | Not started | - |
 | 4. Call Feel | 0/? | Not started | - |
 | 5. Voice Breadth & Unified Thread Polish | 0/? | Not started | - |
