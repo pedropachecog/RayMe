@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Phase 3 UI-SPEC approved
-last_updated: "2026-04-25T19:41:06.706Z"
+stopped_at: Completed 03-01-PLAN.md
+last_updated: "2026-04-25T19:58:06.857Z"
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 69
-  completed_plans: 57
-  percent: 83
+  completed_plans: 58
+  percent: 84
 ---
 
 ## Phase Status
@@ -40,6 +40,7 @@ progress:
 - Phase 02 plan 02-17 completed on 2026-04-25: AI backend now exposes only a non-call `/webrtc` skeleton with explicit non-readiness flags and fixed Phase 3 offer rejection.
 - Phase 02 plan 02-18 completed on 2026-04-25: full local acceptance passed, live OMEN-PC Voice Lab Playwright passed with saved evidence, GPU health showed F5 resident with CUDA STT, and Android Chrome product-owner acceptance passed.
 - Phase 02 complete on 2026-04-25; next phase is Phase 3 First Working Call (MVP).
+- Phase 03 plan 03-01 completed on 2026-04-25: RED AI backend call-session, inbound audio finalization, WebRTC offer/status/control, and sanitized malformed-payload contracts committed; expected implementation failures remain for later Phase 3 plans.
 
 ## Current Decisions
 
@@ -93,6 +94,9 @@ progress:
 - Phase 02-16 runtime evidence policy: runtime promotion requires one-runtime evidence first; split runtime, WSL, Docker, or subprocess paths require logged one-runtime failure evidence while preserving one public AI backend API.
 - Phase 02-16 cleanup policy: Voice Lab cleanup guidance uses exact durable blob paths and protects the canonical OMEN-PC checkout plus reusable TLS material.
 - Phase 02-17 signaling policy: Phase 2 exposes only `/webrtc/status` and `/webrtc/offer`; live media, captions, barge-in, and peer connection allocation remain Phase 3+ scope.
+- Phase 03-01 call contract policy: AI backend call behavior is locked by RED tests before replacing the Phase 2 WebRTC skeleton.
+- Phase 03-01 inbound audio policy: mic audio must finalize through VAD and STT into a typed `user_final` event, not through fabricated JSON input.
+- Phase 03-01 signaling error policy: malformed WebRTC payloads must return sanitized 400/422 validation responses without traceback text.
 
 ## Evidence
 
@@ -118,8 +122,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-04-25T18:41:55.487Z
-Stopped at: Phase 3 UI-SPEC approved
-Resume file: .planning/phases/03-first-working-call-mvp/03-UI-SPEC.md
+Last session: 2026-04-25T19:58:06.841Z
+Stopped at: Completed 03-01-PLAN.md
+Resume file: None
 
 **Planned Phase:** 03 (First Working Call (MVP)) — 12 plans — 2026-04-25T19:41:06.684Z

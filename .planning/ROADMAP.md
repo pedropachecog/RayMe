@@ -260,7 +260,21 @@ Plans:
 4. Ending a call drops the user back into the thread's text composer with the call-summary row visible in scrollback.
 5. A 5-minute call on desktop speakers does not exhibit catastrophic behavior (no ping-pong, no uncaught exceptions); call-feel polish is Phase 4's job, but the loop holds.
 
-**Plans:** TBD
+**Plans:** 12 plans
+
+Plans:
+- [x] 03-01-PLAN.md - AI backend Wave 0 call session and WebRTC signaling contract tests
+- [ ] 03-02-PLAN.md - Web UI server Wave 0 call bootstrap, call rows, readiness, and prompt tests
+- [ ] 03-03-PLAN.md - Client Wave 0 call state, media helper, permissions, toolbar, transcript, summary, and mobile tests
+- [ ] 03-04-PLAN.md - AI backend live call session manager and `/webrtc` signaling/control implementation
+- [ ] 03-05-PLAN.md - Web UI server call facade and durable call service
+- [ ] 03-06-PLAN.md - Sliding-window prompt context for Phase 3 calls
+- [ ] 03-07-PLAN.md - Client call API wrappers, media helpers, and call state machine
+- [ ] 03-08-PLAN.md - Phase 3 call UI surface, entry points, toolbar, visualizer, transcript, and thread row rendering
+- [ ] 03-09-PLAN.md - Full Phase 3 MVP call loop wiring across browser, Web UI server, and AI backend
+- [ ] 03-10-PLAN.md - Full local Phase 3 automated acceptance and Playwright evidence
+- [ ] 03-11-PLAN.md - OMEN-PC live LAN call acceptance and evidence
+- [ ] 03-12-PLAN.md - Physical Android Chrome product-owner acceptance and Phase 3 evidence closure
 
 **UI hint:** yes
 
