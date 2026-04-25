@@ -180,6 +180,7 @@ class VoiceService:
             voice_id=voice.id,
             text=payload.get("text", ""),
             engine=engine,
+            reference_transcript=voice.reference_transcript,
             content=sample.path.read_bytes(),
             content_type=asset.content_type,
         )

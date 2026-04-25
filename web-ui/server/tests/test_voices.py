@@ -481,6 +481,7 @@ def test_voice_library_detail_and_test_play_routes(
     assert test_play.json()["voice_id"] == voice.voice_id
     assert test_play.json()["engine"] == voice.body["default_engine"]
     assert test_play.json()["audio_url"]
+    assert voice_fixture.processor.calls[-1]["reference_transcript"] == "Editable transcript for saved voice."
 
 
 def test_voice_test_play_returns_bad_gateway_when_synthesis_produces_no_audio(

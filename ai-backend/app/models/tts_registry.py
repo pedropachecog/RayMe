@@ -55,6 +55,7 @@ class TtsEngineMetadata(BaseModel, frozen=True):
 class TtsSynthesisInput(BaseModel):
     text: str
     reference_audio: bytes
+    reference_audio_content_type: str | None = None
     reference_transcript: str | None = None
 
 

@@ -3,9 +3,11 @@ from __future__ import annotations
 import base64
 import enum
 import importlib
+import math
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
@@ -329,6 +331,41 @@ def test_tts_synthesize_failure_returns_fixed_public_error() -> None:
     assert "RuntimeError" not in rendered
     assert "CUDA out of memory" not in rendered
     assert "C:\\" not in rendered
+
+
+def test_f5_adapter_uses_runtime_infer_and_returns_wav_bytes() -> None:
+    f5_module = importlib.import_module("app.models.tts_f5")
+    registry_module = importlib.import_module("app.models.tts_registry")
+    F5TtsAdapter = getattr(f5_module, "F5TtsAdapter")
+    TtsSynthesisInput = getattr(registry_module, "TtsSynthesisInput")
+
+    class FakeF5Runtime:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str, str]] = []
+
+        def infer(self, ref_file: str, ref_text: str, gen_text: str, **_: Any) -> tuple[Any, int, None]:
+            self.calls.append((ref_file, ref_text, gen_text))
+            sample_rate = 24_000
+            t = np.linspace(0, 0.05, int(sample_rate * 0.05), endpoint=False)
+            return (0.1 * np.sin(2 * math.pi * 440 * t), sample_rate, None)
+
+    runtime = FakeF5Runtime()
+    adapter = F5TtsAdapter(runtime_factory=lambda: runtime)
+
+    result = adapter.synthesize(
+        TtsSynthesisInput(
+            text="Generated RayMe audio.",
+            reference_audio=b"fake-reference-wav",
+            reference_transcript="Reference transcript.",
+        )
+    )
+
+    assert runtime.calls
+    assert runtime.calls[0][1:] == ("Reference transcript.", "Generated RayMe audio.")
+    assert result.engine_id == "f5"
+    assert result.sample_rate == 24_000
+    assert result.duration_ms and result.duration_ms > 0
+    assert result.wav_bytes.startswith(b"RIFF")
 
 
 def test_create_app_includes_tts_router_without_voice_library_persistence_routes() -> None:

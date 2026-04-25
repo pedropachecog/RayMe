@@ -24,6 +24,7 @@ class TtsSynthesizeRequest(BaseModel):
         validation_alias=AliasChoices("reference_audio_b64", "reference_audio_base64"),
     )
     reference_transcript: str | None = Field(default=None, max_length=10000)
+    reference_audio_content_type: str | None = Field(default=None, max_length=120)
     use_default_engine: bool = False
 
 
@@ -40,9 +41,12 @@ def synthesize(request: Request, payload: TtsSynthesizeRequest) -> dict[str, Any
             TtsSynthesisInput(
                 text=payload.text,
                 reference_audio=reference_audio,
+                reference_audio_content_type=payload.reference_audio_content_type,
                 reference_transcript=payload.reference_transcript,
             )
         )
+        if not result.wav_bytes:
+            raise ValueError("synthesis returned empty audio")
     except HTTPException:
         raise
     except Exception as exc:
