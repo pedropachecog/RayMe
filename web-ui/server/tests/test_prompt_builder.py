@@ -1,5 +1,6 @@
 """Prompt-context contracts for selected branch LLM calls."""
 
+from app.domain import prompt_builder
 from app.domain.prompt_builder import build_prompt_context
 
 
@@ -145,3 +146,136 @@ async def test_until_message_id_stops_context_at_selected_branch_position() -> N
     prompt_text = "\n".join(message["content"] for message in messages)
     assert "Hello" in prompt_text
     assert "Selected branch" not in prompt_text
+
+
+class CallPromptRepository:
+    def __init__(self) -> None:
+        self.thread = {
+            "id": "thread-call",
+            "character_snapshot_name": "Ray",
+            "character_snapshot_description": "A focused AI caller.",
+            "character_snapshot_personality": "Warm and concise.",
+            "character_snapshot_scenario": "Late-night LAN testing.",
+            "character_snapshot_system_prompt": "Stay in character.",
+            "character_snapshot_post_history_instructions": "Keep replies natural.",
+        }
+        self.messages = [
+            {
+                "id": "call-start",
+                "role": "event",
+                "message_kind": "call_start",
+                "content_text": "Call started",
+            },
+            {
+                "id": "user-text",
+                "role": "user",
+                "message_kind": "user_text",
+                "content_text": "Typed context before the call.",
+            },
+            {
+                "id": "ai-text",
+                "role": "assistant",
+                "message_kind": "ai_text",
+                "content_text": "Hidden unselected branch.",
+                "selected_alternate_id": "call-selected-alt",
+                "alternates": [
+                    {"id": "call-selected-alt", "content_text": "Selected text branch."},
+                    {"id": "call-hidden-alt", "content_text": "Hidden alternate branch."},
+                ],
+            },
+            {
+                "id": "user-speech",
+                "role": "user",
+                "message_kind": "user_speech",
+                "content_text": "Spoken user turn.",
+            },
+            {
+                "id": "ai-speech",
+                "role": "assistant",
+                "message_kind": "ai_speech",
+                "content_text": "Spoken assistant answer.",
+            },
+            {
+                "id": "stale-user-speech",
+                "role": "user",
+                "message_kind": "user_speech",
+                "content_text": "Edited-away spoken prompt.",
+                "stale_after_edit": True,
+            },
+            {
+                "id": "call-end",
+                "role": "event",
+                "message_kind": "call_end",
+                "content_text": "Call ended",
+            },
+        ]
+
+    async def get_prompt_thread(self, thread_id: str) -> object:
+        assert thread_id == self.thread["id"]
+        return self
+
+
+async def test_call_context_includes_text_and_speech_but_excludes_call_events() -> None:
+    repository = CallPromptRepository()
+
+    messages = await _build_call_prompt_context("thread-call", max_turns=24, repository=repository)
+
+    assert messages[0]["role"] == "system"
+    assert "Stay in character." in messages[0]["content"]
+    prompt_text = "\n".join(message["content"] for message in messages)
+    assert "Typed context before the call." in prompt_text
+    assert "Selected text branch." in prompt_text
+    assert "Hidden alternate branch." not in prompt_text
+    assert "Spoken user turn." in prompt_text
+    assert "Spoken assistant answer." in prompt_text
+    assert "Edited-away spoken prompt." not in prompt_text
+    assert "Call started" not in prompt_text
+    assert "Call ended" not in prompt_text
+    assert "call_start" not in prompt_text
+    assert "call_end" not in prompt_text
+
+
+async def test_call_context_sliding_window_limits_to_recent_24_turn_messages() -> None:
+    repository = CallPromptRepository()
+    repository.messages = [
+        {
+            "id": "setup-call-start",
+            "role": "event",
+            "message_kind": "call_start",
+            "content_text": "Call started",
+        },
+        *[
+            {
+                "id": f"turn-{index:02d}",
+                "role": "user" if index % 2 == 0 else "assistant",
+                "message_kind": "user_speech" if index % 2 == 0 else "ai_speech",
+                "content_text": f"Call turn {index:02d}",
+            }
+            for index in range(30)
+        ],
+        {
+            "id": "setup-call-end",
+            "role": "event",
+            "message_kind": "call_end",
+            "content_text": "Call ended",
+        },
+    ]
+
+    messages = await _build_call_prompt_context("thread-call", max_turns=24, repository=repository)
+
+    assert messages[0]["role"] == "system"
+    turn_messages = messages[1:]
+    assert len(turn_messages) <= 24
+    assert [message["content"] for message in turn_messages] == [
+        f"Call turn {index:02d}" for index in range(6, 30)
+    ]
+
+
+async def _build_call_prompt_context(
+    thread_id: str,
+    *,
+    max_turns: int,
+    repository: object,
+) -> list[dict[str, str]]:
+    build_call_prompt_context = getattr(prompt_builder, "build_call_prompt_context")
+    return await build_call_prompt_context(thread_id, max_turns=max_turns, repository=repository)
