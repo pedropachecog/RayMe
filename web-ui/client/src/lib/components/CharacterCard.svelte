@@ -3,6 +3,7 @@
 
   import type { CharacterSummary } from '$lib/api/types';
   import { renderTrustedMarkdown } from '$lib/sanitizer/renderMarkdown';
+  import VoiceStateBadge from '$lib/components/voice/VoiceStateBadge.svelte';
 
   export let character: CharacterSummary;
   export let busy = false;
@@ -45,6 +46,12 @@
         {@html renderedSnippet}
       </div>
     </div>
+
+    <VoiceStateBadge
+      state={character.default_voice_state}
+      label={character.default_voice_label}
+      voice={character.default_voice}
+    />
 
     {#if visibleTags.length > 0}
       <div class="tags" aria-label={`${character.name} tags`}>
