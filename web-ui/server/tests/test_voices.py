@@ -459,6 +459,53 @@ def test_ai_backend_voice_processor_uses_stt_route_and_stored_sample_bytes() -> 
     assert [request.url.path for request in requests] == ["/base/stt/transcribe"]
 
 
+def test_ai_backend_voice_processor_uses_asset_id_for_unsaved_preview_voice_id() -> None:
+    from app.api.voices import AiBackendVoiceProcessor
+    from app.domain.ai_backend_client import AiBackendClient
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/base/tts/synthesize":
+            payload = json.loads(request.content)
+            assert payload["voice_id"] == "voice_asset_preview_test"
+            assert payload["asset_id"] == "voice_asset_preview_test"
+            assert payload["reference_audio_base64"]
+            return httpx.Response(
+                200,
+                json={
+                    "engine_id": "f5",
+                    "content_type": "audio/wav",
+                    "audio_base64": "UklGRg==",
+                    "duration_ms": 420,
+                },
+            )
+        return httpx.Response(404)
+
+    async def exercise() -> dict[str, Any]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+            processor = AiBackendVoiceProcessor(
+                AiBackendClient(http_client=http_client),
+                "https://ai.local:9443/base",
+            )
+            return await processor.synthesize_preview(
+                asset_id="voice_asset_preview_test",
+                content=b"stored-sample-bytes",
+                content_type="audio/wav",
+                reference_transcript="Manual transcript",
+                preview_text="Preview this voice.",
+                default_engine="f5",
+                use_default_engine=True,
+            )
+
+    result = asyncio.run(exercise())
+
+    assert result["status"] == "ok"
+    assert result["audio_base64"] == "UklGRg=="
+    assert [request.url.path for request in requests] == ["/base/tts/synthesize"]
+
+
 def test_voice_library_detail_and_test_play_routes(
     voice_fixture: VoiceFixture,
 ) -> None:

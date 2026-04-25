@@ -297,6 +297,6 @@ def _synthesis_payload(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         "reference_transcript": payload.get("reference_transcript"),
         "reference_audio_base64": audio_base64,
         "reference_audio_content_type": payload.get("content_type"),
-        "voice_id": payload.get("voice_id"),
+        "voice_id": payload.get("voice_id") or payload.get("asset_id"),
         "asset_id": payload.get("asset_id"),
     }
