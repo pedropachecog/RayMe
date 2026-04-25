@@ -95,8 +95,10 @@ def test_csp_contains_default_src_self() -> None:
     response = client.get("/")
 
     assert "default-src 'self'" in CSP_HEADER
+    assert "media-src 'self' data: blob:" in CSP_HEADER
     assert "script-src 'self' 'unsafe-inline'" in CSP_HEADER
     assert "default-src 'self'" in response.headers["content-security-policy"]
+    assert "media-src 'self' data: blob:" in response.headers["content-security-policy"]
     assert (
         "script-src 'self' 'unsafe-inline'"
         in response.headers["content-security-policy"]
