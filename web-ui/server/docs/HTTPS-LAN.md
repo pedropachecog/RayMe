@@ -124,6 +124,19 @@ uv run --project web-ui/server python web-ui/server/scripts/run_dev_https.py
 
 Browser URL: `https://192.168.1.199:8443`.
 
+For Phase 2 Voice Lab live checks, use the same reusable mkcert material and
+canonical checkout, then open:
+
+```text
+https://192.168.1.199:8443/voice-lab
+```
+
+The matching Phase 2 AI backend health URL is:
+
+```text
+https://192.168.1.199:9443/health
+```
+
 On `OMEN-PC`, the current repeatable Phase 1 runtime uses Windows scheduled
 tasks so the HTTPS services survive the SSH command that starts them:
 
