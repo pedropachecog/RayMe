@@ -11,6 +11,8 @@ dependencies = [
   "pynvml==13.0.1",
   "soundfile==0.13.1",
   "numpy==2.2.6",
+  "faster-whisper==1.2.1",
+  "silero-vad==6.2.1",
 ]
 
 [dependency-groups]
