@@ -227,7 +227,7 @@ Plans:
 - [x] 02-10-PLAN.md — Web UI Settings service/API for save-audio, VAD values, and AI backend status
 - [x] 02-11-PLAN.md — Character default voice server persistence and unavailable state
 - [x] 02-12-PLAN.md — Client Voice Lab creation flow with six-engine picker and optional preview
-- [ ] 02-13-PLAN.md — Client Voice Library list, rename, delete, and test-play
+- [x] 02-13-PLAN.md — Client Voice Library list, rename, delete, and test-play
 - [x] 02-14-PLAN.md — Client Settings panels and Voice Lab navigation
 - [ ] 02-15-PLAN.md — Character Editor/Gallery default voice assignment and badges
 - [x] 02-16-PLAN.md — License, runtime evidence, Voice Lab, and LAN runbook documentation
