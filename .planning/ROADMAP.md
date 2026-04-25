@@ -264,7 +264,7 @@ Plans:
 
 Plans:
 - [x] 03-01-PLAN.md - AI backend Wave 0 call session and WebRTC signaling contract tests
-- [ ] 03-02-PLAN.md - Web UI server Wave 0 call bootstrap, call rows, readiness, and prompt tests
+- [x] 03-02-PLAN.md - Web UI server Wave 0 call bootstrap, call rows, readiness, and prompt tests
 - [ ] 03-03-PLAN.md - Client Wave 0 call state, media helper, permissions, toolbar, transcript, summary, and mobile tests
 - [ ] 03-04-PLAN.md - AI backend live call session manager and `/webrtc` signaling/control implementation
 - [ ] 03-05-PLAN.md - Web UI server call facade and durable call service
