@@ -3,10 +3,14 @@ from __future__ import annotations
 import asyncio
 import importlib
 import inspect
+import os
 from dataclasses import asdict, is_dataclass
+from io import BytesIO
 from typing import Any
 
+import numpy as np
 import pytest
+import soundfile as sf
 
 EXPECTED_WHISPER_OPTIONS = {
     "language": "en",
@@ -140,6 +144,10 @@ def test_stt_adapter_uses_phase_zero_english_whisper_options() -> None:
     assert result["language"] == "en"
     assert result["model"] == "distil-large-v3"
     assert result["compute_type"] == "int8_float16"
+    assert whisper_kwargs["beam_size"] == 5
+    assert whisper_kwargs["vad_filter"] is True
+    assert whisper_kwargs["vad_parameters"]["threshold"] == 0.5
+    assert whisper_kwargs["vad_parameters"]["min_silence_duration_ms"] == 700
 
 
 def test_vad_gate_blocks_no_speech_before_transcript_return() -> None:
@@ -193,3 +201,57 @@ def test_retry_and_manual_transcript_fallback_response_shape() -> None:
     assert result["status"] == "needs_manual_transcript"
     assert result["retry_allowed"] is True
     assert result["manual_transcript_allowed"] is True
+
+
+def test_audio_io_decodes_uploaded_bytes_to_generated_wav_path() -> None:
+    audio_io = importlib.import_module("app.audio.io")
+    samples = np.zeros(1600, dtype=np.float32)
+    source = BytesIO()
+    sf.write(source, samples, 16000, format="WAV")
+
+    helper = getattr(audio_io, "uploaded_bytes_to_temp_wav", None)
+    assert helper is not None, "audio IO must expose uploaded_bytes_to_temp_wav"
+
+    result = helper(source.getvalue(), original_filename="../evil-sample.mp3")
+    path = result.path if hasattr(result, "path") else result
+    try:
+        assert os.path.exists(path)
+        assert os.path.basename(path).startswith("rayme-stt-")
+        assert os.path.basename(path).endswith(".wav")
+        assert "evil" not in os.path.basename(path)
+        decoded, sample_rate = sf.read(path, dtype="float32")
+        assert sample_rate == 16000
+        assert decoded.ndim == 1
+    finally:
+        cleanup = getattr(result, "cleanup", None)
+        if callable(cleanup):
+            cleanup()
+        elif os.path.exists(path):
+            os.unlink(path)
+
+
+def test_silero_vad_adapter_uses_configurable_threshold_and_silence() -> None:
+    vad_module = importlib.import_module("app.models.vad")
+    SileroVadAdapter = getattr(vad_module, "SileroVadAdapter")
+    calls: list[dict[str, Any]] = []
+
+    def fake_get_speech_timestamps(audio: Any, model: Any, **kwargs: Any) -> list[dict[str, int]]:
+        calls.append({"audio": audio, "model": model, "kwargs": kwargs})
+        return [{"start": 100, "end": 1200}]
+
+    adapter = SileroVadAdapter(
+        model=object(),
+        get_speech_timestamps_fn=fake_get_speech_timestamps,
+        threshold=0.42,
+        end_silence_ms=900,
+    )
+
+    result = adapter.speech_timestamps(np.zeros(16000, dtype=np.float32))
+
+    assert adapter.ready is True
+    assert adapter.threshold == 0.42
+    assert adapter.end_silence_ms == 900
+    assert result == [{"start": 100, "end": 1200}]
+    assert calls[0]["kwargs"]["threshold"] == 0.42
+    assert calls[0]["kwargs"]["min_silence_duration_ms"] == 900
+    assert calls[0]["kwargs"]["sampling_rate"] == 16000
