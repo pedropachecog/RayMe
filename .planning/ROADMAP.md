@@ -270,7 +270,7 @@ Plans:
 - [x] 03-05-PLAN.md - Web UI server call facade and durable call service
 - [x] 03-06-PLAN.md - Sliding-window prompt context for Phase 3 calls
 - [x] 03-07-PLAN.md - Client call API wrappers, media helpers, and call state machine
-- [ ] 03-08-PLAN.md - Phase 3 call UI surface, entry points, toolbar, visualizer, transcript, and thread row rendering
+- [x] 03-08-PLAN.md - Phase 3 call UI surface, entry points, toolbar, visualizer, transcript, and thread row rendering
 - [ ] 03-09-PLAN.md - Full Phase 3 MVP call loop wiring across browser, Web UI server, and AI backend
 - [ ] 03-10-PLAN.md - Full local Phase 3 automated acceptance and Playwright evidence
 - [ ] 03-11-PLAN.md - OMEN-PC live LAN call acceptance and evidence
