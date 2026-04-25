@@ -11,7 +11,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.character_service import CharacterNotFoundError, CharacterService
+from app.domain.character_service import (
+    CharacterNotFoundError,
+    CharacterService,
+    DefaultVoiceNotFoundError,
+)
 from app.domain.portraits import PortraitValidationError
 from app.storage.session import SERVER_ROOT, get_session
 
@@ -67,7 +71,10 @@ async def create_character(
     payload: CharacterWrite,
     service: CharacterService = Depends(get_character_service),
 ) -> dict[str, Any]:
-    return await service.create_character(payload.model_dump())
+    try:
+        return await service.create_character(payload.model_dump())
+    except DefaultVoiceNotFoundError as exc:
+        raise HTTPException(status_code=400, detail="Default voice not found") from exc
 
 
 @router.get("/{character_id}")
@@ -91,6 +98,8 @@ async def update_character(
         return await service.update_character(character_id, payload.model_dump())
     except CharacterNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Character not found") from exc
+    except DefaultVoiceNotFoundError as exc:
+        raise HTTPException(status_code=400, detail="Default voice not found") from exc
 
 
 @router.patch("/{character_id}")

@@ -47,6 +47,10 @@ class CharacterNotFoundError(LookupError):
     """Raised when a requested character does not exist or is deleted."""
 
 
+class DefaultVoiceNotFoundError(LookupError):
+    """Raised when a character write references a missing or deleted voice."""
+
+
 @dataclass(frozen=True)
 class PortraitBlob:
     path: Path
@@ -85,7 +89,7 @@ class CharacterService:
         return [await self.character_to_response(character) for character in characters]
 
     async def create_character(self, payload: dict[str, Any]) -> dict[str, Any]:
-        character = Character(id=new_character_id(), **self._character_columns(payload))
+        character = Character(id=new_character_id(), **await self._character_columns(payload))
         self.session.add(character)
         await self.session.commit()
         await self.session.refresh(character)
@@ -97,7 +101,7 @@ class CharacterService:
 
     async def update_character(self, character_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         character = await self.get_character(character_id)
-        for key, value in self._character_columns(payload).items():
+        for key, value in (await self._character_columns(payload)).items():
             setattr(character, key, value)
         await self.session.commit()
         await self.session.refresh(character)
@@ -251,6 +255,7 @@ class CharacterService:
                 if active_portrait and active_portrait.updated_at
                 else None
             ),
+            "default_voice_id": character.default_voice_id,
             "default_voice": await self._default_voice_response(character.default_voice_id),
             "created_at": character.created_at.isoformat() if character.created_at else None,
             "updated_at": character.updated_at.isoformat() if character.updated_at else None,
@@ -304,8 +309,11 @@ class CharacterService:
         for asset in result.scalars():
             asset.asset_kind = HISTORICAL_PORTRAIT_KIND
 
-    def _character_columns(self, payload: dict[str, Any]) -> dict[str, Any]:
+    async def _character_columns(self, payload: dict[str, Any]) -> dict[str, Any]:
         columns = {field: payload.get(field) for field in EDITOR_FIELD_NAMES}
+        columns["default_voice_id"] = await self._validated_default_voice_id(
+            columns["default_voice_id"]
+        )
         tags = payload.get("tags")
         alternate_greetings = payload.get("alternate_greetings")
         columns["tags_json"] = list(tags) if isinstance(tags, list) else []
@@ -317,6 +325,15 @@ class CharacterService:
         columns["raw_source_json"] = raw_source_json if isinstance(raw_source_json, dict) else None
         columns["lorebook_json"] = lorebook_json if isinstance(lorebook_json, (dict, list)) else None
         return columns
+
+    async def _validated_default_voice_id(self, voice_id: object) -> str | None:
+        if not isinstance(voice_id, str) or not voice_id:
+            return None
+
+        voice = await self.session.get(Voice, voice_id)
+        if voice is None or voice.deleted_at is not None:
+            raise DefaultVoiceNotFoundError(voice_id)
+        return voice.id
 
 
 def _payload_from_import(import_result: CharacterCardImportResult) -> dict[str, Any]:
@@ -382,6 +399,7 @@ __all__ = [
     "ACTIVE_PORTRAIT_KIND",
     "CharacterNotFoundError",
     "CharacterService",
+    "DefaultVoiceNotFoundError",
     "HISTORICAL_PORTRAIT_KIND",
     "PortraitBlob",
     "character_has_messages",
