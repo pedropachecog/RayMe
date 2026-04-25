@@ -228,7 +228,7 @@ Plans:
 - [x] 02-11-PLAN.md — Character default voice server persistence and unavailable state
 - [ ] 02-12-PLAN.md — Client Voice Lab creation flow with six-engine picker and optional preview
 - [ ] 02-13-PLAN.md — Client Voice Library list, rename, delete, and test-play
-- [ ] 02-14-PLAN.md — Client Settings panels and Voice Lab navigation
+- [x] 02-14-PLAN.md — Client Settings panels and Voice Lab navigation
 - [ ] 02-15-PLAN.md — Character Editor/Gallery default voice assignment and badges
 - [ ] 02-16-PLAN.md — License, runtime evidence, Voice Lab, and LAN runbook documentation
 - [ ] 02-17-PLAN.md — Non-call aiortc signaling skeleton
