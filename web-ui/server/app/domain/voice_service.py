@@ -113,12 +113,14 @@ class VoiceService:
 
     async def save_voice(self, payload: dict[str, Any]) -> dict[str, Any]:
         asset = await self.get_asset(str(payload["asset_id"]))
+        metadata = dict(payload.get("metadata") or {})
+        metadata["sample_asset_id"] = asset.id
         voice = Voice(
             id=new_voice_id(),
             name=str(payload["name"]),
             default_engine=str(payload["default_engine"]),
             reference_transcript=payload.get("reference_transcript"),
-            metadata_json={"sample_asset_id": asset.id},
+            metadata_json=metadata,
             deleted_at=None,
         )
         asset.voice_id = voice.id
@@ -142,10 +144,6 @@ class VoiceService:
         voice = await self._voice(voice_id)
         if "name" in payload and payload["name"] is not None:
             voice.name = str(payload["name"])
-        if "default_engine" in payload and payload["default_engine"] is not None:
-            voice.default_engine = str(payload["default_engine"])
-        if "reference_transcript" in payload:
-            voice.reference_transcript = payload["reference_transcript"]
         await self.session.commit()
         await self.session.refresh(voice)
         return await self.voice_detail(voice)
@@ -185,6 +183,9 @@ class VoiceService:
             "voice_id": voice.id,
             "engine": engine,
             "audio_url": result.get("audio_url"),
+            "audio_base64": result.get("audio_base64"),
+            "content_type": result.get("content_type"),
+            "duration_ms": result.get("duration_ms"),
         }
 
     async def sample_blob(self, asset_id: str) -> VoiceSampleBlob:

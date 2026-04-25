@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import base64
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings
+from app.domain.ai_backend_client import AiBackendClient, AiBackendClientError
 from app.domain.voice_assets import VoiceSampleValidationError
 from app.domain.voice_service import (
     VoiceAssetNotFoundError,
@@ -25,19 +28,26 @@ DEFAULT_VOICE_BLOB_DIR = SERVER_ROOT / "data" / "blobs" / "voices"
 
 
 class VoiceSave(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     asset_id: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=200)
     default_engine: str = Field(min_length=1, max_length=80)
     reference_transcript: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class VoicePatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = Field(default=None, min_length=1, max_length=200)
     default_engine: str | None = Field(default=None, min_length=1, max_length=80)
     reference_transcript: str | None = None
 
 
 class VoicePreview(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     asset_id: str = Field(min_length=1, max_length=64)
     name: str | None = Field(default=None, max_length=200)
     default_engine: str | None = Field(default=None, max_length=80)
@@ -48,20 +58,47 @@ class VoicePreview(BaseModel):
 
 
 class VoiceTestPlay(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     text: str = Field(min_length=1, max_length=2000)
     use_default_engine: bool = True
     engine: str | None = Field(default=None, max_length=80)
 
 
-class PassthroughVoiceProcessor:
-    async def transcribe(self, **_: Any) -> dict[str, str | float]:
-        return {"transcript": "", "language": "en", "confidence": 0.0}
+class AiBackendVoiceProcessor:
+    def __init__(self, client: AiBackendClient, base_url: str) -> None:
+        self.client = client
+        self.base_url = base_url
 
-    async def synthesize_preview(self, **_: Any) -> dict[str, str]:
-        return {"preview_id": "", "preview_url": ""}
+    async def transcribe(
+        self,
+        *,
+        asset_id: str,
+        content: bytes,
+        content_type: str | None,
+    ) -> dict[str, Any]:
+        result = await self.client.transcribe_sample(
+            self.base_url,
+            content,
+            _processor_filename(asset_id, content_type),
+            content_type or "application/octet-stream",
+        )
+        return result.model_dump()
 
-    async def test_play(self, **_: Any) -> dict[str, str]:
-        return {"audio_url": ""}
+    async def synthesize_preview(self, **payload: Any) -> dict[str, Any]:
+        return await self._synthesize(kind="preview", **payload)
+
+    async def test_play(self, **payload: Any) -> dict[str, Any]:
+        return await self._synthesize(kind="test_play", **payload)
+
+    async def _synthesize(self, *, kind: str, **payload: Any) -> dict[str, Any]:
+        try:
+            result = await self.client.synthesize(self.base_url, _synthesis_payload(kind, payload))
+        except AiBackendClientError as exc:
+            return {"status": "tts_failed", "error": exc.to_public_dict()}
+        response = result.model_dump()
+        response["status"] = "ok"
+        return response
 
 
 async def get_voice_session() -> AsyncIterator[AsyncSession]:
@@ -73,8 +110,12 @@ def get_voice_blob_dir() -> Path:
     return DEFAULT_VOICE_BLOB_DIR
 
 
-def get_voice_processor() -> object:
-    return PassthroughVoiceProcessor()
+def get_runtime_settings(request: Request) -> Settings:
+    return request.app.state.settings
+
+
+def get_voice_processor(settings: Settings = Depends(get_runtime_settings)) -> object:
+    return AiBackendVoiceProcessor(AiBackendClient(), settings.ai_backend_base_url)
 
 
 def get_voice_service(
@@ -213,10 +254,40 @@ async def test_play_voice(
 
 
 __all__ = [
+    "AiBackendVoiceProcessor",
     "DEFAULT_VOICE_BLOB_DIR",
+    "get_runtime_settings",
     "get_voice_blob_dir",
     "get_voice_processor",
     "get_voice_service",
     "get_voice_session",
     "router",
 ]
+
+
+def _processor_filename(asset_id: str, content_type: str | None) -> str:
+    extension_by_type = {
+        "audio/wav": ".wav",
+        "audio/x-wav": ".wav",
+        "audio/mpeg": ".mp3",
+        "audio/flac": ".flac",
+        "audio/x-flac": ".flac",
+    }
+    return f"{asset_id}{extension_by_type.get(content_type or '', '.bin')}"
+
+
+def _synthesis_payload(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
+    content = payload.get("content")
+    audio_base64 = base64.b64encode(content).decode("ascii") if isinstance(content, bytes) else None
+    engine_id = payload.get("engine") or payload.get("default_engine")
+    return {
+        "kind": kind,
+        "text": payload.get("text") or payload.get("preview_text") or "",
+        "engine_id": engine_id,
+        "use_default_engine": payload.get("use_default_engine", True),
+        "reference_transcript": payload.get("reference_transcript"),
+        "reference_audio_base64": audio_base64,
+        "reference_audio_content_type": payload.get("content_type"),
+        "voice_id": payload.get("voice_id"),
+        "asset_id": payload.get("asset_id"),
+    }
