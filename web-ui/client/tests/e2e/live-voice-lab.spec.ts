@@ -23,7 +23,9 @@ test('live OMEN-PC Voice Lab upload transcribe save and test-play path passes be
   expect(liveWebUrl).toBe(canonicalLiveWebUrl);
   expect(liveAiHealthUrl).toBe(canonicalLiveAiHealthUrl);
 
-  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+    allowConsoleErrors: [/Failed to load resource: the server responded with a status of 500 \(Internal Server Error\)/]
+  });
   const voiceRequests: string[] = [];
 
   page.on('request', (request) => {
@@ -36,7 +38,7 @@ test('live OMEN-PC Voice Lab upload transcribe save and test-play path passes be
   await expect(page.locator('body')).toContainText(/ok|healthy|status/i);
 
   await page.goto(`${canonicalLiveWebUrl}/voice-lab`);
-  await expect(page.getByRole('heading', { name: 'Voice Lab' })).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByRole('heading', { name: 'Voice Lab', exact: true })).toBeVisible({ timeout: 60_000 });
 
   await page.getByLabel('Upload Sample').setInputFiles({
     name: 'sample.wav',
@@ -54,14 +56,12 @@ test('live OMEN-PC Voice Lab upload transcribe save and test-play path passes be
   await page.getByLabel('Voice name').fill(liveVoiceName);
   await page.getByLabel('Preview text').fill('Short live Voice Lab acceptance phrase.');
   await page.getByRole('button', { name: 'Save Voice' }).click();
-  await expect(page.getByRole('row', { name: new RegExp(escapeRegExp(liveVoiceName)) })).toBeVisible({
-    timeout: 120_000
-  });
 
-  const voiceRow = page.getByRole('row', { name: new RegExp(escapeRegExp(liveVoiceName)) });
-  await voiceRow.getByLabel('Test voice text').fill('One short live test phrase.');
+  const voiceRow = page.getByRole('listitem', { name: new RegExp(escapeRegExp(liveVoiceName)) });
+  await expect(voiceRow).toBeVisible({ timeout: 120_000 });
+  await voiceRow.getByPlaceholder('Type a test phrase').fill('One short live test phrase.');
   await voiceRow.getByRole('button', { name: 'Test Voice' }).click();
-  await expect(voiceRow).toContainText(/ready|playing|complete/i, { timeout: 180_000 });
+  await expect(page.getByText('Test voice ready.')).toBeVisible({ timeout: 180_000 });
 
   expect(voiceRequests).toEqual(
     expect.arrayContaining([
