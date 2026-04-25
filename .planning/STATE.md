@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 02-06-PLAN.md
-last_updated: "2026-04-25T00:03:31.826Z"
+stopped_at: Completed 02-07-PLAN.md
+last_updated: "2026-04-25T00:21:48.591Z"
 progress:
   total_phases: 8
   completed_phases: 3
   total_plans: 57
-  completed_plans: 45
-  percent: 79
+  completed_plans: 46
+  percent: 81
 ---
 
 ## Phase Status
@@ -27,6 +27,7 @@ progress:
 - Phase 02 plan 02-04 completed on 2026-04-24: migration-backed voice storage, safe original sample blob validation, and minimal Voice API/service wiring passed server voice contracts.
 - Phase 02 plan 02-05 completed on 2026-04-24: typed Web UI AI backend client, sanitized processing/status errors, RayMe-owned `/api/ai-backend/status`, and Settings AI backend probe integration passed health/settings contracts.
 - Phase 02 plan 02-06 completed on 2026-04-25: AI backend settings, lifespan-owned model manager, six-engine residency metadata, and expanded `/health` VRAM/headroom payload passed AI backend health/model-manager contracts.
+- Phase 02 plan 02-07 completed on 2026-04-25: faster-whisper STT, Silero VAD gating, hallucination/manual transcript fallback, and transient `/stt/transcribe` passed AI backend STT/health contracts.
 
 ## Current Decisions
 
@@ -48,6 +49,7 @@ progress:
 - Phase 02-05 status bridge policy: browser-visible AI backend errors use fixed public code/message fields only; degraded but reachable backend health maps to Settings `Connected`, while `/api/ai-backend/status` exposes the detailed `status: degraded` signal through a RayMe-owned server route.
 - Phase 02-06 AI backend residency policy: model health starts from a metadata-driven six-engine roster with F5 as the default resident engine; lightweight adapters keep unit tests model-download-free until real STT/TTS adapter plans wire runtime loading.
 - Phase 02-06 health disclosure policy: public AI backend health uses fixed sanitized degradation reasons rather than raw adapter exceptions, tracebacks, or local model paths.
+- Phase 02-07 STT policy: uploaded samples are decoded to generated temporary WAV paths, faster-whisper runs English transcribe with `condition_on_previous_text=False`, and no-speech/hallucination/failure paths preserve retry plus manual transcript fallback.
 
 ## Evidence
 
@@ -73,8 +75,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-04-25T00:03:31.804Z
-Stopped at: Completed 02-06-PLAN.md
+Last session: 2026-04-25T00:21:48.591Z
+Stopped at: Completed 02-07-PLAN.md
 Resume file: None
 
 **Planned Phase:** 02 (AI Backend Skeleton & Voice Lab) — 18 plans — 2026-04-24T22:37:51.511Z

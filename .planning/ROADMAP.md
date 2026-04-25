@@ -221,7 +221,7 @@ Plans:
 - [x] 02-04-PLAN.md — Web UI voice schema, migration, and sample-asset storage
 - [x] 02-05-PLAN.md — Web UI AI backend client and status bridge
 - [x] 02-06-PLAN.md — AI backend config, model manager, lifespan, and health residency payload
-- [ ] 02-07-PLAN.md — AI backend STT/VAD processing and transient transcription API
+- [x] 02-07-PLAN.md — AI backend STT/VAD processing and transient transcription API
 - [ ] 02-08-PLAN.md — AI backend TTS registry, adapters, switching, and transient synthesis API
 - [ ] 02-09-PLAN.md — Web UI voice domain/API for upload, transcribe, save, library, delete, and test-play
 - [ ] 02-10-PLAN.md — Web UI Settings service/API for save-audio, VAD values, and AI backend status
@@ -363,7 +363,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 0. Measurement Gate | 0/? | Not started | - |
 | 1. Foundations & Text Chat | 0/? | Not started | - |
-| 2. AI Backend Skeleton & Voice Lab | 6/18 | In Progress | - |
+| 2. AI Backend Skeleton & Voice Lab | 7/18 | In Progress | - |
 | 3. First Working Call (MVP) | 0/? | Not started | - |
 | 4. Call Feel | 0/? | Not started | - |
 | 5. Voice Breadth & Unified Thread Polish | 0/? | Not started | - |
