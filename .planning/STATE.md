@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 03-06-PLAN.md
-last_updated: "2026-04-25T20:48:03.911Z"
+stopped_at: Completed 03-07-PLAN.md
+last_updated: "2026-04-25T20:57:51.764Z"
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 69
-  completed_plans: 63
-  percent: 91
+  completed_plans: 64
+  percent: 93
 ---
 
 ## Phase Status
@@ -46,6 +46,7 @@ progress:
 - Phase 03 plan 03-04 completed on 2026-04-25: AI backend now owns live call sessions, typed `rayme-events`, inbound VAD/STT `user_final` finalization, and Phase 3 `/webrtc` offer/mute/interrupt/end controls.
 - Phase 03 plan 03-05 completed on 2026-04-25: Web UI server now owns same-origin `/api/calls` start/offer/mute/interrupt/end facade routes, `call_` to `rtc_` mappings, voice preflight, backend readiness checks, and durable call writeback.
 - Phase 03 plan 03-06 completed on 2026-04-25: call prompt context was verified to hydrate selected non-stale text and speech rows, exclude call boundary events, and cap the LLM context at 24 recent conversational turns plus the optional system prompt.
+- Phase 03 plan 03-07 completed on 2026-04-25: client call API wrappers, WebRTC `rayme-events` helpers, call FSM, AudioContext unlock, device fallback copy, and split mic/AI RMS metering passed RED unit contracts.
 
 ## Current Decisions
 
@@ -112,6 +113,8 @@ progress:
 - Phase 03-05 Web UI call facade policy: browser call controls use same-origin `/api/calls` routes only; the Web UI server owns `call_` IDs, maps them to server-generated `rtc_` sessions, checks backend readiness before creating active calls, and rejects foreign Origin headers.
 - Phase 03-05 call prompt policy: call offers hydrate recent selected non-stale text and speech rows through `build_call_prompt_context(max_turns=24)` while excluding `call_start` and `call_end` event rows.
 - Phase 03-06 prompt window policy: the Plan 03-05 `build_call_prompt_context` helper is the canonical call prompt path, and tests explicitly lock the total cap to 24 conversational turns plus the optional system message.
+- Phase 03-07 client call policy: browser call transport uses typed same-origin `/api/calls` wrappers, parses only known `rayme-events` data-channel payloads, treats malformed messages as no-ops, and keeps server mute state independent from local microphone track state.
+- Phase 03-07 browser media policy: AudioContext unlock uses the Start Call gesture path with a one-sample silent buffer, device picker unsupported states use fixed UI copy, and visualizer metering keeps microphone listening RMS separate from AI speaking RMS.
 
 ## Evidence
 
@@ -137,8 +140,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-04-25T20:48:03.891Z
-Stopped at: Completed 03-06-PLAN.md
+Last session: 2026-04-25T20:57:51.744Z
+Stopped at: Completed 03-07-PLAN.md
 Resume file: None
 
 **Planned Phase:** 03 (First Working Call (MVP)) — 12 plans — 2026-04-25T19:41:06.684Z
