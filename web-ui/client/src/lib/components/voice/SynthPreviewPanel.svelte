@@ -10,9 +10,30 @@
   export let onPreview: () => void = () => {};
 
   let playing = false;
+  let audioElement: HTMLAudioElement;
+
+  $: if (audioUrl) {
+    playing = false;
+    if (audioElement) {
+      audioElement.load();
+    }
+  }
 
   function togglePlayback() {
-    playing = !playing;
+    if (!audioElement || !audioUrl) {
+      return;
+    }
+
+    if (playing) {
+      audioElement.pause();
+      playing = false;
+      return;
+    }
+
+    playing = true;
+    void audioElement.play().catch(() => {
+      playing = false;
+    });
   }
 </script>
 
@@ -47,6 +68,10 @@
       <span>{playing ? 'Pause' : 'Play'}</span>
     </button>
   </div>
+
+  {#if audioUrl}
+    <audio bind:this={audioElement} src={audioUrl} on:ended={() => (playing = false)} preload="metadata"></audio>
+  {/if}
 
   {#if state === 'ready'}
     <p class="success" role="status">Preview ready.</p>

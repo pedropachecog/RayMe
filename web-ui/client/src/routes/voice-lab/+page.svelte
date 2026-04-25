@@ -169,6 +169,7 @@
     selectedFile = file;
     asset = null;
     transcript = '';
+    voiceName = voiceNameFromFilename(file.name);
     uploadError = '';
     transcriptError = '';
     previewError = '';
@@ -229,8 +230,11 @@
         use_default_engine: useDefaultEngine,
         engine: useDefaultEngine ? null : selectedEngine
       });
-      previewAudioUrl = result.audio_url ?? result.preview_url ?? null;
-      previewState = 'ready';
+      previewAudioUrl = synthesisAudioUrl(result);
+      previewState = previewAudioUrl ? 'ready' : 'error';
+      previewError = previewAudioUrl
+        ? ''
+        : 'Preview did not return playable audio. You can retry or save this voice anyway.';
     } catch {
       previewState = 'error';
       previewError = 'Preview failed. You can retry or save this voice anyway.';
@@ -311,9 +315,12 @@
         ...payload,
         text: payload.text.trim() || 'The line is open. This is the saved RayMe voice.'
       });
-      const audioUrl = result.audio_url ?? result.preview_url ?? null;
+      const audioUrl = synthesisAudioUrl(result);
       if (audioUrl) {
         activeAudio = new Audio(audioUrl);
+        void activeAudio.play().catch(() => {
+          libraryStatus = 'Test voice ready.';
+        });
       }
       libraryStatus = 'Test voice ready.';
     } catch {
@@ -382,6 +389,21 @@
       activeAudio.pause();
       activeAudio = null;
     }
+  }
+
+  function synthesisAudioUrl(result: VoiceSynthesisResult) {
+    const url = result.audio_url ?? result.preview_url;
+    if (url) {
+      return url;
+    }
+    if (result.audio_base64) {
+      return `data:${result.content_type || 'audio/wav'};base64,${result.audio_base64}`;
+    }
+    return null;
+  }
+
+  function voiceNameFromFilename(filename: string) {
+    return filename.replace(/\.[^.]+$/, '').trim();
   }
 </script>
 

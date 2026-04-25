@@ -44,6 +44,7 @@ test('Voice Lab saves after preview returns HTTP 502 and stays on RayMe APIs', a
     mimeType: 'audio/wav',
     buffer: makeTinyWav()
   });
+  await expect(page.getByLabel('Voice name')).toHaveValue('sample');
   await page.getByRole('button', { name: 'Transcribe Sample' }).click();
   await expect(page.getByLabel('Reference transcript')).toHaveValue(sampleTranscript);
   await page.getByLabel('Reference transcript').fill(editedTranscript);
@@ -104,18 +105,18 @@ test('Voice Lab unlocks preview and save after failed transcription with manual 
     mimeType: 'audio/wav',
     buffer: makeTinyWav()
   });
+  await expect(page.getByLabel('Voice name')).toHaveValue('android-sample');
   await page.getByRole('button', { name: 'Transcribe Sample' }).click();
   await expect(page.getByText(/transcription failed/i)).toBeVisible();
 
   await page.getByLabel('Reference transcript').fill(manualTranscript);
   await expect(page.getByRole('button', { name: 'Preview Voice' })).toBeEnabled();
-  await expect(page.getByRole('button', { name: 'Save Voice' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Save Voice' })).toBeEnabled();
 
   await page.getByRole('button', { name: 'Preview Voice' }).click();
   await expect(page.getByText('Preview ready.')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Play preview audio' })).toBeEnabled();
 
-  await page.getByLabel('Voice name').fill('Android Manual Transcript Voice');
-  await expect(page.getByRole('button', { name: 'Save Voice' })).toBeEnabled();
   await page.getByRole('button', { name: 'Save Voice' }).click();
   await expect(page.getByText('Voice saved.')).toBeVisible();
 
@@ -297,14 +298,14 @@ async function routeVoiceLabApis(
     expect(route.request().method()).toBe('POST');
     expect(route.request().postDataJSON()).toMatchObject({
       asset_id: 'sample-asset',
-      name: options.transcribeFails ? 'Android Manual Transcript Voice' : 'RayMe Browser Voice',
+      name: options.transcribeFails ? 'android-sample' : 'RayMe Browser Voice',
       reference_transcript: options.expectedTranscript ?? editedTranscript,
       default_engine: options.transcribeFails ? 'f5' : 'chatterbox_turbo'
     });
     await fulfillJson(route, {
       voice_id: 'voice-rayme',
       asset_id: 'sample-asset',
-      name: options.transcribeFails ? 'Android Manual Transcript Voice' : 'RayMe Browser Voice',
+      name: options.transcribeFails ? 'android-sample' : 'RayMe Browser Voice',
       default_engine: options.transcribeFails ? 'f5' : 'chatterbox_turbo',
       reference_transcript: options.expectedTranscript ?? editedTranscript,
       status: 'available'
@@ -342,6 +343,7 @@ async function routeVoiceLabApis(
     const expectedPayload = options.transcribeFails
       ? {
           asset_id: 'sample-asset',
+          name: 'android-sample',
           reference_transcript: options.expectedTranscript,
           default_engine: 'f5',
           use_default_engine: true,
@@ -360,7 +362,7 @@ async function routeVoiceLabApis(
       await fulfillJson(route, {
         engine_id: 'f5',
         content_type: 'audio/wav',
-        audio_base64: 'UklGRg==',
+        audio_base64: makeTinyWav().toString('base64'),
         duration_ms: 420
       });
       return;
