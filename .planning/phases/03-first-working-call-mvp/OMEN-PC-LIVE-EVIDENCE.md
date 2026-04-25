@@ -5,15 +5,15 @@ product-owner acceptance remains pending.
 
 ## Runtime Identity
 
-- Date/time: `2026-04-25T22:34:25Z`
+- Date/time: `2026-04-25T22:44:42Z`
 - Operator: Codex
-- Deployed commit SHA: `3226fd54a1d4407b51261779834d6569782a1fa0`
+- Deployed commit SHA: `a325c355130c87ccda7eb3079589fe00993d3ace`
 - Branch: `main`
 - Canonical checkout: `C:\Users\pmpg\rayme\RayMe\`
 - TLS directory: `C:\Users\pmpg\rayme\phase1-tls\`
 - Web URL: `https://192.168.1.199:8443`
 - AI health URL: `https://192.168.1.199:9443/health`
-- Listening ports after restart: `9443 -> pid 18588`, `8443 -> pid 21848`
+- Listening ports after restart: `9443 -> pid 29968`, `8443 -> pid 9048`
 
 ## Deployment Result
 
@@ -25,7 +25,7 @@ scripts/deploy-omen.sh
 
 Result:
 
-- `OMEN-PC` pulled `3226fd54a1d4407b51261779834d6569782a1fa0`.
+- `OMEN-PC` pulled `a325c355130c87ccda7eb3079589fe00993d3ace`.
 - Web client production build passed on `OMEN-PC`.
 - Scheduled tasks `RayMePhase1AI` and `RayMePhase1Web` restarted.
 - AI backend and Web UI listeners were verified on `192.168.1.199`.
@@ -87,6 +87,37 @@ uv run --project ai-backend pytest ai-backend/tests/test_webrtc_signaling.py ai-
 19 passed
 ```
 
+Follow-up Android Chrome testing then reached the microphone permission prompt
+but fell back to the generic failed panel shortly after permission was granted.
+The client was still treating browser-side WebRTC answer application as a hard
+startup requirement, and the UI did not start local microphone metering until
+after signaling succeeded.
+
+Fix commit:
+
+```text
+a325c35 fix(03-11): keep Android call UI alive after mic grant
+```
+
+Local verification before redeploy:
+
+```text
+npm --prefix web-ui/client run check
+passed
+
+npm --prefix web-ui/client run test:e2e -- tests/e2e/call-start.spec.ts tests/e2e/call-mobile.spec.ts --project=desktop-chromium
+4 passed
+
+uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py -q
+16 passed
+
+npm --prefix web-ui/client run test:unit -- --run tests/unit/call-audio.test.ts
+1 passed, 4 tests
+
+npm --prefix web-ui/client run build
+passed
+```
+
 ## GPU Runtime Evidence
 
 Deploy script GPU guard output:
@@ -146,6 +177,19 @@ vram_used_mb        : 1333.5
 vram_headroom_mb    : 9666.5
 ```
 
+Post-fix health spot check after deploying `a325c35`:
+
+```text
+service             : rayme-ai-backend
+status              : degraded
+stt_model           : distil-large-v3
+stt_compute_type    : int8_float16
+vad_ready           : True
+resident_tts_engine : f5
+vram_used_mb        : 1333.5
+vram_headroom_mb    : 9666.5
+```
+
 ## Web UI Settings Bridge
 
 Captured after redeploy from `https://192.168.1.199:8443/api/settings`:
@@ -174,6 +218,20 @@ Result: stopped by operator before completion per handoff decision. Services
 remained online after the stop. This is not counted as passing live desktop call
 acceptance.
 
+Post-`a325c35` deployed browser smoke:
+
+```json
+{
+  "state": "listening",
+  "rms": "0.040",
+  "events": [
+    "POST /api/calls/start",
+    "POST /api/calls/call_0010e16cd3914850ad6f7fe2e7b755fc/offer"
+  ],
+  "errors": []
+}
+```
+
 ## Android Product-Owner Acceptance
 
 - Android Chrome product-owner acceptance: pending
@@ -181,5 +239,6 @@ acceptance.
 - Preconditions currently met: Web UI and AI backend are deployed on
   `OMEN-PC`, HTTPS listeners are up, CUDA STT/F5 residency is visible through
   `/health`, the call route now requests microphone capture before starting
-  browser negotiation, and local automated Phase 3 suites passed before
+  browser negotiation, local microphone metering starts immediately after
+  permission is granted, and local automated Phase 3 suites passed before
   deployment.
