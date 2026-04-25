@@ -131,6 +131,7 @@ test('Settings Test Connection saves current form values before probing endpoint
   await llmSection.getByRole('textbox', { name: /API key/ }).fill('');
 
   await webSection.getByRole('button', { name: 'Test Connection' }).click();
+  await expectLastPost(events, '/api/settings/test/web');
   await expect(page.getByTestId('web-ui-status')).toHaveText('Connected');
   expect(events.slice(-2)).toEqual([
     {
@@ -149,6 +150,7 @@ test('Settings Test Connection saves current form values before probing endpoint
   ]);
 
   await aiBackendSection.getByRole('button', { name: 'Test Connection' }).click();
+  await expectLastPost(events, '/api/settings/test/ai-backend');
   await expect(page.getByTestId('ai-backend-status')).toHaveText('Connected');
   expect(events.slice(-2)).toEqual([
     {
@@ -163,6 +165,7 @@ test('Settings Test Connection saves current form values before probing endpoint
   ]);
 
   await llmSection.getByRole('button', { name: 'Test Connection' }).click();
+  await expectLastPost(events, '/api/settings/test/llm');
   await expect(page.getByTestId('llm-status')).toHaveText('Connected');
   expect(events.slice(-2)).toEqual([
     {
@@ -196,4 +199,8 @@ async function routeSettingsTest(
     events.push({ method: 'POST', path });
     await fulfillJson(route, { status: 'Connected' });
   });
+}
+
+async function expectLastPost(events: SettingsEvent[], path: string) {
+  await expect.poll(() => events.at(-1)).toEqual({ method: 'POST', path });
 }

@@ -8,10 +8,12 @@
     testWebSettings,
     updateSettings
   } from '$lib/api/settings';
-  import type { EndpointStatus, SettingsPayload } from '$lib/api/types';
+  import type { AiBackendSettingsStatus, EndpointStatus, SettingsPayload } from '$lib/api/types';
   import { getBrowserReadiness, getBrowserReadinessText } from '$lib/browser/environment';
   import EndpointSettingsPanel from '$lib/components/EndpointSettingsPanel.svelte';
   import StatusChip from '$lib/components/StatusChip.svelte';
+  import AudioSettingsPanel from '$lib/components/settings/AudioSettingsPanel.svelte';
+  import VadSettingsPanel from '$lib/components/settings/VadSettingsPanel.svelte';
 
   let loadState: 'loading' | 'ready' | 'error' = 'loading';
   let saveState: 'idle' | 'saving' = 'idle';
@@ -24,9 +26,25 @@
   let llmModel = '';
   let llmApiKey = '';
   let llmApiKeyConfigured = false;
+  let saveAiAudio = true;
+  let saveMicAudio = false;
+  let vadThreshold = 0.5;
+  let vadEndSilenceMs = 700;
+  let sttModel = 'distil-large-v3';
+  let ttsDefaultEngine = 'f5';
   let webStatus: EndpointStatus = 'Not configured';
   let aiBackendStatus: EndpointStatus = 'Not configured';
   let llmStatus: EndpointStatus = 'Not configured';
+  let aiBackendOperationalStatus: AiBackendSettingsStatus = {
+    endpoint_status: 'Not configured',
+    stt_model: 'distil-large-v3',
+    vad_ready: false,
+    resident_tts_engine: null,
+    available_engines: [],
+    loading_engine: null,
+    vram_used_mb: null,
+    vram_headroom_mb: null
+  };
   let secureContextLabel = 'Insecure context';
   let mediaDevicesLabel = 'Media devices unavailable';
 
@@ -65,8 +83,15 @@
     llmModel = settings.llm_model ?? '';
     llmApiKey = '';
     llmApiKeyConfigured = settings.llm_api_key_configured === true;
+    saveAiAudio = settings.save_ai_audio ?? true;
+    saveMicAudio = settings.save_mic_audio ?? false;
+    vadThreshold = clampNumber(settings.vad_threshold ?? 0.5, 0, 1);
+    vadEndSilenceMs = Math.round(clampNumber(settings.vad_end_silence_ms ?? 700, 100, 3000));
+    sttModel = settings.stt_model ?? 'distil-large-v3';
+    ttsDefaultEngine = settings.tts_default_engine ?? 'f5';
+    aiBackendOperationalStatus = normalizeAiBackendStatus(settings.ai_backend_status, aiBackendUrl);
     webStatus = webUrl.trim() ? 'Connected' : 'Not configured';
-    aiBackendStatus = aiBackendUrl.trim() ? aiBackendStatus : 'Not configured';
+    aiBackendStatus = aiBackendOperationalStatus.endpoint_status;
     llmStatus = llmBaseUrl.trim() && llmModel.trim() ? llmStatus : 'Not configured';
   }
 
@@ -87,6 +112,12 @@
         ai_backend_url: aiBackendUrl,
         llm_base_url: llmBaseUrl,
         llm_model: llmModel,
+        save_ai_audio: saveAiAudio,
+        save_mic_audio: saveMicAudio,
+        vad_threshold: clampNumber(vadThreshold, 0, 1),
+        vad_end_silence_ms: Math.round(clampNumber(vadEndSilenceMs, 100, 3000)),
+        stt_model: sttModel,
+        tts_default_engine: ttsDefaultEngine,
         ...(llmApiKey.trim() ? { llm_api_key: llmApiKey.trim() } : {})
       });
       applySettings(nextSettings);
@@ -129,8 +160,16 @@
         return;
       }
       aiBackendStatus = (await testAiBackendSettings()).status;
+      aiBackendOperationalStatus = {
+        ...aiBackendOperationalStatus,
+        endpoint_status: aiBackendStatus
+      };
     } catch {
       aiBackendStatus = 'Unreachable';
+      aiBackendOperationalStatus = {
+        ...aiBackendOperationalStatus,
+        endpoint_status: 'Unreachable'
+      };
     } finally {
       testingEndpoint = null;
     }
@@ -151,6 +190,43 @@
     } finally {
       testingEndpoint = null;
     }
+  }
+
+  function clampNumber(value: number, min: number, max: number) {
+    if (!Number.isFinite(value)) {
+      return min;
+    }
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function normalizeEndpointStatus(value: unknown, hasUrl: boolean): EndpointStatus {
+    if (
+      value === 'Connected' ||
+      value === 'Unreachable' ||
+      value === 'Unauthorized' ||
+      value === 'Not configured'
+    ) {
+      return value;
+    }
+    return hasUrl ? 'Unreachable' : 'Not configured';
+  }
+
+  function normalizeAiBackendStatus(
+    status: SettingsPayload['ai_backend_status'] | undefined,
+    url: string
+  ): AiBackendSettingsStatus {
+    const endpointStatus = normalizeEndpointStatus(status?.endpoint_status, Boolean(url.trim()));
+    return {
+      endpoint_status: endpointStatus,
+      stt_model: status?.stt_model ?? sttModel,
+      vad_ready: status?.vad_ready === true,
+      resident_tts_engine: status?.resident_tts_engine ?? null,
+      available_engines: status?.available_engines ?? [],
+      loading_engine: status?.loading_engine ?? null,
+      vram_used_mb: typeof status?.vram_used_mb === 'number' ? status.vram_used_mb : null,
+      vram_headroom_mb:
+        typeof status?.vram_headroom_mb === 'number' ? status.vram_headroom_mb : null
+    };
   }
 </script>
 
@@ -205,6 +281,7 @@
           bind:urlValue={aiBackendUrl}
           urlPlaceholder="https://192.168.1.199:9443"
           onUrlInput={(value) => (aiBackendUrl = value)}
+          aiBackendStatus={aiBackendOperationalStatus}
           testing={testingEndpoint === 'ai'}
           onTest={testAiBackendEndpoint}
         />
@@ -248,6 +325,23 @@
             description="media-device availability status"
           />
         </div>
+      </aside>
+
+      <aside class="settings-stack" aria-label="Audio and VAD defaults">
+        <AudioSettingsPanel
+          saveAiAudio={saveAiAudio}
+          saveMicAudio={saveMicAudio}
+          onSaveAiAudioChange={(value) => (saveAiAudio = value)}
+          onSaveMicAudioChange={(value) => (saveMicAudio = value)}
+        />
+
+        <VadSettingsPanel
+          threshold={vadThreshold}
+          endSilenceMs={vadEndSilenceMs}
+          onThresholdChange={(value) => (vadThreshold = clampNumber(value, 0, 1))}
+          onEndSilenceChange={(value) =>
+            (vadEndSilenceMs = Math.round(clampNumber(value, 100, 3000)))}
+        />
       </aside>
     </div>
   {/if}
@@ -334,6 +428,7 @@
 
   .settings-grid,
   .endpoint-stack,
+  .settings-stack,
   .readiness-panel {
     display: grid;
     gap: var(--space-lg);
@@ -375,6 +470,11 @@
     .settings-grid {
       grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
       align-items: start;
+    }
+
+    .settings-stack {
+      grid-column: 1 / -1;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 </style>

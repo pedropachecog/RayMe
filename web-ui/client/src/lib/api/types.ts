@@ -158,6 +158,13 @@ export interface SettingsPayload {
   llm_base_url: string;
   llm_model: string;
   llm_api_key_configured: boolean;
+  save_ai_audio: boolean;
+  save_mic_audio: boolean;
+  vad_threshold: number;
+  vad_end_silence_ms: number;
+  stt_model: string;
+  tts_default_engine: string;
+  ai_backend_status: AiBackendSettingsStatus;
 }
 
 export interface SettingsUpdatePayload {
@@ -166,6 +173,12 @@ export interface SettingsUpdatePayload {
   llm_base_url?: string | null;
   llm_model?: string | null;
   llm_api_key?: string | null;
+  save_ai_audio?: boolean | null;
+  save_mic_audio?: boolean | null;
+  vad_threshold?: number | null;
+  vad_end_silence_ms?: number | null;
+  stt_model?: string | null;
+  tts_default_engine?: string | null;
 }
 
 export interface EndpointTestResult {
@@ -173,4 +186,25 @@ export interface EndpointTestResult {
   message?: string;
   probe?: string;
   target_base_url?: string;
+}
+
+export interface AiBackendEngineStatus {
+  id?: string;
+  engine_id?: string;
+  label?: string | null;
+  available?: boolean;
+  state?: string | null;
+  resident?: boolean | null;
+  unavailable_reason?: string | null;
+}
+
+export interface AiBackendSettingsStatus {
+  endpoint_status: EndpointStatus;
+  stt_model?: string | null;
+  vad_ready?: boolean;
+  resident_tts_engine?: string | null;
+  available_engines?: Array<string | AiBackendEngineStatus>;
+  loading_engine?: string | null;
+  vram_used_mb?: number | null;
+  vram_headroom_mb?: number | null;
 }

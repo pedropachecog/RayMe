@@ -10,6 +10,8 @@ import {
 import settingsApiSource from '../../src/lib/api/settings.ts?raw';
 import typesSource from '../../src/lib/api/types.ts?raw';
 import endpointPanelSource from '../../src/lib/components/EndpointSettingsPanel.svelte?raw';
+import audioPanelSource from '../../src/lib/components/settings/AudioSettingsPanel.svelte?raw';
+import vadPanelSource from '../../src/lib/components/settings/VadSettingsPanel.svelte?raw';
 import settingsSource from '../../src/routes/settings/+page.svelte?raw';
 
 const publicSettings = {
@@ -98,8 +100,9 @@ describe('Settings route', () => {
       'Not configured'
     ];
 
+    const settingsSources = `${settingsSource}\n${endpointPanelSource}\n${audioPanelSource}\n${vadPanelSource}`;
     for (const copy of requiredCopy) {
-      expect(`${settingsSource}\n${endpointPanelSource}`).toContain(copy);
+      expect(settingsSources).toContain(copy);
     }
 
     for (const forbidden of [

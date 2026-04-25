@@ -1,7 +1,7 @@
 <script lang="ts">
   import { Eye, EyeOff, PlugZap } from 'lucide-svelte';
 
-  import type { EndpointStatus } from '$lib/api/types';
+  import type { AiBackendSettingsStatus, EndpointStatus } from '$lib/api/types';
 
   export let idPrefix: string;
   export let title: string;
@@ -19,6 +19,7 @@
   export let modelValue: string | undefined = undefined;
   export let modelPlaceholder = 'Model name';
   export let onModelInput: (value: string) => void = () => {};
+  export let aiBackendStatus: AiBackendSettingsStatus | undefined = undefined;
   export let testing = false;
   export let onTest: () => void | Promise<void> = () => {};
 
@@ -26,6 +27,17 @@
 
   $: showApiKey = apiKeyValue !== undefined;
   $: showModel = modelValue !== undefined;
+  $: showAiBackendStatus = aiBackendStatus !== undefined;
+  $: availableEngineLabels = (aiBackendStatus?.available_engines ?? []).map((engine) => {
+    if (typeof engine === 'string') {
+      return engine;
+    }
+    return engine.label ?? engine.id ?? engine.engine_id ?? 'Unknown engine';
+  });
+  $: vramHeadroom =
+    typeof aiBackendStatus?.vram_headroom_mb === 'number'
+      ? `${Math.round(aiBackendStatus.vram_headroom_mb)} MB`
+      : 'Unknown';
   $: statusTone =
     status === 'Connected'
       ? 'connected'
@@ -46,6 +58,35 @@
     </div>
     <span class={`status-pill ${statusTone}`} data-testid={`${idPrefix}-status`}>{status}</span>
   </div>
+
+  {#if showAiBackendStatus && aiBackendStatus}
+    <dl class="status-grid" aria-label="AI backend residency status">
+      <div>
+        <dt>STT model</dt>
+        <dd>{aiBackendStatus.stt_model ?? 'Unknown'}</dd>
+      </div>
+      <div>
+        <dt>VAD ready</dt>
+        <dd>{aiBackendStatus.vad_ready ? 'Ready' : 'Not ready'}</dd>
+      </div>
+      <div>
+        <dt>Resident TTS engine</dt>
+        <dd>{aiBackendStatus.resident_tts_engine ?? 'None'}</dd>
+      </div>
+      <div>
+        <dt>Available engines</dt>
+        <dd>{availableEngineLabels.length ? availableEngineLabels.join(', ') : 'None'}</dd>
+      </div>
+      <div>
+        <dt>Loading engine</dt>
+        <dd>{aiBackendStatus.loading_engine ?? 'None'}</dd>
+      </div>
+      <div>
+        <dt>VRAM headroom</dt>
+        <dd>{vramHeadroom}</dd>
+      </div>
+    </dl>
+  {/if}
 
   <div class="fields">
     {#if urlLabel}
@@ -179,6 +220,40 @@
   .fields {
     display: grid;
     gap: var(--space-md);
+  }
+
+  .status-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-sm);
+    margin: 0;
+  }
+
+  .status-grid div {
+    min-width: 0;
+    border-radius: var(--radius-md);
+    background: rgba(9, 19, 40, 0.5);
+    padding: var(--space-sm);
+  }
+
+  dt,
+  dd {
+    margin: 0;
+  }
+
+  dt {
+    color: var(--color-text-muted);
+    font-size: var(--font-label);
+    font-weight: 600;
+    line-height: var(--line-label);
+  }
+
+  dd {
+    margin-top: var(--space-xs);
+    overflow-wrap: anywhere;
+    color: var(--color-text);
+    font-size: var(--font-label);
+    line-height: var(--line-label);
   }
 
   label {
