@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-04-25T20:20:29.314Z"
+stopped_at: Completed 03-04-PLAN.md
+last_updated: "2026-04-25T20:31:27.036Z"
 progress:
   total_phases: 8
   completed_phases: 4
   total_plans: 69
-  completed_plans: 60
-  percent: 87
+  completed_plans: 61
+  percent: 88
 ---
 
 ## Phase Status
@@ -43,6 +43,7 @@ progress:
 - Phase 03 plan 03-01 completed on 2026-04-25: RED AI backend call-session, inbound audio finalization, WebRTC offer/status/control, and sanitized malformed-payload contracts committed; expected implementation failures remain for later Phase 3 plans.
 - Phase 03 plan 03-02 completed on 2026-04-25: RED Web UI call bootstrap/control, voice preflight, backend readiness, durable call boundary rows, and sliding-window call prompt contracts committed; expected implementation failures remain for later Phase 3 plans.
 - Phase 03 plan 03-03 completed on 2026-04-25: RED client call FSM, audio helper, desktop/mobile browser, and opt-in live LAN acceptance contracts committed; expected implementation failures remain for later Phase 3 plans.
+- Phase 03 plan 03-04 completed on 2026-04-25: AI backend now owns live call sessions, typed `rayme-events`, inbound VAD/STT `user_final` finalization, and Phase 3 `/webrtc` offer/mute/interrupt/end controls.
 
 ## Current Decisions
 
@@ -103,6 +104,9 @@ progress:
 - Phase 03-02 call prompt policy: call memory uses selected non-stale text and speech rows, excludes `call_start`/`call_end` event rows from LLM messages, and caps call context at the most recent 24 conversational turns.
 - Phase 03-03 client call policy: client call implementation remains RED-gated by browser-facing tests before building the Svelte call surface.
 - Phase 03-03 live call policy: live call acceptance is opt-in through `RAYME_ENABLE_LIVE_E2E` and must avoid mocked call, WebRTC, or media routes.
+- Phase 03-04 AI backend session policy: call sessions are held in `app.state.call_session_manager` and exposed through session-backed `/webrtc` controls.
+- Phase 03-04 WebRTC testability policy: minimal unit-test SDP uses a deterministic answer path, while real media/ICE offers allocate `aiortc` peer connections.
+- Phase 03-04 call event policy: data-channel call events use the `rayme-events` label and fixed public failure codes such as `call_stt_failed`, `webrtc_offer_failed`, `call_session_not_found`, and `call_control_failed`.
 
 ## Evidence
 
@@ -128,8 +132,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-04-25T20:20:29.039Z
-Stopped at: Completed 03-03-PLAN.md
+Last session: 2026-04-25T20:31:27.018Z
+Stopped at: Completed 03-04-PLAN.md
 Resume file: None
 
 **Planned Phase:** 03 (First Working Call (MVP)) — 12 plans — 2026-04-25T19:41:06.684Z
