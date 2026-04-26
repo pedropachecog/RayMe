@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 
-from app.call.tracks import QueuedAudioOutputTrack
+from app.call.tracks import QueuedAudioOutputTrack, normalize_inbound_audio_frame
 from app.call.session import CallSession, CallSessionManager
 
 
@@ -91,6 +91,15 @@ class ScriptedInboundAudioFrame:
 class ScriptedInboundAudioFrameSource:
     def __init__(self, *frames: bytes) -> None:
         self.frames = [ScriptedInboundAudioFrame(frame) for frame in frames]
+
+
+class ScriptedAvAudioFrame:
+    def __init__(self, samples: np.ndarray, *, sample_rate: int = 16000) -> None:
+        self._samples = samples
+        self.sample_rate = sample_rate
+
+    def to_ndarray(self) -> np.ndarray:
+        return self._samples
 
 
 class ScriptedVadAdapter:
@@ -241,6 +250,19 @@ def test_silero_silence_gap_finalizes_turn_even_with_loud_ambient_noise() -> Non
     )
     assert final_event["type"] == "user_final"
     assert stt.calls, "STT must run after VAD end_of_turn"
+
+
+def test_inbound_audio_normalizer_scales_integer_channels_before_mixing() -> None:
+    """Regression: PyAV-style channel arrays must not clip int16 PCM to +/-1."""
+
+    samples = np.asarray([[0, 8192, -8192, 16384]], dtype=np.int16)
+    frame = ScriptedAvAudioFrame(samples)
+
+    normalized = normalize_inbound_audio_frame(frame)
+    normalized_samples = np.frombuffer(normalized.pcm, dtype=np.int16)
+
+    assert normalized.sample_rate == 16000
+    assert normalized_samples.tolist() == [0, 8192, -8192, 16384]
 
 
 def test_muted_inbound_audio_counts_dropped_frames_without_stt() -> None:

@@ -506,3 +506,52 @@ through a Silero-mimic adapter; turn must finalize once the silence gap exceeds
 
 next_action: deploy and ask user to reproduce; expect `vad.silence` then
 `vad.end_of_turn` then `stt.begin/result` in the next trace.
+
+## FOLLOW-UP ROOT CAUSE FOUND (2026-04-26)
+
+### Captured Boundary Trace (commit 0bc6f9d, Android Chrome reproduction)
+
+| Boundary | Outcome |
+|---|---|
+| OMEN deployed HEAD | `0bc6f9d` |
+| Android client | `192.168.1.253` |
+| `/api/calls/start` | 201 Created |
+| `/api/calls/{id}/offer` | 200 OK |
+| `offer.received` -> `offer.answered` | OK |
+| `iceconnectionstatechange: checking -> completed` | OK |
+| `connectionstatechange: connecting -> connected` | OK |
+| `peer.on_datachannel rayme-events readyState=open` | OK |
+| `track.recv.first_frame sample_rate=48000 samples=960` | OK |
+| `turn.started frame_count=1 sample_rate=16000 pcm_bytes=1280` | OK |
+| `track.recv.progress` 50,100,150,200,250,300,350 | OK |
+| `vad.speech_start` / `vad.silence` / `vad.end_of_turn` | NEVER |
+| `stt.begin` / `stt.result` / LLM / TTS | NEVER |
+
+### Root Cause
+
+The previous VAD silence fix was correct for the post-speech silence branch,
+but the live Android trace now failed before speech was detected at all.
+
+`normalize_inbound_audio_frame` averaged multi-dimensional PyAV integer audio
+arrays before scaling int16 PCM into float audio. `numpy.mean()` changes the
+dtype to float, so `_coerce_to_float32` no longer divided by the int16 max
+value. The later clip-to-`[-1, 1]` step collapsed almost every non-zero sample
+to full scale. Silero received a distorted clipped waveform rather than real
+speech-shaped audio, so it produced no speech timestamps and the turn never
+reached STT.
+
+### Fix
+
+Scale integer PCM to float before channel mixing in
+`ai-backend/app/call/tracks.py`.
+
+Regression test:
+`ai-backend/tests/test_call_session.py::test_inbound_audio_normalizer_scales_integer_channels_before_mixing`
+uses a PyAV-style int16 channel array and verifies the normalized PCM preserves
+the original amplitudes instead of clipping to full scale.
+
+Verification:
+`uv run --project ai-backend pytest ai-backend/tests -q` -> **66 passed**.
+
+next_action: deploy and ask user to reproduce; expected trace is
+`vad.speech_start -> vad.silence -> vad.end_of_turn -> stt.begin -> stt.result`.
