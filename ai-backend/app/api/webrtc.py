@@ -16,6 +16,10 @@ router = APIRouter(prefix="/webrtc", tags=["webrtc"])
 RAYME_EVENTS_CHANNEL = "rayme-events"
 WEBRTC_OFFER_FAILED = "webrtc_offer_failed"
 WEBRTC_OFFER_FAILED_MESSAGE = "WebRTC offer could not be accepted"
+WEBRTC_AUDIO_TRACK_FAILED = "webrtc_audio_track_failed"
+WEBRTC_AUDIO_TRACK_FAILED_MESSAGE = "Backend could not create call audio output track"
+WEBRTC_RUNTIME_UNAVAILABLE = "webrtc_runtime_unavailable"
+WEBRTC_RUNTIME_UNAVAILABLE_MESSAGE = "Backend WebRTC runtime is unavailable"
 
 
 class SessionDescription(BaseModel):
@@ -317,7 +321,10 @@ def _create_peer_connection(offer: SessionDescription) -> Any:
 
         return RTCPeerConnection()
     except Exception as exc:
-        raise _offer_error() from exc
+        raise _offer_error(
+            code=WEBRTC_RUNTIME_UNAVAILABLE,
+            message=WEBRTC_RUNTIME_UNAVAILABLE_MESSAGE,
+        ) from exc
 
 
 def _looks_like_real_media_offer(sdp: str) -> bool:
@@ -337,13 +344,19 @@ def _create_data_channel(peer_connection: Any) -> Any:
 def _attach_outbound_audio_track(peer_connection: Any) -> QueuedAudioOutputTrack:
     add_track = getattr(peer_connection, "addTrack", None)
     if not callable(add_track):
-        raise _offer_error()
+        raise _offer_error(
+            code=WEBRTC_AUDIO_TRACK_FAILED,
+            message=WEBRTC_AUDIO_TRACK_FAILED_MESSAGE,
+        )
     try:
         track = QueuedAudioOutputTrack()
         add_track(track)
         return track
     except Exception as exc:
-        raise _offer_error() from exc
+        raise _offer_error(
+            code=WEBRTC_AUDIO_TRACK_FAILED,
+            message=WEBRTC_AUDIO_TRACK_FAILED_MESSAGE,
+        ) from exc
 
 
 def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
@@ -399,11 +412,15 @@ async def _negotiate_answer(
         raise _offer_error() from exc
 
 
-def _offer_error() -> HTTPException:
+def _offer_error(
+    *,
+    code: str = WEBRTC_OFFER_FAILED,
+    message: str = WEBRTC_OFFER_FAILED_MESSAGE,
+) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_502_BAD_GATEWAY,
         detail={
-            "code": WEBRTC_OFFER_FAILED,
-            "message": WEBRTC_OFFER_FAILED_MESSAGE,
+            "code": code,
+            "message": message,
         },
     )

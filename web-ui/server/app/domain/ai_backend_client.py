@@ -13,6 +13,7 @@ INVALID_RESPONSE_MESSAGE = "AI backend returned an invalid response"
 TRANSCRIPTION_FAILED_MESSAGE = "Transcription failed"
 SYNTHESIS_FAILED_MESSAGE = "Synthesis failed"
 WEBRTC_FAILED_MESSAGE = "Call control request failed"
+WEBRTC_OFFER_FAILED_MESSAGE = "WebRTC offer could not be accepted"
 
 
 class EngineStatus(BaseModel):
@@ -93,11 +94,13 @@ class AiBackendClient:
         timeout: float = 5.0,
         transcription_timeout: float = 120.0,
         synthesis_timeout: float = 120.0,
+        webrtc_timeout: float = 30.0,
     ) -> None:
         self._http_client = http_client
         self._timeout = timeout
         self._transcription_timeout = transcription_timeout
         self._synthesis_timeout = synthesis_timeout
+        self._webrtc_timeout = webrtc_timeout
 
     async def get_status(self, base_url: str) -> AiBackendStatus:
         response = await self._request("GET", _join_endpoint(base_url, "/health"))
@@ -159,9 +162,9 @@ class AiBackendClient:
             "POST",
             _join_endpoint(base_url, "/webrtc/offer"),
             json=dict(payload),
-            processing_message=WEBRTC_FAILED_MESSAGE,
+            processing_message=WEBRTC_OFFER_FAILED_MESSAGE,
             processing_code="webrtc_offer_failed",
-            timeout=self._timeout,
+            timeout=self._webrtc_timeout,
         )
         response_payload = _json_payload(response)
         if not isinstance(response_payload, dict):
