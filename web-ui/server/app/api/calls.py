@@ -376,7 +376,11 @@ async def create_call_turn(
                         **voice_reference,
                     },
                 )
-                audio_started = speak_result.get("ai_audio_started_event")
+                nested_event = speak_result.get("event") or {}
+                audio_started = (
+                    speak_result.get("ai_audio_started_event")
+                    or nested_event.get("ai_audio_started_event")
+                )
                 if audio_started:
                     yield _sse({
                         "type": "ai_audio_started",

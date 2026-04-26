@@ -543,7 +543,19 @@ async def _receive_audio_track(session: CallSession, track: Any) -> None:
                     await session.fail(reason="connection_failed")
                     return
                 continue
-            await session.fail(reason="connection_failed")
+            # The inbound track ended or had a codec error while ICE/connection
+            # are still alive (e.g. the remote side stopped sending audio after
+            # the user finished speaking on mobile).  This is NOT a fatal
+            # connection failure — the outbound audio track must remain alive so
+            # that TTS audio already in-flight can be delivered.  Exit the
+            # receive loop without failing the session.
+            logger.info(
+                "[rayme-call] track.recv.inbound_ended session=%s frames=%d "
+                "exc=%s — outbound track kept alive",
+                session.session_id,
+                frame_count,
+                exc_name,
+            )
             return
         frame_count += 1
         if frame_count == 1:

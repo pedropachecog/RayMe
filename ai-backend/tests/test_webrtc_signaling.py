@@ -282,3 +282,69 @@ def test_webrtc_offer_rejects_non_media_offer_instead_of_inventing_answer() -> N
         "message": "WebRTC offer could not be accepted",
     }
     assert "RayMe test answer" not in response.text
+
+
+def test_receive_audio_track_media_stream_error_with_live_ice_does_not_fail_session() -> None:
+    """MediaStreamError raised while ICE=completed/connected must NOT call session.fail().
+
+    Regression for: Android Chrome stops sending audio frames after the user
+    finishes speaking; aiortc raises MediaStreamError; the old fallthrough
+    called session.fail() which destroyed the outbound audio track and prevented
+    in-flight TTS from being delivered.
+    """
+    import asyncio
+
+    from app.call.session import CallSessionManager
+    from app.call.tracks import QueuedAudioOutputTrack
+    from app.config import AiBackendSettings
+
+    class MediaStreamError(Exception):
+        pass
+
+    class ScriptedInboundTrack:
+        kind = "audio"
+        id = "inbound-1"
+
+        async def recv(self) -> Any:
+            # Raise immediately — the error path is what we are testing, not
+            # frame processing.  ICE and conn states are still "alive" so the
+            # fallthrough must NOT call session.fail().
+            raise MediaStreamError("end of stream")
+
+    class LivePeerConnection:
+        connectionState = "connected"
+        iceConnectionState = "completed"
+        close_calls: int = 0
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    async def _run_test() -> tuple[int, str]:
+        settings = AiBackendSettings()
+        manager = CallSessionManager(settings=settings)
+        pc = LivePeerConnection()
+        outbound_track = QueuedAudioOutputTrack()
+        session = await manager.create_session(
+            session_id="test-media-stream-error",
+            thread_id="thread-1",
+            voice_id="voice-1",
+            engine_id="f5",
+            prompt_messages=[],
+            peer_connection=pc,
+            vad_adapter=None,
+            stt_adapter=None,
+            outbound_audio_track=outbound_track,
+        )
+        track = ScriptedInboundTrack()
+        await webrtc_module._receive_audio_track(session, track)
+        return pc.close_calls, session.state
+
+    close_calls, state = asyncio.run(_run_test())
+
+    assert close_calls == 0, (
+        "peer_connection.close() must NOT be called when MediaStreamError fires "
+        "while ICE/conn are still alive (ice=completed conn=connected)"
+    )
+    assert state not in {"failed"}, (
+        f"session.fail() must NOT be called; got state={state!r}"
+    )

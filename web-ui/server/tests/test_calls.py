@@ -524,6 +524,75 @@ def test_turn_generation_failure_preserves_user_speech_and_returns_fixed_code(
     assert not any(row[0] == "ai_speech" for row in rows)
 
 
+def test_turn_yields_ai_audio_started_event_when_nested_inside_speak_result_event(
+    call_fixture: CallFixture,
+) -> None:
+    """ai_audio_started SSE event must be emitted when ai_audio_started_event is
+    nested inside speak_result["event"], not at the speak_result top level.
+
+    Regression for: _speak_call returns {"session_id":…, "turn_id":…, "state":…,
+    "event": {"type":"ai_done", …, "ai_audio_started_event": {…}}}. The old code
+    checked speak_result.get("ai_audio_started_event") which always returned None
+    because the key is inside speak_result["event"]. The SSE ai_audio_started event
+    was therefore never sent to the browser, so the client never knew audio was
+    playing.
+    """
+
+    class BackendWithNestedAudioStarted(ScriptedCallBackend):
+        async def speak_call(
+            self,
+            base_url: str,
+            session_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            self.speak_calls.append(
+                {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
+            )
+            return {
+                "session_id": session_id,
+                "turn_id": payload.get("turn_id"),
+                "state": "speaking",
+                "event": {
+                    "type": "ai_done",
+                    "turn_id": payload.get("turn_id"),
+                    "ai_audio_started_event": {
+                        "type": "ai_audio_started",
+                        "turn_id": payload.get("turn_id"),
+                        "session_id": session_id,
+                    },
+                },
+            }
+
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+
+    calls_module = importlib.import_module("app.api.calls")
+    backend_with_audio = BackendWithNestedAudioStarted()
+    call_fixture.app.dependency_overrides[calls_module.get_call_backend_client] = (
+        lambda: backend_with_audio
+    )
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-audio-started",
+            "text": "Say something.",
+            "source": "user_final",
+        },
+    )
+
+    assert response.status_code == 200
+    events = _sse_events(response.text)
+    event_types = [e["type"] for e in events]
+    assert "ai_audio_started" in event_types, (
+        f"Expected ai_audio_started SSE event but got: {event_types}. "
+        "ai_audio_started_event nested inside speak_result['event'] was not surfaced."
+    )
+    audio_started_events = [e for e in events if e["type"] == "ai_audio_started"]
+    assert audio_started_events[0]["turn_id"] == "turn-audio-started"
+
+
 def test_interrupt_cancels_server_generation_and_ai_backend_session(
     call_fixture: CallFixture,
 ) -> None:
