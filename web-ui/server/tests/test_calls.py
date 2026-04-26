@@ -29,20 +29,22 @@ from app.storage.session import create_engine
 class CallFixture:
     client: TestClient
     sessionmaker: async_sessionmaker
-    backend: "FakeCallBackend"
-    completion: "FakeCompletionClient"
+    backend: "ScriptedCallBackend"
+    completion: "ScriptedCompletionClient"
     voice_blob_dir: Path
 
 
 _TEST_VOICE_BLOB_DIR: Path | None = None
 
 
-class FakeCallBackend:
+class ScriptedCallBackend:
     def __init__(self, *, ready: bool = True, voice_available: bool = True) -> None:
         self.ready = ready
         self.voice_available = voice_available
         self.fail_end = False
+        self.fail_offer = False
         self.created_sessions: list[dict[str, Any]] = []
+        self.offer_calls: list[dict[str, Any]] = []
         self.speak_calls: list[dict[str, Any]] = []
         self.interrupt_calls: list[dict[str, Any]] = []
 
@@ -62,6 +64,20 @@ class FakeCallBackend:
         if not self.voice_available:
             return {"status": "voice_unavailable", "code": "call_voice_unavailable"}
         return {"session_id": f"ai_session_{len(self.created_sessions):032d}"}
+
+    async def create_webrtc_offer(self, base_url: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self.offer_calls.append({"base_url": base_url, "payload": dict(payload)})
+        if self.fail_offer:
+            from app.domain.ai_backend_client import AiBackendProcessingError
+
+            raise AiBackendProcessingError(
+                code="webrtc_offer_failed",
+                message="WebRTC offer could not be accepted",
+            )
+        return {
+            "session_id": payload["session_id"],
+            "answer": {"type": "answer", "sdp": "v=0\r\n"},
+        }
 
     async def speak_call(
         self,
@@ -86,7 +102,7 @@ class FakeCallBackend:
         return {"session_id": session_id, "reason": reason}
 
 
-class FakeCompletionClient:
+class ScriptedCompletionClient:
     def __init__(self) -> None:
         self.token_sequences: list[list[str]] = [["AI reply."]]
         self.requests: list[dict[str, Any]] = []
@@ -102,7 +118,7 @@ class FakeCompletionClient:
             yield token
 
 
-class FakeCancelableTask:
+class ScriptedCancelableTask:
     def __init__(self) -> None:
         self.cancel_calls = 0
 
@@ -121,8 +137,8 @@ def call_fixture(tmp_path: Path) -> Iterator[CallFixture]:
 
     asyncio.run(setup_database())
 
-    backend = FakeCallBackend()
-    completion = FakeCompletionClient()
+    backend = ScriptedCallBackend()
+    completion = ScriptedCompletionClient()
     app = create_app(static_client_dir=None)
     voice_blob_dir = tmp_path / "blobs" / "voices"
     global _TEST_VOICE_BLOB_DIR
@@ -184,7 +200,7 @@ def test_controls_reject_unknown_or_mismatched_call_session_pairs(
 ) -> None:
     response = call_fixture.client.post(
         f"/api/calls/call_unknown{control_route}",
-        json={"session_id": "ai_session_foreign", "muted": True, "sdp": "fake-offer", "type": "offer"},
+        json={"session_id": "ai_session_foreign", "muted": True, "sdp": "scripted-offer", "type": "offer"},
     )
 
     assert response.status_code == 404
@@ -286,6 +302,24 @@ def test_foreign_origin_rejected_for_unsafe_call_controls(call_fixture: CallFixt
 
     assert response.status_code == 403
     assert _public_error_code(response) == "call_origin_not_allowed"
+
+
+def test_offer_failure_returns_backend_public_detail(call_fixture: CallFixture) -> None:
+    call_fixture.backend.fail_offer = True
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/offer",
+        json={
+            "session_id": started["session_id"],
+            "offer": {"type": "offer", "sdp": "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"},
+        },
+    )
+
+    assert response.status_code == 502
+    assert _public_error_code(response) == "webrtc_offer_failed"
+    assert _public_error_message(response) == "WebRTC offer could not be accepted"
 
 
 def test_start_and_end_write_chronological_call_boundary_rows(
@@ -423,8 +457,8 @@ def test_interrupt_cancels_server_generation_and_ai_backend_session(
     thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
     started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
     calls_module = importlib.import_module("app.api.calls")
-    fake_task = FakeCancelableTask()
-    calls_module._ACTIVE_LLM_TURNS[started["call_id"]] = fake_task
+    scripted_task = ScriptedCancelableTask()
+    calls_module._ACTIVE_LLM_TURNS[started["call_id"]] = scripted_task
 
     response = call_fixture.client.post(
         f"/api/calls/{started['call_id']}/interrupt",
@@ -432,7 +466,7 @@ def test_interrupt_cancels_server_generation_and_ai_backend_session(
     )
 
     assert response.status_code == 200
-    assert fake_task.cancel_calls == 1
+    assert scripted_task.cancel_calls == 1
     assert call_fixture.backend.interrupt_calls == [
         {"base_url": "https://127.0.0.1:9443", "session_id": started["session_id"]}
     ]
@@ -441,8 +475,8 @@ def test_interrupt_cancels_server_generation_and_ai_backend_session(
 def _install_test_dependencies(
     app: FastAPI,
     sessionmaker: async_sessionmaker,
-    backend: FakeCallBackend,
-    completion: FakeCompletionClient,
+    backend: ScriptedCallBackend,
+    completion: ScriptedCompletionClient,
     voice_blob_dir: Path,
 ) -> None:
     async def override_session() -> AsyncIterator[Any]:

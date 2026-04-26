@@ -4,7 +4,7 @@ from app.domain import prompt_builder
 from app.domain.prompt_builder import build_prompt_context
 
 
-class FakePromptRepository:
+class ScriptedPromptRepository:
     def __init__(self) -> None:
         self.thread = {
             "id": "thread-1",
@@ -49,7 +49,7 @@ class FakePromptRepository:
 
 
 async def test_lorebook_preserved_but_not_injected() -> None:
-    repository = FakePromptRepository()
+    repository = ScriptedPromptRepository()
 
     messages = await build_prompt_context("thread-1", repository=repository)
 
@@ -61,7 +61,7 @@ async def test_lorebook_preserved_but_not_injected() -> None:
 
 
 async def test_character_persona_fields_enter_system_context() -> None:
-    repository = FakePromptRepository()
+    repository = ScriptedPromptRepository()
 
     messages = await build_prompt_context("thread-1", repository=repository)
 
@@ -75,7 +75,7 @@ async def test_character_persona_fields_enter_system_context() -> None:
 
 
 async def test_swipe_selected_branch_only_enters_prompt() -> None:
-    repository = FakePromptRepository()
+    repository = ScriptedPromptRepository()
 
     messages = await build_prompt_context("thread-1", repository=repository, action="swipe")
 
@@ -85,7 +85,7 @@ async def test_swipe_selected_branch_only_enters_prompt() -> None:
 
 
 async def test_continue_includes_composer_text_without_mutating_storage() -> None:
-    repository = FakePromptRepository()
+    repository = ScriptedPromptRepository()
 
     messages = await build_prompt_context(
         "thread-1",
@@ -103,7 +103,7 @@ async def test_continue_includes_composer_text_without_mutating_storage() -> Non
 
 
 async def test_continue_without_composer_text_avoids_assistant_prefill() -> None:
-    repository = FakePromptRepository()
+    repository = ScriptedPromptRepository()
 
     messages = await build_prompt_context(
         "thread-1",
@@ -124,7 +124,7 @@ async def test_continue_without_composer_text_avoids_assistant_prefill() -> None
 
 
 async def test_stale_rows_are_excluded_from_prompt_context() -> None:
-    repository = FakePromptRepository()
+    repository = ScriptedPromptRepository()
 
     messages = await build_prompt_context("thread-1", repository=repository)
 
@@ -134,7 +134,7 @@ async def test_stale_rows_are_excluded_from_prompt_context() -> None:
 
 
 async def test_until_message_id_stops_context_at_selected_branch_position() -> None:
-    repository = FakePromptRepository()
+    repository = ScriptedPromptRepository()
 
     messages = await build_prompt_context(
         "thread-1",

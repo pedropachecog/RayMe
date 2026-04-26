@@ -29,7 +29,7 @@ from app.storage.models import Base, Character, Message, MessageAlternateShape, 
 from app.storage.session import create_engine
 
 
-class FakeStreamingClient:
+class ScriptedStreamingClient:
     def __init__(self, *, fail_after_tokens: bool = False) -> None:
         self.tokens = ["Hel", "lo"]
         self.fail_after_tokens = fail_after_tokens
@@ -47,7 +47,7 @@ class FakeStreamingClient:
             raise RuntimeError("upstream disconnected")
 
 
-class FakeOpenAICompletions:
+class ScriptedOpenAICompletions:
     def __init__(self) -> None:
         self.requests: list[dict[str, object]] = []
 
@@ -60,13 +60,13 @@ class FakeOpenAICompletions:
         return stream()
 
 
-class FakeOpenAIClient:
+class ScriptedOpenAIClient:
     def __init__(self) -> None:
-        self.chat = type("FakeChat", (), {"completions": FakeOpenAICompletions()})()
+        self.chat = type("ScriptedChat", (), {"completions": ScriptedOpenAICompletions()})()
 
 
 @pytest.fixture()
-def chat_client(tmp_path: Path) -> Iterator[tuple[TestClient, async_sessionmaker, FakeStreamingClient]]:
+def chat_client(tmp_path: Path) -> Iterator[tuple[TestClient, async_sessionmaker, ScriptedStreamingClient]]:
     engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'rayme-test.sqlite3'}")
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -76,7 +76,7 @@ def chat_client(tmp_path: Path) -> Iterator[tuple[TestClient, async_sessionmaker
 
     asyncio.run(setup_database())
 
-    fake_client = FakeStreamingClient()
+    scripted_client = ScriptedStreamingClient()
     app = create_app(
         Settings(
             llm_base_url="http://server-llm.local/v1",
@@ -91,10 +91,10 @@ def chat_client(tmp_path: Path) -> Iterator[tuple[TestClient, async_sessionmaker
             yield session
 
     app.dependency_overrides[get_chat_session] = override_session
-    app.dependency_overrides[get_chat_completion_client] = lambda: fake_client
+    app.dependency_overrides[get_chat_completion_client] = lambda: scripted_client
 
     with TestClient(app) as client:
-        yield client, sessionmaker, fake_client
+        yield client, sessionmaker, scripted_client
 
     asyncio.run(engine.dispose())
 
@@ -122,7 +122,7 @@ async def test_llm_stream_yields_tokens_then_persists_final_once() -> None:
                 api_key="server-secret",
             ),
             [{"role": "user", "content": "Say hello"}],
-            client=FakeStreamingClient(),
+            client=ScriptedStreamingClient(),
             persist_final=persist_final,
         )
     ]
@@ -134,7 +134,7 @@ async def test_llm_stream_yields_tokens_then_persists_final_once() -> None:
 
 
 async def test_collect_chat_completion_uses_same_server_side_stream_settings() -> None:
-    fake_client = FakeStreamingClient()
+    scripted_client = ScriptedStreamingClient()
     settings = ChatCompletionSettings(
         base_url="http://llm.local/v1",
         model="configured-model",
@@ -144,15 +144,15 @@ async def test_collect_chat_completion_uses_same_server_side_stream_settings() -
     text = await collect_chat_completion(
         settings,
         [{"role": "user", "content": "Say hello"}],
-        client=fake_client,
+        client=scripted_client,
     )
 
     assert text == "Hello"
-    assert fake_client.requests[0]["settings"] == settings
+    assert scripted_client.requests[0]["settings"] == settings
 
 
 async def test_openai_compatible_generation_uses_fresh_random_seed() -> None:
-    fake_client = FakeOpenAIClient()
+    scripted_client = ScriptedOpenAIClient()
     settings = ChatCompletionSettings(
         base_url="http://llm.local/v1",
         model="configured-model",
@@ -162,10 +162,10 @@ async def test_openai_compatible_generation_uses_fresh_random_seed() -> None:
     text = await collect_chat_completion(
         settings,
         [{"role": "user", "content": "Say hello"}],
-        client=fake_client,
+        client=scripted_client,
     )
 
-    request = fake_client.chat.completions.requests[0]
+    request = scripted_client.chat.completions.requests[0]
     assert text == "Seeded"
     assert request["model"] == "configured-model"
     assert request["stream"] is True
@@ -210,9 +210,9 @@ def test_done_event_contains_full_thread_message_shape() -> None:
 
 
 def test_send_endpoint_streams_tokens_persists_final_once_and_emits_done_shape(
-    chat_client: tuple[TestClient, async_sessionmaker, FakeStreamingClient],
+    chat_client: tuple[TestClient, async_sessionmaker, ScriptedStreamingClient],
 ) -> None:
-    client, sessionmaker, fake_client = chat_client
+    client, sessionmaker, scripted_client = chat_client
     thread_id = asyncio.run(_create_thread(sessionmaker))
 
     response = client.post(f"/api/chat/{thread_id}/send", json={"content": "Say hello"})
@@ -232,7 +232,7 @@ def test_send_endpoint_streams_tokens_persists_final_once_and_emits_done_shape(
     assert done_message["alternates"] == []
     assert done_message["stale_after_edit"] is False
 
-    request = fake_client.requests[0]
+    request = scripted_client.requests[0]
     settings = request["settings"]
     assert settings == ChatCompletionSettings(
         base_url="http://server-llm.local/v1",
@@ -252,10 +252,10 @@ def test_send_endpoint_streams_tokens_persists_final_once_and_emits_done_shape(
 
 
 def test_send_endpoint_keeps_user_message_but_no_partial_ai_on_upstream_failure(
-    chat_client: tuple[TestClient, async_sessionmaker, FakeStreamingClient],
+    chat_client: tuple[TestClient, async_sessionmaker, ScriptedStreamingClient],
 ) -> None:
-    client, sessionmaker, fake_client = chat_client
-    fake_client.fail_after_tokens = True
+    client, sessionmaker, scripted_client = chat_client
+    scripted_client.fail_after_tokens = True
     thread_id = asyncio.run(_create_thread(sessionmaker))
 
     response = client.post(f"/api/chat/{thread_id}/send", json={"content": "Keep this user turn"})
@@ -272,9 +272,9 @@ def test_send_endpoint_keeps_user_message_but_no_partial_ai_on_upstream_failure(
 
 
 def test_send_endpoint_rejects_browser_llm_setting_overrides(
-    chat_client: tuple[TestClient, async_sessionmaker, FakeStreamingClient],
+    chat_client: tuple[TestClient, async_sessionmaker, ScriptedStreamingClient],
 ) -> None:
-    client, sessionmaker, _fake_client = chat_client
+    client, sessionmaker, _scripted_client = chat_client
     thread_id = asyncio.run(_create_thread(sessionmaker))
 
     response = client.post(

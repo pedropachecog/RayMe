@@ -205,7 +205,7 @@ def test_registry_switch_state_contract_is_idle_loading_resident_unavailable_reg
     assert _module_switch_states(registry_module) == SWITCH_STATES
 
 
-class FakeSynthesisAdapter:
+class ScriptedSynthesisAdapter:
     engine_id = "xtts_v2"
 
     def __init__(self, *, should_fail: bool = False) -> None:
@@ -220,14 +220,14 @@ class FakeSynthesisAdapter:
         output_type = getattr(registry_module, "TtsSynthesisOutput")
         return output_type(
             engine_id=self.engine_id,
-            wav_bytes=b"RIFFfake-wave",
+            wav_bytes=b"RIFFtest-wave",
             sample_rate=24000,
             duration_ms=125.0,
         )
 
 
-class FakeSwitchingManager:
-    def __init__(self, adapter: FakeSynthesisAdapter) -> None:
+class ScriptedSwitchingManager:
+    def __init__(self, adapter: ScriptedSynthesisAdapter) -> None:
         self.settings = type("Settings", (), {"default_tts_engine": "f5"})()
         self.loading_engine = None
         self.resident_tts_engine = "f5"
@@ -262,8 +262,8 @@ def _synthesis_payload(**overrides: Any) -> dict[str, Any]:
 
 
 def test_tts_synthesize_switches_engine_and_returns_transient_json() -> None:
-    adapter = FakeSynthesisAdapter()
-    manager = FakeSwitchingManager(adapter)
+    adapter = ScriptedSynthesisAdapter()
+    manager = ScriptedSwitchingManager(adapter)
     app = create_app()
     app.state.model_manager = manager
     client = TestClient(app)
@@ -275,15 +275,15 @@ def test_tts_synthesize_switches_engine_and_returns_transient_json() -> None:
     assert manager.switch_calls == ["xtts_v2"]
     assert payload["engine_id"] == "xtts_v2"
     assert payload["content_type"] == "audio/wav"
-    assert payload["audio_base64"] == base64.b64encode(b"RIFFfake-wave").decode("ascii")
+    assert payload["audio_base64"] == base64.b64encode(b"RIFFtest-wave").decode("ascii")
     assert adapter.last_request.text == "Hello from RayMe."
     assert adapter.last_request.reference_audio == b"reference wav"
     assert adapter.last_request.reference_transcript == "Reference transcript."
 
 
 def test_tts_synthesize_accepts_web_ui_reference_audio_alias() -> None:
-    adapter = FakeSynthesisAdapter()
-    manager = FakeSwitchingManager(adapter)
+    adapter = ScriptedSynthesisAdapter()
+    manager = ScriptedSwitchingManager(adapter)
     app = create_app()
     app.state.model_manager = manager
     client = TestClient(app)
@@ -299,8 +299,8 @@ def test_tts_synthesize_accepts_web_ui_reference_audio_alias() -> None:
 
 
 def test_tts_synthesize_use_default_engine_switches_to_caller_default() -> None:
-    adapter = FakeSynthesisAdapter()
-    manager = FakeSwitchingManager(adapter)
+    adapter = ScriptedSynthesisAdapter()
+    manager = ScriptedSwitchingManager(adapter)
     app = create_app()
     app.state.model_manager = manager
     client = TestClient(app)
@@ -316,8 +316,8 @@ def test_tts_synthesize_use_default_engine_switches_to_caller_default() -> None:
 
 
 def test_tts_synthesize_failure_returns_fixed_public_error() -> None:
-    adapter = FakeSynthesisAdapter(should_fail=True)
-    manager = FakeSwitchingManager(adapter)
+    adapter = ScriptedSynthesisAdapter(should_fail=True)
+    manager = ScriptedSwitchingManager(adapter)
     app = create_app()
     app.state.model_manager = manager
     client = TestClient(app)
@@ -343,7 +343,7 @@ def test_f5_adapter_uses_runtime_infer_and_returns_wav_bytes() -> None:
     F5TtsAdapter = getattr(f5_module, "F5TtsAdapter")
     TtsSynthesisInput = getattr(registry_module, "TtsSynthesisInput")
 
-    class FakeF5Runtime:
+    class ScriptedF5Runtime:
         def __init__(self) -> None:
             self.calls: list[tuple[str, str, str]] = []
 
@@ -353,13 +353,13 @@ def test_f5_adapter_uses_runtime_infer_and_returns_wav_bytes() -> None:
             t = np.linspace(0, 0.05, int(sample_rate * 0.05), endpoint=False)
             return (0.1 * np.sin(2 * math.pi * 440 * t), sample_rate, None)
 
-    runtime = FakeF5Runtime()
+    runtime = ScriptedF5Runtime()
     adapter = F5TtsAdapter(runtime_factory=lambda: runtime)
 
     result = adapter.synthesize(
         TtsSynthesisInput(
             text="Generated RayMe audio.",
-            reference_audio=b"fake-reference-wav",
+            reference_audio=b"scripted-reference-wav",
             reference_transcript="Reference transcript.",
             speech_speed=0.75,
         )

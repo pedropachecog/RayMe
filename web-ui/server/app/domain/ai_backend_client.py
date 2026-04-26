@@ -248,7 +248,7 @@ class AiBackendClient:
             raise AiBackendUnavailable(code="unreachable", message=UNREACHABLE_MESSAGE) from exc
 
         if response.status_code >= 500 and processing_message and processing_code:
-            raise AiBackendProcessingError(code=processing_code, message=processing_message)
+            raise _processing_error_from_response(response, processing_code, processing_message)
         if response.status_code in {401, 403}:
             raise AiBackendUnavailable(code="unauthorized", message=UNREACHABLE_MESSAGE)
         if response.status_code >= 400:
@@ -258,6 +258,29 @@ class AiBackendClient:
 
 def _join_endpoint(base_url: str, path: str) -> str:
     return f"{base_url.rstrip('/')}/{path.lstrip('/')}"
+
+
+def _processing_error_from_response(
+    response: httpx.Response,
+    fallback_code: str,
+    fallback_message: str,
+) -> AiBackendProcessingError:
+    try:
+        payload = response.json()
+    except ValueError:
+        payload = None
+
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if not isinstance(detail, dict):
+        detail = payload if isinstance(payload, dict) else {}
+
+    code = detail.get("code")
+    message = detail.get("message")
+    if not isinstance(code, str) or not code:
+        code = fallback_code
+    if not isinstance(message, str) or not message:
+        message = fallback_message
+    return AiBackendProcessingError(code=code, message=message)
 
 
 def _json_payload(response: httpx.Response) -> Any:

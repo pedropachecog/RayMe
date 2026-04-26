@@ -5,7 +5,19 @@ OMEN_SSH_ALIAS="${OMEN_SSH_ALIAS:-rayme-pmpg}"
 OMEN_REPO="${OMEN_REPO:-C:\\Users\\pmpg\\rayme\\RayMe}"
 OMEN_BRANCH="${OMEN_BRANCH:-main}"
 
+SCRIPT_DIR=$(
+  CDPATH= cd -- "$(dirname -- "$0")"
+  pwd
+)
+REPO_ROOT=$(
+  CDPATH= cd -- "$SCRIPT_DIR/.."
+  pwd
+)
+
 local_head="$(git rev-parse HEAD)"
+
+RAYME_SSH_ALIAS="${OMEN_SSH_ALIAS}" RAYME_SSH_USER="${OMEN_SSH_USER:-pmpg}" \
+  "$REPO_ROOT/scripts/bootstrap-rayme-ssh.sh" restore >/dev/null
 
 EXPECTED_HEAD="${local_head}" OMEN_REPO="${OMEN_REPO}" OMEN_BRANCH="${OMEN_BRANCH}" \
 ssh "${OMEN_SSH_ALIAS}" "powershell -NoProfile -ExecutionPolicy Bypass -Command - " <<'POWERSHELL'

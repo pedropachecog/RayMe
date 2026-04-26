@@ -28,7 +28,7 @@ FORBIDDEN_PUBLIC_ERROR_TEXT = (
 )
 
 
-class FakeTtsAdapter:
+class ScriptedTtsAdapter:
     def __init__(
         self,
         engine_id: str,
@@ -127,7 +127,7 @@ def _build_manager(
     *,
     failing_engine: str | None = None,
     load_failing_engine: str | None = None,
-) -> tuple[Any, dict[str, FakeTtsAdapter], list[str]]:
+) -> tuple[Any, dict[str, ScriptedTtsAdapter], list[str]]:
     config_module = importlib.import_module("app.config")
     manager_module = importlib.import_module("app.models.model_manager")
 
@@ -137,7 +137,7 @@ def _build_manager(
     settings = AiBackendSettings(load_models_on_startup=False)
     events: list[str] = []
     adapters = {
-        engine_id: FakeTtsAdapter(
+        engine_id: ScriptedTtsAdapter(
             engine_id,
             events,
             fail_self_test=engine_id == failing_engine,

@@ -40,7 +40,7 @@ class UploadedAudio:
 
 
 @dataclass(slots=True)
-class FakeVoiceProcessor:
+class ScriptedVoiceProcessor:
     fail_transcribe: bool = False
     fail_preview: bool = False
     return_tts_failed: bool = False
@@ -87,7 +87,7 @@ class FakeVoiceProcessor:
 @dataclass(frozen=True, slots=True)
 class VoiceFixture:
     client: TestClient
-    processor: FakeVoiceProcessor
+    processor: ScriptedVoiceProcessor
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,7 +163,7 @@ def voice_fixture(tmp_path: Path) -> Iterator[VoiceFixture]:
     asyncio.run(setup_database())
 
     app = create_app(static_client_dir=None)
-    processor = FakeVoiceProcessor()
+    processor = ScriptedVoiceProcessor()
     _install_test_dependencies(app, sessionmaker, tmp_path / "blobs", processor)
 
     with TestClient(app) as client:
@@ -587,7 +587,7 @@ def _install_test_dependencies(
     app: FastAPI,
     sessionmaker: async_sessionmaker,
     blob_dir: Path,
-    processor: FakeVoiceProcessor,
+    processor: ScriptedVoiceProcessor,
 ) -> None:
     async def override_session() -> AsyncIterator:
         async with sessionmaker() as session:

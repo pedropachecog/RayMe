@@ -193,11 +193,11 @@ def test_https_runner_passes_tls_files_to_uvicorn(
     key_path.write_text("key", encoding="utf-8")
     captured: dict[str, object] = {}
 
-    def fake_run(app: str, **kwargs: object) -> None:
+    def scripted_run(app: str, **kwargs: object) -> None:
         captured["app"] = app
         captured.update(kwargs)
 
-    monkeypatch.setattr(runner.uvicorn, "run", fake_run)
+    monkeypatch.setattr(runner.uvicorn, "run", scripted_run)
 
     result = runner.main(
         [

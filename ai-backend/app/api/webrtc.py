@@ -8,11 +8,14 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from app.api.stt import _settings_from_app, _stt_adapter_from_app, _vad_adapter_from_app
 from app.call.session import CallSession, CallSessionManager
+from app.call.tracks import QueuedAudioOutputTrack
 from app.models.model_manager import ModelManager
 
 router = APIRouter(prefix="/webrtc", tags=["webrtc"])
 
 RAYME_EVENTS_CHANNEL = "rayme-events"
+WEBRTC_OFFER_FAILED = "webrtc_offer_failed"
+WEBRTC_OFFER_FAILED_MESSAGE = "WebRTC offer could not be accepted"
 
 
 class SessionDescription(BaseModel):
@@ -97,6 +100,7 @@ async def create_webrtc_offer_answer(
     manager = _manager_from_app(request)
     peer_connection = _create_peer_connection(payload.offer)
     data_channel = _create_data_channel(peer_connection)
+    outbound_audio_track = _attach_outbound_audio_track(peer_connection)
 
     try:
         session = await manager.create_session(
@@ -109,6 +113,7 @@ async def create_webrtc_offer_answer(
             data_channel=data_channel,
             vad_adapter=_vad_adapter(request),
             stt_adapter=_stt_adapter(request),
+            outbound_audio_track=outbound_audio_track,
         )
         _attach_peer_handlers(peer_connection, session)
         answer = await _negotiate_answer(peer_connection, payload.offer)
@@ -306,13 +311,13 @@ def _tts_adapter(request: Request, engine_id: str) -> Any:
 
 def _create_peer_connection(offer: SessionDescription) -> Any:
     if not _looks_like_real_media_offer(offer.sdp):
-        return None
+        raise _offer_error()
     try:
         from aiortc import RTCPeerConnection
 
         return RTCPeerConnection()
-    except Exception:
-        return None
+    except Exception as exc:
+        raise _offer_error() from exc
 
 
 def _looks_like_real_media_offer(sdp: str) -> bool:
@@ -320,19 +325,29 @@ def _looks_like_real_media_offer(sdp: str) -> bool:
 
 
 def _create_data_channel(peer_connection: Any) -> Any:
-    if peer_connection is None:
-        return None
     create_data_channel = getattr(peer_connection, "createDataChannel", None)
     if not callable(create_data_channel):
-        return None
+        raise _offer_error()
     try:
         return create_data_channel(RAYME_EVENTS_CHANNEL)
-    except Exception:
-        return None
+    except Exception as exc:
+        raise _offer_error() from exc
+
+
+def _attach_outbound_audio_track(peer_connection: Any) -> QueuedAudioOutputTrack:
+    add_track = getattr(peer_connection, "addTrack", None)
+    if not callable(add_track):
+        raise _offer_error()
+    try:
+        track = QueuedAudioOutputTrack()
+        add_track(track)
+        return track
+    except Exception as exc:
+        raise _offer_error() from exc
 
 
 def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
-    if peer_connection is None or not hasattr(peer_connection, "on"):
+    if not hasattr(peer_connection, "on"):
         return
 
     @peer_connection.on("datachannel")
@@ -364,9 +379,6 @@ async def _negotiate_answer(
     peer_connection: Any,
     offer: SessionDescription,
 ) -> dict[str, str]:
-    if peer_connection is None:
-        return _fake_answer()
-
     try:
         from aiortc import RTCSessionDescription
 
@@ -376,16 +388,22 @@ async def _negotiate_answer(
         answer = await peer_connection.createAnswer()
         await peer_connection.setLocalDescription(answer)
         local_description = peer_connection.localDescription
+        sdp = getattr(local_description, "sdp", "")
+        if not sdp:
+            raise RuntimeError("empty WebRTC answer SDP")
         return {
             "type": getattr(local_description, "type", "answer"),
-            "sdp": getattr(local_description, "sdp", "") or _fake_answer()["sdp"],
+            "sdp": sdp,
         }
-    except Exception:
-        return _fake_answer()
+    except Exception as exc:
+        raise _offer_error() from exc
 
 
-def _fake_answer() -> dict[str, str]:
-    return {
-        "type": "answer",
-        "sdp": "v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=RayMe\r\nt=0 0\r\n",
-    }
+def _offer_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_502_BAD_GATEWAY,
+        detail={
+            "code": WEBRTC_OFFER_FAILED,
+            "message": WEBRTC_OFFER_FAILED_MESSAGE,
+        },
+    )

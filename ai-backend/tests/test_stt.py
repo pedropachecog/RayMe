@@ -30,25 +30,25 @@ EXPECTED_BLOCKLIST_PHRASES = {
 ROUTE_CONTRACT = "POST /stt/transcribe"
 
 
-class FakeWhisperSegment:
+class ScriptedWhisperSegment:
     def __init__(self, text: str) -> None:
         self.text = text
         self.start = 0.0
         self.end = 1.0
 
 
-class FakeWhisperInfo:
+class ScriptedWhisperInfo:
     language = "en"
 
 
-class FakeWhisperModel:
+class ScriptedWhisperModel:
     def __init__(self, transcript: str) -> None:
         self.transcript = transcript
         self.calls: list[dict[str, Any]] = []
 
-    def transcribe(self, audio: Any, **kwargs: Any) -> tuple[list[FakeWhisperSegment], FakeWhisperInfo]:
+    def transcribe(self, audio: Any, **kwargs: Any) -> tuple[list[ScriptedWhisperSegment], ScriptedWhisperInfo]:
         self.calls.append({"audio": audio, "kwargs": kwargs})
-        return [FakeWhisperSegment(self.transcript)], FakeWhisperInfo()
+        return [ScriptedWhisperSegment(self.transcript)], ScriptedWhisperInfo()
 
 
 class SpeechVad:
@@ -65,7 +65,7 @@ class NoSpeechVad(SpeechVad):
         return []
 
 
-class RouteFakeSttAdapter:
+class RouteScriptedSttAdapter:
     def __init__(self, result: dict[str, Any] | None = None, *, fail: bool = False) -> None:
         self.result = result
         self.fail = fail
@@ -97,23 +97,23 @@ def _to_mapping(value: Any) -> dict[str, Any]:
     pytest.fail(f"Expected dict-like STT response, got {type(value)!r}")
 
 
-def _make_stt_adapter(fake_model: FakeWhisperModel) -> Any:
+def _make_stt_adapter(scripted_model: ScriptedWhisperModel) -> Any:
     stt_module = importlib.import_module("app.models.stt")
     WhisperSttAdapter = getattr(stt_module, "WhisperSttAdapter")
 
     constructor_attempts = (
         {
-            "model": fake_model,
+            "model": scripted_model,
             "model_name": "distil-large-v3",
             "compute_type": "int8_float16",
         },
         {
-            "whisper_model": fake_model,
+            "whisper_model": scripted_model,
             "model_name": "distil-large-v3",
             "compute_type": "int8_float16",
         },
-        {"model": fake_model},
-        {"whisper_model": fake_model},
+        {"model": scripted_model},
+        {"whisper_model": scripted_model},
     )
     errors: list[str] = []
     for kwargs in constructor_attempts:
@@ -121,7 +121,7 @@ def _make_stt_adapter(fake_model: FakeWhisperModel) -> Any:
             return WhisperSttAdapter(**kwargs)
         except TypeError as exc:
             errors.append(str(exc))
-    pytest.fail(f"WhisperSttAdapter must accept a fake model for unit tests: {errors}")
+    pytest.fail(f"WhisperSttAdapter must accept a scripted model for unit tests: {errors}")
 
 
 def _call_transcribe(adapter: Any, *, audio: Any, vad_adapter: Any) -> dict[str, Any]:
@@ -145,14 +145,14 @@ def _call_transcribe(adapter: Any, *, audio: Any, vad_adapter: Any) -> dict[str,
 
 
 def test_stt_adapter_uses_phase_zero_english_whisper_options() -> None:
-    fake_model = FakeWhisperModel("Hello from the sample")
-    adapter = _make_stt_adapter(fake_model)
+    scripted_model = ScriptedWhisperModel("Hello from the sample")
+    adapter = _make_stt_adapter(scripted_model)
 
     result = _call_transcribe(adapter, audio="sample.wav", vad_adapter=SpeechVad())
 
     assert WHISPER_OPTION_CONTRACT
-    assert fake_model.calls, "VAD speech should allow Whisper transcription"
-    whisper_kwargs = fake_model.calls[0]["kwargs"]
+    assert scripted_model.calls, "VAD speech should allow Whisper transcription"
+    whisper_kwargs = scripted_model.calls[0]["kwargs"]
     assert whisper_kwargs["language"] == EXPECTED_WHISPER_OPTIONS["language"]
     assert whisper_kwargs["task"] == EXPECTED_WHISPER_OPTIONS["task"]
     assert (
@@ -169,12 +169,12 @@ def test_stt_adapter_uses_phase_zero_english_whisper_options() -> None:
 
 
 def test_vad_gate_blocks_no_speech_before_transcript_return() -> None:
-    fake_model = FakeWhisperModel("This should not be transcribed")
-    adapter = _make_stt_adapter(fake_model)
+    scripted_model = ScriptedWhisperModel("This should not be transcribed")
+    adapter = _make_stt_adapter(scripted_model)
 
     result = _call_transcribe(adapter, audio="quiet.wav", vad_adapter=NoSpeechVad())
 
-    assert fake_model.calls == []
+    assert scripted_model.calls == []
     assert result["status"] == "needs_manual_transcript"
     assert result["speech_detected"] is False
     assert result["retry_allowed"] is True
@@ -186,13 +186,13 @@ def test_vad_gate_blocks_no_speech_before_transcript_return() -> None:
 def test_hallucination_blocklist_filters_common_whisper_filler() -> None:
     stt_module = importlib.import_module("app.models.stt")
     blocklist = set(getattr(stt_module, "HALLUCINATION_BLOCKLIST"))
-    fake_model = FakeWhisperModel("Thank you for watching!")
-    adapter = _make_stt_adapter(fake_model)
+    scripted_model = ScriptedWhisperModel("Thank you for watching!")
+    adapter = _make_stt_adapter(scripted_model)
 
     result = _call_transcribe(adapter, audio="sample.wav", vad_adapter=SpeechVad())
 
     assert EXPECTED_BLOCKLIST_PHRASES <= {phrase.lower() for phrase in blocklist}
-    assert fake_model.calls
+    assert scripted_model.calls
     assert result["status"] == "needs_manual_transcript"
     assert result["manual_transcript_allowed"] is True
     assert result["retry_allowed"] is True
@@ -200,8 +200,8 @@ def test_hallucination_blocklist_filters_common_whisper_filler() -> None:
 
 
 def test_retry_and_manual_transcript_fallback_response_shape() -> None:
-    fake_model = FakeWhisperModel("Subscribe to my channel")
-    adapter = _make_stt_adapter(fake_model)
+    scripted_model = ScriptedWhisperModel("Subscribe to my channel")
+    adapter = _make_stt_adapter(scripted_model)
 
     result = _call_transcribe(adapter, audio="sample.wav", vad_adapter=SpeechVad())
 
@@ -253,13 +253,13 @@ def test_silero_vad_adapter_uses_configurable_threshold_and_silence() -> None:
     SileroVadAdapter = getattr(vad_module, "SileroVadAdapter")
     calls: list[dict[str, Any]] = []
 
-    def fake_get_speech_timestamps(audio: Any, model: Any, **kwargs: Any) -> list[dict[str, int]]:
+    def scripted_get_speech_timestamps(audio: Any, model: Any, **kwargs: Any) -> list[dict[str, int]]:
         calls.append({"audio": audio, "model": model, "kwargs": kwargs})
         return [{"start": 100, "end": 1200}]
 
     adapter = SileroVadAdapter(
         model=object(),
-        get_speech_timestamps_fn=fake_get_speech_timestamps,
+        get_speech_timestamps_fn=scripted_get_speech_timestamps,
         threshold=0.42,
         end_silence_ms=900,
     )
@@ -282,13 +282,13 @@ def test_silero_vad_adapter_loads_temp_wav_paths_before_timestamping(tmp_path: A
     sf.write(audio_path, np.zeros(16000, dtype=np.float32), 16000, format="WAV")
     calls: list[dict[str, Any]] = []
 
-    def fake_get_speech_timestamps(audio: Any, model: Any, **kwargs: Any) -> list[dict[str, int]]:
+    def scripted_get_speech_timestamps(audio: Any, model: Any, **kwargs: Any) -> list[dict[str, int]]:
         calls.append({"audio": audio, "model": model, "kwargs": kwargs})
         return [{"start": 0, "end": 16000}]
 
     adapter = SileroVadAdapter(
         model=object(),
-        get_speech_timestamps_fn=fake_get_speech_timestamps,
+        get_speech_timestamps_fn=scripted_get_speech_timestamps,
     )
 
     result = adapter.speech_timestamps(str(audio_path))
@@ -306,15 +306,15 @@ def _wav_upload() -> tuple[str, bytes, str]:
     return ("../unsafe-name.wav", source.getvalue(), "audio/wav")
 
 
-def _client_with_stt(fake_stt: RouteFakeSttAdapter, vad_adapter: Any | None = None) -> TestClient:
+def _client_with_stt(scripted_stt: RouteScriptedSttAdapter, vad_adapter: Any | None = None) -> TestClient:
     app = create_app()
-    app.state.stt_adapter = fake_stt
+    app.state.stt_adapter = scripted_stt
     app.state.vad_adapter = vad_adapter or SpeechVad()
     return TestClient(app)
 
 
 def test_transient_stt_route_accepts_upload_and_returns_contract_fields() -> None:
-    fake_stt = RouteFakeSttAdapter(
+    scripted_stt = RouteScriptedSttAdapter(
         {
             "status": "accepted",
             "transcript": "Hello from the sample",
@@ -327,7 +327,7 @@ def test_transient_stt_route_accepts_upload_and_returns_contract_fields() -> Non
             "manual_transcript_allowed": True,
         }
     )
-    client = _client_with_stt(fake_stt)
+    client = _client_with_stt(scripted_stt)
 
     response = client.post(
         "/stt/transcribe",
@@ -350,14 +350,14 @@ def test_transient_stt_route_accepts_upload_and_returns_contract_fields() -> Non
         "manual_transcript_allowed",
     }
     assert payload["manual_transcript_allowed"] is True
-    assert fake_stt.calls[0]["vad_threshold"] == 0.42
-    assert fake_stt.calls[0]["vad_end_silence_ms"] == 900
-    assert os.path.basename(fake_stt.calls[0]["audio"]).startswith("rayme-stt-")
-    assert "unsafe-name" not in os.path.basename(fake_stt.calls[0]["audio"])
+    assert scripted_stt.calls[0]["vad_threshold"] == 0.42
+    assert scripted_stt.calls[0]["vad_end_silence_ms"] == 900
+    assert os.path.basename(scripted_stt.calls[0]["audio"]).startswith("rayme-stt-")
+    assert "unsafe-name" not in os.path.basename(scripted_stt.calls[0]["audio"])
 
 
 def test_transient_stt_route_preserves_manual_fallback_response() -> None:
-    fake_stt = RouteFakeSttAdapter(
+    scripted_stt = RouteScriptedSttAdapter(
         {
             "status": "needs_manual_transcript",
             "transcript": "",
@@ -370,7 +370,7 @@ def test_transient_stt_route_preserves_manual_fallback_response() -> None:
             "manual_transcript_allowed": True,
         }
     )
-    client = _client_with_stt(fake_stt, NoSpeechVad())
+    client = _client_with_stt(scripted_stt, NoSpeechVad())
 
     response = client.post("/stt/transcribe", files={"file": _wav_upload()})
 
@@ -382,7 +382,7 @@ def test_transient_stt_route_preserves_manual_fallback_response() -> None:
 
 
 def test_transient_stt_route_returns_sanitized_failure_with_manual_fallback() -> None:
-    client = _client_with_stt(RouteFakeSttAdapter(fail=True))
+    client = _client_with_stt(RouteScriptedSttAdapter(fail=True))
 
     response = client.post("/stt/transcribe", files={"file": _wav_upload()})
 

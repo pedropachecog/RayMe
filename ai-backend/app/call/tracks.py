@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import asyncio
+import fractions
 import os
 import tempfile
+from io import BytesIO
 from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
 import soundfile as sf
+from aiortc import MediaStreamTrack
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,66 @@ class OutboundAudioBuffer:
         chunks = list(self.chunks)
         self.chunks.clear()
         return chunks
+
+
+class QueuedAudioOutputTrack(MediaStreamTrack):
+    kind = "audio"
+
+    def __init__(self, *, sample_rate: int = 48000, frame_ms: int = 20) -> None:
+        super().__init__()
+        self.sample_rate = sample_rate
+        self.frame_samples = max(int(sample_rate * frame_ms / 1000), 1)
+        self._queue: asyncio.Queue[np.ndarray | None] = asyncio.Queue()
+        self._buffer = np.asarray([], dtype=np.int16)
+        self._pts = 0
+
+    async def recv(self) -> Any:
+        from av import AudioFrame
+
+        samples = await self._next_samples()
+        frame = AudioFrame.from_ndarray(samples.reshape(1, -1), format="s16", layout="mono")
+        frame.sample_rate = self.sample_rate
+        frame.pts = self._pts
+        frame.time_base = fractions.Fraction(1, self.sample_rate)
+        self._pts += self.frame_samples
+        return frame
+
+    async def enqueue(self, wav_bytes: bytes) -> None:
+        samples = _wav_bytes_to_int16(wav_bytes, target_sample_rate=self.sample_rate)
+        if samples.size:
+            await self._queue.put(samples)
+
+    async def stop_current(self) -> None:
+        while not self._queue.empty():
+            self._queue.get_nowait()
+            self._queue.task_done()
+        self._buffer = np.asarray([], dtype=np.int16)
+
+    def stop(self) -> None:
+        super().stop()
+        self._queue.put_nowait(None)
+
+    async def _next_samples(self) -> np.ndarray:
+        while self._buffer.size < self.frame_samples and self.readyState != "ended":
+            try:
+                chunk = await asyncio.wait_for(self._queue.get(), timeout=self.frame_samples / self.sample_rate)
+            except asyncio.TimeoutError:
+                break
+            if chunk is None:
+                break
+            self._buffer = np.concatenate([self._buffer, chunk])
+            self._queue.task_done()
+
+        if self._buffer.size >= self.frame_samples:
+            samples = self._buffer[: self.frame_samples]
+            self._buffer = self._buffer[self.frame_samples :]
+            return samples
+
+        samples = np.zeros(self.frame_samples, dtype=np.int16)
+        if self._buffer.size:
+            samples[: self._buffer.size] = self._buffer
+            self._buffer = np.asarray([], dtype=np.int16)
+        return samples
 
 
 @dataclass(frozen=True)
@@ -103,6 +167,19 @@ def write_pcm_frames_to_temp_wav(
     with tempfile.NamedTemporaryFile(prefix="rayme-call-stt-", suffix=".wav", delete=False) as handle:
         sf.write(handle.name, combined, target_sample_rate, format="WAV")
         return TemporaryWavFile(path=handle.name)
+
+
+def _wav_bytes_to_int16(wav_bytes: bytes, *, target_sample_rate: int) -> np.ndarray:
+    samples, sample_rate = sf.read(BytesIO(wav_bytes), dtype="float32", always_2d=True)
+    mono = np.asarray(samples, dtype=np.float32).mean(axis=1)
+    if sample_rate != target_sample_rate:
+        mono = _resample_linear(
+            mono,
+            source_rate=int(sample_rate),
+            target_rate=target_sample_rate,
+        )
+    clipped = np.clip(mono, -1.0, 1.0)
+    return (clipped * np.iinfo(np.int16).max).astype(np.int16)
 
 
 def _pcm_to_float32(frame: PcmAudioFrame, *, target_sample_rate: int) -> np.ndarray:

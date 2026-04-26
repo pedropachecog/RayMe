@@ -27,7 +27,7 @@ from app.storage.session import create_engine
 CARD_FIXTURE_DIR = Path(__file__).parent / "fixtures" / "cards"
 
 
-class FakeCharacterRepository:
+class ScriptedCharacterRepository:
     def __init__(self) -> None:
         self.thread_snapshot = {
             "thread_id": "thread-1",
@@ -79,7 +79,7 @@ def character_client(tmp_path: Path) -> Iterator[tuple[TestClient, Path, async_s
 
 
 async def test_character_delete_preserves_existing_thread_snapshot() -> None:
-    repository = FakeCharacterRepository()
+    repository = ScriptedCharacterRepository()
 
     result = await delete_character_preserving_thread_snapshots(
         "character-1",

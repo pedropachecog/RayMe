@@ -59,7 +59,7 @@ def phase1_client(
 
     asyncio.run(setup_database())
 
-    fake_client = ScriptedCompletionClient()
+    scripted_client = ScriptedCompletionClient()
     app = create_app(
         Settings(
             web_public_url="https://192.168.1.199:8443",
@@ -79,12 +79,12 @@ def phase1_client(
     app.dependency_overrides[get_thread_session] = override_session
     app.dependency_overrides[get_chat_session] = override_session
     app.dependency_overrides[get_message_action_session] = override_session
-    app.dependency_overrides[get_chat_completion_client] = lambda: fake_client
-    app.dependency_overrides[get_message_completion_client] = lambda: fake_client
+    app.dependency_overrides[get_chat_completion_client] = lambda: scripted_client
+    app.dependency_overrides[get_message_completion_client] = lambda: scripted_client
     app.dependency_overrides[get_portrait_blob_dir] = lambda: tmp_path / "portraits"
 
     with TestClient(app) as client:
-        yield client, sessionmaker, fake_client
+        yield client, sessionmaker, scripted_client
 
     asyncio.run(engine.dispose())
 
@@ -92,7 +92,7 @@ def phase1_client(
 def test_phase1_import_chat_actions_reload_and_continue(
     phase1_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
 ) -> None:
-    client, _sessionmaker, fake_client = phase1_client
+    client, _sessionmaker, scripted_client = phase1_client
     fixture = CARD_FIXTURE_DIR / "v3_card.json"
 
     import_response = client.post(
@@ -168,7 +168,7 @@ def test_phase1_import_chat_actions_reload_and_continue(
     final_detail = client.get(f"/api/threads/{thread_id}").json()
     assert final_detail["id"] == thread_id
     assert final_detail["messages"][-1]["content_text"] == "Reload follow-up response"
-    assert len(fake_client.requests) == 5
+    assert len(scripted_client.requests) == 5
     assert all(
         request["settings"]
         == ChatCompletionSettings(
@@ -176,10 +176,10 @@ def test_phase1_import_chat_actions_reload_and_continue(
             model="server-model",
             api_key="server-secret",
         )
-        for request in fake_client.requests
+        for request in scripted_client.requests
     )
     prompt_text = "\n".join(
-        message["content"] for message in fake_client.requests[-1]["messages"]  # type: ignore[index]
+        message["content"] for message in scripted_client.requests[-1]["messages"]  # type: ignore[index]
     )
     assert "Continue backend extension" in prompt_text
     assert "server-secret" not in prompt_text

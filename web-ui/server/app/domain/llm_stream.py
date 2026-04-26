@@ -121,16 +121,6 @@ async def _stream_text_tokens(
                 yield str(token)
         return
 
-    fake_tokens = getattr(completion_client, "tokens", None)
-    if fake_tokens is not None:
-        requests = getattr(completion_client, "requests", None)
-        if isinstance(requests, list):
-            requests.append({"settings": settings, "messages": list(messages)})
-        for token in fake_tokens:
-            if token:
-                yield str(token)
-        return
-
     create = completion_client.chat.completions.create
     stream = await create(
         model=settings.model,

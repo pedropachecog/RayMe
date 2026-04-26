@@ -68,6 +68,7 @@
   let localMicSource: MediaStreamAudioSourceNode | null = null;
   let localMicAnalyser: AnalyserNode | null = null;
   let localMicMeterFrame = 0;
+  let remoteAudioElement: HTMLAudioElement | null = null;
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'RayMe');
@@ -132,11 +133,8 @@
       const started = await startCall({ thread_id: threadId });
       callId = started.call_id;
       sessionId = started.session_id || started.call_id;
-      applyCallState(started.state ?? 'listening');
-      if (callState === 'listening' && listeningRms === null) {
-        listeningRms = 0.12;
-      }
       await connectBrowserMedia(started);
+      applyCallState(started.state ?? 'listening');
       applyStartEvents((started as typeof started & { events?: StartEvent[] }).events ?? []);
 
       if (callState === 'listening' && listeningRms === null) {
@@ -147,7 +145,7 @@
         speakingRms = 0.34;
       }
     } catch (error) {
-      showBlockingPanel(error);
+      await failCallStartup(error);
     }
   }
 
@@ -157,13 +155,7 @@
     }
 
     if (typeof RTCPeerConnection === 'undefined') {
-      const offer = {
-        type: 'offer' as RTCSdpType,
-        sdp: 'v=0\r\ns=RayMe microphone fallback\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=ice-ufrag:rayme\r\n'
-      };
-      const response = await sendCallOffer(started.call_id, offer, started.session_id);
-      sessionId = response.session_id || started.session_id || started.call_id;
-      return;
+      throw new CallApiError('This browser cannot start a real WebRTC call.', 400, 'webrtc_offer_failed');
     }
 
     peerConnection?.close();
@@ -177,6 +169,10 @@
         attachCallEventChannel(event.channel);
       }
     };
+    connection.ontrack = (event) => {
+      const stream = event.streams[0] ?? new MediaStream([event.track]);
+      attachRemoteAudio(stream);
+    };
     for (const track of localMediaStream.getAudioTracks()) {
       connection.addTrack(track, localMediaStream);
     }
@@ -185,22 +181,27 @@
     await connection.setLocalDescription(offer);
     await waitForIceGathering(connection);
     const localDescription = connection.localDescription ?? offer;
-    let response;
-    try {
-      response = await sendCallOffer(started.call_id, localDescription, started.session_id);
-    } catch {
-      return;
-    }
+    const response = await sendCallOffer(started.call_id, localDescription, started.session_id);
     sessionId = response.session_id || started.session_id || started.call_id;
     if (response.answer) {
-      try {
-        await connection.setRemoteDescription(response.answer);
-      } catch {
-        // Some Android Chrome builds reject fallback SDP answers even after
-        // the backend accepts the call session. Keep the call surface alive so
-        // controls and local mic activity remain visible instead of failing
-        // the whole call startup.
-      }
+      await connection.setRemoteDescription(response.answer);
+    }
+  }
+
+  async function failCallStartup(error: unknown) {
+    clearEventTimers();
+    cancelActiveTurnStream();
+    stopBrowserMedia();
+    showBlockingPanel(error);
+
+    if (!callId || !sessionId) {
+      return;
+    }
+
+    try {
+      await endCall(callId, sessionId, 'setup_failed');
+    } catch {
+      // Startup failure is already visible; teardown failures are not actionable here.
     }
   }
 
@@ -656,6 +657,15 @@
         };
         return;
       }
+
+      if (error.code === 'webrtc_offer_failed' || error.code === 'unreachable' || error.status >= 500) {
+        blockingPanel = {
+          body: error.message || 'RayMe could not connect this call.',
+          action: 'Return to Thread',
+          tone: 'danger'
+        };
+        return;
+      }
     }
 
     if (
@@ -701,12 +711,32 @@
 
   function stopBrowserMedia() {
     stopLocalMicMeter();
-    eventsChannel?.close();
+    detachRemoteAudio();
+    eventsChannel?.close?.();
     eventsChannel = null;
-    peerConnection?.close();
+    peerConnection?.close?.();
     peerConnection = null;
     localMediaStream?.getTracks().forEach((track) => track.stop());
     localMediaStream = null;
+  }
+
+  function attachRemoteAudio(stream: MediaStream) {
+    detachRemoteAudio();
+    const element = new Audio();
+    element.autoplay = true;
+    element.playsInline = true;
+    element.srcObject = stream;
+    remoteAudioElement = element;
+    void element.play().catch(() => undefined);
+  }
+
+  function detachRemoteAudio() {
+    if (!remoteAudioElement) {
+      return;
+    }
+    remoteAudioElement.pause();
+    remoteAudioElement.srcObject = null;
+    remoteAudioElement = null;
   }
 
   function labelForState(state: ActiveCallState): string {

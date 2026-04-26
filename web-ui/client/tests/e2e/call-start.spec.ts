@@ -22,7 +22,7 @@ test('starts a call from the thread header Start call control', async ({ page })
   assertNoBrowserErrors();
 });
 
-test('keeps the call surface listening when backend offer forwarding fails', async ({ page }) => {
+test('ends startup and shows sanitized failure when backend offer forwarding fails', async ({ page }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page, {
     allowConsoleErrors: [/Failed to load resource: the server responded with a status of 502/]
   });
@@ -30,11 +30,15 @@ test('keeps the call surface listening when backend offer forwarding fails', asy
   await installCallStartRoutes(page, { failOffer: true });
 
   await page.goto(`/chat/${threadId}`);
+  const failedOffer = page.waitForResponse(
+    (response) => response.url().includes('/api/calls/') && response.url().endsWith('/offer')
+  );
   await page.getByRole('button', { name: 'Start call' }).click();
+  await expect((await failedOffer).status()).toBe(502);
 
-  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'End Call' })).toBeVisible();
-  await expect(page.getByText('The call ended because the connection dropped.')).toHaveCount(0);
+  await expect(page.getByText('WebRTC offer could not be accepted')).toBeVisible();
+  await expect(page.getByRole('alert').getByRole('button', { name: 'Return to Thread' })).toBeVisible();
+  await expect(page.getByTestId('voice-visualizer')).toHaveCount(0);
   assertNoBrowserErrors();
 });
 
@@ -131,7 +135,7 @@ async function installCallStartRoutes(page: Page, options: { failOffer?: boolean
     if (options.failOffer) {
       await fulfillJson(
         route,
-        { detail: { code: 'webrtc_offer_failed', message: 'Call control request failed' } },
+        { detail: { code: 'webrtc_offer_failed', message: 'WebRTC offer could not be accepted' } },
         502
       );
       return;
@@ -142,6 +146,9 @@ async function installCallStartRoutes(page: Page, options: { failOffer?: boolean
       answer: { type: 'answer', sdp: 'v=0\r\n' },
       event_channel: 'rayme-events'
     });
+  });
+  await page.route('**/api/calls/*/end', async (route) => {
+    await fulfillJson(route, { call_id: 'call-start-01', session_id: 'rtc-call-start-01', reason: 'setup_failed' });
   });
 }
 

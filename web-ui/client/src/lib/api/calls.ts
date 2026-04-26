@@ -22,10 +22,13 @@ export class CallApiError extends Error {
 export async function startCall(payload: CallStartRequest): Promise<CallStartResponse> {
   const started = await postCallStart('/calls/start', payload);
   if (started.status === 404) {
-    return parseCallStartResponse(await postCallStart('/calls', payload));
+    return parseCallApiResponse(
+      await postCallStart('/calls', payload),
+      'RayMe could not start this call.'
+    );
   }
 
-  return parseCallStartResponse(started);
+  return parseCallApiResponse(started, 'RayMe could not start this call.');
 }
 
 async function postCallStart(path: string, payload: CallStartRequest): Promise<Response> {
@@ -36,17 +39,17 @@ async function postCallStart(path: string, payload: CallStartRequest): Promise<R
   });
 }
 
-async function parseCallStartResponse(response: Response): Promise<CallStartResponse> {
+async function parseCallApiResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
   const payload = await readJsonPayload(response);
 
   if (!response.ok) {
     const detail = payload.detail && typeof payload.detail === 'object' ? payload.detail : payload;
     const code = typeof detail.code === 'string' ? (detail.code as CallErrorCode) : undefined;
-    const message = typeof detail.message === 'string' ? detail.message : 'RayMe could not start this call.';
+    const message = typeof detail.message === 'string' ? detail.message : fallbackMessage;
     throw new CallApiError(message, response.status, code);
   }
 
-  return payload as CallStartResponse;
+  return payload as T;
 }
 
 async function readJsonPayload(response: Response): Promise<Record<string, unknown>> {
@@ -58,13 +61,14 @@ async function readJsonPayload(response: Response): Promise<Record<string, unkno
   }
 }
 
-export function sendCallOffer(
+export async function sendCallOffer(
   callId: string,
   offer: RTCSessionDescriptionInit,
   sessionId?: string | null
 ): Promise<CallOfferResponse> {
-  return apiFetch<CallOfferResponse>(`/calls/${encodeURIComponent(callId)}/offer`, {
+  const response = await fetch(toApiPath(`/calls/${encodeURIComponent(callId)}/offer`), {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       session_id: sessionId ?? undefined,
       offer: {
@@ -73,6 +77,8 @@ export function sendCallOffer(
       }
     })
   });
+
+  return parseCallApiResponse(response, 'RayMe could not connect this call.');
 }
 
 export function submitCallTurn(

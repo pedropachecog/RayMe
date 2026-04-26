@@ -32,12 +32,12 @@ def test_cuda_device_guard_rejects_cpu_compute_type() -> None:
 
 def test_torch_cuda_guard_rejects_cpu_only_torch(monkeypatch: pytest.MonkeyPatch) -> None:
     gpu_runtime = importlib.import_module("app.models.gpu_runtime")
-    fake_torch = types.SimpleNamespace(
+    scripted_torch = types.SimpleNamespace(
         __version__="2.10.0+cpu",
         version=types.SimpleNamespace(cuda=None),
         cuda=types.SimpleNamespace(is_available=lambda: False),
     )
-    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(sys.modules, "torch", scripted_torch)
 
     with pytest.raises(RuntimeError, match="CUDA-enabled PyTorch"):
         gpu_runtime.require_torch_cuda_runtime("F5-TTS")
@@ -45,16 +45,16 @@ def test_torch_cuda_guard_rejects_cpu_only_torch(monkeypatch: pytest.MonkeyPatch
 
 def test_torch_cuda_guard_accepts_cuda_torch(monkeypatch: pytest.MonkeyPatch) -> None:
     gpu_runtime = importlib.import_module("app.models.gpu_runtime")
-    fake_cuda = types.SimpleNamespace(
+    scripted_cuda = types.SimpleNamespace(
         is_available=lambda: True,
         get_device_name=lambda _index: "NVIDIA GeForce RTX 3060",
     )
-    fake_torch = types.SimpleNamespace(
+    scripted_torch = types.SimpleNamespace(
         __version__="2.10.0+cu126",
         version=types.SimpleNamespace(cuda="12.6"),
-        cuda=fake_cuda,
+        cuda=scripted_cuda,
     )
-    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(sys.modules, "torch", scripted_torch)
 
     info = gpu_runtime.require_torch_cuda_runtime("F5-TTS")
 
@@ -95,14 +95,14 @@ def test_f5_production_load_requires_torch_cuda(monkeypatch: pytest.MonkeyPatch)
     f5_module = importlib.import_module("app.models.tts_f5")
     F5TtsAdapter = getattr(f5_module, "F5TtsAdapter")
 
-    def fake_available(self: Any) -> None:
+    def scripted_available(self: Any) -> None:
         return None
 
-    def fake_guard(component: str) -> None:
+    def scripted_guard(component: str) -> None:
         raise RuntimeError(f"{component} requires a CUDA-enabled PyTorch runtime")
 
-    monkeypatch.setattr(F5TtsAdapter, "_ensure_runtime_available", fake_available)
-    monkeypatch.setattr(f5_module, "require_torch_cuda_runtime", fake_guard)
+    monkeypatch.setattr(F5TtsAdapter, "_ensure_runtime_available", scripted_available)
+    monkeypatch.setattr(f5_module, "require_torch_cuda_runtime", scripted_guard)
 
     with pytest.raises(RuntimeError, match="F5-TTS requires a CUDA-enabled PyTorch runtime"):
         F5TtsAdapter().load()

@@ -37,7 +37,7 @@ SERVER_SETTINGS = ChatCompletionSettings(
 )
 
 
-class FakeActionRepository:
+class ScriptedActionRepository:
     def __init__(self) -> None:
         self.messages = {
             "user-1": ThreadMessageShape(
@@ -215,7 +215,7 @@ class FakeActionRepository:
         ]
 
 
-class FakeCompletionClient:
+class ScriptedCompletionClient:
     def __init__(self) -> None:
         self.tokens = ["Generated"]
         self.requests: list[dict[str, object]] = []
@@ -233,7 +233,7 @@ class FakeCompletionClient:
 @pytest.fixture()
 def message_action_client(
     tmp_path: Path,
-) -> Iterator[tuple[TestClient, async_sessionmaker, FakeCompletionClient]]:
+) -> Iterator[tuple[TestClient, async_sessionmaker, ScriptedCompletionClient]]:
     engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'rayme-test.sqlite3'}")
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -243,7 +243,7 @@ def message_action_client(
 
     asyncio.run(setup_database())
 
-    fake_client = FakeCompletionClient()
+    scripted_client = ScriptedCompletionClient()
     app = create_app(
         Settings(
             llm_base_url="http://server-llm.local/v1",
@@ -258,10 +258,10 @@ def message_action_client(
             yield session
 
     app.dependency_overrides[get_message_action_session] = override_session
-    app.dependency_overrides[get_message_completion_client] = lambda: fake_client
+    app.dependency_overrides[get_message_completion_client] = lambda: scripted_client
 
     with TestClient(app) as client:
-        yield client, sessionmaker, fake_client
+        yield client, sessionmaker, scripted_client
 
     asyncio.run(engine.dispose())
 
@@ -269,16 +269,16 @@ def message_action_client(
 async def test_regenerate_calls_llm_and_replaces_selected_ai_response(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    repository = FakeActionRepository()
+    repository = ScriptedActionRepository()
     calls: list[tuple[str, object]] = []
 
-    async def fake_build_prompt_context(*args: object, **kwargs: object) -> list[dict[str, str]]:
+    async def scripted_build_prompt_context(*args: object, **kwargs: object) -> list[dict[str, str]]:
         calls.append(("build_prompt_context", kwargs["action"]))
         assert kwargs["repository"] is repository
         assert kwargs["until_message_id"] == "user-1"
         return [{"role": "user", "content": "Prompt from user"}]
 
-    async def fake_collect_chat_completion(
+    async def scripted_collect_chat_completion(
         settings: ChatCompletionSettings,
         messages: list[dict[str, str]],
     ) -> str:
@@ -288,8 +288,8 @@ async def test_regenerate_calls_llm_and_replaces_selected_ai_response(
         assert messages == [{"role": "user", "content": "Prompt from user"}]
         return "Regenerated server response"
 
-    monkeypatch.setattr(message_actions, "build_prompt_context", fake_build_prompt_context)
-    monkeypatch.setattr(message_actions, "collect_chat_completion", fake_collect_chat_completion)
+    monkeypatch.setattr(message_actions, "build_prompt_context", scripted_build_prompt_context)
+    monkeypatch.setattr(message_actions, "collect_chat_completion", scripted_collect_chat_completion)
 
     result = await message_actions.regenerate_ai_turn(
         "ai-1",
@@ -308,14 +308,14 @@ async def test_regenerate_calls_llm_and_replaces_selected_ai_response(
 async def test_swipe_calls_llm_persists_alternate_and_excludes_unselected_from_future_context(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    repository = FakeActionRepository()
+    repository = ScriptedActionRepository()
 
-    async def fake_build_prompt_context(*args: object, **kwargs: object) -> list[dict[str, str]]:
+    async def scripted_build_prompt_context(*args: object, **kwargs: object) -> list[dict[str, str]]:
         assert kwargs["repository"] is repository
         assert kwargs["action"] == "swipe"
         return [{"role": "assistant", "content": "Selected branch only"}]
 
-    async def fake_collect_chat_completion(
+    async def scripted_collect_chat_completion(
         settings: ChatCompletionSettings,
         messages: list[dict[str, str]],
     ) -> str:
@@ -325,8 +325,8 @@ async def test_swipe_calls_llm_persists_alternate_and_excludes_unselected_from_f
         assert "Hidden branch" not in prompt_text
         return "Generated swipe alternate"
 
-    monkeypatch.setattr(message_actions, "build_prompt_context", fake_build_prompt_context)
-    monkeypatch.setattr(message_actions, "collect_chat_completion", fake_collect_chat_completion)
+    monkeypatch.setattr(message_actions, "build_prompt_context", scripted_build_prompt_context)
+    monkeypatch.setattr(message_actions, "collect_chat_completion", scripted_collect_chat_completion)
 
     result = await message_actions.create_swipe_alternate(
         "ai-1",
@@ -343,9 +343,9 @@ async def test_swipe_calls_llm_persists_alternate_and_excludes_unselected_from_f
 async def test_continue_calls_llm_with_composer_text_and_selects_continue_alternate(
     monkeypatch: MonkeyPatch,
 ) -> None:
-    repository = FakeActionRepository()
+    repository = ScriptedActionRepository()
 
-    async def fake_build_prompt_context(*args: object, **kwargs: object) -> list[dict[str, str]]:
+    async def scripted_build_prompt_context(*args: object, **kwargs: object) -> list[dict[str, str]]:
         assert kwargs["repository"] is repository
         assert kwargs["action"] == "continue"
         assert kwargs["until_message_id"] == "ai-1"
@@ -355,7 +355,7 @@ async def test_continue_calls_llm_with_composer_text_and_selects_continue_altern
             {"role": "user", "content": "Continue with: finish this sentence"},
         ]
 
-    async def fake_collect_chat_completion(
+    async def scripted_collect_chat_completion(
         settings: ChatCompletionSettings,
         messages: list[dict[str, str]],
     ) -> str:
@@ -363,8 +363,8 @@ async def test_continue_calls_llm_with_composer_text_and_selects_continue_altern
         assert "finish this sentence" in "\n".join(message["content"] for message in messages)
         return "Extended AI response"
 
-    monkeypatch.setattr(message_actions, "build_prompt_context", fake_build_prompt_context)
-    monkeypatch.setattr(message_actions, "collect_chat_completion", fake_collect_chat_completion)
+    monkeypatch.setattr(message_actions, "build_prompt_context", scripted_build_prompt_context)
+    monkeypatch.setattr(message_actions, "collect_chat_completion", scripted_collect_chat_completion)
 
     result = await message_actions.continue_ai_turn(
         "ai-1",
@@ -380,7 +380,7 @@ async def test_continue_calls_llm_with_composer_text_and_selects_continue_altern
 
 
 async def test_edit_marks_downstream_turns_stale() -> None:
-    repository = FakeActionRepository()
+    repository = ScriptedActionRepository()
 
     await message_actions.edit_message_and_mark_stale(
         "user-1",
@@ -393,7 +393,7 @@ async def test_edit_marks_downstream_turns_stale() -> None:
 
 
 async def test_truncate_stale_removes_downstream_rows() -> None:
-    repository = FakeActionRepository()
+    repository = ScriptedActionRepository()
     repository.messages["downstream-1"] = ThreadMessageShape(
         id="downstream-1",
         thread_id="thread-1",
@@ -414,7 +414,7 @@ async def test_truncate_stale_removes_downstream_rows() -> None:
 
 
 async def test_keep_stale_records_user_choice() -> None:
-    repository = FakeActionRepository()
+    repository = ScriptedActionRepository()
 
     await message_actions.keep_stale_after_message("user-1", repository=repository)
 
@@ -423,10 +423,10 @@ async def test_keep_stale_records_user_choice() -> None:
 
 
 def test_regenerate_route_uses_server_settings_and_replaces_without_appending_ai_turn(
-    message_action_client: tuple[TestClient, async_sessionmaker, FakeCompletionClient],
+    message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
 ) -> None:
-    client, sessionmaker, fake_client = message_action_client
-    fake_client.tokens = ["Regenerated server response"]
+    client, sessionmaker, scripted_client = message_action_client
+    scripted_client.tokens = ["Regenerated server response"]
     ids = asyncio.run(_create_action_thread(sessionmaker))
 
     response = client.post(f"/api/messages/{ids['ai']}/regenerate")
@@ -437,7 +437,7 @@ def test_regenerate_route_uses_server_settings_and_replaces_without_appending_ai
     assert body["content_text"] == "Regenerated server response"
     assert body["alternates"][-1]["source_action"] == "regenerate"
     assert body["selected_alternate_id"] == body["alternates"][-1]["id"]
-    assert fake_client.requests[0]["settings"] == ChatCompletionSettings(
+    assert scripted_client.requests[0]["settings"] == ChatCompletionSettings(
         base_url="http://server-llm.local/v1",
         model="server-model",
         api_key="server-secret",
@@ -449,10 +449,10 @@ def test_regenerate_route_uses_server_settings_and_replaces_without_appending_ai
 
 
 def test_swipe_route_generates_selected_alternate_and_future_context_excludes_unselected(
-    message_action_client: tuple[TestClient, async_sessionmaker, FakeCompletionClient],
+    message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
 ) -> None:
-    client, sessionmaker, fake_client = message_action_client
-    fake_client.tokens = ["Generated swipe alternate"]
+    client, sessionmaker, scripted_client = message_action_client
+    scripted_client.tokens = ["Generated swipe alternate"]
     ids = asyncio.run(_create_prior_branch_thread(sessionmaker))
 
     response = client.post(f"/api/messages/{ids['target_ai']}/swipes")
@@ -465,7 +465,7 @@ def test_swipe_route_generates_selected_alternate_and_future_context_excludes_un
     assert body["selected_alternate_id"] == selected["id"]
 
     prompt_text = "\n".join(
-        message["content"] for message in fake_client.requests[0]["messages"]
+        message["content"] for message in scripted_client.requests[0]["messages"]
     )
     assert "Selected prior branch" in prompt_text
     assert "Hidden prior branch" not in prompt_text
@@ -476,10 +476,10 @@ def test_swipe_route_generates_selected_alternate_and_future_context_excludes_un
 
 
 def test_continue_route_uses_composer_text_and_returns_thread_message_shape(
-    message_action_client: tuple[TestClient, async_sessionmaker, FakeCompletionClient],
+    message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
 ) -> None:
-    client, _sessionmaker, fake_client = message_action_client
-    fake_client.tokens = ["Extended AI response"]
+    client, _sessionmaker, scripted_client = message_action_client
+    scripted_client.tokens = ["Extended AI response"]
     ids = asyncio.run(_create_action_thread(message_action_client[1]))
 
     response = client.post(
@@ -496,15 +496,15 @@ def test_continue_route_uses_composer_text_and_returns_thread_message_shape(
     assert body["alternates"][-1]["source_action"] == "continue"
     assert body["selected_alternate_id"] == body["alternates"][-1]["id"]
     prompt_text = "\n".join(
-        message["content"] for message in fake_client.requests[0]["messages"]
+        message["content"] for message in scripted_client.requests[0]["messages"]
     )
     assert "finish this sentence" in prompt_text
 
 
 def test_edit_route_marks_downstream_stale_and_truncate_keep_behaviors_work(
-    message_action_client: tuple[TestClient, async_sessionmaker, FakeCompletionClient],
+    message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
 ) -> None:
-    client, sessionmaker, _fake_client = message_action_client
+    client, sessionmaker, _scripted_client = message_action_client
     ids = asyncio.run(_create_action_thread(sessionmaker, include_downstream=True))
 
     edit_response = client.patch(

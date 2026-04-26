@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
+import app.api.webrtc as webrtc_module
 from app.main import create_app
 
 MUTE_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/mute"
@@ -12,7 +14,7 @@ END_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/end"
 SPEAK_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/speak"
 
 
-class FakeTtsAdapter:
+class ScriptedTtsAdapter:
     def __init__(self, *, fail: bool = False) -> None:
         self.fail = fail
         self.calls: list[dict[str, Any]] = []
@@ -35,18 +37,61 @@ class FakeTtsAdapter:
         )
         if self.fail:
             raise RuntimeError("raw model failure")
-        return {"wav_bytes": b"fake-wav", "sample_rate": 24000, "duration_ms": 100}
+        return {"wav_bytes": b"scripted-wav", "sample_rate": 24000, "duration_ms": 100}
 
 
-class FakeModelManager:
-    def __init__(self, adapter: FakeTtsAdapter | None = None) -> None:
+class ScriptedModelManager:
+    def __init__(self, adapter: ScriptedTtsAdapter | None = None) -> None:
         self.switch_calls: list[str] = []
-        self.tts_adapters = {"f5": adapter or FakeTtsAdapter()}
+        self.tts_adapters = {"f5": adapter or ScriptedTtsAdapter()}
 
     def switch_tts_engine(self, engine_id: str) -> None:
         self.switch_calls.append(engine_id)
         if engine_id not in self.tts_adapters:
             raise ValueError("unknown engine")
+
+
+class StubPeerConnection:
+    connectionState = "new"
+
+    def __init__(self) -> None:
+        self.tracks: list[Any] = []
+
+    def addTrack(self, track: Any) -> None:
+        self.tracks.append(track)
+
+    def createDataChannel(self, label: str) -> Any:
+        return type("StubDataChannel", (), {"label": label, "readyState": "open", "send": lambda self, data: None})()
+
+    def on(self, _event_name: str) -> Any:
+        def decorator(handler: Any) -> Any:
+            return handler
+
+        return decorator
+
+    async def close(self) -> None:
+        return None
+
+
+@pytest.fixture
+def stub_webrtc(monkeypatch: pytest.MonkeyPatch) -> None:
+    def create_peer_connection(_offer: Any) -> StubPeerConnection:
+        return StubPeerConnection()
+
+    def attach_outbound_audio_track(peer_connection: StubPeerConnection) -> Any:
+        track = type("StubAudioTrack", (), {"kind": "audio", "chunks": [], "enqueue": lambda self, chunk: self.chunks.append(chunk)})()
+        peer_connection.addTrack(track)
+        return track
+
+    async def negotiate_answer(_peer_connection: Any, _offer: Any) -> dict[str, str]:
+        return {
+            "type": "answer",
+            "sdp": "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=RayMe test answer\r\nt=0 0\r\n",
+        }
+
+    monkeypatch.setattr(webrtc_module, "_create_peer_connection", create_peer_connection)
+    monkeypatch.setattr(webrtc_module, "_attach_outbound_audio_track", attach_outbound_audio_track)
+    monkeypatch.setattr(webrtc_module, "_negotiate_answer", negotiate_answer)
 
 
 def _client(*, model_manager: Any | None = None) -> TestClient:
@@ -90,8 +135,9 @@ def test_webrtc_status_exposes_live_call_readiness_and_session_counts() -> None:
     assert payload["status"] in {"starting", "ready", "degraded", "unavailable"}
 
 
-def test_webrtc_offer_creates_session_answer_and_events_channel() -> None:
-    response = _client().post("/webrtc/offer", json=_offer_payload())
+def test_webrtc_offer_creates_session_answer_and_events_channel(stub_webrtc: None) -> None:
+    client = _client()
+    response = client.post("/webrtc/offer", json=_offer_payload())
 
     assert response.status_code == 200
     payload = response.json()
@@ -100,9 +146,12 @@ def test_webrtc_offer_creates_session_answer_and_events_channel() -> None:
     assert isinstance(payload["answer"]["sdp"], str)
     assert payload["answer"]["sdp"].startswith("v=0")
     assert payload["data_channel"]["label"] == "rayme-events"
+    session = client.app.state.call_session_manager.get_session("call-session-1")
+    assert session.outbound_audio_track is not None
+    assert session.outbound_audio_track.kind == "audio"
 
 
-def test_webrtc_mute_control_returns_session_state() -> None:
+def test_webrtc_mute_control_returns_session_state(stub_webrtc: None) -> None:
     client = _client()
     session_id = "call-session-1"
     client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
@@ -119,7 +168,7 @@ def test_webrtc_mute_control_returns_session_state() -> None:
     assert payload["muted"] is True
 
 
-def test_webrtc_interrupt_control_returns_session_state() -> None:
+def test_webrtc_interrupt_control_returns_session_state(stub_webrtc: None) -> None:
     client = _client()
     session_id = "call-session-1"
     client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
@@ -132,9 +181,9 @@ def test_webrtc_interrupt_control_returns_session_state() -> None:
     assert payload["state"] in {"listening", "interrupted"}
 
 
-def test_webrtc_speak_synthesizes_with_exact_engine_and_emits_done() -> None:
-    adapter = FakeTtsAdapter()
-    manager = FakeModelManager(adapter)
+def test_webrtc_speak_synthesizes_with_exact_engine_and_emits_done(stub_webrtc: None) -> None:
+    adapter = ScriptedTtsAdapter()
+    manager = ScriptedModelManager(adapter)
     client = _client(model_manager=manager)
     session_id = "call-session-1"
     client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
@@ -165,8 +214,8 @@ def test_webrtc_speak_synthesizes_with_exact_engine_and_emits_done() -> None:
     assert payload["event"]["turn_id"] == "ai-turn-1"
 
 
-def test_webrtc_speak_failure_returns_fixed_call_tts_failed_code() -> None:
-    client = _client(model_manager=FakeModelManager(FakeTtsAdapter(fail=True)))
+def test_webrtc_speak_failure_returns_fixed_call_tts_failed_code(stub_webrtc: None) -> None:
+    client = _client(model_manager=ScriptedModelManager(ScriptedTtsAdapter(fail=True)))
     session_id = "call-session-1"
     client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
 
@@ -190,7 +239,7 @@ def test_webrtc_speak_failure_returns_fixed_call_tts_failed_code() -> None:
     assert "raw model failure" not in response.text
 
 
-def test_webrtc_end_control_returns_session_state() -> None:
+def test_webrtc_end_control_returns_session_state(stub_webrtc: None) -> None:
     client = _client()
     session_id = "call-session-1"
     client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
@@ -219,3 +268,14 @@ def test_webrtc_offer_malformed_payload_returns_sanitized_validation_error() -> 
     assert response.status_code in {400, 422}
     assert "Traceback" not in response.text
     assert "File " not in response.text
+
+
+def test_webrtc_offer_rejects_non_media_offer_instead_of_inventing_answer() -> None:
+    response = _client().post("/webrtc/offer", json=_offer_payload())
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == {
+        "code": "webrtc_offer_failed",
+        "message": "WebRTC offer could not be accepted",
+    }
+    assert "RayMe test answer" not in response.text

@@ -214,7 +214,7 @@ def test_settings_rejects_vad_values_outside_call_phase_bounds(
 def test_settings_response_includes_compact_live_ai_backend_status(
     settings_client: TestClient,
 ) -> None:
-    class FakeAiBackendClient:
+    class ScriptedAiBackendClient:
         async def get_status(self, base_url: str) -> AiBackendStatus:
             assert base_url == "https://ai.local:9443"
             return AiBackendStatus(
@@ -236,7 +236,7 @@ def test_settings_response_includes_compact_live_ai_backend_status(
                 vram_headroom_mb=8700,
             )
 
-    settings_client.app.dependency_overrides[get_ai_backend_client] = FakeAiBackendClient
+    settings_client.app.dependency_overrides[get_ai_backend_client] = ScriptedAiBackendClient
     settings_client.patch("/api/settings", json={"ai_backend_url": "https://ai.local:9443"})
 
     body = settings_client.get("/api/settings").json()
@@ -350,7 +350,7 @@ def test_ai_backend_status_bridge_returns_compact_backend_status(
 ) -> None:
     from app.api.ai_backend import get_ai_backend_client
 
-    class FakeAiBackendClient:
+    class ScriptedAiBackendClient:
         async def get_status(self, base_url: str) -> AiBackendStatus:
             assert base_url == "https://127.0.0.1:9443"
             return AiBackendStatus(
@@ -372,7 +372,7 @@ def test_ai_backend_status_bridge_returns_compact_backend_status(
                 vram_headroom_mb=8700,
             )
 
-    settings_client.app.dependency_overrides[get_ai_backend_client] = FakeAiBackendClient
+    settings_client.app.dependency_overrides[get_ai_backend_client] = ScriptedAiBackendClient
 
     response = settings_client.get("/api/ai-backend/status")
 
@@ -454,7 +454,7 @@ def test_llm_test_uses_server_side_settings_and_never_returns_api_key(
     captured: dict[str, str | None] = {}
     raw_llm_api_key = "sk-secret-value"
 
-    async def fake_llm_probe(
+    async def scripted_llm_probe(
         *,
         base_url: str | None,
         api_key: str | None,
@@ -463,7 +463,7 @@ def test_llm_test_uses_server_side_settings_and_never_returns_api_key(
         captured.update({"base_url": base_url, "api_key": api_key, "model": model})
         return CONNECTED
 
-    settings_client.app.dependency_overrides[get_llm_probe] = lambda: fake_llm_probe
+    settings_client.app.dependency_overrides[get_llm_probe] = lambda: scripted_llm_probe
     settings_client.patch(
         "/api/settings",
         json={
@@ -718,8 +718,44 @@ async def test_ai_backend_client_sanitizes_public_error_payloads() -> None:
         assert forbidden not in rendered
 
 
+async def test_ai_backend_client_preserves_sanitized_webrtc_offer_failure_detail() -> None:
+    from app.domain.ai_backend_client import AiBackendClient, AiBackendProcessingError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/webrtc/offer"):
+            return httpx.Response(
+                502,
+                json={
+                    "detail": {
+                        "code": "webrtc_offer_failed",
+                        "message": "WebRTC offer could not be accepted",
+                    }
+                },
+            )
+        return httpx.Response(404)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        ai_client = AiBackendClient(http_client=client)
+        with pytest.raises(AiBackendProcessingError) as failed:
+            await ai_client.create_webrtc_offer(
+                "https://ai.local:9443",
+                {
+                    "session_id": "rtc-call-1",
+                    "thread_id": "thread-1",
+                    "voice_id": "voice-1",
+                    "engine_id": "f5",
+                    "offer": {"type": "offer", "sdp": "v=0\r\n"},
+                },
+            )
+
+    assert failed.value.to_public_dict() == {
+        "code": "webrtc_offer_failed",
+        "message": "WebRTC offer could not be accepted",
+    }
+
+
 def _ai_backend_client(status: ConnectionStatus):
-    class FakeAiBackendClient:
+    class ScriptedAiBackendClient:
         async def get_status(self, _base_url: str) -> AiBackendStatus:
             if status == CONNECTED:
                 return AiBackendStatus(status="ok")
@@ -730,4 +766,4 @@ def _ai_backend_client(status: ConnectionStatus):
                 )
             raise AiBackendUnavailable(code="unreachable", message="AI backend unreachable")
 
-    return FakeAiBackendClient
+    return ScriptedAiBackendClient

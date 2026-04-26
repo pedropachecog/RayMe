@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from io import BytesIO
 from typing import Any
 
+import numpy as np
+import soundfile as sf
+
+from app.call.tracks import QueuedAudioOutputTrack
 from app.call.session import CallSession, CallSessionManager
 
 
@@ -12,7 +17,7 @@ def _run(value: Any) -> Any:
     return value
 
 
-class FakePeerConnection:
+class ScriptedPeerConnection:
     def __init__(self) -> None:
         self.close_calls = 0
         self.connectionState = "new"
@@ -21,7 +26,7 @@ class FakePeerConnection:
         self.close_calls += 1
 
 
-class FakeAiTurn:
+class ScriptedAiTurn:
     def __init__(self) -> None:
         self.cancel_calls = 0
 
@@ -29,7 +34,7 @@ class FakeAiTurn:
         self.cancel_calls += 1
 
 
-class FakeOutboundAudioTrack:
+class ScriptedOutboundAudioTrack:
     def __init__(self) -> None:
         self.chunks: list[bytes] = []
         self.stop_calls = 0
@@ -41,7 +46,7 @@ class FakeOutboundAudioTrack:
         self.stop_calls += 1
 
 
-class FakeTtsAdapter:
+class ScriptedTtsAdapter:
     def __init__(self, *, delay: float = 0) -> None:
         self.delay = delay
         self.calls: list[dict[str, Any]] = []
@@ -64,31 +69,31 @@ class FakeTtsAdapter:
         )
         if self.delay:
             await asyncio.sleep(self.delay)
-        return {"wav_bytes": b"fake-wav", "sample_rate": 24000, "duration_ms": 100}
+        return {"wav_bytes": b"scripted-wav", "sample_rate": 24000, "duration_ms": 100}
 
 
-class FakeGenericTtsAdapter:
+class ScriptedGenericTtsAdapter:
     def __init__(self) -> None:
         self.reference_audio: bytes | None = None
 
     def synthesize(self, payload: Any) -> dict[str, Any]:
         self.reference_audio = payload.reference_audio
-        return {"wav_bytes": b"fake-wav", "sample_rate": 24000, "duration_ms": 100}
+        return {"wav_bytes": b"scripted-wav", "sample_rate": 24000, "duration_ms": 100}
 
 
-class FakeInboundAudioFrame:
+class ScriptedInboundAudioFrame:
     def __init__(self, pcm: bytes) -> None:
         self.pcm = pcm
         self.sample_rate = 16000
         self.channels = 1
 
 
-class FakeInboundAudioFrameSource:
+class ScriptedInboundAudioFrameSource:
     def __init__(self, *frames: bytes) -> None:
-        self.frames = [FakeInboundAudioFrame(frame) for frame in frames]
+        self.frames = [ScriptedInboundAudioFrame(frame) for frame in frames]
 
 
-class FakeVadAdapter:
+class ScriptedVadAdapter:
     def __init__(self) -> None:
         self.frames: list[bytes] = []
 
@@ -100,7 +105,7 @@ class FakeVadAdapter:
         }
 
 
-class FakeSttAdapter:
+class ScriptedSttAdapter:
     def __init__(self) -> None:
         self.calls: list[list[bytes]] = []
 
@@ -121,8 +126,8 @@ def _new_session(
     tts_adapter: Any | None = None,
     outbound_audio_track: Any | None = None,
     event_sink: Any | None = None,
-) -> tuple[Any, FakePeerConnection]:
-    peer = FakePeerConnection()
+) -> tuple[Any, ScriptedPeerConnection]:
+    peer = ScriptedPeerConnection()
     session = CallSession(
         session_id=session_id,
         peer_connection=peer,
@@ -159,9 +164,9 @@ def test_mute_stops_server_consumption() -> None:
 
 
 def test_inbound_audio_emits_user_final_after_vad_end() -> None:
-    vad = FakeVadAdapter()
-    stt = FakeSttAdapter()
-    source = FakeInboundAudioFrameSource(b"pcm-frame-1", b"pcm-frame-2")
+    vad = ScriptedVadAdapter()
+    stt = ScriptedSttAdapter()
+    source = ScriptedInboundAudioFrameSource(b"pcm-frame-1", b"pcm-frame-2")
     session, _ = _new_session(vad_adapter=vad, stt_adapter=stt)
 
     first_event = _run(session.handle_inbound_audio_frame(source.frames[0]))
@@ -180,9 +185,9 @@ def test_inbound_audio_emits_user_final_after_vad_end() -> None:
 
 
 def test_muted_inbound_audio_counts_dropped_frames_without_stt() -> None:
-    vad = FakeVadAdapter()
-    stt = FakeSttAdapter()
-    source = FakeInboundAudioFrameSource(b"muted-pcm-frame")
+    vad = ScriptedVadAdapter()
+    stt = ScriptedSttAdapter()
+    source = ScriptedInboundAudioFrameSource(b"muted-pcm-frame")
     session, _ = _new_session(vad_adapter=vad, stt_adapter=stt)
 
     _run(session.set_muted(True))
@@ -198,7 +203,7 @@ def test_muted_inbound_audio_counts_dropped_frames_without_stt() -> None:
 
 def test_interrupt_cancels_active_ai_turn() -> None:
     session, _ = _new_session()
-    active_turn = FakeAiTurn()
+    active_turn = ScriptedAiTurn()
     session.active_ai_turn = active_turn
 
     event = _run(session.interrupt())
@@ -211,8 +216,8 @@ def test_interrupt_cancels_active_ai_turn() -> None:
 
 def test_speak_text_queues_audio_and_emits_done_for_final_chunk() -> None:
     events: list[dict[str, Any]] = []
-    track = FakeOutboundAudioTrack()
-    adapter = FakeTtsAdapter()
+    track = ScriptedOutboundAudioTrack()
+    adapter = ScriptedTtsAdapter()
     session, _ = _new_session(
         tts_adapter=adapter,
         outbound_audio_track=track,
@@ -237,14 +242,33 @@ def test_speak_text_queues_audio_and_emits_done_for_final_chunk() -> None:
             "engine_id": "f5",
         }
     ]
-    assert track.chunks == [b"fake-wav"]
+    assert track.chunks == [b"scripted-wav"]
     assert [item["type"] for item in events] == ["ai_audio_started", "ai_done"]
     assert event["type"] == "ai_done"
     assert session.state == "listening"
 
 
+def test_queued_audio_output_track_returns_tts_audio_frames() -> None:
+    async def scenario() -> Any:
+        track = QueuedAudioOutputTrack(sample_rate=16000, frame_ms=20)
+        samples = np.full(1600, 0.25, dtype=np.float32)
+        buffer = BytesIO()
+        sf.write(buffer, samples, 16000, format="WAV")
+
+        await track.enqueue(buffer.getvalue())
+        frame = await track.recv()
+
+        return frame
+
+    frame = _run(scenario())
+
+    assert frame.sample_rate == 16000
+    assert frame.samples == 320
+    assert np.max(np.abs(frame.to_ndarray())) > 0
+
+
 def test_speak_text_generic_adapter_uses_real_reference_audio() -> None:
-    adapter = FakeGenericTtsAdapter()
+    adapter = ScriptedGenericTtsAdapter()
     session, _ = _new_session(tts_adapter=adapter)
 
     _run(
@@ -265,8 +289,8 @@ def test_speak_text_generic_adapter_uses_real_reference_audio() -> None:
 
 def test_interrupt_cancels_active_speech_before_ai_done() -> None:
     events: list[dict[str, Any]] = []
-    track = FakeOutboundAudioTrack()
-    adapter = FakeTtsAdapter(delay=1)
+    track = ScriptedOutboundAudioTrack()
+    adapter = ScriptedTtsAdapter(delay=1)
     session, _ = _new_session(
         tts_adapter=adapter,
         outbound_audio_track=track,

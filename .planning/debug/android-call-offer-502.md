@@ -1,8 +1,8 @@
 ---
-status: investigating
+status: resolved
 trigger: "Android Chrome Phase 3 live call: microphone permission is granted and Android shows mic listening, then the RayMe call UI still fails or becomes unusable."
 created: 2026-04-25T23:36:09Z
-updated: 2026-04-25T23:36:09Z
+updated: 2026-04-25T23:59:30Z
 ---
 
 # Debug Session: Android Call Offer 502
@@ -27,10 +27,10 @@ updated: 2026-04-25T23:36:09Z
 
 ## Current Focus
 
-- hypothesis: Android Chrome's real SDP offer is rejected, times out, or fails
-  in the Web UI to AI backend `/webrtc/offer` forwarding path. The user-visible
-  failure has been reduced, but the underlying live media path is still not
-  proven working.
+- hypothesis: the regression was caused by the Web UI swallowing
+  `/api/calls/{call_id}/offer` failures after entering `Listening`, combined
+  with generic client error handling that discarded the sanitized backend
+  `webrtc_offer_failed` detail.
 - test: reproduce with a real or captured Android SDP offer against
   `POST https://192.168.1.199:8443/api/calls/{call_id}/offer` and then directly
   against `POST https://192.168.1.199:9443/webrtc/offer`, while capturing
@@ -38,10 +38,9 @@ updated: 2026-04-25T23:36:09Z
 - expecting: the web facade returns `502` with public code
   `webrtc_offer_failed` or `unreachable`, and the AI backend either receives no
   `/webrtc/offer` request or rejects the Android SDP inside aiortc negotiation.
-- next_action: instrument the Web UI call offer facade and AI backend WebRTC
-  offer route with safe structured diagnostics for status, elapsed time, and
-  exception class; then reproduce on Android and inspect
-  `C:\Users\pmpg\rayme\logs\*.hidden.*.log`.
+- next_action: deploy and retest on Android; expected behavior is immediate
+  failure panel with the sanitized WebRTC offer error instead of a listening
+  surface.
 - reasoning_checkpoint: do not keep patching the UI blindly. The permission and
   local microphone symptoms are already fixed. The remaining root cause is in
   the WebRTC offer/answer or aiortc media negotiation path.
@@ -96,6 +95,32 @@ updated: 2026-04-25T23:36:09Z
   limitation: this smoke uses fake media on desktop Chromium and does not prove
   Android SDP, Android media transport, STT, LLM, or F5 playback.
 
+- timestamp: 2026-04-25T23:59Z
+  observation: Product-owner retest reports the latest change regressed UX.
+  details:
+    - Android starts a call and continues showing/listening.
+    - Nothing progresses until the user hangs up.
+    - Keeping the dialog alive is not an improvement.
+  interpretation: failed offer negotiation must terminate the call attempt and
+    surface the exact backend failure instead of leaving the user in an
+    apparently active listening state.
+
+- timestamp: 2026-04-25T23:59:30Z
+  observation: Root cause confirmed and fixed in focused regression coverage.
+  details:
+    - `connectBrowserMedia` no longer catches and ignores `sendCallOffer`
+      failures.
+    - `sendCallOffer` now parses public error payloads and throws
+      `CallApiError` with the backend code/message.
+    - call startup failure stops local media, shows the failure panel, and
+      sends `endCall(..., "setup_failed")` for cleanup.
+    - media teardown is defensive so cleanup cannot block failure presentation.
+    - the web AI backend client preserves sanitized `/webrtc/offer` 5xx
+      `detail.code` and `detail.message`.
+  interpretation: the user-visible regression was in the client startup error
+    path, not microphone permission. Backend offer failures now terminate the
+    attempt and show the precise sanitized reason.
+
 ## Eliminated
 
 - hypothesis: Android Chrome did not receive or load the newest client bundle.
@@ -133,6 +158,8 @@ updated: 2026-04-25T23:36:09Z
     error.
   - Server `end_call` records a local call end even if backend session control
     fails.
+  - Product-owner retest says this is a regression: the call now appears to keep
+    listening while no backend turn happens.
 
 ## Verification Already Run
 
@@ -143,6 +170,11 @@ updated: 2026-04-25T23:36:09Z
 - `uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py -q`
   passed: `17 passed`.
 - OMEN deployment via `scripts/deploy-omen.sh` completed at `66e2850`.
+- `npm --prefix web-ui/client run check` passed after fix.
+- `uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py web-ui/server/tests/test_health_settings.py -q`
+  passed: `37 passed`.
+- `npm --prefix web-ui/client run test:e2e -- tests/e2e/call-start.spec.ts --project=desktop-chromium --workers=1`
+  passed: `4 passed`.
 
 ## Important Files For Debugger
 
@@ -197,7 +229,12 @@ updated: 2026-04-25T23:36:09Z
 
 ## Resolution
 
-- root_cause:
-- fix:
-- verification:
-- files_changed:
+- root_cause: Web UI call startup entered `Listening` before WebRTC negotiation
+  and then swallowed `/offer` failures, while `sendCallOffer` used generic
+  `apiFetch` errors that discarded sanitized backend detail.
+- fix: Propagate offer failures as typed `CallApiError`, fail startup through a
+  blocking panel, stop local media, request setup cleanup with
+  `reason="setup_failed"`, and preserve sanitized backend WebRTC failure
+  code/message through the web server AI client.
+- verification: `npm --prefix web-ui/client run check`; `uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py web-ui/server/tests/test_health_settings.py -q`; `npm --prefix web-ui/client run test:e2e -- tests/e2e/call-start.spec.ts --project=desktop-chromium --workers=1`.
+- files_changed: `web-ui/client/src/lib/api/calls.ts`, `web-ui/client/src/routes/call/[threadId]/+page.svelte`, `web-ui/client/tests/e2e/call-start.spec.ts`, `web-ui/server/app/domain/ai_backend_client.py`, `web-ui/server/tests/test_calls.py`, `web-ui/server/tests/test_health_settings.py`, `.planning/debug/android-call-offer-502.md`.
