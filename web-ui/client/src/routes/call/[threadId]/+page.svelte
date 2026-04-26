@@ -70,6 +70,10 @@
   let localMicAnalyser: AnalyserNode | null = null;
   let localMicMeterFrame = 0;
   let remoteAudioElement: HTMLAudioElement | null = null;
+  let remoteAudioContext: AudioContext | null = null;
+  let remoteAudioSource: MediaStreamAudioSourceNode | null = null;
+  let remoteAudioAnalyser: AnalyserNode | null = null;
+  let remoteAudioMeterFrame = 0;
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'RayMe');
@@ -235,6 +239,15 @@
       emitDebugEvent(debugCallId, 'pc.connectionstatechange', {
         connectionState: connection.connectionState
       });
+      if (connection.connectionState === 'failed' || connection.connectionState === 'disconnected') {
+        emitDebugEvent(debugCallId, 'pc.connection.failed', {
+          connectionState: connection.connectionState,
+          iceConnectionState: connection.iceConnectionState,
+          remoteAudioContextState: remoteAudioContext?.state ?? 'none',
+          remoteAudioElementPlaying: remoteAudioElement ? !remoteAudioElement.paused : false,
+          speakingRms: speakingRms
+        });
+      }
       if (connection.connectionState === 'connected') {
         try {
           if (eventsChannel && (eventsChannel.readyState === 'closed' || eventsChannel.readyState === 'closing')) {
@@ -900,6 +913,8 @@
   function stopBrowserMedia() {
     stopLocalMicMeter();
     detachRemoteAudio();
+    remoteAudioContext?.close().catch(() => undefined);
+    remoteAudioContext = null;
     eventsChannel?.close?.();
     eventsChannel = null;
     peerConnection?.close?.();
@@ -910,37 +925,134 @@
 
   function attachRemoteAudio(stream: MediaStream, debugCallId = '') {
     detachRemoteAudio();
-    const element = new Audio();
-    element.autoplay = true;
-    element.playsInline = true;
-    element.srcObject = stream;
-    remoteAudioElement = element;
     emitDebugEvent(debugCallId, 'remote_audio.attach', {
       tracks: stream.getAudioTracks().length,
       stream_id: stream.id
     });
-    void element
-      .play()
-      .then(() => {
-        emitDebugEvent(debugCallId, 'remote_audio.play.ok', {});
-      })
-      .catch((error: unknown) => {
+  
+    // Log track events for debugging
+    for (const track of stream.getAudioTracks()) {
+      emitDebugEvent(debugCallId, 'remote_audio.track', {
+        kind: track.kind,
+        id: track.id,
+        readyState: track.readyState,
+        muted: track.muted,
+        enabled: track.enabled
+      });
+      track.addEventListener('ended', () => {
+        emitDebugEvent(debugCallId, 'remote_audio.track.ended', { id: track.id });
+      });
+      track.addEventListener('mute', () => {
+        emitDebugEvent(debugCallId, 'remote_audio.track.mute', { id: track.id, muted: track.muted });
+      });
+    }
+  
+    // Use AudioContext-based playback for reliable Android audio routing.
+    // The <Audio> element approach can fail silently on Android Chrome when
+    // audio data arrives significantly after the initial play() call.
+    const AudioContextCtor =
+      typeof AudioContext !== 'undefined'
+        ? AudioContext
+        : (globalThis as typeof globalThis & { webkitAudioContext?: typeof AudioContext })
+            .webkitAudioContext;
+    if (!AudioContextCtor) {
+      emitDebugEvent(debugCallId, 'remote_audio.play.failed', {
+        name: 'NotSupportedError',
+        message: 'AudioContext is not available'
+      });
+      // Fallback to <Audio> element
+      const element = new Audio();
+      element.autoplay = true;
+      element.playsInline = true;
+      element.srcObject = stream;
+      remoteAudioElement = element;
+      void element.play().catch((error: unknown) => {
         emitDebugEvent(debugCallId, 'remote_audio.play.failed', {
           name: (error as DOMException)?.name ?? 'unknown',
           message: (error as Error)?.message ?? ''
         });
       });
-  }
-
-  function detachRemoteAudio() {
-    if (!remoteAudioElement) {
       return;
     }
-    remoteAudioElement.pause();
-    remoteAudioElement.srcObject = null;
-    remoteAudioElement = null;
+  
+    try {
+      const context = remoteAudioContext ?? new AudioContextCtor();
+      if (context.state === 'suspended') {
+        context.resume().catch(() => undefined);
+      }
+      remoteAudioContext = context;
+  
+      const source = context.createMediaStreamSource(stream);
+      remoteAudioSource = source;
+  
+      const analyser = context.createAnalyser();
+      analyser.fftSize = 512;
+      remoteAudioAnalyser = analyser;
+  
+      source.connect(analyser);
+      analyser.connect(context.destination);
+  
+      // Start remote audio metering (speakingRms)
+      const samples = new Float32Array(analyser.fftSize);
+      const updateMeter = () => {
+        if (remoteAudioAnalyser !== analyser) {
+          return;
+        }
+        analyser.getFloatTimeDomainData(samples);
+        let sumSquares = 0;
+        for (let i = 0; i < samples.length; i++) {
+          sumSquares += samples[i] * samples[i];
+        }
+        const rms = Math.sqrt(sumSquares / samples.length);
+        speakingRms = Math.max(0.04, Math.min(1, rms * 3.2));
+        remoteAudioMeterFrame = requestAnimationFrame(updateMeter);
+      };
+      remoteAudioMeterFrame = requestAnimationFrame(updateMeter);
+  
+      emitDebugEvent(debugCallId, 'remote_audio.play.ok', {
+        method: 'AudioContext',
+        sampleRate: context.sampleRate,
+        state: context.state
+      });
+    } catch (error: unknown) {
+      emitDebugEvent(debugCallId, 'remote_audio.play.failed', {
+        name: (error as DOMException)?.name ?? 'unknown',
+        message: (error as Error)?.message ?? ''
+      });
+      // Fallback to <Audio> element
+      const element = new Audio();
+      element.autoplay = true;
+      element.playsInline = true;
+      element.srcObject = stream;
+      remoteAudioElement = element;
+      void element.play().catch((e: unknown) => {
+        emitDebugEvent(debugCallId, 'remote_audio.play.failed', {
+          name: (e as DOMException)?.name ?? 'unknown',
+          message: (e as Error)?.message ?? ''
+        });
+      });
+    }
   }
-
+  
+  function detachRemoteAudio() {
+    // Stop remote audio metering
+    if (remoteAudioMeterFrame) {
+      cancelAnimationFrame(remoteAudioMeterFrame);
+      remoteAudioMeterFrame = 0;
+    }
+    remoteAudioSource?.disconnect();
+    remoteAudioAnalyser?.disconnect();
+    remoteAudioSource = null;
+    remoteAudioAnalyser = null;
+  
+    if (remoteAudioElement) {
+      remoteAudioElement.pause();
+      remoteAudioElement.srcObject = null;
+      remoteAudioElement = null;
+    }
+  }
+  
+  
   function labelForState(state: ActiveCallState): string {
     if (state === 'connecting') {
       return 'Connecting';

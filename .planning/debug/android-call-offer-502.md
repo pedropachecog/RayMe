@@ -2,7 +2,7 @@
 status: investigating
 trigger: "Android Chrome Phase 3 live call: microphone permission is granted and Android shows mic listening, then the RayMe call UI still fails or becomes unusable."
 created: 2026-04-25T23:36:09Z
-updated: 2026-04-26T22:00:00Z
+updated: 2026-04-26T23:30:00Z
 ---
 
 # Debug Session: Android Call Offer 502
@@ -27,40 +27,100 @@ updated: 2026-04-26T22:00:00Z
 
 ## Current Focus
 
-- status: investigating — tracing voice blob pipeline to find why
-  `voice_reference_for_call()` fails on OMEN despite Voice Lab uploads working.
+- status: fixing — root cause confirmed: `scripts/deploy-omen.sh` runs
+  `git clean -fd` which deletes the `web-ui/server/data/blobs/` directory
+  (including all voice sample WAV files) on every deploy. The `.gitignore`
+  protects `*.sqlite3` and `*.sqlite3-*` but not the `blobs/` subdirectory.
+  VoiceAsset records survive in the database; the actual blob files are destroyed.
 
-- reasoning_checkpoint (voice-blob-missing):
-    hypothesis: "voice_reference_for_call() in call_service.py:210-231 has three
-      failure points, all raising the same CallVoiceUnavailableError. The call
-      path on OMEN hits one of them. Need to determine which: (1) no VoiceAsset
-      record with asset_kind='sample' for the voice, (2) storage_path check fails,
-      or (3) file not found on disk at voice_blob_dir/storage_name."
+- reasoning_checkpoint (blob-dir-wiped-by-deploy):
+    hypothesis: "scripts/deploy-omen.sh runs 'git clean -fd' which deletes the
+      entire web-ui/server/data/blobs/ directory on every deploy because it is
+      not listed in .gitignore. Voice sample blobs are written to this directory
+      by the Voice Lab upload endpoint, but are destroyed the next time the
+      deploy script runs."
     confirming_evidence:
-      - "voice_reference_for_call() logs 'voice_reference.unavailable' for both
-        turns on OMEN (commit 82dfbd8)"
-      - "Voice Lab upload works (user confirmed) — blob is stored somewhere"
-      - "voice_reference_for_call() reads from voice_blob_dir = SERVER_ROOT /
-        'data' / 'blobs' / 'voices' which is the same DEFAULT_VOICE_BLOB_DIR
-        used by the Voice Lab upload endpoint"
-      - "The VoiceAsset lookup uses VoiceAsset.voice_id == voice.id and
-        VoiceAsset.asset_kind == 'sample' — same query as VoiceService.asset_for_voice()"
-      - "VoiceService.save_voice() sets asset.voice_id = voice.id when saving
-        a voice from an uploaded asset — this is the ONLY path that links an
-        asset to a voice"
-    falsification_test: "If the character's default_voice_id points to a Voice
-      that has no VoiceAsset with asset_kind='sample', or if the VoiceAsset's
-      storage_path file does not exist on OMEN disk, the hypothesis is confirmed"
-    fix_rationale: "Once the exact failure point is identified (wrong voice_id,
-      missing asset record, or missing file), the fix will be targeted to that
-      specific gap in the pipeline"
-    blind_spots: "Cannot SSH to OMEN from this environment to inspect the actual
-      database or filesystem — need to add diagnostic logging that survives
-      deployment so the exact failure point is visible in OMEN logs"
+      - "OMEN logs show [voice-ref] FILE_MISSING with blob_dir_exists=False —
+        the directory C:\Users\pmpg\rayme\RayMe\web-ui\server\data\blobs\voices
+        does not exist on OMEN"
+      - "OMEN filesystem check confirmed: no blobs/ directory exists under
+        web-ui/server/data/ — only rayme.sqlite3"
+      - "OMEN database contains 34 VoiceAsset records with storage_path values
+        like 'voice_asset_0b989ed2aa2c42a4b28820124ee04f84.wav' — the records
+        exist but the files are gone"
+      - "scripts/deploy-omen.sh lines 33-34: 'git checkout -- .' and 'git clean
+        -fd' — this removes all untracked files and directories"
+      - ".gitignore only has 'web-ui/server/data/*.sqlite3' and
+        'web-ui/server/data/*.sqlite3-*' — no entry for blobs/"
+      - "No voice upload POST requests found in OMEN web-ui logs — the Voice
+        Lab was used on a previous deploy, blobs were written, then a subsequent
+        deploy wiped them"
+    falsification_test: "If the blobs/ directory existed on OMEN (e.g., after
+      adding the gitignore entry and re-uploading), voice_reference_for_call()
+      would find the files and return OK instead of FILE_MISSING"
+    fix_rationale: "Adding 'web-ui/server/data/blobs/' to .gitignore prevents
+      git clean from deleting the blobs directory. The VoiceAsset records and
+      the actual blob files will both survive deploys."
+    blind_spots: "If the user uploaded the voice on a local dev machine (not
+      OMEN), the blob would only exist locally. However, the VoiceAsset record
+      for voice_8b509ef848794ada9d5d141262d924d2 was created on 2026-04-26
+      19:50:24 which matches OMEN timestamps — the voice was uploaded to OMEN,
+      then a subsequent deploy wiped the blob."
 
-- next_action: Add structured diagnostic logging to voice_reference_for_call()
-  so each of the three failure points logs a distinct message. Deploy and have
-  user reproduce. The OMEN logs will show exactly which check fails.
+- next_action: Add blobs/ to .gitignore, commit, deploy, ask user to re-upload
+  voice on OMEN, then test a call.
+
+## BLOCKING DISCOVERY UPDATE (2026-04-26) — Voice Blob Pipeline Analysis
+
+### Pipeline Trace
+
+**Voice Lab upload path** (`web-ui/server/app/api/voices.py:135-148`):
+1. `POST /api/voices/assets` receives the audio file
+2. `VoiceService.upload_sample()` validates and writes blob via `write_voice_sample_blob()`
+3. Blob written to `voice_blob_dir / f"{asset_id}{extension}"` (e.g., `voice_asset_xxx.wav`)
+4. `VoiceAsset` record created with `voice_id=None`, `asset_kind="sample"`, `storage_path=blob_filename`
+5. **CRITICAL: The asset is NOT linked to any voice yet**
+
+**Voice Lab save path** (`web-ui/server/app/domain/voice_service.py:118-135`):
+1. `POST /api/voices` creates a new `Voice` record with `id=new_voice_id()`
+2. `asset.voice_id = voice.id` links the asset to the new voice
+3. **CRITICAL: The voice is NOT assigned to any character yet**
+
+**Character assignment path** (`web-ui/client/src/routes/characters/[id]/+page.svelte`):
+1. User must go to the character settings page
+2. Select a voice from the "Default voice" dropdown
+3. Click "Save Character" to persist `default_voice_id`
+4. **THIS STEP IS MISSING — the Voice Lab does not auto-assign the voice**
+
+**Call path** (`web-ui/server/app/domain/call_service.py:117-152`):
+1. `start_call()` reads `character.default_voice_id`
+2. If null → `CallVoiceRequiredError` ("Assign a voice before calling")
+3. If set → looks up the Voice, creates `ActiveCall(voice_id=voice.id)`
+4. `voice_reference_for_call()` looks up `VoiceAsset` for that `voice_id`
+
+### Root Cause Hypothesis
+
+**The character's `default_voice_id` is either null or points to a voice that has no VoiceAsset with `asset_kind='sample'`.**
+
+The Voice Lab saves a voice but does NOT assign it to any character. The user uploaded a voice in the Voice Lab on OMEN (creating Voice + VoiceAsset), but the character's `default_voice_id` was never updated to point to this new voice. The call uses whatever voice was previously assigned (or none), which has no sample audio.
+
+### Evidence
+
+- `voice_reference_for_call()` reads `call.voice_id` which comes from `character.default_voice_id`
+- The Voice Lab `save_voice()` creates a new Voice but does not update any character
+- The character settings page has a "Default voice" dropdown, but this is a separate step
+- The user confirmed the Voice Lab works (test-play succeeds) — confirming Voice + VoiceAsset exist
+- But the test-play uses the voice_id from the Voice Lab, not from the character
+
+### Fix Direction
+
+**Immediate fix:** User needs to go to the character settings page on OMEN and assign the uploaded voice.
+
+**UX improvement (future):** Voice Lab should show which characters are using this voice, or auto-assign to the character being edited.
+
+### Diagnostic Commit
+
+Commit `fdc3ab3` adds structured logging to `voice_reference_for_call()` so each failure point produces a distinct log message. Deploy to OMEN and reproduce to confirm the exact failure point.
 
 ## Evidence
 
@@ -893,3 +953,123 @@ call cannot be end-to-end tested.
 Blocked on voice blob pipeline investigation. All other call path fixes
 (VAD, ICE, data channel, MediaStreamError, SSE error visibility) are believed
 complete based on logs showing correct operation through `stt.result`.
+
+---
+
+## 2026-04-26T23:30:00Z — New Symptom: TTS runs but no audio on Android
+
+### New User-Visible Symptom
+
+After the voice blob fix (blobs/ in .gitignore, voice re-uploaded on OMEN):
+- Voice blob found: `voice_reference OK file_size=266606`
+- TTS synthesized: `tts.enqueue wav_bytes=1190412 target=track`
+- Browser received: `ai_audio_started`, `ai_done` via data channel
+- Browser: `remote_audio.play.ok` — Audio element play() succeeded
+- **User hears NO audio and sees NO error message**
+
+### Captured Boundary Trace (commit 0e76c7e, Android Chrome reproduction)
+
+| Boundary | Outcome |
+|---|---|
+| OMEN deployed HEAD | `0e76c7e` |
+| Android client | `192.168.1.253` |
+| Voice blob | OK (`voice_6d6d48ec89534ec1a9567ba971a5772e`, 266606 bytes) |
+| `/api/calls/start` | 201 Created |
+| `/api/calls/{id}/offer` | 200 OK |
+| WebRTC negotiation | OK (ICE completed, connected) |
+| Data channel | OK (opened, messages flowing) |
+| Inbound audio | OK (frames flowing, VAD works) |
+| VAD (turns 1+2) | OK (speech_start, end_of_turn) |
+| STT | OK (transcript_len=41, transcript_len=7) |
+| `user_final` via data channel | OK (browser received both) |
+| `/turns` SSE | 200 OK (two turns submitted) |
+| LLM | OK (tokens generated) |
+| TTS | OK (`wav_bytes=1190412`) |
+| `ai_audio_started` via data channel | OK (browser received) |
+| `ai_done` via data channel | OK (browser received) |
+| Browser `remote_audio.play.ok` | OK |
+| Browser `iceConnectionState=disconnected` | After ai_done |
+| Browser `connectionState=failed` | After ai_done |
+| Audio audible on Android | **NO** |
+
+### Key Evidence
+
+**AI backend stderr logs (instrumentation IS working, was in stderr not stdout):**
+- Full lifecycle visible: offer → ICE → track → VAD → STT → TTS → events
+- TTS enqueued 1.19 MB WAV to QueuedAudioOutputTrack
+- Data channel events sent with `readyState=open`
+- After events: DTLS `ConnectionError: Cannot send encrypted data, not connected`
+- Inbound track ended gracefully (MediaStreamError, outbound kept alive)
+
+**Browser debug logs (via /_debug/event POST):**
+- `remote_audio.attach` — track attached to Audio element
+- `remote_audio.play.ok` — play() resolved successfully
+- `datachannel.message event_type=user_final` (x2) — turns submitted
+- `datachannel.message event_type=ai_audio_started` — speaking signal
+- `datachannel.message event_type=ai_done` — turn finished
+- `iceConnectionState=disconnected` → `connectionState=failed` — after ai_done
+- `datachannel.close` — cleanup
+
+### Current Hypothesis
+
+The `<Audio>` element approach for remote audio playback may not produce audible
+sound on Android Chrome when the audio data arrives significantly after the initial
+`play()` call. On Android, the `<Audio>` element's `play()` resolves as soon as the
+MediaStream has live tracks, but the actual audio data (TTS output) arrives much
+later — after LLM generation and TTS synthesis. By the time the audio data arrives,
+Android's audio session may have moved on.
+
+**Alternative hypothesis:** The audio IS transmitted and IS playing, but Android's
+audio routing (communications mode, speaker vs earpiece, volume) makes it inaudible.
+
+### Investigation Plan
+
+1. Add browser-side logging for remote audio track activity (onended, onmute,
+   track event count) to verify audio data actually arrives
+2. Add browser-side logging for connection state changes that affect audio
+3. Test switching from `<Audio>` element to AudioContext-based playback
+   (MediaStreamAudioSourceNode → AudioContext.destination) for Android compatibility
+4. Add `speakingRms` metering for remote audio to verify audio data is non-zero
+
+
+### reasoning_checkpoint (AudioContext-based remote audio playback)
+
+  hypothesis: "The <Audio> element approach for remote audio playback produces no
+    audible sound on Android Chrome because (a) play() resolves when the track is
+    first attached with silent frames, but the actual TTS audio arrives much later
+    after LLM + TTS synthesis, and (b) Android's audio session may not maintain
+    the playback path for delayed audio data on an <Audio> element that is not
+    connected to the DOM."
+
+  confirming_evidence:
+    - "Browser logs show remote_audio.play.ok fired early (before ICE connected),
+      but actual TTS audio was enqueued much later (after 2+ turns of user speech)"
+    - "The <Audio> element is created with new Audio() but never appended to the DOM"
+    - "Android Chrome has known issues with <Audio> element playback for WebRTC
+      MediaStream sources when audio data arrives asynchronously"
+    - "The audio unlock (unlockCallAudioContext) creates a separate AudioContext
+      that is unlocked by user gesture, but the <Audio> element does not use this
+      context"
+    - "User hears no audio despite all other call path working correctly (VAD, STT,
+      LLM, TTS, data channel events)"
+
+  falsification_test: "If the AudioContext-based approach also produces no audio,
+    then the hypothesis is wrong and the issue is elsewhere (e.g., audio not
+    transmitted over WebRTC, codec mismatch, or Android audio routing issue
+    unrelated to playback method)"
+
+  fix_rationale: "Routing remote audio through an AudioContext (MediaStreamAudioSourceNode
+    -> AnalyserNode -> AudioContext.destination) ensures the audio flows through
+    the same audio rendering path that was unlocked by the user gesture. The
+    AudioContext is a proper audio graph that processes incoming audio data in
+    real-time, rather than relying on the <Audio> element's internal buffer
+    management which may discard late-arriving data on Android."
+
+  blind_spots:
+    - "If the audio is not actually being transmitted over WebRTC (e.g., aiortc
+      not polling the outbound track), then changing the playback method won't help"
+    - "If Android's WebRTC stack mutes the remote track when the connection
+      transitions to 'failed', the audio may stop before being audible"
+    - "If the F5 TTS output is silent or inaudible (e.g., wrong voice, codec issue),
+      the playback method doesn't matter"
+
