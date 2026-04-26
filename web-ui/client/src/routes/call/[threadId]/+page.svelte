@@ -43,6 +43,7 @@
 
   type CallTurnStreamEvent =
     | { type: 'ai_token'; turn_id?: string; text?: string }
+    | { type: 'ai_audio_started'; turn_id?: string; session_id?: string }
     | { type: 'ai_done'; turn_id?: string }
     | { type: 'error'; turn_id?: string; code?: string; message?: string };
 
@@ -234,6 +235,19 @@
       emitDebugEvent(debugCallId, 'pc.connectionstatechange', {
         connectionState: connection.connectionState
       });
+      if (connection.connectionState === 'connected') {
+        try {
+          if (eventsChannel && (eventsChannel.readyState === 'closed' || eventsChannel.readyState === 'closing')) {
+            emitDebugEvent(debugCallId, 'datachannel.recreate', {
+              previousReadyState: eventsChannel.readyState
+            });
+            eventsChannel = connection.createDataChannel('rayme-events');
+            attachCallEventChannel(eventsChannel, debugCallId, 'recreated');
+          }
+        } catch {
+          // Ignore errors during recovery attempt
+        }
+      }
     });
     connection.addEventListener('signalingstatechange', () => {
       emitDebugEvent(debugCallId, 'pc.signalingstatechange', {
@@ -659,6 +673,11 @@
         callState = 'speaking';
       }
       appendAiText(event.text, event.turn_id);
+      return;
+    }
+
+    if (event.type === 'ai_audio_started') {
+      callState = 'speaking';
       return;
     }
 

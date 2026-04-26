@@ -489,12 +489,49 @@ async def _receive_audio_track(session: CallSession, track: Any) -> None:
         try:
             frame = await track.recv()
         except Exception as exc:
+            exc_name = exc.__class__.__name__
+            pc = session.peer_connection
+            ice_state = getattr(pc, "iceConnectionState", "?")
+            conn_state = getattr(pc, "connectionState", "?")
             logger.info(
-                "[rayme-call] track.recv.exception session=%s frames=%d exc=%s",
+                "[rayme-call] track.recv.error session=%s frames=%d exc=%s "
+                "ice=%s conn=%s",
                 session.session_id,
                 frame_count,
-                exc.__class__.__name__,
+                exc_name,
+                ice_state,
+                conn_state,
             )
+            if session.state in {"ended", "failed"}:
+                break
+            if ice_state in {"failed", "closed"} or conn_state in {"failed", "closed"}:
+                await session.fail(reason="connection_failed")
+                return
+            if ice_state == "disconnected" or conn_state == "disconnected":
+                reconnected = False
+                for attempt in range(10):
+                    await asyncio.sleep(0.5)
+                    if session.state in {"ended", "failed"}:
+                        break
+                    ice_state = getattr(pc, "iceConnectionState", "?")
+                    if ice_state == "completed" or ice_state == "connected":
+                        reconnected = True
+                        logger.info(
+                            "[rayme-call] track.recv.reconnected session=%s "
+                            "ice=%s after=%.1fs",
+                            session.session_id,
+                            ice_state,
+                            (attempt + 1) * 0.5,
+                        )
+                        break
+                if not reconnected:
+                    logger.info(
+                        "[rayme-call] track.recv.reconnect_timeout session=%s",
+                        session.session_id,
+                    )
+                    await session.fail(reason="connection_failed")
+                    return
+                continue
             await session.fail(reason="connection_failed")
             return
         frame_count += 1

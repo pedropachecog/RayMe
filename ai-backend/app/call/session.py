@@ -329,15 +329,14 @@ class CallSession:
         if current_task is not None:
             self.active_turn_task = current_task
 
-        await self.emit_event(
-            simple_event(
-                AI_AUDIO_STARTED_EVENT,
-                session_id=self.session_id,
-                turn_id=turn_id,
-                voice_id=voice_id,
-                engine_id=engine_id,
-            )
+        audio_started_event = simple_event(
+            AI_AUDIO_STARTED_EVENT,
+            session_id=self.session_id,
+            turn_id=turn_id,
+            voice_id=voice_id,
+            engine_id=engine_id,
         )
+        await self.emit_event(audio_started_event)
 
         try:
             result = await self._synthesize_speech(
@@ -351,7 +350,7 @@ class CallSession:
                 reference_audio_content_type=reference_audio_content_type,
             )
             if turn_id in self._cancelled_ai_turns:
-                return {"status": "cancelled", "turn_id": turn_id}
+                return {"status": "cancelled", "turn_id": turn_id, "ai_audio_started_event": audio_started_event}
             wav_bytes = bytes(result.get("wav_bytes") or b"")
             await self._queue_outbound_audio(wav_bytes)
         except asyncio.CancelledError:
@@ -368,18 +367,18 @@ class CallSession:
             )
             event["engine_id"] = engine_id
             await self.emit_event(event)
-            return event
+            return {**event, "ai_audio_started_event": audio_started_event}
         finally:
             if self.active_turn_task is current_task:
                 self.active_turn_task = None
 
         if turn_id in self._cancelled_ai_turns:
             self.state = "listening"
-            return {"status": "cancelled", "turn_id": turn_id}
+            return {"status": "cancelled", "turn_id": turn_id, "ai_audio_started_event": audio_started_event}
 
         if final_chunk:
             self.state = "listening"
-            return await self.emit_event(
+            done_event = await self.emit_event(
                 simple_event(
                     AI_DONE_EVENT,
                     session_id=self.session_id,
@@ -388,12 +387,14 @@ class CallSession:
                     engine_id=engine_id,
                 )
             )
+            return {**done_event, "ai_audio_started_event": audio_started_event}
 
         return {
             "status": "queued",
             "session_id": self.session_id,
             "turn_id": turn_id,
             "engine_id": engine_id,
+            "ai_audio_started_event": audio_started_event,
         }
 
     async def cancel_ai_turn(self, turn_id: str | None = None) -> None:

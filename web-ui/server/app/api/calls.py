@@ -342,7 +342,7 @@ async def create_call_turn(
 
             visible_text = "".join(accumulated)
             if visible_text:
-                await _speak_call(
+                speak_result = await _speak_call(
                     backend,
                     endpoint_settings.ai_backend_url,
                     session_id,
@@ -355,6 +355,13 @@ async def create_call_turn(
                         **voice_reference,
                     },
                 )
+                audio_started = speak_result.get("ai_audio_started_event")
+                if audio_started:
+                    yield _sse({
+                        "type": "ai_audio_started",
+                        "turn_id": payload.turn_id,
+                        "session_id": session_id,
+                    })
             message = await service.record_ai_speech(call_id, visible_text)
             yield _sse(
                 {
