@@ -284,6 +284,7 @@ export type CallEvent =
       turn_id?: string | null;
       code: CallErrorCode;
       message?: string | null;
+      retry_allowed?: boolean | null;
     };
 
 export interface SettingsPayload {

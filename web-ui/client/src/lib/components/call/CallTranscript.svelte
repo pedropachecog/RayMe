@@ -11,10 +11,22 @@
   $: streamingHtml = renderTrustedMarkdown(activeAiText);
 
   function displayName(turn: CallTranscriptTurn): string {
-    return turn.role === 'user' ? 'You' : 'RayMe';
+    if (turn.role === 'user') {
+      return 'You';
+    }
+
+    if (turn.role === 'event') {
+      return 'Call';
+    }
+
+    return 'RayMe';
   }
 
-  function chipFor(turn: CallTranscriptTurn): 'Final' | 'Streaming' | 'Interrupted' {
+  function chipFor(turn: CallTranscriptTurn): 'Final' | 'Streaming' | 'Interrupted' | 'Notice' {
+    if (turn.role === 'event') {
+      return 'Notice';
+    }
+
     if ((interrupted && turn.role === 'assistant') || turn.interrupted) {
       return 'Interrupted';
     }
@@ -37,10 +49,16 @@
     <div class="turn-list">
       {#each visibleTurns as turn, index}
         {@const chip = chipFor(turn)}
-        <article class:user={turn.role === 'user'} class="turn" data-turn-type={turn.type ?? ''}>
+        <article class:event={turn.role === 'event'} class:user={turn.role === 'user'} class="turn" data-turn-type={turn.type ?? ''}>
           <div class="turn-meta">
             <span>{displayName(turn)}</span>
-            <span class:interrupted-chip={chip === 'Interrupted'} class="state-chip">{chip}</span>
+            <span
+              class:event-chip={chip === 'Notice'}
+              class:interrupted-chip={chip === 'Interrupted'}
+              class="state-chip"
+            >
+              {chip}
+            </span>
           </div>
           <div class="turn-text">
             {@html htmlFor(turn)}
@@ -125,6 +143,13 @@
     background: rgba(182, 160, 255, 0.16);
   }
 
+  .turn.event {
+    justify-self: center;
+    width: min(92%, 720px);
+    background: rgba(20, 31, 56, 0.46);
+    border: 1px solid rgba(182, 160, 255, 0.16);
+  }
+
   .turn.streaming {
     box-shadow: 0 0 36px rgba(182, 160, 255, 0.1);
   }
@@ -152,6 +177,11 @@
 
   .streaming-chip {
     background: rgba(182, 160, 255, 0.18);
+    color: var(--color-text);
+  }
+
+  .event-chip {
+    background: rgba(114, 170, 255, 0.14);
     color: var(--color-text);
   }
 

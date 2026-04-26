@@ -14,7 +14,7 @@
     submitCallTurn
   } from '$lib/api/calls';
   import { loadThread } from '$lib/api/chat';
-  import type { CallEvent, CallStateName, CallTranscriptTurn, ThreadDetail } from '$lib/api/types';
+  import type { CallErrorCode, CallEvent, CallStateName, CallTranscriptTurn, ThreadDetail } from '$lib/api/types';
   import { requestCallMicrophone, unlockCallAudioContext } from '$lib/call/audio';
   import CallToolbar from '$lib/components/call/CallToolbar.svelte';
   import CallTranscript from '$lib/components/call/CallTranscript.svelte';
@@ -512,13 +512,40 @@
     }
 
     if (event.type === 'failed') {
+      const message = messageForCallFailure(event.code, event.message);
+      activeAiText = '';
+
+      if (event.retry_allowed) {
+        blockingPanel = null;
+        appendCallNotice(message, event.turn_id ?? undefined);
+        callState = 'listening';
+        return;
+      }
+
       callState = 'failed';
       blockingPanel = {
-        body: 'The call ended because the connection dropped. Your transcript so far was saved.',
+        body: message,
         action: 'Return to Thread',
         tone: 'danger'
       };
     }
+  }
+
+  function messageForCallFailure(code: CallErrorCode, message?: string | null) {
+    const normalized = message?.trim();
+    if (normalized) {
+      return normalized;
+    }
+
+    if (code === 'call_stt_failed') {
+      return 'Speech transcription failed. Please try speaking again.';
+    }
+
+    if (code === 'call_tts_failed') {
+      return 'Speech playback failed. Please try again.';
+    }
+
+    return 'The call ended because the connection dropped. Your transcript so far was saved.';
   }
 
   function appendUserFinal(text: string, turnId?: string) {
@@ -535,6 +562,20 @@
     ];
     activeAiText = '';
     callState = 'thinking';
+  }
+
+  function appendCallNotice(text: string, turnId?: string) {
+    transcript = [
+      ...transcript,
+      {
+        id: `event-${turnId ?? Date.now()}`,
+        turn_id: turnId,
+        role: 'event',
+        type: 'call_notice',
+        text,
+        created_at: null
+      }
+    ];
   }
 
   async function submitUserTurn(event: Extract<CallEvent, { type: 'user_final' }>) {
