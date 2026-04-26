@@ -1,8 +1,8 @@
 ---
-status: investigating
+status: awaiting-user-reproduction
 trigger: "Android Chrome Phase 3 live call: microphone permission is granted and Android shows mic listening, then the RayMe call UI still fails or becomes unusable."
 created: 2026-04-25T23:36:09Z
-updated: 2026-04-26T01:10:00Z
+updated: 2026-04-26T02:05:00Z
 ---
 
 # Debug Session: Android Call Offer 502
@@ -553,5 +553,15 @@ the original amplitudes instead of clipping to full scale.
 Verification:
 `uv run --project ai-backend pytest ai-backend/tests -q` -> **66 passed**.
 
-next_action: deploy and ask user to reproduce; expected trace is
+### Deploy Confirmation
+
+- OMEN deployed code HEAD: `6f96c4e`
+- `scripts/deploy-omen.sh` completed with `OMEN deploy complete:
+  6f96c4e37fe06d132548ba65d1edc50d003fbc9b`
+- AI WebRTC status: `ready`, `live_call_ready: true`,
+  `media_transport_ready: true`, `active_sessions: 0`
+- Verification rerun before deploy:
+  `uv run --project ai-backend pytest ai-backend/tests -q` -> **66 passed**
+
+next_action: ask user to reproduce on Android Chrome; expected trace is
 `vad.speech_start -> vad.silence -> vad.end_of_turn -> stt.begin -> stt.result`.
