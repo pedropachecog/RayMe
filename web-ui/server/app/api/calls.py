@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.domain.ai_backend_client import AiBackendClient, AiBackendClientError
+from app.domain.ai_backend_client import AiBackendClient, AiBackendClientError, AiBackendUnavailable
 from app.domain.call_service import (
     CALL_SESSION_NOT_FOUND,
     CallService,
@@ -31,6 +31,7 @@ router = APIRouter(prefix="/api/calls", tags=["calls"])
 DEFAULT_CALL_VOICE_BLOB_DIR = SERVER_ROOT / "data" / "blobs" / "voices"
 
 CALL_BACKEND_NOT_READY = "call_backend_not_ready"
+CALL_BACKEND_CLIENT_MISCONFIGURED = "call_backend_client_misconfigured"
 CALL_ORIGIN_NOT_ALLOWED = "call_origin_not_allowed"
 CALL_SESSION_NOT_FOUND_CODE = "call_session_not_found"
 CALL_GENERATION_FAILED = "call_generation_failed"
@@ -386,12 +387,15 @@ async def end_call(
         endpoint_settings = await SettingsService(session, runtime_settings).read()
         try:
             await _end_call(backend, endpoint_settings.ai_backend_url, session_id, reason)
-        except AiBackendClientError:
-            pass
+        except AiBackendClientError as exc:
+            if exc.code == CALL_BACKEND_CLIENT_MISCONFIGURED:
+                raise
         ended = await service.end_call(call_id, reason=reason)
         return {"call_id": call_id, "session_id": session_id, "reason": ended["reason"]}
     except CallServiceError as exc:
         raise _call_error(exc) from exc
+    except AiBackendClientError as exc:
+        raise _backend_error(exc) from exc
 
 
 async def _ensure_backend_ready(backend: Any, base_url: str) -> None:
@@ -421,25 +425,25 @@ def _backend_status_ready(payload: Mapping[str, Any]) -> bool:
 
 async def _create_offer(backend: Any, base_url: str, payload: Mapping[str, Any]) -> dict[str, Any]:
     if not hasattr(backend, "create_webrtc_offer"):
-        return {"session_id": payload["session_id"], "answer": None}
+        raise _missing_backend_method("create_webrtc_offer")
     return dict(await backend.create_webrtc_offer(base_url, payload))
 
 
 async def _mute_call(backend: Any, base_url: str, session_id: str, muted: bool) -> dict[str, Any]:
     if not hasattr(backend, "mute_call"):
-        return {"session_id": session_id, "muted": muted}
+        raise _missing_backend_method("mute_call")
     return dict(await backend.mute_call(base_url, session_id, muted))
 
 
 async def _interrupt_call(backend: Any, base_url: str, session_id: str) -> dict[str, Any]:
     if not hasattr(backend, "interrupt_call"):
-        return {"session_id": session_id, "interrupted": True}
+        raise _missing_backend_method("interrupt_call")
     return dict(await backend.interrupt_call(base_url, session_id))
 
 
 async def _end_call(backend: Any, base_url: str, session_id: str, reason: str) -> dict[str, Any]:
     if not hasattr(backend, "end_call"):
-        return {"session_id": session_id, "reason": reason}
+        raise _missing_backend_method("end_call")
     return dict(await backend.end_call(base_url, session_id, reason))
 
 
@@ -450,8 +454,15 @@ async def _speak_call(
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
     if not hasattr(backend, "speak_call"):
-        return {"session_id": session_id, "event": {"type": "ai_done"}}
+        raise _missing_backend_method("speak_call")
     return dict(await backend.speak_call(base_url, session_id, payload))
+
+
+def _missing_backend_method(method_name: str) -> AiBackendUnavailable:
+    return AiBackendUnavailable(
+        code=CALL_BACKEND_CLIENT_MISCONFIGURED,
+        message=f"AI backend client is missing required call method: {method_name}",
+    )
 
 
 def _reject_mismatched_session(stored_session_id: str, provided_session_id: str | None) -> None:

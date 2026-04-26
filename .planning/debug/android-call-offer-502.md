@@ -1,8 +1,8 @@
 ---
-status: resolved
+status: investigating
 trigger: "Android Chrome Phase 3 live call: microphone permission is granted and Android shows mic listening, then the RayMe call UI still fails or becomes unusable."
 created: 2026-04-25T23:36:09Z
-updated: 2026-04-25T23:59:30Z
+updated: 2026-04-26T00:25:00Z
 ---
 
 # Debug Session: Android Call Offer 502
@@ -120,6 +120,21 @@ updated: 2026-04-25T23:59:30Z
   interpretation: the user-visible regression was in the client startup error
     path, not microphone permission. Backend offer failures now terminate the
     attempt and show the precise sanitized reason.
+
+- timestamp: 2026-04-26T00:25Z
+  observation: Production call facade synthetic success branches were removed.
+  details:
+    - Missing `create_webrtc_offer` now raises
+      `call_backend_client_misconfigured` instead of returning `answer: None`.
+    - Missing `mute_call`, `interrupt_call`, `end_call`, and `speak_call` now
+      raise `call_backend_client_misconfigured` instead of returning local
+      success.
+    - `end_call` still records the local call boundary for backend runtime
+      control failures, but it no longer hides a misconfigured backend client.
+    - Regression coverage was added to `web-ui/server/tests/test_calls.py`.
+    - The production synthetic-path guard now rejects `answer: None`.
+  interpretation: this fixes the identified fake call facade behavior. It does
+    not prove the live Android call is working end to end.
 
 ## Eliminated
 

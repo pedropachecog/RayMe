@@ -28,6 +28,7 @@ from app.storage.session import create_engine
 @dataclass(frozen=True, slots=True)
 class CallFixture:
     client: TestClient
+    app: FastAPI
     sessionmaker: async_sessionmaker
     backend: "ScriptedCallBackend"
     completion: "ScriptedCompletionClient"
@@ -148,6 +149,7 @@ def call_fixture(tmp_path: Path) -> Iterator[CallFixture]:
     with TestClient(app) as client:
         yield CallFixture(
             client=client,
+            app=app,
             sessionmaker=sessionmaker,
             backend=backend,
             completion=completion,
@@ -322,6 +324,54 @@ def test_offer_failure_returns_backend_public_detail(call_fixture: CallFixture) 
     assert _public_error_message(response) == "WebRTC offer could not be accepted"
 
 
+def test_offer_rejects_missing_backend_method_instead_of_returning_empty_answer(
+    call_fixture: CallFixture,
+) -> None:
+    class IncompleteCallBackend:
+        pass
+
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    calls_module = importlib.import_module("app.api.calls")
+    call_fixture.app.dependency_overrides[calls_module.get_call_backend_client] = IncompleteCallBackend
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/offer",
+        json={
+            "session_id": started["session_id"],
+            "offer": {"type": "offer", "sdp": "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"},
+        },
+    )
+
+    assert response.status_code == 502
+    assert _public_error_code(response) == "call_backend_client_misconfigured"
+    assert "create_webrtc_offer" in _public_error_message(response)
+
+
+@pytest.mark.parametrize(
+    ("helper_name", "args", "missing_method"),
+    [
+        ("_mute_call", ("session_live", True), "mute_call"),
+        ("_interrupt_call", ("session_live",), "interrupt_call"),
+        ("_end_call", ("session_live", "hangup"), "end_call"),
+        ("_speak_call", ("session_live", {"turn_id": "turn_1", "text": "Hi"}), "speak_call"),
+    ],
+)
+def test_call_control_helpers_reject_missing_backend_methods_instead_of_local_success(
+    helper_name: str,
+    args: tuple[Any, ...],
+    missing_method: str,
+) -> None:
+    calls_module = importlib.import_module("app.api.calls")
+    helper = getattr(calls_module, helper_name)
+
+    with pytest.raises(Exception) as exc_info:
+        asyncio.run(helper(object(), "https://127.0.0.1:9443", *args))
+
+    assert getattr(exc_info.value, "code") == "call_backend_client_misconfigured"
+    assert missing_method in getattr(exc_info.value, "message")
+
+
 def test_start_and_end_write_chronological_call_boundary_rows(
     call_fixture: CallFixture,
 ) -> None:
@@ -359,6 +409,29 @@ def test_end_writes_local_boundary_even_when_backend_session_control_fails(
     assert response.json()["reason"] == "hangup"
     rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
     assert rows[-1] == ("call_end", "event", "Call ended")
+
+
+def test_end_rejects_missing_backend_method_instead_of_pretending_backend_ended(
+    call_fixture: CallFixture,
+) -> None:
+    class IncompleteCallBackend:
+        pass
+
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    calls_module = importlib.import_module("app.api.calls")
+    call_fixture.app.dependency_overrides[calls_module.get_call_backend_client] = IncompleteCallBackend
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/end",
+        json={"session_id": started["session_id"]},
+    )
+
+    assert response.status_code == 502
+    assert _public_error_code(response) == "call_backend_client_misconfigured"
+    assert "end_call" in _public_error_message(response)
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert rows[-1] == ("call_start", "event", "Call started")
 
 
 def test_two_turns_stream_tokens_and_write_exact_speech_rows_before_call_end(

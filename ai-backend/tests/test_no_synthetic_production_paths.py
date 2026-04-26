@@ -16,6 +16,10 @@ BANNED_PATTERN = re.compile(
     rf"(?:^|_){SYNTHETIC_SUCCESS_WORD}_|_{SYNTHETIC_SUCCESS_WORD}(?:$|_)",
     re.IGNORECASE,
 )
+BANNED_SNIPPETS = (
+    '"answer": None',
+    "'answer': None",
+)
 ALLOWLIST = {
     Path("web-ui/client/src/lib/components/call/VoiceVisualizer.svelte"): {
         "waveform-fallback",
@@ -37,7 +41,7 @@ def test_production_code_has_no_scripted_mock_or_stub_paths() -> None:
             for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
                 if any(fragment in line for fragment in allowed_fragments):
                     continue
-                if BANNED_PATTERN.search(line):
+                if BANNED_PATTERN.search(line) or any(snippet in line for snippet in BANNED_SNIPPETS):
                     violations.append(f"{relative_path}:{line_number}: {line.strip()}")
 
     assert violations == []
