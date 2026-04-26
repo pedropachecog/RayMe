@@ -127,6 +127,22 @@ class ScriptedSttAdapter:
         }
 
 
+class ScriptedManualFallbackSttAdapter:
+    def __init__(self) -> None:
+        self.calls: list[list[bytes]] = []
+
+    def transcribe_pcm(self, pcm_frames: list[bytes], **_: Any) -> dict[str, Any]:
+        self.calls.append(list(pcm_frames))
+        return {
+            "status": "needs_manual_transcript",
+            "transcript": "",
+            "language": "en",
+            "speech_detected": True,
+            "retry_allowed": True,
+            "manual_transcript_allowed": True,
+        }
+
+
 def _new_session(
     *,
     session_id: str = "call-session-1",
@@ -191,6 +207,27 @@ def test_inbound_audio_emits_user_final_after_vad_end() -> None:
     }
     assert session.stats()["incoming_audio_frames"] == 2
     assert session.stats()["dropped_audio_frames"] == 0
+
+
+def test_inbound_audio_emits_failed_event_when_stt_needs_manual_transcript() -> None:
+    vad = ScriptedVadAdapter()
+    stt = ScriptedManualFallbackSttAdapter()
+    source = ScriptedInboundAudioFrameSource(b"pcm-frame-1", b"pcm-frame-2")
+    session, _ = _new_session(vad_adapter=vad, stt_adapter=stt)
+
+    first_event = _run(session.handle_inbound_audio_frame(source.frames[0]))
+    failed_event = _run(session.handle_inbound_audio_frame(source.frames[1]))
+
+    assert first_event is None
+    assert stt.calls == [[b"pcm-frame-1", b"pcm-frame-2"]]
+    assert failed_event == {
+        "type": "failed",
+        "session_id": "call-session-1",
+        "turn_id": "user-turn-1",
+        "code": "call_stt_failed",
+        "message": "Speech transcription failed. Please try speaking again.",
+        "retry_allowed": True,
+    }
 
 
 class ScriptedSileroVadAdapter:

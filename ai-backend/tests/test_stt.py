@@ -168,6 +168,27 @@ def test_stt_adapter_uses_phase_zero_english_whisper_options() -> None:
     assert whisper_kwargs["vad_parameters"]["min_silence_duration_ms"] == 700
 
 
+def test_stt_adapter_can_disable_internal_whisper_vad_for_presegmented_audio() -> None:
+    scripted_model = ScriptedWhisperModel("Hello from the sample")
+    adapter = _make_stt_adapter(scripted_model)
+
+    result = _to_mapping(
+        _complete(
+            adapter.transcribe(
+                audio="sample.wav",
+                vad_adapter=None,
+                apply_vad_filter=False,
+            )
+        )
+    )
+
+    whisper_kwargs = scripted_model.calls[0]["kwargs"]
+    assert whisper_kwargs["vad_filter"] is False
+    assert "vad_parameters" not in whisper_kwargs
+    assert result["status"] == "accepted"
+    assert result["transcript"] == "Hello from the sample"
+
+
 def test_vad_gate_blocks_no_speech_before_transcript_return() -> None:
     scripted_model = ScriptedWhisperModel("This should not be transcribed")
     adapter = _make_stt_adapter(scripted_model)

@@ -40,6 +40,7 @@ class WhisperSttAdapter:
         vad_adapter: Any | None = None,
         vad_threshold: float | None = None,
         vad_end_silence_ms: int | None = None,
+        apply_vad_filter: bool = True,
     ) -> dict[str, Any]:
         threshold = self.settings.vad_threshold if vad_threshold is None else vad_threshold
         end_silence_ms = (
@@ -57,6 +58,7 @@ class WhisperSttAdapter:
             audio,
             threshold=threshold,
             end_silence_ms=end_silence_ms,
+            apply_vad_filter=apply_vad_filter,
         )
         segments = [self._segment_to_mapping(segment) for segment in list(segments_iter)]
         transcript = " ".join(segment["text"].strip() for segment in segments).strip()
@@ -105,18 +107,23 @@ class WhisperSttAdapter:
         *,
         threshold: float,
         end_silence_ms: int,
+        apply_vad_filter: bool,
     ) -> Any:
-        return model.transcribe(
-            audio,
-            language="en",
-            task="transcribe",
-            condition_on_previous_text=False,
-            beam_size=5,
-            vad_filter=True,
-            vad_parameters={
+        kwargs: dict[str, Any] = {
+            "language": "en",
+            "task": "transcribe",
+            "condition_on_previous_text": False,
+            "beam_size": 5,
+            "vad_filter": apply_vad_filter,
+        }
+        if apply_vad_filter:
+            kwargs["vad_parameters"] = {
                 "threshold": threshold,
                 "min_silence_duration_ms": end_silence_ms,
-            },
+            }
+        return model.transcribe(
+            audio,
+            **kwargs,
         )
 
     def _speech_detected(self, audio: Any, vad_adapter: Any | None) -> bool:

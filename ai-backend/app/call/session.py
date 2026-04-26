@@ -210,6 +210,7 @@ class CallSession:
             return event
 
         text = str(transcription.get("transcript") or "").strip()
+        status = str(transcription.get("status") or "")
         logger.info(
             "[rayme-call] stt.result session=%s turn=%s transcript_len=%d "
             "language=%s",
@@ -218,6 +219,17 @@ class CallSession:
             len(text),
             transcription.get("language"),
         )
+        if status != "accepted" or not text:
+            event = failed_event(
+                session_id=self.session_id,
+                turn_id=turn_id,
+                code="call_stt_failed",
+                message="Speech transcription failed. Please try speaking again.",
+                retry_allowed=True,
+            )
+            await self.emit_event(event)
+            self.state = "listening"
+            return event
         event = user_final_event(
             session_id=self.session_id,
             turn_id=turn_id,
@@ -544,6 +556,7 @@ class CallSession:
                 vad_adapter=None,
                 vad_threshold=self.settings.vad_threshold,
                 vad_end_silence_ms=self.settings.vad_end_silence_ms,
+                apply_vad_filter=False,
             )
             return self._mapping_from_result(result)
         finally:

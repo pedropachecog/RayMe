@@ -335,6 +335,41 @@ Verification:
 `uv run --project ai-backend pytest ai-backend/tests -q` -> **68 passed**.
 
 next_action: deploy and ask user to reproduce; expected trace remains `vad.speech_start -> vad.silence -> vad.end_of_turn -> stt.begin -> stt.result`.
+
+## FOLLOW-UP ROOT CAUSE FOUND (2026-04-26)
+
+### Captured Boundary Trace (commit f144354, Android Chrome reproduction)
+
+| Boundary | Outcome |
+|---|---|
+| OMEN deployed HEAD | `f144354` |
+| `turn.started frame_count=1 sample_rate=16000 pcm_bytes=640` | OK |
+| `vad.speech_start` | OK |
+| `vad.silence` | OK |
+| `vad.end_of_turn` | OK |
+| `stt.begin frames=372 pcm_bytes=238080` | OK |
+| `stt.result transcript_len=0 language=en` | FAIL |
+| `event.sent type=user_final readyState=open` | WRONG |
+| LLM / TTS | NEVER |
+
+### Root Cause
+
+The call path was applying VAD twice. RayMe call VAD had already finalized the turn, but `WhisperSttAdapter.transcribe()` still invoked faster-whisper with `vad_filter=True`. On the live Android call this second VAD pass returned no usable transcript, which produced `status=needs_manual_transcript` and an empty transcript. `CallSession.finalize_user_turn()` then incorrectly emitted an empty `user_final` event, so the client ignored it and the call appeared to hang.
+
+### Fix
+
+- Disable faster-whisper internal VAD for pre-segmented call turns by passing `apply_vad_filter=False` from `CallSession._transcribe_turn()`.
+- Treat non-accepted or empty STT results as `call_stt_failed` instead of emitting an empty `user_final`.
+
+Regression tests:
+
+- `ai-backend/tests/test_stt.py::test_stt_adapter_can_disable_internal_whisper_vad_for_presegmented_audio`
+- `ai-backend/tests/test_call_session.py::test_inbound_audio_emits_failed_event_when_stt_needs_manual_transcript`
+
+Verification:
+`uv run --project ai-backend pytest ai-backend/tests -q` -> **70 passed**.
+
+next_action: deploy and ask user to reproduce; expected next boundary is either non-empty `stt.result` followed by LLM/TTS, or a new failure after `user_final`.
 - verification: `npm --prefix web-ui/client run check`; `uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py web-ui/server/tests/test_health_settings.py -q`; `npm --prefix web-ui/client run test:e2e -- tests/e2e/call-start.spec.ts --project=desktop-chromium --workers=1`.
 - files_changed: `web-ui/client/src/lib/api/calls.ts`, `web-ui/client/src/routes/call/[threadId]/+page.svelte`, `web-ui/client/tests/e2e/call-start.spec.ts`, `web-ui/server/app/domain/ai_backend_client.py`, `web-ui/server/tests/test_calls.py`, `web-ui/server/tests/test_health_settings.py`, `.planning/debug/android-call-offer-502.md`.
 
