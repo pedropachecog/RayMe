@@ -118,7 +118,6 @@ async def create_webrtc_offer_answer(
         "a=fingerprint:" in offer_sdp,
     )
     peer_connection = _create_peer_connection(payload.offer)
-    data_channel = _create_data_channel(peer_connection)
     outbound_audio_track = _attach_outbound_audio_track(peer_connection)
 
     negotiate_started = time.monotonic()
@@ -130,7 +129,6 @@ async def create_webrtc_offer_answer(
             engine_id=payload.engine_id,
             prompt_messages=[message.model_dump() for message in payload.prompt_messages],
             peer_connection=peer_connection,
-            data_channel=data_channel,
             vad_adapter=_vad_adapter(request),
             stt_adapter=_stt_adapter(request),
             outbound_audio_track=outbound_audio_track,
@@ -162,12 +160,12 @@ async def create_webrtc_offer_answer(
     answer_sdp = answer.get("sdp", "")
     logger.info(
         "[rayme-call] offer.answered session=%s elapsed_ms=%d answer_sdp_len=%d "
-        "answer_has_audio=%s data_channel_state=%s",
+        "answer_has_audio=%s data_channel_owner=%s",
         session.session_id,
         int((time.monotonic() - negotiate_started) * 1000),
         len(answer_sdp),
         "m=audio" in answer_sdp,
-        getattr(data_channel, "readyState", "?"),
+        "browser",
     )
     return {
         "session_id": session.session_id,
@@ -366,16 +364,6 @@ def _create_peer_connection(offer: SessionDescription) -> Any:
 
 def _looks_like_real_media_offer(sdp: str) -> bool:
     return "m=audio" in sdp and "a=ice-ufrag:" in sdp
-
-
-def _create_data_channel(peer_connection: Any) -> Any:
-    create_data_channel = getattr(peer_connection, "createDataChannel", None)
-    if not callable(create_data_channel):
-        raise _offer_error()
-    try:
-        return create_data_channel(RAYME_EVENTS_CHANNEL)
-    except Exception as exc:
-        raise _offer_error() from exc
 
 
 def _attach_outbound_audio_track(peer_connection: Any) -> QueuedAudioOutputTrack:

@@ -56,11 +56,13 @@ class StubPeerConnection:
 
     def __init__(self) -> None:
         self.tracks: list[Any] = []
+        self.create_data_channel_calls = 0
 
     def addTrack(self, track: Any) -> None:
         self.tracks.append(track)
 
     def createDataChannel(self, label: str) -> Any:
+        self.create_data_channel_calls += 1
         return type("StubDataChannel", (), {"label": label, "readyState": "open", "send": lambda self, data: None})()
 
     def on(self, _event_name: str) -> Any:
@@ -147,6 +149,7 @@ def test_webrtc_offer_creates_session_answer_and_events_channel(stub_webrtc: Non
     assert payload["answer"]["sdp"].startswith("v=0")
     assert payload["data_channel"]["label"] == "rayme-events"
     session = client.app.state.call_session_manager.get_session("call-session-1")
+    assert session.peer_connection.create_data_channel_calls == 0
     assert session.outbound_audio_track is not None
     assert session.outbound_audio_track.kind == "audio"
 
