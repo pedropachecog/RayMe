@@ -1,8 +1,8 @@
 ---
-status: awaiting-user-reproduction
+status: fixing
 trigger: "Android Chrome Phase 3 live call: microphone permission is granted and Android shows mic listening, then the RayMe call UI still fails or becomes unusable."
 created: 2026-04-25T23:36:09Z
-updated: 2026-04-26T02:05:00Z
+updated: 2026-04-26T19:00:00Z
 ---
 
 # Debug Session: Android Call Offer 502
@@ -27,32 +27,34 @@ updated: 2026-04-26T02:05:00Z
 
 ## Current Focus
 
-- status: BLOCKED on operational access — SSH alias `rayme-pmpg` is unresolvable
-  from the current debugger environment, so I cannot tail OMEN logs or deploy
-  myself. Awaiting user checkpoint response.
-- new_symptom: After `1be53a7`, Android offer/answer succeeds (200/200/200) but
-  the call is stuck in `Listening` indefinitely. No transcript, no AI text, no
-  TTS. Identical symptom for at least 4 plausible root causes (no inbound track
-  at backend / VAD never finalizes turn / data channel mismatch / silent ICE
-  failure).
-- hypothesis: NOT YET FORMED — current evidence is insufficient to choose
-  between H3/H4/H6/H7 (see appended section). Choosing without live evidence
-  will repeat the back-and-forth the user is sick of.
-- test: visibility-first. Add structured logging at every post-offer boundary
-  on both ends, deploy ONCE, reproduce ONCE, read evidence, fix.
-- expecting: after deploy + reproduction, OMEN web log + AI log will show
-  exactly which boundary fails (track received? VAD frames? STT transcript?
-  data-channel send?).
-- next_action (REQUIRES USER): user runs `git push origin main && scripts/deploy-omen.sh`
-  on a shell with SSH access, starts the three log tails listed in the
-  checkpoint, opens https://192.168.1.199:8443 on Android, calls ThickGiant,
-  speaks for ~5s, hangs up after ~10s, and pastes the new log output back.
-- reasoning_checkpoint: do not write fix code yet. Do not even write
-  instrumentation code yet. The user explicitly said the next round must
-  produce visibility, not another speculative fix. Confirm SSH path with the
-  user first; then either I write instrumentation here (if user can deploy) or
-  hand off to the orchestrator with explicit deploy steps.
-- tdd_checkpoint: defer until root cause is confirmed by live evidence.
+- status: fixing — committing VAD max-turn safety net (already in working tree)
+  and repairing test mock that is missing the `threshold` attribute.
+- hypothesis (CONFIRMED): Silero VAD classifies all buffered audio as continuous
+  speech (no silence gap), so `_silence_ms` never reaches `vad_end_silence_ms`
+  and `end_of_turn` never fires. Fix: force `end_of_turn` after
+  `vad_max_turn_ms` (5000 ms) of continuous turn duration.
+- reasoning_checkpoint:
+    hypothesis: "frame_idx * frame_ms >= vad_max_turn_ms forces end_of_turn
+      when Silero never produces a silence gap"
+    confirming_evidence:
+      - "Boundary trace @ 9275e36: vad.speech_start fires on frame 15 but
+        vad.silence/vad.end_of_turn NEVER fire over 450+ frames (~9 s)"
+      - "vad.bufdiag confirms buf_rms > 0 (real speech-shaped audio reaching
+        Silero)"
+      - "Silero ts_count=0 at frame 10 then vad.speech_start fires — adapter
+        classifies everything as one continuous segment"
+    falsification_test: "after deploy, vad.end_of_turn log line must appear
+      within 5-6 s of vad.speech_start"
+    fix_rationale: "adds a hard ceiling on turn duration so the turn always
+      finalizes even when Silero never produces a trailing silence gap"
+    blind_spots: "ICE disconnect at ~9-10 s may still kill the session before
+      STT/LLM/TTS completes; data-channel keepalive (faac744) is deployed and
+      may address this"
+- pre_commit_blocker: test mock ScriptedSileroVadAdapter is missing `threshold`
+  attribute; `session.py` accesses `adapter.threshold` at frame 10 for
+  diagnostic logging. Fix: add `threshold: float = 0.5` to mock.
+- next_action: fix mock, run tests to green, commit, push, deploy, ask user to
+  reproduce on Android Chrome and confirm vad.end_of_turn fires within ~5 s.
 
 ## Evidence
 
@@ -677,3 +679,67 @@ Verification:
 
 next_action: ask user to reproduce on Android Chrome; expected trace is
 `vad.speech_start -> vad.silence -> vad.end_of_turn -> stt.begin -> stt.result`.
+
+## FOLLOW-UP ROOT CAUSE FOUND (2026-04-26, later Android Chrome repro)
+
+### Captured Boundary Trace (commit 445c19f)
+
+| Boundary | Outcome |
+|---|---|
+| OMEN deployed HEAD | `445c19f` |
+| `/webrtc/offer` | 200 OK |
+| `offer.received` -> `offer.answered` | OK |
+| `iceconnectionstatechange: checking -> completed` | OK |
+| `connectionstatechange: connecting -> connected` | OK |
+| `track.recv.first_frame sample_rate=48000 samples=960` | OK |
+| `turn.started frame_count=1 sample_rate=16000 pcm_bytes=640` | OK |
+| `track.recv.progress` 50..400 | OK |
+| `vad.speech_start` / `vad.silence` / `vad.end_of_turn` | NEVER |
+| `stt.begin` / `stt.result` / LLM / TTS | NEVER |
+| browser `datachannel.open` | OK |
+| browser `datachannel.error` + `datachannel.close` | FAILED |
+
+### Root Cause
+
+The browser and backend were both creating `rayme-events` data channels. On
+Android Chrome this produced two same-label channels in the session:
+
+- browser-created `rayme-events`
+- backend-created `rayme-events`
+
+The browser then attached both, and both channels errored closed with
+`OperationError`. That made call event delivery unreliable and introduced a
+real signaling boundary failure separate from VAD.
+
+This does not yet explain the lack of `vad.speech_start` in that repro, but it
+is a concrete live-call bug and had to be removed before trusting any further
+speech-path diagnosis.
+
+### Fix
+
+Stop creating `rayme-events` on the backend. The browser now owns channel
+creation, and the backend only accepts the browser-opened channel via
+`peer.on_datachannel`.
+
+Files:
+
+- `ai-backend/app/api/webrtc.py`
+- `ai-backend/tests/test_webrtc_signaling.py`
+
+Verification:
+
+- `uv run --project ai-backend pytest ai-backend/tests/test_webrtc_signaling.py -q`
+  -> **9 passed**
+- `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q`
+  -> **17 passed**
+
+Deploy confirmation:
+
+- OMEN deployed code HEAD: `8b6b9e6`
+- `scripts/deploy-omen.sh` completed with:
+  `OMEN deploy complete: 8b6b9e6e419b20124487122a20a507f084d016b0`
+
+next_action: ask user to reproduce again on Android Chrome and confirm whether
+the single-channel session reaches `vad.speech_start`; if not, add targeted
+mic-energy instrumentation on the browser side and inspect normalized PCM on
+the backend for the new session.

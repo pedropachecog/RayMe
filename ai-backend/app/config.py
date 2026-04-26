@@ -11,4 +11,5 @@ class AiBackendSettings(BaseModel, frozen=True):
     vram_budget_mb: int = 11000
     vad_threshold: float = Field(default=0.5, ge=0.0, le=1.0)
     vad_end_silence_ms: int = Field(default=700, ge=0)
+    vad_max_turn_ms: int = Field(default=5000, ge=1000)
     load_models_on_startup: bool = True

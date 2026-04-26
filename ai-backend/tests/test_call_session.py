@@ -238,9 +238,11 @@ class ScriptedSileroVadAdapter:
         *,
         sampling_rate: int = 16000,
         speech_end_sample: int | None = None,
+        threshold: float = 0.5,
     ) -> None:
         self.sampling_rate = sampling_rate
         self.speech_end_sample = speech_end_sample
+        self.threshold = threshold
         self.calls: list[int] = []
 
     def speech_timestamps(self, audio: Any) -> list[dict[str, int]]:

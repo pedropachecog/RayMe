@@ -92,6 +92,7 @@ class CallSession:
         self._turn_index = 0
         self._speech_seen = False
         self._silence_ms = 0
+        self._speech_start_frame: int | None = None
         self._cancelled_ai_turns: set[str] = set()
 
     @property
@@ -188,6 +189,7 @@ class CallSession:
         self._turn_started_at = None
         self._speech_seen = False
         self._silence_ms = 0
+        self._speech_start_frame = None
 
         try:
             transcription = self._transcribe_turn(frames)
@@ -542,15 +544,24 @@ class CallSession:
             sampling_rate = int(getattr(adapter, "sampling_rate", 16000)) or 16000
             if timestamps:
                 self._speech_seen = True
+                if self._speech_start_frame is None:
+                    self._speech_start_frame = frame_idx
                 last_end_sample = int(timestamps[-1].get("end", 0))
                 silence_samples = max(len(buffered_samples) - last_end_sample, 0)
                 self._silence_ms = int(silence_samples * 1000 / sampling_rate)
             elif self._speech_seen:
                 self._silence_ms += frame_ms
+
+            # Max turn duration safety net: force end if Silero keeps
+            # classifying everything as continuous speech beyond vad_max_turn_ms
+            max_turn_ms = int(getattr(getattr(self, 'settings', None), 'vad_max_turn_ms', 10000))
+            turn_duration_ms = frame_idx * frame_ms
+            forced_end = turn_duration_ms >= max_turn_ms
+
             return {
                 "speech_detected": self._speech_seen,
                 "end_of_turn": self._speech_seen
-                and self._silence_ms >= end_silence_ms,
+                and (self._silence_ms >= end_silence_ms or forced_end),
             }
 
         energy = float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
@@ -562,10 +573,14 @@ class CallSession:
         elif self._speech_seen:
             self._silence_ms += frame_ms
 
+        max_turn_ms = int(getattr(getattr(self, 'settings', None), 'vad_max_turn_ms', 10000))
+        turn_duration_ms = frame_idx * frame_ms
+
         return {
             "speech_detected": self._speech_seen or energy >= threshold,
             "end_of_turn": self._speech_seen
-            and self._silence_ms >= end_silence_ms,
+            and (self._silence_ms >= end_silence_ms
+                 or turn_duration_ms >= max_turn_ms),
         }
 
     def _buffered_turn_samples(self) -> np.ndarray:
