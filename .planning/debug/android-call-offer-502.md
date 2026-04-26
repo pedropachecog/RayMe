@@ -258,6 +258,44 @@ updated: 2026-04-26T02:05:00Z
   blocking panel, stop local media, request setup cleanup with
   `reason="setup_failed"`, and preserve sanitized backend WebRTC failure
   code/message through the web server AI client.
+
+## FOLLOW-UP ROOT CAUSE FOUND (2026-04-26)
+
+### Captured Boundary Trace (commit 6f96c4e, Android Chrome reproduction)
+
+| Boundary | Outcome |
+|---|---|
+| OMEN deployed HEAD | `6f96c4e` |
+| Android client | `192.168.1.253` |
+| `/api/calls/start` | 201 Created |
+| `/api/calls/{id}/offer` | 200 OK |
+| `offer.received` -> `offer.answered` | OK |
+| `iceconnectionstatechange: checking -> completed` | OK |
+| `connectionstatechange: connecting -> connected` | OK |
+| `peer.on_datachannel rayme-events readyState=open` | OK |
+| `track.recv.first_frame sample_rate=48000 samples=960` | OK |
+| `turn.started frame_count=1 sample_rate=16000 pcm_bytes=1280` | OK |
+| `track.recv.progress` 50,100,150,200,250,300,350 | OK |
+| `vad.speech_start` / `vad.silence` / `vad.end_of_turn` | NEVER |
+| `stt.begin` / `stt.result` / LLM / TTS | NEVER |
+
+### Root Cause
+
+The live call path was still collapsing some PyAV audio buffers before VAD could inspect them. `normalize_inbound_audio_frame()` scaled integer PCM correctly, but it still averaged every 2D ndarray on axis 0. That is correct for channel-first audio, but wrong for channel-last audio. When `to_ndarray()` exposed samples x channels, the normalizer compressed the waveform into the wrong shape, and Silero never saw usable speech, so the session never reached `vad.speech_start`.
+
+### Fix
+
+Make PyAV normalization shape-aware in `ai-backend/app/call/tracks.py` so 2D arrays are mixed on the channel axis whether the layout is channel-first or channel-last.
+
+Regression tests:
+
+- `ai-backend/tests/test_call_session.py::test_inbound_audio_normalizer_scales_integer_channels_before_mixing`
+- `ai-backend/tests/test_call_session.py::test_inbound_audio_normalizer_handles_channel_last_integer_audio`
+
+Verification:
+`uv run --project ai-backend pytest ai-backend/tests -q` -> **67 passed**.
+
+next_action: deploy and ask user to reproduce; expected trace is still `vad.speech_start -> vad.silence -> vad.end_of_turn -> stt.begin -> stt.result`.
 - verification: `npm --prefix web-ui/client run check`; `uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py web-ui/server/tests/test_health_settings.py -q`; `npm --prefix web-ui/client run test:e2e -- tests/e2e/call-start.spec.ts --project=desktop-chromium --workers=1`.
 - files_changed: `web-ui/client/src/lib/api/calls.ts`, `web-ui/client/src/routes/call/[threadId]/+page.svelte`, `web-ui/client/tests/e2e/call-start.spec.ts`, `web-ui/server/app/domain/ai_backend_client.py`, `web-ui/server/tests/test_calls.py`, `web-ui/server/tests/test_health_settings.py`, `.planning/debug/android-call-offer-502.md`.
 

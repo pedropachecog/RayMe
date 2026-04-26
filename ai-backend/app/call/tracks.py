@@ -139,7 +139,12 @@ def normalize_inbound_audio_frame(
         array = np.asarray(to_ndarray())
         samples = _coerce_to_float32(array)
         if array.ndim > 1:
-            samples = samples.mean(axis=0)
+            if array.shape[0] <= 8 and array.shape[-1] > array.shape[0]:
+                samples = samples.mean(axis=0)
+            elif array.shape[-1] <= 8 and array.shape[0] > array.shape[-1]:
+                samples = samples.mean(axis=-1)
+            else:
+                samples = samples.mean(axis=0)
         source_rate = int(getattr(frame, "sample_rate", target_sample_rate))
         if source_rate != target_sample_rate:
             samples = _resample_linear(

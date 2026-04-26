@@ -265,6 +265,19 @@ def test_inbound_audio_normalizer_scales_integer_channels_before_mixing() -> Non
     assert normalized_samples.tolist() == [0, 8192, -8192, 16384]
 
 
+def test_inbound_audio_normalizer_handles_channel_last_integer_audio() -> None:
+    """Regression: PyAV may expose audio as samples x channels."""
+
+    samples = np.asarray([[0, 8192], [-8192, 16384], [32767, -32767]], dtype=np.int16)
+    frame = ScriptedAvAudioFrame(samples)
+
+    normalized = normalize_inbound_audio_frame(frame)
+    normalized_samples = np.frombuffer(normalized.pcm, dtype=np.int16)
+
+    assert normalized.sample_rate == 16000
+    assert normalized_samples.tolist() == [4096, 4096, 0]
+
+
 def test_muted_inbound_audio_counts_dropped_frames_without_stt() -> None:
     vad = ScriptedVadAdapter()
     stt = ScriptedSttAdapter()
