@@ -399,6 +399,7 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
             "[rayme-call] peer.on_datachannel session=%s label=%s readyState=%s",
             session.session_id,
             label,
+            ready,
         )
         if label == RAYME_EVENTS_CHANNEL:
             session.data_channel = channel
