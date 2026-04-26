@@ -2,7 +2,7 @@
 status: investigating
 trigger: "Android Chrome Phase 3 live call: microphone permission is granted and Android shows mic listening, then the RayMe call UI still fails or becomes unusable."
 created: 2026-04-25T23:36:09Z
-updated: 2026-04-26T00:25:00Z
+updated: 2026-04-26T01:10:00Z
 ---
 
 # Debug Session: Android Call Offer 502
@@ -27,25 +27,32 @@ updated: 2026-04-26T00:25:00Z
 
 ## Current Focus
 
-- hypothesis: the regression was caused by the Web UI swallowing
-  `/api/calls/{call_id}/offer` failures after entering `Listening`, combined
-  with generic client error handling that discarded the sanitized backend
-  `webrtc_offer_failed` detail.
-- test: reproduce with a real or captured Android SDP offer against
-  `POST https://192.168.1.199:8443/api/calls/{call_id}/offer` and then directly
-  against `POST https://192.168.1.199:9443/webrtc/offer`, while capturing
-  backend exceptions and response status.
-- expecting: the web facade returns `502` with public code
-  `webrtc_offer_failed` or `unreachable`, and the AI backend either receives no
-  `/webrtc/offer` request or rejects the Android SDP inside aiortc negotiation.
-- next_action: deploy and retest on Android; expected behavior is immediate
-  failure panel with the sanitized WebRTC offer error instead of a listening
-  surface.
-- reasoning_checkpoint: do not keep patching the UI blindly. The permission and
-  local microphone symptoms are already fixed. The remaining root cause is in
-  the WebRTC offer/answer or aiortc media negotiation path.
-- tdd_checkpoint: add regression coverage only around confirmed failure mode;
-  avoid tests that merely assert the UI hides backend failure.
+- status: BLOCKED on operational access — SSH alias `rayme-pmpg` is unresolvable
+  from the current debugger environment, so I cannot tail OMEN logs or deploy
+  myself. Awaiting user checkpoint response.
+- new_symptom: After `1be53a7`, Android offer/answer succeeds (200/200/200) but
+  the call is stuck in `Listening` indefinitely. No transcript, no AI text, no
+  TTS. Identical symptom for at least 4 plausible root causes (no inbound track
+  at backend / VAD never finalizes turn / data channel mismatch / silent ICE
+  failure).
+- hypothesis: NOT YET FORMED — current evidence is insufficient to choose
+  between H3/H4/H6/H7 (see appended section). Choosing without live evidence
+  will repeat the back-and-forth the user is sick of.
+- test: visibility-first. Add structured logging at every post-offer boundary
+  on both ends, deploy ONCE, reproduce ONCE, read evidence, fix.
+- expecting: after deploy + reproduction, OMEN web log + AI log will show
+  exactly which boundary fails (track received? VAD frames? STT transcript?
+  data-channel send?).
+- next_action (REQUIRES USER): user runs `git push origin main && scripts/deploy-omen.sh`
+  on a shell with SSH access, starts the three log tails listed in the
+  checkpoint, opens https://192.168.1.199:8443 on Android, calls ThickGiant,
+  speaks for ~5s, hangs up after ~10s, and pastes the new log output back.
+- reasoning_checkpoint: do not write fix code yet. Do not even write
+  instrumentation code yet. The user explicitly said the next round must
+  produce visibility, not another speculative fix. Confirm SSH path with the
+  user first; then either I write instrumentation here (if user can deploy) or
+  hand off to the orchestrator with explicit deploy steps.
+- tdd_checkpoint: defer until root cause is confirmed by live evidence.
 
 ## Evidence
 
@@ -253,3 +260,181 @@ updated: 2026-04-26T00:25:00Z
   code/message through the web server AI client.
 - verification: `npm --prefix web-ui/client run check`; `uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py web-ui/server/tests/test_health_settings.py -q`; `npm --prefix web-ui/client run test:e2e -- tests/e2e/call-start.spec.ts --project=desktop-chromium --workers=1`.
 - files_changed: `web-ui/client/src/lib/api/calls.ts`, `web-ui/client/src/routes/call/[threadId]/+page.svelte`, `web-ui/client/tests/e2e/call-start.spec.ts`, `web-ui/server/app/domain/ai_backend_client.py`, `web-ui/server/tests/test_calls.py`, `web-ui/server/tests/test_health_settings.py`, `.planning/debug/android-call-offer-502.md`.
+
+---
+
+## 2026-04-26T01:10:00Z — New Symptom: stuck in Listening after offer 200 OK
+
+### New User-Visible Symptom
+
+User reports on Android Chrome at https://192.168.1.199:8443:
+- /api/calls/start -> 201 Created
+- /api/calls/{id}/offer -> 200 OK
+- AI backend /webrtc/offer -> 200 OK
+- Call UI stays in `Listening` indefinitely
+- No transcript appears, no AI response, no audible TTS
+- User must manually hang up
+- No alternation pattern reported by user: "alternating back and forth and back and forth between it failing quickly or not failing but not answering either"
+
+### Operational Constraint Discovered (Blocker For Live Reproduction)
+
+The SSH alias `rayme-pmpg` is NOT resolvable from the current debugging environment.
+- `ssh rayme-pmpg 'echo ok'` -> `ssh: Could not resolve hostname rayme-pmpg: Name or service not known`
+- `~/.ssh/config` does not exist for this user
+- `scripts/bootstrap-rayme-ssh.sh` configures alias `rayme-ssh` (not `rayme-pmpg`)
+- Even with `dangerouslyDisableSandbox=true` SSH cannot reach OMEN
+
+This means:
+- I cannot start background log tails on OMEN myself
+- I cannot run `scripts/deploy-omen.sh` (it requires SSH)
+- I cannot read OMEN log files directly
+
+The user has SSH access (commits 1be53a7 and earlier were verified deployed via SSH, and OMEN /webrtc/status responds at https://192.168.1.199:9443/webrtc/status with status: ready, live_call_ready: true, media_transport_ready: true, active_sessions: 0).
+
+The visibility-first plan must be done by the user, OR by an environment that has SSH. I will instrument the code so when it IS deployed and the user reproduces, the post-offer path is fully observable. I will hand the deploy + tail commands to the user as a checkpoint.
+
+### Local vs Deployed State
+
+- Local HEAD: `94150d4 docs: replace Android call handoff` (one commit ahead of origin)
+- Origin HEAD: `1be53a7 fix: remove synthetic call facade fallbacks` (per `git log origin/main..HEAD`)
+- OMEN deployed HEAD per handoff: `1be53a7`
+- AI backend `/webrtc/status` reachable from local: ready, 0 active sessions
+
+### Post-Offer Code Path Mapped (No Code Changes Yet)
+
+Browser side (`web-ui/client/src/routes/call/[threadId]/+page.svelte`):
+- `connectBrowserMedia` creates `RTCPeerConnection` (no STUN/TURN/iceServers config)
+- Browser creates outbound data channel `eventsChannel = connection.createDataChannel('rayme-events')`
+- Browser registers `connection.ondatachannel` handler that swaps in remote channel of same label
+- Browser registers `connection.ontrack` handler that calls `attachRemoteAudio(stream)`
+- Browser adds local mic tracks via `connection.addTrack(track, localMediaStream)`
+- Browser createOffer -> setLocalDescription -> waitForIceGathering(1500ms cap) -> POST offer
+- Browser setRemoteDescription on response.answer
+
+Backend side (`ai-backend/app/api/webrtc.py`):
+- `_create_peer_connection(offer)` constructs aiortc `RTCPeerConnection()` (no iceServers)
+- `_create_data_channel(peer_connection)` -> calls `peer_connection.createDataChannel("rayme-events")` BACKEND ALSO CREATES A CHANNEL
+- `_attach_outbound_audio_track(peer_connection)` -> adds `QueuedAudioOutputTrack` BEFORE setRemoteDescription
+- `manager.create_session(...)` (data_channel passed in is the backend-created one)
+- `_attach_peer_handlers(peer_connection, session)` registers:
+  - `on_datachannel` -> overwrites `session.data_channel` with browser's channel when it arrives
+  - `on_track` -> spawns `_receive_audio_track` task that calls `track.recv()` in a loop
+  - `on_connectionstatechange`
+- `_negotiate_answer(peer_connection, payload.offer)` setRemoteDescription, createAnswer, setLocalDescription
+- Returns `{session_id, answer, event_channel, data_channel}`
+
+Inbound audio loop (`_receive_audio_track`):
+- `await track.recv()` -> `session.handle_inbound_audio_frame(frame)`
+- `handle_inbound_audio_frame` runs VAD (`_accept_vad_frame`), only finalizes turn when `end_of_turn=True`
+- `finalize_user_turn` runs STT, emits `user_final` event via `emit_event`
+
+`emit_event` send path:
+- if data channel exists and `readyState == "open"`, channel.send(json) (NOT awaited)
+
+### Observations Worth Treating As Hypothesis Candidates (NOT Confirmed)
+
+H1. NO ICE SERVERS configured on either side. Both `new RTCPeerConnection()` (browser) and `RTCPeerConnection()` (aiortc backend) use no STUN/TURN. On Android Chrome over local LAN with both peers on the same /24 subnet (192.168.1.0/24), host candidates should still discover each other and form an ICE pair, so this is plausibly OK. But on Android, host candidates from cellular interfaces or VPNs can interfere. No live ICE state evidence yet.
+
+H2. DUPLICATE DATA CHANNEL CREATION. Both browser AND backend create a data channel named `rayme-events`. WebRTC convention is that exactly ONE side creates the channel and the other receives it via `ondatachannel`. With both sides creating, the browser holds its OWN local outgoing channel as `eventsChannel` and never reattaches via its `ondatachannel` (because backend's channel won't necessarily appear as a remote channel that triggers the browser's handler — depends on negotiation order). The backend will eventually swap `session.data_channel` to the browser-created channel through its `on_datachannel`. Net effect: backend sends events on the browser-created channel; browser listens on its OWN created channel; these are the same channel object on the wire (browser-initiated). This MIGHT actually work, but is an unnecessary risk and complicates diagnosis. Worth eliminating.
+
+H3. NO INBOUND TRACK EVER ARRIVES on backend. If aiortc's ICE/DTLS does not complete with Android Chrome, `on_track` never fires, `_receive_audio_track` never runs, no VAD, no STT, no `user_final`, and the browser sees no data channel events. Browser would stay in `Listening` forever. This is the most parsimonious explanation given the symptom.
+
+H4. INBOUND TRACK ARRIVES BUT VAD NEVER ENDS THE TURN. aiortc decodes Opus frames at 48kHz; `normalize_inbound_audio_frame` resamples to 16kHz. If the VAD threshold is too high or end-of-turn silence threshold is too long, the user's speech might never finalize. Browser stays in `Listening`. This is also possible.
+
+H5. STT RUNS BUT EMITS EMPTY TRANSCRIPT, then `user_final` event with `text=""` is sent — `appendUserFinal('')` would still trigger `submitUserTurn`, which would `submitCallTurn` with `text=""` (which would 422 due to `min_length=1`). UI would not visibly progress. Less likely but not ruled out.
+
+H6. EVENT IS EMITTED BUT BROWSER NEVER SEES IT. Backend's `emit_event` checks `getattr(channel, "readyState", "open") == "open"`. If the channel is the backend-created one and browser-created channel never matched, the channel's readyState may not be "open" from the browser's viewpoint. Browser receives nothing. Stuck in `Listening`.
+
+H7. `pc.iceConnectionState` reaches `failed` or `disconnected` silently. There is no listener attached on the browser, so the user sees no failure. The session quietly does nothing. This is consistent with the symptom.
+
+### Why Visibility Comes First
+
+The symptom is identical for at least four of these hypotheses (H3, H4, H6, H7 all produce "stuck in Listening, no progress"). Choosing the wrong fix without evidence will burn another iteration and the user has explicitly said they're sick of the back-and-forth. The first deliverable MUST be visibility, then ONE reproduction, then ONE fix.
+
+### Next Concrete Action (Pending User-Side SSH)
+
+I will write structured-logging instrumentation in a single commit covering BOTH ends:
+
+Browser (`+page.svelte`): subscribe to all four state-change events, data channel open/message/close/error, mic track end, audio play() rejection. Forward all events to a small in-memory ring buffer AND `console.log('[rayme-call] ...')` so they appear in adb chrome remote inspector AND get POSTed to a new `/api/calls/_debug/event` endpoint that uvicorn will print to stdout. This makes the browser-side state visible WITHOUT requiring the user to attach a desktop debugger to Android.
+
+Backend (`webrtc.py`, `session.py`): structured logger calls at every boundary (peer connection state, track received, periodic frame count, VAD decision summary, STT call, transcript length, event emit, TTS enqueue). Use existing logger (do not add prints).
+
+Then ONE deploy, ONE Android reproduction, READ logs, FORM the real hypothesis, FIX exactly that.
+
+### Checkpoint Reason
+
+Cannot deploy or tail OMEN logs from this environment. Need user to (a) run deploy, (b) start log tails, (c) reproduce on Android, (d) paste the result. Returning checkpoint to orchestrator with exact instructions before writing any instrumentation code, so the user can decide whether to continue with this approach or hand back SSH access.
+
+---
+
+## 2026-04-26T(now)Z — SSH Restored, Instrumentation Round
+
+### Operational Update
+
+SSH alias `rayme-pmpg` is now resolvable from this environment. Verified:
+`ssh rayme-pmpg 'echo ok-pmpg && hostname'` returns `ok-pmpg / OMEN-PC`. OMEN
+deployed HEAD verified `1be53a7`. Path A check (orchestrator-run): tail of
+`ai-backend.hidden.out.log` shows only uvicorn access lines on the post-offer
+path — `POST /webrtc/offer 200 OK` followed by `POST /webrtc/sessions/.../end
+200 OK`. No peer-connection-state, no on_track, no inbound frame counts, no VAD,
+no STT, no event publish. **Confirmed: post-offer observability is missing.
+That IS the first bug to address — visibility, not a speculative fix.**
+
+### Instrumentation Plan (Single Atomic Commit, Behavior-Neutral)
+
+Add structured logger calls (no `print`) at every post-offer boundary on both
+ends. Mirror browser-side state changes to OMEN via a new diagnostic POST
+endpoint `POST /api/calls/{call_id}/_debug/event` so Android Chrome (no remote
+devtools attached) becomes observable in OMEN logs.
+
+Backend (`ai-backend/app/api/webrtc.py`, `ai-backend/app/call/session.py`):
+- `webrtc.py::create_webrtc_offer_answer` — log session_id, sdp length, has
+  m=audio / a=ice-ufrag / a=fingerprint, elapsed for negotiate, answer sdp
+  length on success.
+- `_attach_peer_handlers` — log `connectionstatechange`, register
+  `iceconnectionstatechange` and `signalingstatechange` listeners and log them.
+- `on_track` — log kind/id when fired.
+- `_receive_audio_track` — log first frame received; log periodic frame count
+  every 50 frames; log on track recv exception with class name.
+- `session.py::handle_inbound_audio_frame` — log every Nth frame normalized
+  (sample rate, byte length).
+- `_accept_vad_frame` — log speech_start once per turn, end_of_turn once per
+  turn, with energy/threshold and silence_ms.
+- `finalize_user_turn` — log STT begin (frame count, total ms), STT result
+  (transcript length, language), event emit.
+- `emit_event` — log channel state, event type, send success/failure.
+- `speak_text` / `_queue_outbound_audio` — log TTS enqueue (wav byte count).
+
+Browser (`web-ui/client/src/routes/call/[threadId]/+page.svelte`):
+- After `new RTCPeerConnection()` register listeners for
+  `iceconnectionstatechange`, `connectionstatechange`,
+  `signalingstatechange`, `icegatheringstatechange`. Each fires:
+  console.log AND POST to `/api/calls/{call_id}/_debug/event` with
+  `{event, detail}`.
+- `eventsChannel`/`event.channel` open/close/error/message: log all four.
+- `connection.ontrack`: log kind/id of remote track and stream count.
+- `attachRemoteAudio`: log play() success or rejection class name.
+- Mic local track readyState at start.
+
+Web facade (`web-ui/server/app/api/calls.py`): add a new minimal route
+`POST /api/calls/{call_id}/_debug/event` that calls `logger.info("[browser-call]
+%s call=%s detail=%s", event, call_id, json.dumps(detail))`. No DB, no
+forwarding. Only purpose: surface Android browser state in OMEN web log file.
+
+### Sanitization Constraints
+
+- Never log full SDP body. Only length and presence of well-known a-lines.
+- Never log audio bytes. Only frame counts and rates.
+- Never log API keys, voice references, or transcript text content (length
+  only). Transcript text content is acceptable to log because the user already
+  authorized the call session to receive it; but to be safe-by-default, log
+  only length until proven we need text.
+- Guard at INFO level so it can be turned off later via uvicorn log config.
+
+### Why Visibility, Not A Fix, This Round
+
+Same hypothesis-uncertainty as previous round (H3/H4/H6/H7 all produce identical
+"stuck in Listening" symptom). Speculative fixes have already burned several
+deploys. Deliverable for this round = visibility shipped to OMEN; user
+reproduces ONCE on Android; logs reveal which boundary fails first; next round
+applies a targeted fix at exactly that boundary.

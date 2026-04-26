@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import logging
+import time
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -10,6 +12,8 @@ from app.api.stt import _settings_from_app, _stt_adapter_from_app, _vad_adapter_
 from app.call.session import CallSession, CallSessionManager
 from app.call.tracks import QueuedAudioOutputTrack
 from app.models.model_manager import ModelManager
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/webrtc", tags=["webrtc"])
 
@@ -102,10 +106,22 @@ async def create_webrtc_offer_answer(
     payload: CallOfferRequest,
 ) -> dict[str, Any]:
     manager = _manager_from_app(request)
+    offer_sdp = payload.offer.sdp
+    logger.info(
+        "[rayme-call] offer.received session=%s thread=%s sdp_len=%d "
+        "has_audio=%s has_ice_ufrag=%s has_fingerprint=%s",
+        payload.session_id,
+        payload.thread_id,
+        len(offer_sdp),
+        "m=audio" in offer_sdp,
+        "a=ice-ufrag:" in offer_sdp,
+        "a=fingerprint:" in offer_sdp,
+    )
     peer_connection = _create_peer_connection(payload.offer)
     data_channel = _create_data_channel(peer_connection)
     outbound_audio_track = _attach_outbound_audio_track(peer_connection)
 
+    negotiate_started = time.monotonic()
     try:
         session = await manager.create_session(
             session_id=payload.session_id,
@@ -122,8 +138,19 @@ async def create_webrtc_offer_answer(
         _attach_peer_handlers(peer_connection, session)
         answer = await _negotiate_answer(peer_connection, payload.offer)
     except HTTPException:
+        logger.exception(
+            "[rayme-call] offer.failed session=%s elapsed_ms=%d",
+            payload.session_id,
+            int((time.monotonic() - negotiate_started) * 1000),
+        )
         raise
     except Exception as exc:
+        logger.exception(
+            "[rayme-call] offer.unhandled session=%s elapsed_ms=%d exc=%s",
+            payload.session_id,
+            int((time.monotonic() - negotiate_started) * 1000),
+            exc.__class__.__name__,
+        )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail={
@@ -132,6 +159,16 @@ async def create_webrtc_offer_answer(
             },
         ) from exc
 
+    answer_sdp = answer.get("sdp", "")
+    logger.info(
+        "[rayme-call] offer.answered session=%s elapsed_ms=%d answer_sdp_len=%d "
+        "answer_has_audio=%s data_channel_state=%s",
+        session.session_id,
+        int((time.monotonic() - negotiate_started) * 1000),
+        len(answer_sdp),
+        "m=audio" in answer_sdp,
+        getattr(data_channel, "readyState", "?"),
+    )
     return {
         "session_id": session.session_id,
         "answer": answer,
@@ -365,27 +402,136 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
 
     @peer_connection.on("datachannel")
     def on_datachannel(channel: Any) -> None:
-        if getattr(channel, "label", None) == RAYME_EVENTS_CHANNEL:
+        label = getattr(channel, "label", None)
+        ready = getattr(channel, "readyState", "?")
+        logger.info(
+            "[rayme-call] peer.on_datachannel session=%s label=%s readyState=%s",
+            session.session_id,
+            label,
+            ready,
+        )
+        if label == RAYME_EVENTS_CHANNEL:
             session.data_channel = channel
+            if hasattr(channel, "on"):
+                @channel.on("open")
+                def on_dc_open() -> None:
+                    logger.info(
+                        "[rayme-call] datachannel.open session=%s label=%s",
+                        session.session_id,
+                        label,
+                    )
+
+                @channel.on("close")
+                def on_dc_close() -> None:
+                    logger.info(
+                        "[rayme-call] datachannel.close session=%s label=%s",
+                        session.session_id,
+                        label,
+                    )
+
+                @channel.on("error")
+                def on_dc_error(error: Any) -> None:
+                    logger.info(
+                        "[rayme-call] datachannel.error session=%s label=%s err=%s",
+                        session.session_id,
+                        label,
+                        error.__class__.__name__ if error else "?",
+                    )
 
     @peer_connection.on("track")
     def on_track(track: Any) -> None:
-        if getattr(track, "kind", None) == "audio":
+        kind = getattr(track, "kind", None)
+        track_id = getattr(track, "id", None)
+        logger.info(
+            "[rayme-call] peer.on_track session=%s kind=%s id=%s",
+            session.session_id,
+            kind,
+            track_id,
+        )
+        if kind == "audio":
             asyncio.create_task(_receive_audio_track(session, track))
 
     @peer_connection.on("connectionstatechange")
     async def on_connectionstatechange() -> None:
+        state = getattr(peer_connection, "connectionState", None)
+        logger.info(
+            "[rayme-call] peer.connectionstatechange session=%s state=%s",
+            session.session_id,
+            state,
+        )
         await session.handle_connection_state_change()
+
+    @peer_connection.on("iceconnectionstatechange")
+    async def on_iceconnectionstatechange() -> None:
+        state = getattr(peer_connection, "iceConnectionState", None)
+        logger.info(
+            "[rayme-call] peer.iceconnectionstatechange session=%s state=%s",
+            session.session_id,
+            state,
+        )
+
+    @peer_connection.on("icegatheringstatechange")
+    async def on_icegatheringstatechange() -> None:
+        state = getattr(peer_connection, "iceGatheringState", None)
+        logger.info(
+            "[rayme-call] peer.icegatheringstatechange session=%s state=%s",
+            session.session_id,
+            state,
+        )
+
+    @peer_connection.on("signalingstatechange")
+    async def on_signalingstatechange() -> None:
+        state = getattr(peer_connection, "signalingState", None)
+        logger.info(
+            "[rayme-call] peer.signalingstatechange session=%s state=%s",
+            session.session_id,
+            state,
+        )
 
 
 async def _receive_audio_track(session: CallSession, track: Any) -> None:
+    logger.info(
+        "[rayme-call] track.recv.start session=%s kind=%s id=%s",
+        session.session_id,
+        getattr(track, "kind", None),
+        getattr(track, "id", None),
+    )
+    frame_count = 0
     while session.state not in {"ended", "failed"}:
         try:
             frame = await track.recv()
-        except Exception:
+        except Exception as exc:
+            logger.info(
+                "[rayme-call] track.recv.exception session=%s frames=%d exc=%s",
+                session.session_id,
+                frame_count,
+                exc.__class__.__name__,
+            )
             await session.fail(reason="connection_failed")
             return
+        frame_count += 1
+        if frame_count == 1:
+            logger.info(
+                "[rayme-call] track.recv.first_frame session=%s sample_rate=%s "
+                "samples=%s",
+                session.session_id,
+                getattr(frame, "sample_rate", "?"),
+                getattr(frame, "samples", "?"),
+            )
+        elif frame_count % 50 == 0:
+            logger.info(
+                "[rayme-call] track.recv.progress session=%s frames=%d state=%s",
+                session.session_id,
+                frame_count,
+                session.state,
+            )
         await session.handle_inbound_audio_frame(frame)
+    logger.info(
+        "[rayme-call] track.recv.exit session=%s frames=%d state=%s",
+        session.session_id,
+        frame_count,
+        session.state,
+    )
 
 
 async def _negotiate_answer(

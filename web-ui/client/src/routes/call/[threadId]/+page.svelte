@@ -161,30 +161,121 @@
     peerConnection?.close();
     const connection = new RTCPeerConnection();
     peerConnection = connection;
+    attachPeerConnectionDebug(connection, started.call_id);
     eventsChannel = connection.createDataChannel('rayme-events');
-    attachCallEventChannel(eventsChannel);
+    attachCallEventChannel(eventsChannel, started.call_id, 'browser-created');
     connection.ondatachannel = (event) => {
+      emitDebugEvent(started.call_id, 'pc.ondatachannel', {
+        label: event.channel.label,
+        readyState: event.channel.readyState
+      });
       if (event.channel.label === 'rayme-events') {
         eventsChannel = event.channel;
-        attachCallEventChannel(event.channel);
+        attachCallEventChannel(event.channel, started.call_id, 'remote-attached');
       }
     };
     connection.ontrack = (event) => {
+      emitDebugEvent(started.call_id, 'pc.ontrack', {
+        kind: event.track.kind,
+        id: event.track.id,
+        readyState: event.track.readyState,
+        streams: event.streams.length
+      });
       const stream = event.streams[0] ?? new MediaStream([event.track]);
-      attachRemoteAudio(stream);
+      attachRemoteAudio(stream, started.call_id);
     };
     for (const track of localMediaStream.getAudioTracks()) {
+      emitDebugEvent(started.call_id, 'pc.addTrack', {
+        kind: track.kind,
+        id: track.id,
+        readyState: track.readyState,
+        muted: track.muted,
+        enabled: track.enabled
+      });
       connection.addTrack(track, localMediaStream);
     }
 
     const offer = await connection.createOffer();
     await connection.setLocalDescription(offer);
+    emitDebugEvent(started.call_id, 'pc.setLocalDescription', {
+      type: offer.type,
+      sdp_len: offer.sdp?.length ?? 0
+    });
     await waitForIceGathering(connection);
     const localDescription = connection.localDescription ?? offer;
+    emitDebugEvent(started.call_id, 'pc.offer.sending', {
+      iceGatheringState: connection.iceGatheringState,
+      sdp_len: localDescription.sdp?.length ?? 0
+    });
     const response = await sendCallOffer(started.call_id, localDescription, started.session_id);
     sessionId = response.session_id || started.session_id || started.call_id;
+    emitDebugEvent(started.call_id, 'pc.answer.received', {
+      session_id: sessionId,
+      has_answer: Boolean(response.answer),
+      answer_sdp_len: response.answer?.sdp?.length ?? 0
+    });
     if (response.answer) {
       await connection.setRemoteDescription(response.answer);
+      emitDebugEvent(started.call_id, 'pc.setRemoteDescription.done', {
+        signalingState: connection.signalingState,
+        iceConnectionState: connection.iceConnectionState,
+        connectionState: connection.connectionState
+      });
+    }
+  }
+
+  function attachPeerConnectionDebug(connection: RTCPeerConnection, debugCallId: string) {
+    connection.addEventListener('iceconnectionstatechange', () => {
+      emitDebugEvent(debugCallId, 'pc.iceconnectionstatechange', {
+        iceConnectionState: connection.iceConnectionState
+      });
+    });
+    connection.addEventListener('connectionstatechange', () => {
+      emitDebugEvent(debugCallId, 'pc.connectionstatechange', {
+        connectionState: connection.connectionState
+      });
+    });
+    connection.addEventListener('signalingstatechange', () => {
+      emitDebugEvent(debugCallId, 'pc.signalingstatechange', {
+        signalingState: connection.signalingState
+      });
+    });
+    connection.addEventListener('icegatheringstatechange', () => {
+      emitDebugEvent(debugCallId, 'pc.icegatheringstatechange', {
+        iceGatheringState: connection.iceGatheringState
+      });
+    });
+    connection.addEventListener('icecandidateerror', (event) => {
+      const error = event as RTCPeerConnectionIceErrorEvent;
+      emitDebugEvent(debugCallId, 'pc.icecandidateerror', {
+        errorCode: error.errorCode,
+        errorText: error.errorText,
+        url: error.url
+      });
+    });
+  }
+
+  function emitDebugEvent(debugCallId: string, name: string, detail: Record<string, unknown>): void {
+    try {
+      // eslint-disable-next-line no-console
+      console.log(`[rayme-call] ${name}`, detail);
+    } catch {
+      // Console logging cannot block diagnostics.
+    }
+
+    if (!debugCallId) {
+      return;
+    }
+
+    try {
+      void fetch(`/api/calls/${encodeURIComponent(debugCallId)}/_debug/event`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ event: name, detail, session_id: sessionId || undefined }),
+        keepalive: true
+      }).catch(() => undefined);
+    } catch {
+      // Diagnostic delivery failures must not affect the call.
     }
   }
 
@@ -205,9 +296,41 @@
     }
   }
 
-  function attachCallEventChannel(channel: RTCDataChannel) {
+  function attachCallEventChannel(channel: RTCDataChannel, debugCallId = '', source = 'unknown') {
+    emitDebugEvent(debugCallId, 'datachannel.attach', {
+      label: channel.label,
+      readyState: channel.readyState,
+      source
+    });
+    channel.onopen = () => {
+      emitDebugEvent(debugCallId, 'datachannel.open', {
+        label: channel.label,
+        source
+      });
+    };
+    channel.onclose = () => {
+      emitDebugEvent(debugCallId, 'datachannel.close', {
+        label: channel.label,
+        source
+      });
+    };
+    channel.onerror = (event) => {
+      const error = (event as RTCErrorEvent).error;
+      emitDebugEvent(debugCallId, 'datachannel.error', {
+        label: channel.label,
+        source,
+        errorName: error?.name ?? 'unknown',
+        errorMessage: error?.message ?? ''
+      });
+    };
     channel.onmessage = (message) => {
       const event = parseCallDataEvent(message.data);
+      emitDebugEvent(debugCallId, 'datachannel.message', {
+        label: channel.label,
+        source,
+        bytes: typeof message.data === 'string' ? message.data.length : -1,
+        event_type: event?.type ?? 'unparseable'
+      });
       if (event) {
         void handleCallDataEvent(event);
       }
@@ -720,14 +843,28 @@
     localMediaStream = null;
   }
 
-  function attachRemoteAudio(stream: MediaStream) {
+  function attachRemoteAudio(stream: MediaStream, debugCallId = '') {
     detachRemoteAudio();
     const element = new Audio();
     element.autoplay = true;
     element.playsInline = true;
     element.srcObject = stream;
     remoteAudioElement = element;
-    void element.play().catch(() => undefined);
+    emitDebugEvent(debugCallId, 'remote_audio.attach', {
+      tracks: stream.getAudioTracks().length,
+      stream_id: stream.id
+    });
+    void element
+      .play()
+      .then(() => {
+        emitDebugEvent(debugCallId, 'remote_audio.play.ok', {});
+      })
+      .catch((error: unknown) => {
+        emitDebugEvent(debugCallId, 'remote_audio.play.failed', {
+          name: (error as DOMException)?.name ?? 'unknown',
+          message: (error as Error)?.message ?? ''
+        });
+      });
   }
 
   function detachRemoteAudio() {

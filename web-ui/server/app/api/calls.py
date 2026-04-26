@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 from typing import Any, Literal
@@ -12,6 +13,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.config import Settings
 from app.domain.ai_backend_client import AiBackendClient, AiBackendClientError, AiBackendUnavailable
@@ -99,6 +102,22 @@ class CallTurnRequest(BaseModel):
     turn_id: str = Field(min_length=1, max_length=128)
     text: str = Field(min_length=1, max_length=20000)
     source: Literal["user_final"]
+
+
+class CallDebugEventRequest(BaseModel):
+    """Browser-side diagnostic event mirrored to the server log.
+
+    The browser cannot be remote-inspected on Android in this environment, so
+    WebRTC state changes are forwarded here purely so they appear in the OMEN
+    web log. This route does not touch the database, does not call the AI
+    backend, and does not change call state.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    event: str = Field(min_length=1, max_length=120)
+    detail: dict[str, Any] | None = Field(default=None)
+    session_id: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 async def get_call_session() -> AsyncIterator[AsyncSession]:
@@ -396,6 +415,38 @@ async def end_call(
         raise _call_error(exc) from exc
     except AiBackendClientError as exc:
         raise _backend_error(exc) from exc
+
+
+@router.post(
+    "/{call_id}/_debug/event",
+    dependencies=[Depends(enforce_same_origin_for_calls)],
+)
+async def record_call_debug_event(
+    call_id: str,
+    payload: CallDebugEventRequest,
+) -> dict[str, str]:
+    """Mirror browser WebRTC lifecycle events to the OMEN web log.
+
+    Behavior-neutral: no DB write, no backend forwarding, no call state change.
+    Sole purpose is observability for Android browsers without remote devtools.
+    """
+
+    detail_serialized = ""
+    if payload.detail is not None:
+        try:
+            detail_serialized = json.dumps(payload.detail, separators=(",", ":"))
+        except (TypeError, ValueError):
+            detail_serialized = "<unserializable>"
+    if len(detail_serialized) > 800:
+        detail_serialized = detail_serialized[:800] + "...<truncated>"
+    logger.info(
+        "[browser-call] event=%s call=%s session=%s detail=%s",
+        payload.event,
+        call_id,
+        payload.session_id or "",
+        detail_serialized,
+    )
+    return {"status": "ok"}
 
 
 async def _ensure_backend_ready(backend: Any, base_url: str) -> None:

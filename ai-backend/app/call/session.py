@@ -4,11 +4,14 @@ import asyncio
 import base64
 import inspect
 import json
+import logging
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
 
 import numpy as np
+
+logger = logging.getLogger(__name__)
 
 from app.call.events import (
     AI_AUDIO_STARTED_EVENT,
@@ -104,19 +107,64 @@ class CallSession:
         was_raw_bytes = isinstance(frame, bytes)
         if self.muted or self.state in {"ended", "failed"}:
             self.dropped_audio_frames += 1
+            if self.incoming_audio_frames % 100 == 0:
+                logger.info(
+                    "[rayme-call] inbound.dropped session=%s total=%d dropped=%d "
+                    "muted=%s state=%s",
+                    self.session_id,
+                    self.incoming_audio_frames,
+                    self.dropped_audio_frames,
+                    self.muted,
+                    self.state,
+                )
             return False if was_raw_bytes else None
 
         normalized = normalize_inbound_audio_frame(frame)
         self._turn_frames.append(normalized)
         if self._turn_started_at is None:
             self._turn_started_at = utc_timestamp()
+            logger.info(
+                "[rayme-call] turn.started session=%s frame_count=%d "
+                "sample_rate=%d pcm_bytes=%d",
+                self.session_id,
+                self.incoming_audio_frames,
+                normalized.sample_rate,
+                len(normalized.pcm),
+            )
 
+        speech_seen_before = self._speech_seen
+        silence_before = self._silence_ms
         vad_result = self._accept_vad_frame(normalized)
-        if not vad_result.get("speech_detected", True):
+        speech_detected = vad_result.get("speech_detected", True)
+        end_of_turn = vad_result.get("end_of_turn", False)
+
+        if not speech_seen_before and self._speech_seen:
+            logger.info(
+                "[rayme-call] vad.speech_start session=%s turn_frames=%d",
+                self.session_id,
+                len(self._turn_frames),
+            )
+        if not speech_detected:
             return None
-        if not vad_result.get("end_of_turn", False):
+        if not end_of_turn:
+            if self._speech_seen and self._silence_ms != silence_before \
+               and self._silence_ms > 0 and self._silence_ms % 200 < 40:
+                logger.info(
+                    "[rayme-call] vad.silence session=%s silence_ms=%d "
+                    "threshold_ms=%d",
+                    self.session_id,
+                    self._silence_ms,
+                    int(self.settings.vad_end_silence_ms),
+                )
             return None
 
+        logger.info(
+            "[rayme-call] vad.end_of_turn session=%s turn_frames=%d "
+            "silence_ms=%d",
+            self.session_id,
+            len(self._turn_frames),
+            self._silence_ms,
+        )
         return await self.finalize_user_turn()
 
     async def finalize_user_turn(self) -> dict[str, Any] | None:
@@ -128,6 +176,14 @@ class CallSession:
         frames = list(self._turn_frames)
         started_at = self._turn_started_at or utc_timestamp()
         ended_at = utc_timestamp()
+        total_pcm_bytes = sum(len(f.pcm) for f in frames)
+        logger.info(
+            "[rayme-call] stt.begin session=%s turn=%s frames=%d pcm_bytes=%d",
+            self.session_id,
+            turn_id,
+            len(frames),
+            total_pcm_bytes,
+        )
         self._turn_frames.clear()
         self._turn_started_at = None
         self._speech_seen = False
@@ -135,7 +191,13 @@ class CallSession:
 
         try:
             transcription = self._transcribe_turn(frames)
-        except Exception:
+        except Exception as exc:
+            logger.exception(
+                "[rayme-call] stt.failed session=%s turn=%s exc=%s",
+                self.session_id,
+                turn_id,
+                exc.__class__.__name__,
+            )
             event = failed_event(
                 session_id=self.session_id,
                 turn_id=turn_id,
@@ -148,6 +210,14 @@ class CallSession:
             return event
 
         text = str(transcription.get("transcript") or "").strip()
+        logger.info(
+            "[rayme-call] stt.result session=%s turn=%s transcript_len=%d "
+            "language=%s",
+            self.session_id,
+            turn_id,
+            len(text),
+            transcription.get("language"),
+        )
         event = user_final_event(
             session_id=self.session_id,
             turn_id=turn_id,
@@ -171,10 +241,40 @@ class CallSession:
                 await result
 
         channel = self.data_channel
+        ready_state = getattr(channel, "readyState", None) if channel is not None else None
+        event_type = event.get("type")
+        if channel is None:
+            logger.info(
+                "[rayme-call] event.skip_no_channel session=%s type=%s",
+                self.session_id,
+                event_type,
+            )
+        elif ready_state is not None and ready_state != "open":
+            logger.info(
+                "[rayme-call] event.skip_channel_not_open session=%s type=%s "
+                "readyState=%s",
+                self.session_id,
+                event_type,
+                ready_state,
+            )
         if channel is not None and getattr(channel, "readyState", "open") == "open":
             send = getattr(channel, "send", None)
             if callable(send):
-                send(json.dumps(event, separators=(",", ":")))
+                try:
+                    send(json.dumps(event, separators=(",", ":")))
+                    logger.info(
+                        "[rayme-call] event.sent session=%s type=%s readyState=%s",
+                        self.session_id,
+                        event_type,
+                        ready_state or "open",
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "[rayme-call] event.send_failed session=%s type=%s exc=%s",
+                        self.session_id,
+                        event_type,
+                        exc.__class__.__name__,
+                    )
         return event
 
     async def set_muted(self, muted: bool) -> dict[str, Any]:
@@ -484,13 +584,27 @@ class CallSession:
 
     async def _queue_outbound_audio(self, wav_bytes: bytes) -> None:
         if not wav_bytes:
+            logger.info(
+                "[rayme-call] tts.enqueue_empty session=%s",
+                self.session_id,
+            )
             return
         enqueue = getattr(self.outbound_audio_track, "enqueue", None)
         if callable(enqueue):
+            logger.info(
+                "[rayme-call] tts.enqueue session=%s wav_bytes=%d target=track",
+                self.session_id,
+                len(wav_bytes),
+            )
             result = enqueue(wav_bytes)
             if inspect.isawaitable(result):
                 await result
             return
+        logger.info(
+            "[rayme-call] tts.enqueue session=%s wav_bytes=%d target=buffer",
+            self.session_id,
+            len(wav_bytes),
+        )
         self.outbound_audio_buffer.append(wav_bytes)
 
 
