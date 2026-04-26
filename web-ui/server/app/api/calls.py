@@ -299,7 +299,15 @@ async def create_call_turn(
             repository=SqlAlchemyPromptRepository(session),
             max_turns=24,
         )
-        voice_reference = await service.voice_reference_for_call(call_id, voice_blob_dir)
+        try:
+            voice_reference = await service.voice_reference_for_call(call_id, voice_blob_dir)
+        except CallServiceError as exc:
+            logger.warning(
+                "[call-turn] voice_reference.unavailable call=%s err=%s — proceeding without reference audio",
+                call_id,
+                exc.message,
+            )
+            voice_reference = {}
         endpoint_settings = await SettingsService(session, runtime_settings).read()
     except CallServiceError as exc:
         raise _call_error(exc) from exc
