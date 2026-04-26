@@ -438,3 +438,22 @@ Same hypothesis-uncertainty as previous round (H3/H4/H6/H7 all produce identical
 deploys. Deliverable for this round = visibility shipped to OMEN; user
 reproduces ONCE on Android; logs reveal which boundary fails first; next round
 applies a targeted fix at exactly that boundary.
+
+### Deploy Confirmation (2026-04-26)
+
+- Local commit pushed: `6751631 chore(03-debug): instrument post-offer call lifecycle`.
+- `scripts/deploy-omen.sh` completed: `OMEN deploy complete: 675163124bc81cf509c304225a226c531873caae`.
+- OMEN `git rev-parse --short HEAD` = `6751631` (matches local).
+- `https://192.168.1.199:9443/webrtc/status` returns
+  `{"status":"ready","phase":"03","live_call_ready":true,"media_transport_ready":true,"active_sessions":0}`.
+- Three background tails attached to OMEN log files:
+  - `ai-backend.hidden.out.log` (background ID `bedrpdfen`)
+  - `ai-backend.hidden.err.log` (background ID `bn14oguk1`)
+  - `web-ui.hidden.out.log` (background ID `bkfwvq4c5`)
+- Deploy result note: web/ai both report `degraded` in deploy health (existing
+  pre-instrumentation state — STT/TTS warmup likely still running). `webrtc`
+  facade reports ready, which is what matters for the call path. Will re-check
+  during reproduction.
+
+next_action: orchestrator presents Android reproduction steps to user; on user
+"go", read fresh background output for first-failing boundary.
