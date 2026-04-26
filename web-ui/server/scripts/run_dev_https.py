@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import sys
 from pathlib import Path
+from typing import Any
 
 import uvicorn
+from uvicorn.config import LOGGING_CONFIG
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -13,6 +16,25 @@ if str(PROJECT_ROOT) not in sys.path:
 from app.config import Settings, get_settings  # noqa: E402
 
 BROWSER_URL_EXAMPLE = "https://192.168.1.199:8443"
+
+
+def build_log_config() -> dict[str, Any]:
+    """Return uvicorn's default log config with `app.*` loggers wired to stderr.
+
+    Uvicorn's default LOGGING_CONFIG only attaches handlers to `uvicorn.*`
+    loggers. Module loggers like `app.api.calls` therefore have no handler and
+    propagate to a handlerless root logger, which silently discards their
+    records. Without this override, `[browser-call]` debug events posted from
+    the Android browser are invisible in the OMEN log files.
+    """
+    config = copy.deepcopy(LOGGING_CONFIG)
+    loggers = config.setdefault("loggers", {})
+    loggers["app"] = {
+        "handlers": ["default"],
+        "level": "INFO",
+        "propagate": False,
+    }
+    return config
 
 
 def build_parser(settings: Settings | None = None) -> argparse.ArgumentParser:
@@ -96,6 +118,7 @@ def main(argv: list[str] | None = None) -> int:
         port=args.port,
         ssl_certfile=str(cert_path),
         ssl_keyfile=str(key_path),
+        log_config=build_log_config(),
     )
     return 0
 

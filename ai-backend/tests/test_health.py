@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import importlib.util
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -15,6 +17,15 @@ from app.models.model_manager import ModelManager
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 RUNNER = PROJECT_ROOT / "scripts" / "run_https.py"
 PYPROJECT = PROJECT_ROOT / "pyproject.toml"
+
+
+def load_runner_module() -> ModuleType:
+    spec = importlib.util.spec_from_file_location("ai_backend_run_https", RUNNER)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 class ScriptedTtsAdapter:
@@ -168,3 +179,32 @@ def test_https_runner_help_documents_direct_ip_health_url() -> None:
     assert "--cert" in output
     assert "--key" in output
     assert "9443" in output
+
+
+def test_build_log_config_attaches_handler_to_app_loggers() -> None:
+    """Regression: uvicorn's default config silently discards `app.*` loggers.
+
+    Without an explicit handler on the `app` logger, every `logger.info(...)`
+    call from `app.api.webrtc` (the `[rayme-call]` instrumentation) is
+    propagated to a handlerless root logger and dropped, leaving the OMEN
+    log files devoid of post-offer call lifecycle evidence.
+    """
+    runner = load_runner_module()
+
+    config = runner.build_log_config()
+
+    assert config["version"] == 1
+    assert config["disable_existing_loggers"] is False
+    # uvicorn's own loggers must remain wired up.
+    assert "uvicorn" in config["loggers"]
+    assert "uvicorn.access" in config["loggers"]
+    # `app.*` and `aiortc` module loggers must now have a stderr handler.
+    app_logger = config["loggers"]["app"]
+    assert app_logger["handlers"] == ["default"]
+    assert app_logger["level"] == "INFO"
+    assert app_logger["propagate"] is False
+    aiortc_logger = config["loggers"]["aiortc"]
+    assert aiortc_logger["handlers"] == ["default"]
+    assert aiortc_logger["level"] == "INFO"
+    # The handler the loggers reference must actually exist.
+    assert "default" in config["handlers"]
