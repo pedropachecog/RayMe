@@ -278,6 +278,21 @@ def test_inbound_audio_normalizer_handles_channel_last_integer_audio() -> None:
     assert normalized_samples.tolist() == [4096, 4096, 0]
 
 
+def test_inbound_audio_normalizer_handles_packed_stereo_audio() -> None:
+    """Regression: packed stereo audio should be deinterleaved before VAD."""
+
+    from av import AudioFrame
+
+    samples = np.arange(1920, dtype=np.int16).reshape(1, 1920)
+    frame = AudioFrame.from_ndarray(samples, format="s16", layout="stereo")
+    frame.sample_rate = 48000
+
+    normalized = normalize_inbound_audio_frame(frame)
+
+    assert normalized.sample_rate == 16000
+    assert len(normalized.pcm) == 640
+
+
 def test_muted_inbound_audio_counts_dropped_frames_without_stt() -> None:
     vad = ScriptedVadAdapter()
     stt = ScriptedSttAdapter()

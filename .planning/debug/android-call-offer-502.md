@@ -296,6 +296,45 @@ Verification:
 `uv run --project ai-backend pytest ai-backend/tests -q` -> **67 passed**.
 
 next_action: deploy and ask user to reproduce; expected trace is still `vad.speech_start -> vad.silence -> vad.end_of_turn -> stt.begin -> stt.result`.
+
+## FOLLOW-UP ROOT CAUSE FOUND (2026-04-26)
+
+### Captured Boundary Trace (commit 785414e, Android Chrome reproduction)
+
+| Boundary | Outcome |
+|---|---|
+| OMEN deployed HEAD | `785414e` |
+| Android client | `192.168.1.253` |
+| `/api/calls/start` | 201 Created |
+| `/api/calls/{id}/offer` | 200 OK |
+| `offer.received` -> `offer.answered` | OK |
+| `iceconnectionstatechange: checking -> completed` | OK |
+| `connectionstatechange: connecting -> connected` | OK |
+| `peer.on_datachannel rayme-events readyState=open` | OK |
+| `track.recv.first_frame sample_rate=48000 samples=960` | OK |
+| `turn.started frame_count=1 sample_rate=16000 pcm_bytes=1280` | WRONG |
+| `track.recv.progress` 50,100,150,200,250,300,350 | OK |
+| `vad.speech_start` / `vad.silence` / `vad.end_of_turn` | NEVER |
+| `stt.begin` / `stt.result` / LLM / TTS | NEVER |
+
+### Root Cause
+
+`normalize_inbound_audio_frame()` was still mis-handling packed stereo PyAV audio. The live frame shape is packed interleaved stereo: `format=s16`, `layout=stereo`, `to_ndarray().shape == (1, 1920)`. The previous normalization logic treated any 2D array as channel-first or channel-last and averaged along the wrong axis, which doubled the effective sample count to 640 resampled samples and produced `pcm_bytes=1280` instead of the expected 640 bytes for a 20 ms 48 kHz frame. That left VAD with the wrong waveform length and it never reported speech.
+
+### Fix
+
+Use PyAV frame metadata to distinguish planar from packed audio, deinterleave packed multi-channel buffers before mixing, and keep the old shape heuristic only as a fallback for mocked test frames.
+
+Regression tests:
+
+- `ai-backend/tests/test_call_session.py::test_inbound_audio_normalizer_handles_packed_stereo_audio`
+- `ai-backend/tests/test_call_session.py::test_inbound_audio_normalizer_scales_integer_channels_before_mixing`
+- `ai-backend/tests/test_call_session.py::test_inbound_audio_normalizer_handles_channel_last_integer_audio`
+
+Verification:
+`uv run --project ai-backend pytest ai-backend/tests -q` -> **68 passed**.
+
+next_action: deploy and ask user to reproduce; expected trace remains `vad.speech_start -> vad.silence -> vad.end_of_turn -> stt.begin -> stt.result`.
 - verification: `npm --prefix web-ui/client run check`; `uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py web-ui/server/tests/test_health_settings.py -q`; `npm --prefix web-ui/client run test:e2e -- tests/e2e/call-start.spec.ts --project=desktop-chromium --workers=1`.
 - files_changed: `web-ui/client/src/lib/api/calls.ts`, `web-ui/client/src/routes/call/[threadId]/+page.svelte`, `web-ui/client/tests/e2e/call-start.spec.ts`, `web-ui/server/app/domain/ai_backend_client.py`, `web-ui/server/tests/test_calls.py`, `web-ui/server/tests/test_health_settings.py`, `.planning/debug/android-call-offer-502.md`.
 

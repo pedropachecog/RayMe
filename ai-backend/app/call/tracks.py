@@ -139,12 +139,18 @@ def normalize_inbound_audio_frame(
         array = np.asarray(to_ndarray())
         samples = _coerce_to_float32(array)
         if array.ndim > 1:
-            if array.shape[0] <= 8 and array.shape[-1] > array.shape[0]:
+            layout = getattr(frame, "layout", None)
+            format_ = getattr(frame, "format", None)
+            channel_count = _frame_channel_count(layout, frame)
+            is_planar = bool(getattr(format_, "is_planar", False))
+            if is_planar and channel_count > 1 and array.shape[0] == channel_count:
                 samples = samples.mean(axis=0)
+            elif channel_count > 1:
+                samples = samples.reshape(-1).reshape(-1, channel_count).mean(axis=1)
             elif array.shape[-1] <= 8 and array.shape[0] > array.shape[-1]:
                 samples = samples.mean(axis=-1)
             else:
-                samples = samples.mean(axis=0)
+                samples = samples.reshape(-1)
         source_rate = int(getattr(frame, "sample_rate", target_sample_rate))
         if source_rate != target_sample_rate:
             samples = _resample_linear(
@@ -201,6 +207,19 @@ def _pcm_to_float32(frame: PcmAudioFrame, *, target_sample_rate: int) -> np.ndar
             target_rate=target_sample_rate,
         )
     return samples.astype(np.float32, copy=False)
+
+
+def _frame_channel_count(layout: Any, frame: Any) -> int:
+    channels = getattr(layout, "channels", None)
+    if channels is not None:
+        try:
+            count = len(channels)
+            if count > 0:
+                return count
+        except TypeError:
+            pass
+    count = int(getattr(frame, "channels", 1) or 1)
+    return max(count, 1)
 
 
 def _coerce_to_float32(array: np.ndarray) -> np.ndarray:
