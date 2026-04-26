@@ -30,6 +30,8 @@ $expectedHead = $env:EXPECTED_HEAD
 
 Set-Location $repo
 Write-Host "== OMEN deploy: repo $(Get-Location)"
+git checkout -- .
+git clean -fd
 git fetch origin $branch
 git pull --ff-only origin $branch
 $actualHead = (git rev-parse HEAD).Trim()
