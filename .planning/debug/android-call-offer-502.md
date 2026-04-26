@@ -457,3 +457,52 @@ applies a targeted fix at exactly that boundary.
 
 next_action: orchestrator presents Android reproduction steps to user; on user
 "go", read fresh background output for first-failing boundary.
+
+## ROOT CAUSE FOUND (2026-04-26)
+
+### Captured Boundary Trace (commit 70a175d, Android Chrome reproduction)
+
+| Boundary | Outcome |
+|---|---|
+| `offer.received` → `offer.answered` (5030 ms) | OK |
+| `iceconnectionstatechange: checking → completed` | OK |
+| `connectionstatechange: connecting → connected` | OK |
+| `peer.on_datachannel rayme-events readyState=open` | OK |
+| `track.recv.first_frame sample_rate=48000 samples=960` | OK |
+| `turn.started frame_count=1 sample_rate=16000 pcm_bytes=1280` | OK |
+| `vad.speech_start turn_frames=1` | **fires on frame 1** |
+| `track.recv.progress` 50,100,150,200,250,300,350 | OK (audio flows ~7 s) |
+| `vad.silence` | **NEVER** |
+| `vad.end_of_turn` | **NEVER** |
+| `stt.begin` / `stt.result` / LLM / TTS | NEVER reached |
+| User hangs up → `MediaStreamError` → cleanup | OK |
+
+### Root Cause
+
+`CallSession._accept_vad_frame` (`ai-backend/app/call/session.py:463`) has a
+real Silero VAD adapter loaded but only used the boolean "any speech ever?"
+result. `_silence_ms` was driven entirely by an RMS-energy comparator with
+threshold = `vad_threshold * 1000` = **500 RMS** for int16 audio. With browser
+audio (AGC always pumping the signal), every frame's RMS exceeds 500, so the
+energy branch keeps resetting `_silence_ms = 0`. End-of-turn condition
+(`_silence_ms >= vad_end_silence_ms`) was therefore unreachable.
+
+Effect: speech_start triggered on frame 1, the turn was held open forever, no
+STT/LLM/TTS path ever executed, UI stayed in "Listening".
+
+### Fix
+
+When a Silero-style adapter exposing `speech_timestamps` is present, derive
+`_silence_ms` from `len(buffered_samples) - last_timestamp.end` (in ms via
+adapter sampling rate) and skip the energy heuristic. Energy fallback retained
+only for the no-adapter case (mostly tests).
+
+Regression test: `test_silero_silence_gap_finalizes_turn_even_with_loud_ambient_noise`
+in `ai-backend/tests/test_call_session.py` feeds loud constant-amplitude PCM
+through a Silero-mimic adapter; turn must finalize once the silence gap exceeds
+`vad_end_silence_ms`.
+
+`uv run --project ai-backend pytest ai-backend/tests -q` → **65 passed**.
+
+next_action: deploy and ask user to reproduce; expect `vad.silence` then
+`vad.end_of_turn` then `stt.begin/result` in the next trace.

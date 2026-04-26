@@ -184,6 +184,65 @@ def test_inbound_audio_emits_user_final_after_vad_end() -> None:
     assert session.stats()["dropped_audio_frames"] == 0
 
 
+class ScriptedSileroVadAdapter:
+    """Mimics SileroVadAdapter: exposes speech_timestamps + sampling_rate."""
+
+    def __init__(
+        self,
+        *,
+        sampling_rate: int = 16000,
+        speech_end_sample: int | None = None,
+    ) -> None:
+        self.sampling_rate = sampling_rate
+        self.speech_end_sample = speech_end_sample
+        self.calls: list[int] = []
+
+    def speech_timestamps(self, audio: Any) -> list[dict[str, int]]:
+        total_samples = int(len(audio))
+        self.calls.append(total_samples)
+        if total_samples == 0:
+            return []
+        end = self.speech_end_sample if self.speech_end_sample is not None else total_samples
+        return [{"start": 0, "end": min(end, total_samples)}]
+
+
+def test_silero_silence_gap_finalizes_turn_even_with_loud_ambient_noise() -> None:
+    """Regression: with browser AGC, raw RMS energy stays high every frame.
+    Silero must drive end_of_turn from the gap between last speech and buffer end,
+    not from a raw energy comparator."""
+    sampling_rate = 16000
+    frame_samples = 320  # 20 ms at 16 kHz
+    loud_pcm = (np.full(frame_samples, 8000, dtype=np.int16)).tobytes()
+
+    speech_frames_count = 5
+    speech_end_sample = frame_samples * speech_frames_count
+    vad = ScriptedSileroVadAdapter(
+        sampling_rate=sampling_rate,
+        speech_end_sample=speech_end_sample,
+    )
+    stt = ScriptedSttAdapter()
+    session, _ = _new_session(vad_adapter=vad, stt_adapter=stt)
+
+    end_silence_ms = int(session.settings.vad_end_silence_ms)
+    silence_frames_needed = (end_silence_ms // 20) + 1
+    total_frames = speech_frames_count + silence_frames_needed
+
+    final_event: dict[str, Any] | None = None
+    for _ in range(total_frames):
+        frame = ScriptedInboundAudioFrame(loud_pcm)
+        result = _run(session.handle_inbound_audio_frame(frame))
+        if isinstance(result, dict) and result.get("type") == "user_final":
+            final_event = result
+            break
+
+    assert final_event is not None, (
+        "Silero silence gap must finalize the turn; without this fix the "
+        "energy fallback resets _silence_ms every frame so end_of_turn never fires"
+    )
+    assert final_event["type"] == "user_final"
+    assert stt.calls, "STT must run after VAD end_of_turn"
+
+
 def test_muted_inbound_audio_counts_dropped_frames_without_stt() -> None:
     vad = ScriptedVadAdapter()
     stt = ScriptedSttAdapter()

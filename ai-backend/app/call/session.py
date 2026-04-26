@@ -465,12 +465,6 @@ class CallSession:
         if adapter is not None and hasattr(adapter, "accept_audio_frame"):
             return dict(adapter.accept_audio_frame(frame.pcm))
 
-        buffered_samples = self._buffered_turn_samples()
-        if adapter is not None and hasattr(adapter, "speech_timestamps"):
-            timestamps = adapter.speech_timestamps(buffered_samples)
-            if timestamps:
-                self._speech_seen = True
-
         if len(frame.pcm) < 2 or len(frame.pcm) % 2 != 0:
             return {
                 "speech_detected": self._speech_seen or True,
@@ -478,9 +472,28 @@ class CallSession:
             }
 
         samples = np.frombuffer(frame.pcm, dtype=np.int16).astype(np.float32)
+        frame_ms = int((len(samples) / max(frame.sample_rate, 1)) * 1000)
+        end_silence_ms = int(self.settings.vad_end_silence_ms)
+
+        if adapter is not None and hasattr(adapter, "speech_timestamps"):
+            buffered_samples = self._buffered_turn_samples()
+            timestamps = list(adapter.speech_timestamps(buffered_samples))
+            sampling_rate = int(getattr(adapter, "sampling_rate", 16000)) or 16000
+            if timestamps:
+                self._speech_seen = True
+                last_end_sample = int(timestamps[-1].get("end", 0))
+                silence_samples = max(len(buffered_samples) - last_end_sample, 0)
+                self._silence_ms = int(silence_samples * 1000 / sampling_rate)
+            elif self._speech_seen:
+                self._silence_ms += frame_ms
+            return {
+                "speech_detected": self._speech_seen,
+                "end_of_turn": self._speech_seen
+                and self._silence_ms >= end_silence_ms,
+            }
+
         energy = float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
         threshold = float(self.settings.vad_threshold) * 1000.0
-        frame_ms = int((len(samples) / max(frame.sample_rate, 1)) * 1000)
 
         if energy >= threshold:
             self._speech_seen = True
@@ -491,7 +504,7 @@ class CallSession:
         return {
             "speech_detected": self._speech_seen or energy >= threshold,
             "end_of_turn": self._speech_seen
-            and self._silence_ms >= int(self.settings.vad_end_silence_ms),
+            and self._silence_ms >= end_silence_ms,
         }
 
     def _buffered_turn_samples(self) -> np.ndarray:
