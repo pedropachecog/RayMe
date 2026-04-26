@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,8 @@ from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from app.domain.thread_service import (
     CharacterUnavailableError,
@@ -210,6 +213,10 @@ class CallService:
     async def voice_reference_for_call(self, call_id: str, voice_blob_dir: Path) -> dict[str, Any]:
         call = self._active_call(call_id)
         voice = await self._required_available_voice(call.voice_id)
+        logger.info(
+            "[voice-ref] call=%s voice_id=%s voice_name=%s blob_dir=%s",
+            call_id, voice.id, voice.name, voice_blob_dir,
+        )
         result = await self.session.execute(
             select(VoiceAsset)
             .where(VoiceAsset.voice_id == voice.id, VoiceAsset.asset_kind == "sample")
@@ -217,13 +224,34 @@ class CallService:
         )
         asset = result.scalars().first()
         if asset is None:
+            logger.warning(
+                "[voice-ref] NO_ASSET_RECORD call=%s voice_id=%s — no VoiceAsset with "
+                "asset_kind='sample' for this voice",
+                call_id, voice.id,
+            )
             raise CallVoiceUnavailableError()
         storage_name = Path(asset.storage_path).name
         if storage_name != asset.storage_path:
+            logger.warning(
+                "[voice-ref] STORAGE_PATH_NOT_PLAIN call=%s voice_id=%s asset_id=%s "
+                "storage_path=%r storage_name=%r — path contains directory components",
+                call_id, voice.id, asset.id, asset.storage_path, storage_name,
+            )
             raise CallVoiceUnavailableError()
         sample_path = voice_blob_dir / storage_name
         if not sample_path.is_file():
+            logger.warning(
+                "[voice-ref] FILE_MISSING call=%s voice_id=%s asset_id=%s "
+                "expected_path=%s blob_dir_exists=%s blob_dir_contents=%s",
+                call_id, voice.id, asset.id, sample_path,
+                voice_blob_dir.is_dir(),
+                list(voice_blob_dir.iterdir()) if voice_blob_dir.is_dir() else "N/A",
+            )
             raise CallVoiceUnavailableError()
+        logger.info(
+            "[voice-ref] OK call=%s voice_id=%s asset_id=%s file_size=%d",
+            call_id, voice.id, asset.id, sample_path.stat().st_size,
+        )
         return {
             "reference_audio_base64": base64.b64encode(sample_path.read_bytes()).decode("ascii"),
             "reference_audio_content_type": asset.content_type,

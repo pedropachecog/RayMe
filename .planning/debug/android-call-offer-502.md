@@ -1,8 +1,8 @@
 ---
-status: fixing
+status: investigating
 trigger: "Android Chrome Phase 3 live call: microphone permission is granted and Android shows mic listening, then the RayMe call UI still fails or becomes unusable."
 created: 2026-04-25T23:36:09Z
-updated: 2026-04-26T21:30:00Z
+updated: 2026-04-26T22:00:00Z
 ---
 
 # Debug Session: Android Call Offer 502
@@ -27,37 +27,40 @@ updated: 2026-04-26T21:30:00Z
 
 ## Current Focus
 
-- status: fixing — root cause of "stuck in listening after 2 turns" confirmed
-  from 2026-04-26 live trace.
+- status: investigating — tracing voice blob pipeline to find why
+  `voice_reference_for_call()` fails on OMEN despite Voice Lab uploads working.
 
-- reasoning_checkpoint (stuck-after-2-turns):
-    hypothesis: "handleTurnStreamEvent() receives type=error from the /turns SSE
-      (emitted by _voice_unavailable_events when voice_reference_for_call throws).
-      It sets callState='listening' but never calls appendCallNotice — so the user
-      sees no feedback. The call stays alive, the VAD 5s timer fires again on the
-      next silence window, another user_final arrives, another /turns call gets the
-      same type=error, and the cycle repeats. The user is permanently in 'listening'
-      with no indication that voice is unavailable."
+- reasoning_checkpoint (voice-blob-missing):
+    hypothesis: "voice_reference_for_call() in call_service.py:210-231 has three
+      failure points, all raising the same CallVoiceUnavailableError. The call
+      path on OMEN hits one of them. Need to determine which: (1) no VoiceAsset
+      record with asset_kind='sample' for the voice, (2) storage_path check fails,
+      or (3) file not found on disk at voice_blob_dir/storage_name."
     confirming_evidence:
-      - "web-ui err log: voice_reference.unavailable fires for BOTH /turns calls"
-      - "web-ui out log: both POST .../turns 200 OK — SSE error reaches browser"
-      - "handleTurnStreamEvent line 689-691: type=error -> callState='listening' only,
-        no appendCallNotice call"
-      - "ai-backend log: turn.started / stt.result / event.sent for turn-1 and
-        turn-2 both complete correctly — backend is fine; failure is in web-ui turn handler"
-    falsification_test: "after fix, the transcript must show 'Speech playback failed:
-      voice audio unavailable.' as a call notice entry after each failing turn; the
-      UI must NOT silently stay in listening"
-    fix_rationale: "handleTurnStreamEvent must call appendCallNotice with the error
-      message when type=error so the user sees 'voice unavailable' in the transcript
-      and can act (Choose Voice). callState='listening' is correct — the call stays
-      alive for retry after voice upload."
-    blind_spots: "The VAD max_turn_ms=5000 forcing end_of_turn when user pauses is
-      a contributing nuisance that will keep retrying; fixing the notice visibility
-      is the necessary first step"
+      - "voice_reference_for_call() logs 'voice_reference.unavailable' for both
+        turns on OMEN (commit 82dfbd8)"
+      - "Voice Lab upload works (user confirmed) — blob is stored somewhere"
+      - "voice_reference_for_call() reads from voice_blob_dir = SERVER_ROOT /
+        'data' / 'blobs' / 'voices' which is the same DEFAULT_VOICE_BLOB_DIR
+        used by the Voice Lab upload endpoint"
+      - "The VoiceAsset lookup uses VoiceAsset.voice_id == voice.id and
+        VoiceAsset.asset_kind == 'sample' — same query as VoiceService.asset_for_voice()"
+      - "VoiceService.save_voice() sets asset.voice_id = voice.id when saving
+        a voice from an uploaded asset — this is the ONLY path that links an
+        asset to a voice"
+    falsification_test: "If the character's default_voice_id points to a Voice
+      that has no VoiceAsset with asset_kind='sample', or if the VoiceAsset's
+      storage_path file does not exist on OMEN disk, the hypothesis is confirmed"
+    fix_rationale: "Once the exact failure point is identified (wrong voice_id,
+      missing asset record, or missing file), the fix will be targeted to that
+      specific gap in the pipeline"
+    blind_spots: "Cannot SSH to OMEN from this environment to inspect the actual
+      database or filesystem — need to add diagnostic logging that survives
+      deployment so the exact failure point is visible in OMEN logs"
 
-- next_action: fix handleTurnStreamEvent in +page.svelte to call appendCallNotice
-  on type=error, add regression test, deploy.
+- next_action: Add structured diagnostic logging to voice_reference_for_call()
+  so each of the three failure points logs a distinct message. Deploy and have
+  user reproduce. The OMEN logs will show exactly which check fails.
 
 ## Evidence
 
@@ -807,3 +810,86 @@ File: `web-ui/server/app/api/calls.py` — `create_call_turn` SSE `events()` gen
 
 next_action: ask user to reproduce on Android Chrome; expected outcome is
 audible AI speech for the first time since the voice blob was re-uploaded.
+
+## FOLLOW-UP ROOT CAUSE FOUND (2026-04-26, post-MediaStreamError fix)
+
+### Captured Boundary Trace (commit 58e0a96, Android Chrome reproduction)
+
+| Boundary | Outcome |
+|---|---|
+| OMEN deployed HEAD | `58e0a96` |
+| `vad.speech_start` / `vad.end_of_turn` / `stt.result` | OK (turns 1 and 2) |
+| `event.sent type=user_final readyState=open` | OK (turns 1 and 2) |
+| Browser `datachannel.message event_type=user_final` | OK (turns 1 and 2) |
+| `POST .../turns` | 200 OK (SSE stream with `type=error`) |
+| Browser receives SSE `type=error code=call_tts_failed` | OK |
+| UI shows error notice in transcript | NEVER |
+| UI stays in `listening` indefinitely | SYMPTOM |
+| `voice_reference.unavailable` | fires for BOTH turns |
+
+### Root Cause
+
+`handleTurnStreamEvent()` handled `type=error` from the `/turns` SSE by
+setting `callState = 'listening'` but never calling `appendCallNotice`.
+The error message was silently discarded. The call stayed alive with no
+user feedback. The VAD 5 s max-turn timer fired again, another
+`user_final` was submitted, the same `voice_reference.unavailable` error
+recurred — an infinite silent loop.
+
+### Fix
+
+Call `appendCallNotice(messageForCallFailure(code, message), turn_id)` in
+`handleTurnStreamEvent` when `event.type === 'error'`, so the error text
+appears in the transcript. Also added `installCallDebugEventRoute` helper
+to e2e test harness so the browser's `/_debug/event` diagnostics POSTs are
+mocked in all call tests.
+
+Regression test:
+`web-ui/client/tests/e2e/call-start.spec.ts::shows a call notice in the
+transcript when /turns returns a type=error SSE event`
+
+Verification:
+- `npm --prefix web-ui/client run check` — passed
+- `npm --prefix web-ui/client run test:e2e -- tests/e2e/call-start.spec.ts --project=desktop-chromium --workers=1` — **5 passed**
+- `uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py web-ui/server/tests/test_health_settings.py -q` — **44 passed**
+
+Deploy: `82dfbd8` — `OMEN deploy complete: 82dfbd80478ec29fbeadd4dafc1eb6ebc97ecc88`
+
+## BLOCKING DISCOVERY (2026-04-26) — Voice Blob Missing On OMEN, No Upload Path Outside Voice Lab
+
+### Discovery
+
+OMEN is missing the voice reference audio blob required for TTS during calls.
+The error `voice_reference.unavailable` fires on every `/turns` call.
+
+**Critical constraint confirmed by product owner:**
+> There is no settings page or character settings UI to upload voice reference
+> audio blobs. The only upload path is the **Voice Lab**.
+
+The user re-uploaded a voice in the Voice Lab and verified it works there. However
+the call path still gets `voice_reference.unavailable`, which means one of:
+
+1. The Voice Lab upload writes the blob to a different location or database record
+   than what `voice_reference_for_call()` reads at call time.
+2. The blob IS written correctly but the call path looks up the wrong voice ID
+   (e.g. the character's assigned voice ID does not match the newly uploaded blob's ID).
+3. The Voice Lab upload endpoint stores the blob on the local dev machine (not OMEN)
+   because dev machine ran the upload, not OMEN.
+
+### Next Investigation Required
+
+Before any further call testing is possible, the voice blob pipeline must be traced:
+
+- What does the Voice Lab upload endpoint write to disk, and where?
+- What does `voice_reference_for_call()` read, and from where?
+- Does the character's assigned voice ID match the uploaded blob's ID?
+- Is the Voice Lab upload routed through OMEN (https://192.168.1.199:8443) or local dev?
+
+Until `voice_reference.unavailable` stops firing, TTS will never succeed and the
+call cannot be end-to-end tested.
+
+### Status
+
+Blocked on voice blob pipeline investigation. All other call path fixes
+(VAD, ICE, data channel, MediaStreamError, SSE error visibility) are believed
+complete based on logs showing correct operation through `stt.result`.
