@@ -388,15 +388,17 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
     if not hasattr(peer_connection, "on"):
         return
 
+    keepalive_task: asyncio.Task | None = None
+
     @peer_connection.on("datachannel")
     def on_datachannel(channel: Any) -> None:
+        nonlocal keepalive_task
         label = getattr(channel, "label", None)
         ready = getattr(channel, "readyState", "?")
         logger.info(
             "[rayme-call] peer.on_datachannel session=%s label=%s readyState=%s",
             session.session_id,
             label,
-            ready,
         )
         if label == RAYME_EVENTS_CHANNEL:
             session.data_channel = channel
@@ -408,9 +410,17 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
                         session.session_id,
                         label,
                     )
+                    nonlocal keepalive_task
+                    keepalive_task = asyncio.create_task(
+                        _data_channel_keepalive(session, channel)
+                    )
 
                 @channel.on("close")
                 def on_dc_close() -> None:
+                    nonlocal keepalive_task
+                    if keepalive_task is not None:
+                        keepalive_task.cancel()
+                        keepalive_task = None
                     logger.info(
                         "[rayme-call] datachannel.close session=%s label=%s",
                         session.session_id,
@@ -557,6 +567,28 @@ async def _receive_audio_track(session: CallSession, track: Any) -> None:
         frame_count,
         session.state,
     )
+
+
+async def _data_channel_keepalive(session: CallSession, channel: Any) -> None:
+    send = getattr(channel, "send", None)
+    if not callable(send):
+        return
+
+    interval = 4.0
+
+    try:
+        while True:
+            await asyncio.sleep(interval)
+            if getattr(channel, "readyState", "closed") != "open":
+                break
+            if session.state in {"ended", "failed"}:
+                break
+            try:
+                send('{"type":"ping"}')
+            except Exception:
+                break
+    except asyncio.CancelledError:
+        return
 
 
 async def _negotiate_answer(

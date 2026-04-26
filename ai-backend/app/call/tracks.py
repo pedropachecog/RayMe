@@ -87,8 +87,12 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
     async def _next_samples(self) -> np.ndarray:
         while self._buffer.size < self.frame_samples and self.readyState != "ended":
             try:
-                chunk = await asyncio.wait_for(self._queue.get(), timeout=self.frame_samples / self.sample_rate)
+                chunk = await asyncio.wait_for(
+                    self._queue.get(), timeout=self.frame_samples / self.sample_rate
+                )
             except asyncio.TimeoutError:
+                break
+            except asyncio.CancelledError:
                 break
             if chunk is None:
                 break
