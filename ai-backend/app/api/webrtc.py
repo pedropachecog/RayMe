@@ -587,7 +587,7 @@ async def _data_channel_keepalive(session: CallSession, channel: Any) -> None:
     if not callable(send):
         return
 
-    interval = 4.0
+    interval = 1.0
 
     try:
         while True:

@@ -108,6 +108,13 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
         if self._buffer.size:
             samples[: self._buffer.size] = self._buffer
             self._buffer = np.asarray([], dtype=np.int16)
+        else:
+            # Silence frame — add tiny jitter so Opus DTX does not suppress
+            # the frame entirely. Without any packet flow during the
+            # STT+LLM+TTS processing gap, ICE times out on the remote side
+            # (especially Android Chrome) and the connection fails before
+            # TTS audio arrives.
+            samples[:] = np.random.randint(-4, 4, size=self.frame_samples, dtype=np.int16)
         return samples
 
 

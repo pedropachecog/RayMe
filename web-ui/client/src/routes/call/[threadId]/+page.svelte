@@ -358,6 +358,23 @@
         bytes: typeof message.data === 'string' ? message.data.length : -1,
         event_type: event?.type ?? 'unparseable'
       });
+      // Respond to backend keepalive pings to maintain bidirectional
+      // packet flow and prevent ICE timeout during processing gaps.
+      if (event?.type === 'ping') {
+        try {
+          channel.send(JSON.stringify({ type: 'pong' }));
+        } catch {
+          // Ping response failure is non-actionable.
+        }
+        return;
+      }
+      // Backend may send ai_audio_started / ai_done via data channel
+      // when the WebRTC connection is still alive even if the /turns SSE
+      // stream has not yet delivered them. Handle them here as a fallback.
+      if (event?.type === 'ai_audio_started' || event?.type === 'ai_done') {
+        void handleCallDataEvent(event);
+        return;
+      }
       if (event) {
         void handleCallDataEvent(event);
       }

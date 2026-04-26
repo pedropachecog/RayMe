@@ -2,7 +2,7 @@
 status: investigating
 trigger: "Android Chrome Phase 3 live call: microphone permission is granted and Android shows mic listening, then the RayMe call UI still fails or becomes unusable."
 created: 2026-04-25T23:36:09Z
-updated: 2026-04-26T23:30:00Z
+updated: 2026-04-26T23:55:00Z
 ---
 
 # Debug Session: Android Call Offer 502
@@ -27,11 +27,20 @@ updated: 2026-04-26T23:30:00Z
 
 ## Current Focus
 
-- status: fixing — root cause confirmed: `scripts/deploy-omen.sh` runs
-  `git clean -fd` which deletes the `web-ui/server/data/blobs/` directory
-  (including all voice sample WAV files) on every deploy. The `.gitignore`
-  protects `*.sqlite3` and `*.sqlite3-*` but not the `blobs/` subdirectory.
-  VoiceAsset records survive in the database; the actual blob files are destroyed.
+- status: awaiting_human_verify — AudioContext fix deployed. Waiting for user to test on Android Chrome.
+
+- last_fix: AudioContext-based remote audio playback (commit `c6e9820`)
+  - Replaced `<Audio>` element with `MediaStreamAudioSourceNode -> AnalyserNode -> AudioContext.destination`
+  - Added remote audio metering (`speakingRms`) via AnalyserNode
+  - Added track event logging (ended, mute) for debugging
+  - Added connection failure logging with audio state
+  - Fallback to `<Audio>` element if AudioContext unavailable
+
+- next_action: User tests on Android Chrome at https://192.168.1.199:8443.
+  If audio is heard, confirm fixed. If not, pull OMEN logs to check for:
+  (a) `speakingRms` values (should be > 0.04 during TTS playback)
+  (b) `remote_audio.play.ok` with `method=AudioContext`
+  (c) ICE/connection state timing relative to TTS enqueue
 
 - reasoning_checkpoint (blob-dir-wiped-by-deploy):
     hypothesis: "scripts/deploy-omen.sh runs 'git clean -fd' which deletes the
@@ -1072,4 +1081,104 @@ audio routing (communications mode, speaker vs earpiece, volume) makes it inaudi
       transitions to 'failed', the audio may stop before being audible"
     - "If the F5 TTS output is silent or inaudible (e.g., wrong voice, codec issue),
       the playback method doesn't matter"
+
+---
+
+## 2026-04-26T23:55:00Z — New Symptom: No audio, no error, "speaking" for a few seconds then nothing
+
+### New User-Visible Symptom
+
+User reports on Android Chrome: UI says "speaking" for a few seconds but nothing plays. No error shown.
+
+### Captured Boundary Trace (commit c6e9820, Android Chrome reproduction)
+
+| Boundary | Outcome |
+|---|---|
+| OMEN deployed HEAD | `c6e9820` (AudioContext remote playback) |
+| Android client | `192.168.1.253` |
+| Voice blob | OK (`voice_6d6d48ec89534ec1a9567ba971a5772e`, 266606 bytes) |
+| `/api/calls/start` | 201 Created |
+| `/api/calls/{id}/offer` | 200 OK |
+| WebRTC negotiation | OK (ICE completed, connected) |
+| Data channel | OK (opened, messages flowing) |
+| Inbound audio | OK (frames flowing, VAD works) |
+| VAD (turn 1) | OK (speech_start frame 37, end_of_turn frame 195, silence 702ms) |
+| STT | OK (transcript_len=47, language=en) |
+| `user_final` via data channel | OK (readyState=open) |
+| Browser received `user_final` | OK |
+| `/turns` SSE | 200 OK (LLM + TTS processing) |
+| Browser ICE | **disconnected -> connected -> disconnected -> failed** (multiple cycles) |
+| Browser `speakingRms` | **0.04** (floor value — NO audio data) |
+| Browser `remoteAudioElementPlaying` | **false** |
+| Backend inbound track | MediaStreamError at frame 610 (caused by browser ICE disconnect) |
+| Backend data channel | **closed** (before TTS events) |
+| Backend TTS | **wav_bytes=1061900** (enqueued AFTER connection closed) |
+| Backend events | **all skipped** (`ai_audio_started`, `ai_done`, `ended` — `readyState=closed`) |
+| Audio audible on Android | **NO** |
+
+### Root Cause Analysis
+
+The browser's WebRTC ICE disconnected during the processing gap (STT + LLM + TTS).
+This caused a cascade:
+
+1. Browser ICE disconnected (no enough bidirectional packet flow during processing)
+2. Backend inbound track raised MediaStreamError (browser stopped sending audio)
+3. Backend data channel closed (connection state changed to closed)
+4. TTS completed (1.06 MB WAV) but enqueued to a dead connection
+5. All data channel events (`ai_audio_started`, `ai_done`, `ended`) skipped
+6. Browser `speakingRms=0.04` (floor value) — no audio data ever arrived
+7. Browser `remoteAudioElementPlaying=false` — track was muted or ended
+
+**Why ICE disconnected:**
+- The outbound `QueuedAudioOutputTrack` sends silence frames during the processing gap
+- Opus DTX (Discontinuous Transmission) suppresses consecutive silence frames
+- No actual packets flow over the media channel during processing
+- Data channel keepalive (every 4s) provides intermittent reconnection but not enough
+- Android Chrome's ICE timeout fires, connection fails
+
+**Why `speakingRms=0.04`:**
+- The remote audio track never received actual audio data (connection was dead)
+- The AnalyserNode reads silence, `Math.max(0.04, ...)` floors at 0.04
+
+### Fix Direction
+
+1. **Reduce data channel keepalive interval** from 4s to 1s to prevent ICE timeout
+2. **Add jitter to silence frames** so Opus DTX does not suppress them entirely
+3. **Browser responds to keepalive pings** for bidirectional packet flow
+4. **Recreate data channel on ICE reconnect** (already partially implemented, verify)
+
+### reasoning_checkpoint (ICE timeout during processing gap)
+    hypothesis: "The browser's WebRTC ICE connection times out during the
+      STT+LLM+TTS processing gap because no bidirectional packet flow occurs.
+      Opus DTX suppresses silence frames from the outbound track, and the
+      data channel keepalive (every 4s) is not frequent enough to prevent
+      Android Chrome's ICE timeout. The connection fails before TTS audio
+      arrives, resulting in speakingRms=0.04 (floor value) and no audible audio."
+    confirming_evidence:
+      - "Browser logs show ICE flapping: connected -> disconnected -> connected
+        -> disconnected -> failed (multiple cycles during processing)"
+      - "speakingRms=0.04 (floor value) confirms no audio data reached the
+        browser AnalyserNode"
+      - "Backend logs show data channel closed (readyState=closed) before TTS
+        events (ai_audio_started, ai_done, ended) were sent"
+      - "TTS enqueued 1.06 MB WAV but all events were skipped due to closed
+        data channel"
+      - "Backend inbound track ended at frame 610 (MediaStreamError) caused by
+        browser ICE disconnect"
+    falsification_test: "If the fix (jittered silence frames + faster keepalive
+      + ping response) is deployed and the browser ICE stays connected during
+      the processing gap, then TTS audio will arrive and the user will hear
+      audio. If speakingRms remains 0.04, the hypothesis is wrong."
+    fix_rationale: "Adding tiny jitter to silence frames prevents Opus DTX from
+      suppressing them, ensuring continuous packet flow over the media channel.
+      Reducing keepalive interval from 4s to 1s provides more frequent data
+      channel packets. Responding to pings creates bidirectional flow. Together,
+      these prevent ICE timeout during the processing gap."
+    blind_spots:
+      - "If the ICE timeout is caused by something other than lack of packet
+        flow (e.g., NAT binding expiry, firewall), jitter won't help"
+      - "If Android Chrome has a shorter ICE timeout than the default, even 1s
+        keepalive may not be enough"
+      - "If the data channel close is caused by the DTLS connection closing
+        (not just ICE), the keepalive won't help"
 
