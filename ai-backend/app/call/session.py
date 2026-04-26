@@ -488,9 +488,57 @@ class CallSession:
         frame_ms = int((len(samples) / max(frame.sample_rate, 1)) * 1000)
         end_silence_ms = int(self.settings.vad_end_silence_ms)
 
+        # DIAG: log per-frame energy for first frame + frame 10
+        frame_idx = len(self._turn_frames)
+        rms = float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
+        peak = float(np.max(np.abs(samples))) if samples.size else 0.0
+        if frame_idx == 1 or frame_idx == 10:
+            logger.info(
+                "[rayme-call] vad.diag session=%s frame=%d samples=%d "
+                "rms=%.1f peak=%.1f",
+                self.session_id,
+                frame_idx,
+                len(samples),
+                rms,
+                peak,
+            )
+
         if adapter is not None and hasattr(adapter, "speech_timestamps"):
             buffered_samples = self._buffered_turn_samples()
+            buf_rms = float(np.sqrt(np.mean(np.square(buffered_samples)))) if buffered_samples.size else 0.0
+            buf_peak = float(np.max(np.abs(buffered_samples))) if buffered_samples.size else 0.0
+
+            if frame_idx == 10:
+                logger.info(
+                    "[rayme-call] vad.bufdiag session=%s buf_samples=%d "
+                    "buf_rms=%.4f buf_peak=%.4f dur_ms=%d",
+                    self.session_id,
+                    len(buffered_samples),
+                    buf_rms,
+                    buf_peak,
+                    int(len(buffered_samples) * 1000 / max(
+                        getattr(adapter, "sampling_rate", 16000), 1
+                    )),
+                )
+
             timestamps = list(adapter.speech_timestamps(buffered_samples))
+            if frame_idx == 10:
+                logger.info(
+                    "[rayme-call] vad.silero session=%s ts_count=%d "
+                    "threshold=%.2f sr=%d",
+                    self.session_id,
+                    len(timestamps),
+                    adapter.threshold,
+                    adapter.sampling_rate,
+                )
+                if timestamps:
+                    logger.info(
+                        "[rayme-call] vad.silero.first session=%s "
+                        "start=%s end=%s",
+                        self.session_id,
+                        timestamps[0].get("start", "?"),
+                        timestamps[0].get("end", "?"),
+                    )
             sampling_rate = int(getattr(adapter, "sampling_rate", 16000)) or 16000
             if timestamps:
                 self._speech_seen = True
