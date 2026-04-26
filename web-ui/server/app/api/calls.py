@@ -303,11 +303,24 @@ async def create_call_turn(
             voice_reference = await service.voice_reference_for_call(call_id, voice_blob_dir)
         except CallServiceError as exc:
             logger.warning(
-                "[call-turn] voice_reference.unavailable call=%s err=%s — proceeding without reference audio",
+                "[call-turn] voice_reference.unavailable call=%s err=%s — aborting turn",
                 call_id,
                 exc.message,
             )
-            voice_reference = {}
+
+            async def _voice_unavailable_events() -> AsyncIterator[str]:
+                yield _sse(
+                    {
+                        "type": "error",
+                        "turn_id": payload.turn_id,
+                        "code": "call_tts_failed",
+                        "message": "Speech playback failed: voice audio unavailable.",
+                    }
+                )
+
+            return StreamingResponse(
+                _voice_unavailable_events(), media_type="text/event-stream"
+            )
         endpoint_settings = await SettingsService(session, runtime_settings).read()
     except CallServiceError as exc:
         raise _call_error(exc) from exc

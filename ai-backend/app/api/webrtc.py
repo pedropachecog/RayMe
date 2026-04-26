@@ -321,7 +321,7 @@ def _vad_adapter(request: Request) -> Any:
         request,
         settings,
         settings.vad_threshold,
-        settings.vad_end_silence_ms,
+        settings.vad_silero_min_silence_ms,
     )
 
 
