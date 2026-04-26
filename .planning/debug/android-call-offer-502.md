@@ -1,5 +1,5 @@
 ---
-status: investigating
+status: awaiting_human_verify
 trigger: "Android Chrome Phase 3 live call: microphone permission is granted and Android shows mic listening, then the RayMe call UI still fails or becomes unusable."
 created: 2026-04-25T23:36:09Z
 updated: 2026-04-26T23:55:00Z
@@ -27,57 +27,15 @@ updated: 2026-04-26T23:55:00Z
 
 ## Current Focus
 
-- status: awaiting_human_verify — AudioContext fix deployed. Waiting for user to test on Android Chrome.
+- status: investigating — ICE timeout fix (commit `c0dbb34`) deployed and tested. User reports no improvement. OMEN logs pulled and analyzed.
 
-- last_fix: AudioContext-based remote audio playback (commit `c6e9820`)
-  - Replaced `<Audio>` element with `MediaStreamAudioSourceNode -> AnalyserNode -> AudioContext.destination`
-  - Added remote audio metering (`speakingRms`) via AnalyserNode
-  - Added track event logging (ended, mute) for debugging
-  - Added connection failure logging with audio state
-  - Fallback to `<Audio>` element if AudioContext unavailable
+- last_fix: ICE timeout prevention during STT+LLM+TTS processing gap (commit `c0dbb34`)
+  - Added tiny jitter to silence frames in `QueuedAudioOutputTrack._next_samples()` so Opus DTX does not suppress them
+  - Reduced data channel keepalive interval from 4s to 1s
+  - Browser responds to backend ping events for bidirectional packet flow
+  - Browser handles `ai_audio_started`/`ai_done` via data channel as fallback (in case SSE stream is slow)
 
-- next_action: User tests on Android Chrome at https://192.168.1.199:8443.
-  If audio is heard, confirm fixed. If not, pull OMEN logs to check for:
-  (a) `speakingRms` values (should be > 0.04 during TTS playback)
-  (b) `remote_audio.play.ok` with `method=AudioContext`
-  (c) ICE/connection state timing relative to TTS enqueue
-
-- reasoning_checkpoint (blob-dir-wiped-by-deploy):
-    hypothesis: "scripts/deploy-omen.sh runs 'git clean -fd' which deletes the
-      entire web-ui/server/data/blobs/ directory on every deploy because it is
-      not listed in .gitignore. Voice sample blobs are written to this directory
-      by the Voice Lab upload endpoint, but are destroyed the next time the
-      deploy script runs."
-    confirming_evidence:
-      - "OMEN logs show [voice-ref] FILE_MISSING with blob_dir_exists=False —
-        the directory C:\Users\pmpg\rayme\RayMe\web-ui\server\data\blobs\voices
-        does not exist on OMEN"
-      - "OMEN filesystem check confirmed: no blobs/ directory exists under
-        web-ui/server/data/ — only rayme.sqlite3"
-      - "OMEN database contains 34 VoiceAsset records with storage_path values
-        like 'voice_asset_0b989ed2aa2c42a4b28820124ee04f84.wav' — the records
-        exist but the files are gone"
-      - "scripts/deploy-omen.sh lines 33-34: 'git checkout -- .' and 'git clean
-        -fd' — this removes all untracked files and directories"
-      - ".gitignore only has 'web-ui/server/data/*.sqlite3' and
-        'web-ui/server/data/*.sqlite3-*' — no entry for blobs/"
-      - "No voice upload POST requests found in OMEN web-ui logs — the Voice
-        Lab was used on a previous deploy, blobs were written, then a subsequent
-        deploy wiped them"
-    falsification_test: "If the blobs/ directory existed on OMEN (e.g., after
-      adding the gitignore entry and re-uploading), voice_reference_for_call()
-      would find the files and return OK instead of FILE_MISSING"
-    fix_rationale: "Adding 'web-ui/server/data/blobs/' to .gitignore prevents
-      git clean from deleting the blobs directory. The VoiceAsset records and
-      the actual blob files will both survive deploys."
-    blind_spots: "If the user uploaded the voice on a local dev machine (not
-      OMEN), the blob would only exist locally. However, the VoiceAsset record
-      for voice_8b509ef848794ada9d5d141262d924d2 was created on 2026-04-26
-      19:50:24 which matches OMEN timestamps — the voice was uploaded to OMEN,
-      then a subsequent deploy wiped the blob."
-
-- next_action: Add blobs/ to .gitignore, commit, deploy, ask user to re-upload
-  voice on OMEN, then test a call.
+- next_action: Fix the ICE timeout with stronger measures — see reasoning_checkpoint below.
 
 ## BLOCKING DISCOVERY UPDATE (2026-04-26) — Voice Blob Pipeline Analysis
 
@@ -1175,10 +1133,109 @@ This caused a cascade:
       channel packets. Responding to pings creates bidirectional flow. Together,
       these prevent ICE timeout during the processing gap."
     blind_spots:
-      - "If the ICE timeout is caused by something other than lack of packet
-        flow (e.g., NAT binding expiry, firewall), jitter won't help"
-      - "If Android Chrome has a shorter ICE timeout than the default, even 1s
-        keepalive may not be enough"
-      - "If the data channel close is caused by the DTLS connection closing
-        (not just ICE), the keepalive won't help"
+    - "If the ICE timeout is caused by something other than lack of packet
+      flow (e.g., NAT binding expiry, firewall), jitter won't help"
+    - "If Android Chrome has a shorter ICE timeout than the default, even 1s
+      keepalive may not be enough"
+    - "If the data channel close is caused by the DTLS connection closing
+      (not just ICE), the keepalive won't help"
+
+---
+
+## 2026-04-26T23:55:00Z — ICE Fix (c0dbb34) Did NOT Work
+
+### New User-Visible Symptom
+
+User reports on Android Chrome: UI says "speaking" for a few seconds but nothing plays. No error shown.
+
+### Captured Boundary Trace (commit c0dbb34, Android Chrome reproduction)
+
+| Boundary | Outcome |
+|---|---|
+| OMEN deployed HEAD | `c0dbb34` |
+| Android client | `192.168.1.253` |
+| `/api/calls/start` | 201 Created |
+| `/api/calls/{id}/offer` | 200 OK |
+| WebRTC negotiation | OK (ICE completed, connected) |
+| Data channel | OK (opened, messages flowing) |
+| Inbound audio | OK (frames flowing, VAD works) |
+| VAD (turn 1) | OK (speech_start frame 82, end_of_turn frame 247, silence 718ms) |
+| STT | OK (transcript_len=46, language=en) |
+| `user_final` via data channel | OK (readyState=open) |
+| Browser received `user_final` | OK |
+| `/turns` SSE | 200 OK (LLM + TTS processing) |
+| Browser ICE | **disconnected -> failed** (immediately after connected) |
+| Browser `speakingRms` | **0.04** (floor value — NO audio data) |
+| Browser `remoteAudioElementPlaying` | **false** |
+| Backend inbound track | MediaStreamError at frame 665 (ice=completed, conn=connected) |
+| Backend data channel | **closed** (before TTS events) |
+| Backend TTS | **wav_bytes=1271308** (enqueued AFTER connection closed) |
+| Backend events | **all skipped** (`ai_audio_started`, `ai_done`, `ended` — `readyState=closed`) |
+| Audio audible on Android | **NO** |
+
+### Root Cause Analysis
+
+The ICE timeout fix from commit `c0dbb34` did NOT work. The same cascade occurred:
+
+1. Browser ICE connected, then immediately disconnected during processing gap
+2. Backend inbound track ended (MediaStreamError, but outbound kept alive)
+3. Backend data channel closed before TTS events could be sent
+4. TTS synthesized 1.27 MB WAV but all events skipped (readyState=closed)
+5. Browser `speakingRms=0.04` (floor) — no audio data ever arrived
+
+**Why the jitter fix failed:** The jitter values (`np.random.randint(-4, 4)`) are approximately -0.00009 of full scale. This is likely still below the Opus encoder's internal silence detection threshold, meaning DTX continues to suppress the frames. Additionally, the data channel keepalive (every 1s) may not be frequent enough to prevent Android Chrome's ICE timeout.
+
+### Key Evidence from Logs
+
+**Browser-side (web-ui stderr):**
+- `iceConnectionState: disconnected` -> `connectionState: disconnected` -> `connectionState: failed`
+- `speakingRms: 0.04` (floor value) — confirms NO audio data reached the browser
+- `remoteAudioElementPlaying: false` — track was muted or ended
+- `datachannel.close` — data channel closed before TTS events
+
+**Backend-side (ai-backend stderr):**
+- `track.recv.error frames=665 exc=MediaStreamError ice=completed conn=connected` — inbound ended gracefully
+- `datachannel.close` — data channel closed
+- `tts.enqueue wav_bytes=1271308` — TTS succeeded but too late
+- `event.skip_channel_not_open` for `ai_audio_started`, `ai_done`, `ended` — all skipped
+
+### reasoning_checkpoint (Stronger ICE keepalive measures)
+
+  hypothesis: "The browser's WebRTC ICE connection times out during the
+    STT+LLM+TTS processing gap because the current jitter (-4 to +4 int16,
+    approximately -0.00009 of full scale) is still below the Opus encoder's
+    internal silence detection threshold. DTX continues to suppress the frames,
+    and the 1s data channel keepalive is not frequent enough to prevent
+    Android Chrome's ICE timeout."
+
+  confirming_evidence:
+    - "OMEN logs show the exact same cascade as before the fix: ICE connected
+      -> disconnected -> failed, speakingRms=0.04, data channel closed,
+      TTS events skipped"
+    - "The jitter range (-4 to +4) is extremely small relative to int16 max
+      (32767). Opus DTX has a comfort noise floor that may be higher"
+    - "Android Chrome's ICE timeout (typically 10-15s) requires continuous
+      packet flow; the processing gap (STT + LLM + TTS) can take 20-30s"
+    - "The data channel keepalive interval (1s) should be sufficient if
+      packets are actually flowing, but the media channel is the primary
+      ICE keepalive mechanism"
+
+  falsification_test: "If increasing the jitter to a level that Opus DTX
+    cannot suppress (e.g., -100 to +100 int16, approximately -0.003 of
+    full scale) and the ICE still times out, then the hypothesis is wrong
+    and the issue is with the data channel keepalive or Android Chrome's
+    ICE implementation"
+
+  fix_rationale: "Increasing the jitter amplitude ensures the Opus encoder
+    treats the frames as non-silence and sends actual packets over the media
+    channel. This provides continuous bidirectional packet flow that keeps
+    the ICE connection alive during the processing gap."
+
+  blind_spots:
+    - "If the ICE timeout is caused by something other than lack of packet
+      flow (e.g., NAT binding expiry, firewall), jitter won't help"
+    - "If Android Chrome's ICE timeout is shorter than the processing gap,
+      even continuous packet flow may not be enough"
+    - "If the data channel close is caused by the DTLS connection closing
+      (not just ICE), the keepalive won't help"
 
