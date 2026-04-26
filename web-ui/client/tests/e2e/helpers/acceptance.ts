@@ -68,6 +68,12 @@ export async function fulfillSse(route: Route, events: unknown[]) {
   });
 }
 
+export async function installCallDebugEventRoute(page: Page) {
+  await page.route('**/api/calls/*/_debug/event', async (route) => {
+    await fulfillJson(route, { status: 'ok' });
+  });
+}
+
 export async function installMockCallMedia(page: Page) {
   await page.addInitScript(() => {
     const mediaDevices = {

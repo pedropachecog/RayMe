@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Route } from '@playwright/test';
 
-import { fulfillJson, installBrowserErrorGuard, installMockCallMedia } from './helpers/acceptance';
+import { fulfillJson, installBrowserErrorGuard, installCallDebugEventRoute, installMockCallMedia } from './helpers/acceptance';
 import { makeCharacter, makeThreadDetail } from './helpers/fixtures';
 
 const characterId = 'call-start-character';
@@ -79,7 +79,91 @@ test('streams two user to AI cycles in one call and reaches the ended state', as
   assertNoBrowserErrors();
 });
 
+test('shows a call notice in the transcript when /turns returns a type=error SSE event', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  await installTurnErrorCallRoutes(page);
+
+  await page.goto(`/chat/${threadId}`);
+  await page.getByRole('button', { name: 'Start call' }).click();
+
+  // User transcript entry appears (user_final delivered via start events)
+  await expect(page.getByText('Hello there.')).toBeVisible();
+
+  // Error notice appears in the transcript — not a blocking panel
+  await expect(page.getByText('Speech playback failed: voice audio unavailable.')).toBeVisible();
+
+  // Call state returns to listening — toolbar is still visible (not failed)
+  await expect(page.getByRole('button', { name: 'End Call' })).toBeVisible();
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  assertNoBrowserErrors();
+});
+
+async function installTurnErrorCallRoutes(page: Page) {
+  await installCallDebugEventRoute(page);
+  const thread = makeThreadDetail({
+    id: threadId,
+    character_id: characterId,
+    title: 'Call Start Aster',
+    character_name: 'Call Start Aster',
+    messages: []
+  });
+
+  await page.route('**/api/threads/*', async (route) => {
+    await fulfillJson(route, thread);
+  });
+  await page.route('**/api/characters/*/portrait**', async (route) => {
+    await route.fulfill({ status: 204 });
+  });
+  await page.route('**/api/calls/start', async (route) => {
+    await fulfillJson(route, {
+      call_id: 'call-error-01',
+      session_id: 'rtc-call-error-01',
+      thread_id: threadId,
+      state: 'listening',
+      events: [
+        {
+          type: 'user_final',
+          session_id: 'rtc-call-error-01',
+          turn_id: 'turn-err-1',
+          text: 'Hello there.'
+        }
+      ]
+    }, 201);
+  });
+  await page.route('**/api/calls/*/offer', async (route) => {
+    await fulfillJson(route, {
+      call_id: 'call-error-01',
+      session_id: 'rtc-call-error-01',
+      answer: { type: 'answer', sdp: 'v=0\r\n' },
+      event_channel: 'rayme-events'
+    });
+  });
+  await page.route('**/api/calls/*/turns', async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: [
+        `data: ${JSON.stringify({
+          type: 'error',
+          turn_id: 'turn-err-1',
+          code: 'call_tts_failed',
+          message: 'Speech playback failed: voice audio unavailable.'
+        })}`,
+        '',
+        ''
+      ].join('\n')
+    });
+  });
+  await page.route('**/api/calls/*/end', async (route) => {
+    await fulfillJson(route, { state: 'ended' });
+  });
+}
+
 async function installCallStartRoutes(page: Page, options: { failOffer?: boolean } = {}) {
+  await installCallDebugEventRoute(page);
   const character = makeCharacter({
     id: characterId,
     name: 'Call Start Aster',
@@ -153,6 +237,7 @@ async function installCallStartRoutes(page: Page, options: { failOffer?: boolean
 }
 
 async function installMultiTurnCallRoutes(page: Page) {
+  await installCallDebugEventRoute(page);
   let ended = false;
   let turnCount = 0;
   const thread = makeThreadDetail({

@@ -2,7 +2,7 @@
 status: fixing
 trigger: "Android Chrome Phase 3 live call: microphone permission is granted and Android shows mic listening, then the RayMe call UI still fails or becomes unusable."
 created: 2026-04-25T23:36:09Z
-updated: 2026-04-26T20:00:00Z
+updated: 2026-04-26T21:30:00Z
 ---
 
 # Debug Session: Android Call Offer 502
@@ -27,57 +27,37 @@ updated: 2026-04-26T20:00:00Z
 
 ## Current Focus
 
-- status: fixing — two new confirmed root causes from 2026-04-26 live trace.
+- status: fixing — root cause of "stuck in listening after 2 turns" confirmed
+  from 2026-04-26 live trace.
 
-- reasoning_checkpoint (Issue 1 — VAD 5s "dead zone"):
-    hypothesis: "Silero's min_silence_duration_ms=700 (same as vad_end_silence_ms)
-      means a speech segment never closes until the user pauses 700ms; while
-      speaking continuously, timestamps[-1].end tracks the buffer end, silence_ms
-      stays near 0, and end_of_turn only fires from vad_max_turn_ms=5000."
+- reasoning_checkpoint (stuck-after-2-turns):
+    hypothesis: "handleTurnStreamEvent() receives type=error from the /turns SSE
+      (emitted by _voice_unavailable_events when voice_reference_for_call throws).
+      It sets callState='listening' but never calls appendCallNotice — so the user
+      sees no feedback. The call stays alive, the VAD 5s timer fires again on the
+      next silence window, another user_final arrives, another /turns call gets the
+      same type=error, and the cycle repeats. The user is permanently in 'listening'
+      with no indication that voice is unavailable."
     confirming_evidence:
-      - "Live trace: vad.end_of_turn turn_frames=250 silence_ms=0 for first two
-        turns — forced by 5000ms safety net, not natural silence"
-      - "Third turn: vad.end_of_turn turn_frames=67 silence_ms=702 — user paused
-        long enough; silence detection CAN work"
-      - "vad.silero ts_count=0 at frame 10 (200ms buffer) every time — Silero
-        needs more audio before first detection"
-    falsification_test: "with silero_min_silence_ms=300, end_of_turn should fire
-      at silence_ms=300-700 rather than always at silence_ms=0"
-    fix_rationale: "use a shorter min_silence_duration_ms inside Silero (300ms)
-      while keeping the outer vad_end_silence_ms=700ms check; short pauses close
-      the Silero segment so silence_ms can accumulate against the outer threshold"
-    blind_spots: "lowering Silero min_silence may cause word-internal pauses to
-      trigger turns prematurely; 300ms is a reasonable minimum but needs live test"
+      - "web-ui err log: voice_reference.unavailable fires for BOTH /turns calls"
+      - "web-ui out log: both POST .../turns 200 OK — SSE error reaches browser"
+      - "handleTurnStreamEvent line 689-691: type=error -> callState='listening' only,
+        no appendCallNotice call"
+      - "ai-backend log: turn.started / stt.result / event.sent for turn-1 and
+        turn-2 both complete correctly — backend is fine; failure is in web-ui turn handler"
+    falsification_test: "after fix, the transcript must show 'Speech playback failed:
+      voice audio unavailable.' as a call notice entry after each failing turn; the
+      UI must NOT silently stay in listening"
+    fix_rationale: "handleTurnStreamEvent must call appendCallNotice with the error
+      message when type=error so the user sees 'voice unavailable' in the transcript
+      and can act (Choose Voice). callState='listening' is correct — the call stays
+      alive for retry after voice upload."
+    blind_spots: "The VAD max_turn_ms=5000 forcing end_of_turn when user pauses is
+      a contributing nuisance that will keep retrying; fixing the notice visibility
+      is the necessary first step"
 
-- reasoning_checkpoint (Issue 2 — TTS 502 / speaking < 1s):
-    hypothesis: "Voice reference audio sample file is missing from OMEN disk;
-      voice_reference_for_call raises CallVoiceUnavailableError; the caller
-      silently proceeds with voice_reference={} (no reference_audio_b64); F5
-      TTS has no synthesize_call_text path so _synthesize_speech hits
-      'raise ValueError(call TTS reference audio is required)'; the speak
-      endpoint returns 502; the SSE stream yields type=error; the browser
-      sets callState=listening in < 1s."
-    confirming_evidence:
-      - "web-ui err log: voice_reference.unavailable err='The assigned voice is
-        unavailable' for every /turns call on both sessions"
-      - "ai-backend out log: POST /webrtc/sessions/{id}/speak 502 Bad Gateway
-        for both sessions"
-      - "No tts.enqueue log line ever appears — TTS synthesis never starts"
-      - "session.py _synthesize_speech: if not reference_audio_b64: raise
-        ValueError — this is the exact exception path"
-    falsification_test: "if voice_reference is populated with valid reference
-      audio, tts.enqueue must appear in logs after the next /speak call"
-    fix_rationale: "two-part fix: (a) surface missing voice reference as a
-      user-facing error instead of silently proceeding; (b) add a 'no reference
-      required' TTS path for cases where the engine doesn't need a reference.
-      Immediate fix: make the missing-reference error visible so the user knows
-      to re-upload voice audio. Longer-term: skip TTS or use a default voice
-      when reference is unavailable."
-
-- next_action: implement fixes — (1) add vad_silero_min_silence_ms config and
-  use it for Silero internal param; (2) change missing-voice-reference handling
-  to emit a clear call_tts_failed error instead of silently continuing without
-  reference audio into a guaranteed 502.
+- next_action: fix handleTurnStreamEvent in +page.svelte to call appendCallNotice
+  on type=error, add regression test, deploy.
 
 ## Evidence
 

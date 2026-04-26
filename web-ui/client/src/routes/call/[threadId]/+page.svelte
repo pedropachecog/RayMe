@@ -687,6 +687,11 @@
     }
 
     if (event.type === 'error') {
+      const message = messageForCallFailure(
+        (event.code ?? 'call_generation_failed') as CallErrorCode,
+        event.message
+      );
+      appendCallNotice(message, event.turn_id);
       callState = 'listening';
     }
   }
