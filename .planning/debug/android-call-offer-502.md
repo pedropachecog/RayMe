@@ -2,7 +2,7 @@
 status: fixing
 trigger: "Android Chrome Phase 3 live call: microphone permission is granted and Android shows mic listening, then the RayMe call UI still fails or becomes unusable."
 created: 2026-04-25T23:36:09Z
-updated: 2026-04-26T19:00:00Z
+updated: 2026-04-26T20:00:00Z
 ---
 
 # Debug Session: Android Call Offer 502
@@ -27,34 +27,57 @@ updated: 2026-04-26T19:00:00Z
 
 ## Current Focus
 
-- status: fixing — committing VAD max-turn safety net (already in working tree)
-  and repairing test mock that is missing the `threshold` attribute.
-- hypothesis (CONFIRMED): Silero VAD classifies all buffered audio as continuous
-  speech (no silence gap), so `_silence_ms` never reaches `vad_end_silence_ms`
-  and `end_of_turn` never fires. Fix: force `end_of_turn` after
-  `vad_max_turn_ms` (5000 ms) of continuous turn duration.
-- reasoning_checkpoint:
-    hypothesis: "frame_idx * frame_ms >= vad_max_turn_ms forces end_of_turn
-      when Silero never produces a silence gap"
+- status: fixing — two new confirmed root causes from 2026-04-26 live trace.
+
+- reasoning_checkpoint (Issue 1 — VAD 5s "dead zone"):
+    hypothesis: "Silero's min_silence_duration_ms=700 (same as vad_end_silence_ms)
+      means a speech segment never closes until the user pauses 700ms; while
+      speaking continuously, timestamps[-1].end tracks the buffer end, silence_ms
+      stays near 0, and end_of_turn only fires from vad_max_turn_ms=5000."
     confirming_evidence:
-      - "Boundary trace @ 9275e36: vad.speech_start fires on frame 15 but
-        vad.silence/vad.end_of_turn NEVER fire over 450+ frames (~9 s)"
-      - "vad.bufdiag confirms buf_rms > 0 (real speech-shaped audio reaching
-        Silero)"
-      - "Silero ts_count=0 at frame 10 then vad.speech_start fires — adapter
-        classifies everything as one continuous segment"
-    falsification_test: "after deploy, vad.end_of_turn log line must appear
-      within 5-6 s of vad.speech_start"
-    fix_rationale: "adds a hard ceiling on turn duration so the turn always
-      finalizes even when Silero never produces a trailing silence gap"
-    blind_spots: "ICE disconnect at ~9-10 s may still kill the session before
-      STT/LLM/TTS completes; data-channel keepalive (faac744) is deployed and
-      may address this"
-- pre_commit_blocker: test mock ScriptedSileroVadAdapter is missing `threshold`
-  attribute; `session.py` accesses `adapter.threshold` at frame 10 for
-  diagnostic logging. Fix: add `threshold: float = 0.5` to mock.
-- next_action: fix mock, run tests to green, commit, push, deploy, ask user to
-  reproduce on Android Chrome and confirm vad.end_of_turn fires within ~5 s.
+      - "Live trace: vad.end_of_turn turn_frames=250 silence_ms=0 for first two
+        turns — forced by 5000ms safety net, not natural silence"
+      - "Third turn: vad.end_of_turn turn_frames=67 silence_ms=702 — user paused
+        long enough; silence detection CAN work"
+      - "vad.silero ts_count=0 at frame 10 (200ms buffer) every time — Silero
+        needs more audio before first detection"
+    falsification_test: "with silero_min_silence_ms=300, end_of_turn should fire
+      at silence_ms=300-700 rather than always at silence_ms=0"
+    fix_rationale: "use a shorter min_silence_duration_ms inside Silero (300ms)
+      while keeping the outer vad_end_silence_ms=700ms check; short pauses close
+      the Silero segment so silence_ms can accumulate against the outer threshold"
+    blind_spots: "lowering Silero min_silence may cause word-internal pauses to
+      trigger turns prematurely; 300ms is a reasonable minimum but needs live test"
+
+- reasoning_checkpoint (Issue 2 — TTS 502 / speaking < 1s):
+    hypothesis: "Voice reference audio sample file is missing from OMEN disk;
+      voice_reference_for_call raises CallVoiceUnavailableError; the caller
+      silently proceeds with voice_reference={} (no reference_audio_b64); F5
+      TTS has no synthesize_call_text path so _synthesize_speech hits
+      'raise ValueError(call TTS reference audio is required)'; the speak
+      endpoint returns 502; the SSE stream yields type=error; the browser
+      sets callState=listening in < 1s."
+    confirming_evidence:
+      - "web-ui err log: voice_reference.unavailable err='The assigned voice is
+        unavailable' for every /turns call on both sessions"
+      - "ai-backend out log: POST /webrtc/sessions/{id}/speak 502 Bad Gateway
+        for both sessions"
+      - "No tts.enqueue log line ever appears — TTS synthesis never starts"
+      - "session.py _synthesize_speech: if not reference_audio_b64: raise
+        ValueError — this is the exact exception path"
+    falsification_test: "if voice_reference is populated with valid reference
+      audio, tts.enqueue must appear in logs after the next /speak call"
+    fix_rationale: "two-part fix: (a) surface missing voice reference as a
+      user-facing error instead of silently proceeding; (b) add a 'no reference
+      required' TTS path for cases where the engine doesn't need a reference.
+      Immediate fix: make the missing-reference error visible so the user knows
+      to re-upload voice audio. Longer-term: skip TTS or use a default voice
+      when reference is unavailable."
+
+- next_action: implement fixes — (1) add vad_silero_min_silence_ms config and
+  use it for Silero internal param; (2) change missing-voice-reference handling
+  to emit a clear call_tts_failed error instead of silently continuing without
+  reference audio into a guaranteed 502.
 
 ## Evidence
 
@@ -743,3 +766,64 @@ next_action: ask user to reproduce again on Android Chrome and confirm whether
 the single-channel session reaches `vad.speech_start`; if not, add targeted
 mic-energy instrumentation on the browser side and inspect normalized PCM on
 the backend for the new session.
+
+## FOLLOW-UP ROOT CAUSES FOUND (2026-04-26, post-VAD fix)
+
+### Root Cause 1 — `session.fail()` called when inbound track ends mid-TTS
+
+| Boundary | Outcome |
+|---|---|
+| OMEN deployed HEAD | `8b6b9e6` (single data channel) |
+| `vad.speech_start` / `vad.end_of_turn` | OK (confirmed from previous fix) |
+| `stt.result` / LLM tokens | OK |
+| F5 TTS synthesis | OK (`tts.enqueue wav_bytes=1822700`) |
+| Audio delivered over WebRTC | NEVER |
+
+After the user finishes speaking, Android Chrome stops sending audio frames.
+aiortc raises `MediaStreamError` at that point with `ice=completed conn=connected`.
+The `_receive_audio_track` error handler fallthrough was calling
+`await session.fail(reason="connection_failed")` which closed the peer
+connection entirely — destroying the outbound `QueuedAudioOutputTrack` before
+TTS audio (already synthesized and enqueued) could be delivered. The call UI
+showed `thinking → speaking → listening` in under 1 second with no audible
+audio. F5 synthesis had succeeded (`tts.enqueue wav_bytes=1822700`) but the
+outbound track was dead.
+
+Fix: when `track.recv()` raises and ICE/conn state is still `completed`/`connected`,
+exit the inbound receive loop with a log line and `return` — do NOT call
+`session.fail()`. The outbound audio track remains alive.
+
+File: `ai-backend/app/api/webrtc.py` — `_receive_audio_track` fallthrough case.
+
+### Root Cause 2 — `ai_audio_started_event` nested key lookup always returned None
+
+`_speak_call` returns `{"session_id":…, "turn_id":…, "state":…, "event":
+{"type":"ai_done", …, "ai_audio_started_event": {…}}}`. The `/turns` SSE
+generator checked `speak_result.get("ai_audio_started_event")` which is always
+`None` because the key is inside `speak_result["event"]`, not at the top level.
+The `ai_audio_started` SSE event was therefore never yielded to the browser,
+so the client had no signal that audio was playing.
+
+Fix: check both `speak_result.get("ai_audio_started_event")` and
+`(speak_result.get("event") or {}).get("ai_audio_started_event")`.
+
+File: `web-ui/server/app/api/calls.py` — `create_call_turn` SSE `events()` generator.
+
+### Regression Tests
+
+- `ai-backend/tests/test_webrtc_signaling.py::test_receive_audio_track_media_stream_error_with_live_ice_does_not_fail_session`
+- `web-ui/server/tests/test_calls.py::test_turn_yields_ai_audio_started_event_when_nested_inside_speak_result_event`
+
+### Verification
+
+- `uv run --project ai-backend pytest ai-backend/tests -q` → **71 passed**
+- `uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py -q` → **25 passed**
+
+### Deploy Confirmation
+
+- Commit: `58e0a96`
+- `scripts/deploy-omen.sh` completed: `OMEN deploy complete: 58e0a96d0af9c618d3090cae1b4f04ad2686785f`
+- OMEN listeners confirmed on ports 8443/9443
+
+next_action: ask user to reproduce on Android Chrome; expected outcome is
+audible AI speech for the first time since the voice blob was re-uploaded.
