@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import fractions
 import logging
-import math
 import os
 import tempfile
 from io import BytesIO
@@ -189,16 +188,10 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
                     peak,
                 )
         else:
-            # Emit a carrier while no AI audio is queued so Opus keeps RTP
-            # packets flowing during STT/LLM/TTS gaps. The browser mutes the
-            # media element outside the speaking state so this keepalive does
-            # not reach the user.
+            # Emit silence while no AI audio is queued so recv() continues to
+            # produce RTP frames during STT/LLM/TTS gaps. The browser can keep
+            # the remote media element audible without leaking a carrier tone.
             self._idle_frame_count += 1
-            phase = 2 * math.pi * 440 * self._pts / self.sample_rate
-            amplitude = 500
-            t = np.arange(self.frame_samples, dtype=np.float32)
-            samples_f = amplitude * np.sin(phase + 2 * math.pi * 440 * t / self.sample_rate)
-            samples = samples_f.astype(np.int16)
         return samples
 
 

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 import {
   createCallRmsMeter,
+  ensureRemoteCallAudioAudible,
   getOutputPickerUnavailableCopy,
   unlockCallAudioContext
 } from '../../src/lib/call/audio';
@@ -36,6 +37,15 @@ describe('call audio helpers', () => {
 
   it('exposes unsupported output picker copy from the UI contract', () => {
     expect(getOutputPickerUnavailableCopy()).toBe(outputPickerUnavailableCopy);
+  });
+
+  it('keeps remote WebRTC call audio audible independent of call state events', () => {
+    const audio = { muted: true };
+
+    expect(ensureRemoteCallAudioAudible(audio)).toBe(true);
+    expect(audio.muted).toBe(false);
+    expect(ensureRemoteCallAudioAudible(audio)).toBe(false);
+    expect(audio.muted).toBe(false);
   });
 
   it('raises listeningRms for non-zero microphone samples and returns near zero for silence', () => {

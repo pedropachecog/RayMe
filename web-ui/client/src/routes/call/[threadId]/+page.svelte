@@ -15,7 +15,7 @@
   } from '$lib/api/calls';
   import { loadThread } from '$lib/api/chat';
   import type { CallErrorCode, CallEvent, CallStateName, CallTranscriptTurn, ThreadDetail } from '$lib/api/types';
-  import { requestCallMicrophone, unlockCallAudioContext } from '$lib/call/audio';
+  import { ensureRemoteCallAudioAudible, requestCallMicrophone, unlockCallAudioContext } from '$lib/call/audio';
   import CallToolbar from '$lib/components/call/CallToolbar.svelte';
   import CallTranscript from '$lib/components/call/CallTranscript.svelte';
   import VoiceVisualizer from '$lib/components/call/VoiceVisualizer.svelte';
@@ -594,12 +594,11 @@
     if (!remoteAudioElement) {
       return;
     }
-    const shouldPlayAudibly = callState === 'speaking';
-    if (remoteAudioElement.muted !== !shouldPlayAudibly) {
-      remoteAudioElement.muted = !shouldPlayAudibly;
+    if (ensureRemoteCallAudioAudible(remoteAudioElement)) {
       emitDebugEvent(callId, 'remote_audio.audibility', {
         muted: remoteAudioElement.muted,
-        callState
+        callState,
+        policy: 'always-audible'
       });
     }
   }
@@ -1058,7 +1057,7 @@
     element.autoplay = true;
     element.playsInline = true;
     element.controls = false;
-    element.muted = callState !== 'speaking';
+    element.muted = false;
     element.srcObject = stream;
     remoteAudioElement = element;
     element.addEventListener('playing', () => {

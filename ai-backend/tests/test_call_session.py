@@ -556,7 +556,7 @@ def test_queued_audio_output_track_preroll_sends_silence_before_tts() -> None:
     assert np.max(np.abs(third.to_ndarray())) > 0
 
 
-def test_queued_audio_output_track_idle_frames_emit_keepalive_carrier() -> None:
+def test_queued_audio_output_track_idle_frames_emit_silent_keepalive() -> None:
     async def scenario() -> Any:
         track = QueuedAudioOutputTrack(sample_rate=16000, frame_ms=20)
         return await track.recv()
@@ -565,7 +565,7 @@ def test_queued_audio_output_track_idle_frames_emit_keepalive_carrier() -> None:
 
     assert frame.sample_rate == 16000
     assert frame.samples == 320
-    assert np.max(np.abs(frame.to_ndarray())) > 0
+    assert np.max(np.abs(frame.to_ndarray())) == 0
 
 
 def test_speak_text_generic_adapter_uses_real_reference_audio() -> None:

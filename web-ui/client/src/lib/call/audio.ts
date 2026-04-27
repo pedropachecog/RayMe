@@ -84,6 +84,14 @@ export async function requestCallMicrophone(): Promise<MediaStream> {
   });
 }
 
+export function ensureRemoteCallAudioAudible(audio: Pick<HTMLMediaElement, 'muted'>): boolean {
+  if (!audio.muted) {
+    return false;
+  }
+  audio.muted = false;
+  return true;
+}
+
 export function createRmsMeter(): {
   pushSamples: (samples: Float32Array) => void;
   read: () => number;
