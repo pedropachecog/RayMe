@@ -364,21 +364,47 @@ async def create_call_turn(
             visible_text = "".join(accumulated)
             if visible_text:
                 message = await service.record_ai_speech(call_id, visible_text)
+                # Block the SSE stream until TTS synthesis completes and audio
+                # is enqueued to the WebRTC outbound track. This keeps the
+                # browser in 'speaking' state (SSE stream active), which
+                # prevents Android Chrome from suspending the tab and dropping
+                # the WebRTC ICE connection during the TTS gap.
+                # ai_audio_started / ai_done for the media pipeline are still
+                # delivered via the WebRTC data channel independently.
+                try:
+                    await _speak_call(
+                        backend,
+                        endpoint_settings.ai_backend_url,
+                        session_id,
+                        {
+                            "turn_id": payload.turn_id,
+                            "text": visible_text,
+                            "voice_id": call["voice_id"],
+                            "engine_id": call["engine_id"],
+                            "final_chunk": True,
+                            **voice_reference,
+                        },
+                    )
+                except AiBackendClientError as exc:
+                    logger.warning(
+                        "[call-turn] speak_call.sync_failed call=%s turn=%s "
+                        "code=%s message=%s — yielding ai_done for UI recovery",
+                        call_id,
+                        payload.turn_id,
+                        exc.code,
+                        exc.message,
+                    )
+                    # TTS failed but LLM text was saved. Yield ai_done so the
+                    # browser transitions from 'speaking' back to 'listening'.
+                    # The user sees the AI text but no audio — they can try again.
+                logger.info(
+                    "[call-turn] ai_done call=%s turn=%s visible_text_len=%d",
+                    call_id,
+                    payload.turn_id,
+                    len(visible_text),
+                )
             else:
                 message = None
-            # Yield ai_done immediately so the browser SSE reader unblocks
-            # and transitions from 'speaking' to 'listening'. TTS runs as a
-            # background task -- ai_audio_started / ai_done events for the
-            # media pipeline are delivered via the WebRTC data channel from
-            # the AI backend, independently of the SSE stream.
-            logger.info(
-                "[call-turn] ai_done call=%s turn=%s visible_text_len=%d "
-                "tts_background=%s",
-                call_id,
-                payload.turn_id,
-                len(visible_text),
-                bool(visible_text),
-            )
             yield _sse(
                 {
                     "type": "ai_done",
@@ -386,19 +412,6 @@ async def create_call_turn(
                     "message": message,
                 }
             )
-            if visible_text:
-                asyncio.ensure_future(
-                    _speak_call_background(
-                        backend,
-                        endpoint_settings.ai_backend_url,
-                        session_id,
-                        payload.turn_id,
-                        visible_text,
-                        call["voice_id"],
-                        call["engine_id"],
-                        voice_reference,
-                    ),
-                )
         except asyncio.CancelledError:
             return
         except AiBackendClientError:
@@ -545,7 +558,7 @@ async def _speak_call(
     return dict(await backend.speak_call(base_url, session_id, payload))
 
 
-async def _speak_call_background(
+async def _speak_call_sync(
     backend: Any,
     base_url: str,
     session_id: str,
@@ -554,12 +567,13 @@ async def _speak_call_background(
     voice_id: str,
     engine_id: str,
     voice_reference: dict[str, Any],
-) -> None:
-    """Fire-and-forget TTS call after SSE stream ends.
+) -> bool:
+    """Synchronous TTS call within the SSE generator.
 
-    Runs in the background so the SSE generator is not blocked during TTS
-    synthesis (5-15 seconds on GPU). The AI backend delivers
-    ai_audio_started / ai_done via the WebRTC data channel independently.
+    Blocks the SSE stream until TTS synthesis completes and audio is enqueued
+    to the WebRTC outbound track. This keeps the browser in 'speaking' state,
+    preventing Android Chrome from dropping the WebRTC ICE connection during
+    the TTS gap. Returns True if TTS succeeded.
     """
     try:
         await _speak_call(
@@ -575,21 +589,24 @@ async def _speak_call_background(
                 **voice_reference,
             },
         )
+        return True
     except AiBackendClientError as exc:
         logger.warning(
-            "[call-turn] speak_call.background_failed turn=%s session=%s "
+            "[call-turn] speak_call.sync_failed turn=%s session=%s "
             "code=%s message=%s",
             turn_id,
             session_id,
             exc.code,
             exc.message,
         )
+        return False
     except Exception:
         logger.exception(
-            "[call-turn] speak_call.background_exception turn=%s session=%s",
+            "[call-turn] speak_call.sync_exception turn=%s session=%s",
             turn_id,
             session_id,
         )
+        return False
 
 
 def _missing_backend_method(method_name: str) -> AiBackendUnavailable:
