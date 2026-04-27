@@ -26,6 +26,12 @@ that same task until the subagent returns.
   the takeover is happening, and only then continue locally.
 - Parallel work is allowed only when it is clearly disjoint from the delegated
   task and cannot touch the same files, boundary, or decision.
+- Subagents must never launch `codex`, `claude`, or another agent CLI from the
+  shell as a workaround for missing nested-subagent capability.
+- Codex debug workflows must not delegate to a debug-session-manager that then
+  tries to spawn its own agents. The main agent should create/update the debug
+  session file, spawn `gsd-debugger` directly, wait for it, and handle any
+  checkpoint, fix, deployment, or follow-up dispatch itself.
 
 This applies to all subagent usage, including GSD workflows, code review,
 debugging, planning, and implementation.

@@ -1,6 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { fulfillJson, installBrowserErrorGuard, installMockCallMedia } from './helpers/acceptance';
+import {
+  fulfillJson,
+  installBrowserErrorGuard,
+  installCallDebugEventRoute,
+  installMockCallMedia
+} from './helpers/acceptance';
 import { makeThreadDetail } from './helpers/fixtures';
 
 const threadId = 'call-toolbar-thread';
@@ -12,6 +17,7 @@ const outputPickerCopy =
 test('call toolbar exposes mute, interrupt, device picker fallback, and end controls', async ({ page }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
   await installMockCallMedia(page);
+  await installCallDebugEventRoute(page);
   await installActiveCallRoutes(page);
 
   await page.goto(`/chat/${threadId}`);
@@ -22,10 +28,12 @@ test('call toolbar exposes mute, interrupt, device picker fallback, and end cont
   await expect(page.getByRole('button', { name: 'Unmute' })).toBeVisible();
 
   await expect(page.getByTestId('voice-visualizer').getByText('Thinking')).toBeVisible();
+  await page.getByRole('button', { name: 'More call options' }).click();
   await expect(page.getByRole('button', { name: 'Interrupt' })).toBeVisible();
   await page.getByRole('button', { name: 'Interrupt' }).click();
   await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
 
+  await page.getByRole('button', { name: 'More call options' }).click();
   await expect(page.getByText(inputPickerCopy)).toBeVisible();
   await expect(page.getByText(outputPickerCopy)).toBeVisible();
   await page.getByRole('button', { name: 'End Call' }).click();

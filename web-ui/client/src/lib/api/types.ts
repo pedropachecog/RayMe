@@ -256,6 +256,12 @@ export type CallEvent =
       session_id: string;
       turn_id?: string | null;
       text?: string | null;
+      audio?: {
+        duration_ms?: number;
+        samples?: number;
+        rms?: number;
+        peak?: number;
+      } | null;
     }
   | {
       type: 'ai_done';

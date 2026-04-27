@@ -25,11 +25,10 @@ test.describe('mobile-chromium call path', () => {
 
     const toolbar = page.getByTestId('call-toolbar');
     const bottomNavigation = page.getByTestId('bottom-navigation');
+    await expect(toolbar.getByTestId('call-ready-state')).toBeVisible();
     await expect(toolbar.getByRole('button', { name: 'Mute' })).toBeVisible();
-    await expect(toolbar.getByRole('button', { name: 'Interrupt' })).toBeVisible();
     await expect(toolbar.getByRole('button', { name: 'End Call' })).toBeVisible();
-    await expect(toolbar.getByRole('combobox').first()).toBeVisible();
-    await expect(toolbar.getByRole('combobox').nth(1)).toBeVisible();
+    await expect(toolbar.getByRole('button', { name: 'More call options' })).toBeVisible();
 
     const toolbarBox = await toolbar.boundingBox();
     const navBox = await bottomNavigation.boundingBox();
@@ -39,16 +38,19 @@ test.describe('mobile-chromium call path', () => {
 
     for (const control of [
       toolbar.getByRole('button', { name: 'Mute' }),
-      toolbar.getByRole('button', { name: 'Interrupt' }),
       toolbar.getByRole('button', { name: 'End Call' }),
-      toolbar.getByRole('combobox').first(),
-      toolbar.getByRole('combobox').nth(1)
+      toolbar.getByRole('button', { name: 'More call options' })
     ]) {
       const box = await control.boundingBox();
       expect(box).not.toBeNull();
       expect(box!.height).toBeGreaterThanOrEqual(44);
       expect(box!.y + box!.height).toBeLessThanOrEqual(navBox!.y);
     }
+
+    await toolbar.getByRole('button', { name: 'More call options' }).click();
+    await expect(toolbar.getByRole('button', { name: 'Interrupt' })).toBeVisible();
+    await expect(toolbar.getByRole('combobox').first()).toBeVisible();
+    await expect(toolbar.getByRole('combobox').nth(1)).toBeVisible();
     assertNoBrowserErrors();
   });
 });

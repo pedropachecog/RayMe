@@ -178,18 +178,44 @@ class CallSession:
         if not self._turn_frames:
             return None
 
-        self._turn_index += 1
-        turn_id = f"user-turn-{self._turn_index}"
+        turn_id = f"user-turn-{self._turn_index + 1}"
         frames = list(self._turn_frames)
         started_at = self._turn_started_at or utc_timestamp()
         ended_at = utc_timestamp()
         total_pcm_bytes = sum(len(f.pcm) for f in frames)
+        audio_stats = self._turn_audio_stats(frames)
+        if (
+            audio_stats is not None
+            and audio_stats["rms"] < float(self.settings.call_min_turn_rms)
+        ):
+            logger.info(
+                "[rayme-call] stt.skip_near_silence session=%s turn=%s "
+                "frames=%d rms=%.1f peak=%.1f threshold=%.1f",
+                self.session_id,
+                turn_id,
+                len(frames),
+                audio_stats["rms"],
+                audio_stats["peak"],
+                float(self.settings.call_min_turn_rms),
+            )
+            self._turn_frames.clear()
+            self._turn_started_at = None
+            self._speech_seen = False
+            self._silence_ms = 0
+            self._speech_start_frame = None
+            self.state = "listening"
+            return None
+        self._turn_index += 1
+        turn_id = f"user-turn-{self._turn_index}"
         logger.info(
-            "[rayme-call] stt.begin session=%s turn=%s frames=%d pcm_bytes=%d",
+            "[rayme-call] stt.begin session=%s turn=%s frames=%d pcm_bytes=%d "
+            "rms=%s peak=%s",
             self.session_id,
             turn_id,
             len(frames),
             total_pcm_bytes,
+            f"{audio_stats['rms']:.1f}" if audio_stats is not None else "unknown",
+            f"{audio_stats['peak']:.1f}" if audio_stats is not None else "unknown",
         )
         self._turn_frames.clear()
         self._turn_started_at = None
@@ -359,6 +385,7 @@ class CallSession:
             wav_bytes = bytes(result.get("wav_bytes") or b"")
             playback_seconds = await self._queue_outbound_audio(wav_bytes)
             if wav_bytes:
+                audio_stats = self._outbound_audio_stats()
                 self.state = "speaking"
                 audio_started_event = simple_event(
                     AI_AUDIO_STARTED_EVENT,
@@ -366,6 +393,7 @@ class CallSession:
                     turn_id=turn_id,
                     voice_id=voice_id,
                     engine_id=engine_id,
+                    audio=audio_stats,
                 )
                 await self.emit_event(audio_started_event)
                 await self._wait_for_outbound_audio_playback(playback_seconds)
@@ -654,6 +682,33 @@ class CallSession:
         if hasattr(result, "model_dump"):
             return dict(result.model_dump())
         return dict(result)
+
+    def _turn_audio_stats(self, frames: list[PcmAudioFrame]) -> dict[str, float] | None:
+        chunks: list[np.ndarray] = []
+        for frame in frames:
+            if len(frame.pcm) < 2 or len(frame.pcm) % 2 != 0:
+                continue
+            chunks.append(np.frombuffer(frame.pcm, dtype=np.int16).astype(np.float32))
+        if not chunks:
+            return None
+        samples = np.concatenate(chunks)
+        if samples.size == 0:
+            return None
+        return {
+            "rms": float(np.sqrt(np.mean(np.square(samples)))),
+            "peak": float(np.max(np.abs(samples))),
+        }
+
+    def _outbound_audio_stats(self) -> dict[str, float | int] | None:
+        stats = getattr(self.outbound_audio_track, "last_enqueue_stats", None)
+        if isinstance(stats, dict):
+            return {
+                "duration_ms": int(stats.get("duration_ms") or 0),
+                "samples": int(stats.get("samples") or 0),
+                "rms": float(stats.get("rms") or 0.0),
+                "peak": float(stats.get("peak") or 0.0),
+            }
+        return None
 
     async def _synthesize_speech(
         self,

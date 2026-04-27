@@ -63,6 +63,13 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
         self._pts = 0
         self._recv_count = 0
         self._idle_frame_count = 0
+        self.last_enqueue_stats: dict[str, float | int] = {
+            "duration_ms": 0,
+            "samples": 0,
+            "rms": 0.0,
+            "peak": 0.0,
+        }
+        self._nonzero_send_logged = False
 
     async def recv(self) -> Any:
         from av import AudioFrame
@@ -88,9 +95,25 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
 
     async def enqueue(self, wav_bytes: bytes) -> float:
         samples = _wav_bytes_to_int16(wav_bytes, target_sample_rate=self.sample_rate)
+        rms = float(np.sqrt(np.mean(np.square(samples.astype(np.float32))))) if samples.size else 0.0
+        peak = float(np.max(np.abs(samples.astype(np.float32)))) if samples.size else 0.0
+        duration_seconds = samples.size / self.sample_rate if samples.size else 0.0
+        self.last_enqueue_stats = {
+            "duration_ms": int(duration_seconds * 1000),
+            "samples": int(samples.size),
+            "rms": rms,
+            "peak": peak,
+        }
+        logger.info(
+            "[rayme-call] track.enqueue stats samples=%d duration_ms=%d rms=%.1f peak=%.1f",
+            samples.size,
+            int(duration_seconds * 1000),
+            rms,
+            peak,
+        )
         if samples.size:
             await self._queue.put(samples)
-        return samples.size / self.sample_rate if samples.size else 0.0
+        return duration_seconds
 
     async def wait_until_idle(self, *, timeout: float | None = None) -> bool:
         deadline = None
@@ -140,12 +163,28 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
         if self._buffer.size >= self.frame_samples:
             samples = self._buffer[: self.frame_samples]
             self._buffer = self._buffer[self.frame_samples :]
+            if not self._nonzero_send_logged and np.max(np.abs(samples)) > 0:
+                self._nonzero_send_logged = True
+                logger.info(
+                    "[rayme-call] track.send.first_nonzero recv_count=%d rms=%.1f peak=%.1f",
+                    self._recv_count,
+                    float(np.sqrt(np.mean(np.square(samples.astype(np.float32))))),
+                    float(np.max(np.abs(samples.astype(np.float32)))),
+                )
             return samples
 
         samples = np.zeros(self.frame_samples, dtype=np.int16)
         if self._buffer.size:
             samples[: self._buffer.size] = self._buffer
             self._buffer = np.asarray([], dtype=np.int16)
+            if not self._nonzero_send_logged and np.max(np.abs(samples)) > 0:
+                self._nonzero_send_logged = True
+                logger.info(
+                    "[rayme-call] track.send.first_nonzero recv_count=%d rms=%.1f peak=%.1f",
+                    self._recv_count,
+                    float(np.sqrt(np.mean(np.square(samples.astype(np.float32))))),
+                    float(np.max(np.abs(samples.astype(np.float32)))),
+                )
         else:
             # Silence frame — inject a low-amplitude sine wave so Opus
             # DTX does not suppress the frame. Without any packet flow

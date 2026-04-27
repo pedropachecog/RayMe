@@ -41,9 +41,16 @@
     text?: string;
   }
 
+  interface CallAudioStats {
+    duration_ms?: number;
+    samples?: number;
+    rms?: number;
+    peak?: number;
+  }
+
   type CallTurnStreamEvent =
     | { type: 'ai_token'; turn_id?: string; text?: string }
-    | { type: 'ai_audio_started'; turn_id?: string; session_id?: string }
+    | { type: 'ai_audio_started'; turn_id?: string; session_id?: string; audio?: CallAudioStats | null }
     | { type: 'ai_done'; turn_id?: string }
     | { type: 'error'; turn_id?: string; code?: string; message?: string };
 
@@ -74,6 +81,8 @@
   let remoteAudioSource: MediaStreamAudioSourceNode | null = null;
   let remoteAudioAnalyser: AnalyserNode | null = null;
   let remoteAudioMeterFrame = 0;
+  let remoteAudioMeterTicks = 0;
+  let remoteAudioNonZeroLogged = false;
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'RayMe');
@@ -83,6 +92,7 @@
   );
   const statusTone = $derived(callState === 'failed' ? 'danger' : callState === 'connecting' ? 'neutral' : 'healthy');
   const statusLabel = $derived(labelForState(callState));
+  const callControlStateLabel = $derived(callState === 'listening' ? 'Ready to speak' : statusLabel);
   const canUseToolbar = $derived(callState !== 'connecting' && callState !== 'ended' && callState !== 'failed');
 
   onMount(() => {
@@ -120,7 +130,6 @@
       sessionId = querySessionId && querySessionId !== 'undefined' ? querySessionId : queryCallId;
       applyCallState(page.url.searchParams.get('state') ?? 'listening');
       listeningRms = callState === 'listening' ? 0.24 : listeningRms;
-      speakingRms = callState === 'speaking' ? 0.36 : speakingRms;
       return;
     }
 
@@ -146,9 +155,6 @@
         listeningRms = 0.22;
       }
 
-      if (callState === 'speaking' && speakingRms === null) {
-        speakingRms = 0.34;
-      }
     } catch (error) {
       await failCallStartup(error);
     }
@@ -472,7 +478,15 @@
 
   async function unlockAudioForCall() {
     try {
-      await unlockCallAudioContext();
+      const AudioContextCtor =
+        typeof AudioContext !== 'undefined'
+          ? AudioContext
+          : (globalThis as typeof globalThis & { webkitAudioContext?: typeof AudioContext })
+              .webkitAudioContext;
+      if (AudioContextCtor && !remoteAudioContext) {
+        remoteAudioContext = new AudioContextCtor();
+      }
+      await unlockCallAudioContext(remoteAudioContext ?? undefined);
     } catch {
       // Fixed recovery panels below handle public UI copy; raw browser errors stay hidden.
     }
@@ -575,6 +589,12 @@
     }
 
     if (event.type === 'ai_audio_started') {
+      emitDebugEvent(callId, 'call.ai_audio_started', {
+        turn_id: event.turn_id ?? null,
+        audio: event.audio ?? null,
+        remoteAudioContextState: remoteAudioContext?.state ?? 'none',
+        speakingRms
+      });
       applyCallState('speaking');
       if (event.text) {
         appendAiText(event.text, event.turn_id ?? undefined);
@@ -736,6 +756,13 @@
     }
 
     if (event.type === 'ai_audio_started') {
+      emitDebugEvent(callId, 'call.ai_audio_started', {
+        turn_id: event.turn_id ?? null,
+        audio: event.audio ?? null,
+        remoteAudioContextState: remoteAudioContext?.state ?? 'none',
+        speakingRms,
+        source: 'turn-stream'
+      });
       applyCallState('speaking');
       return;
     }
@@ -991,6 +1018,9 @@
       track.addEventListener('mute', () => {
         emitDebugEvent(debugCallId, 'remote_audio.track.mute', { id: track.id, muted: track.muted });
       });
+      track.addEventListener('unmute', () => {
+        emitDebugEvent(debugCallId, 'remote_audio.track.unmute', { id: track.id, muted: track.muted });
+      });
     }
   
     // Use AudioContext-based playback for reliable Android audio routing.
@@ -1022,6 +1052,7 @@
     }
   
     try {
+      const reusedContext = Boolean(remoteAudioContext);
       const context = remoteAudioContext ?? new AudioContextCtor();
       if (context.state === 'suspended') {
         context.resume().catch(() => undefined);
@@ -1040,6 +1071,8 @@
   
       // Start remote audio metering (speakingRms)
       const samples = new Float32Array(analyser.fftSize);
+      remoteAudioMeterTicks = 0;
+      remoteAudioNonZeroLogged = false;
       const updateMeter = () => {
         if (remoteAudioAnalyser !== analyser) {
           return;
@@ -1050,7 +1083,22 @@
           sumSquares += samples[i] * samples[i];
         }
         const rms = Math.sqrt(sumSquares / samples.length);
-        speakingRms = Math.max(0.04, Math.min(1, rms * 3.2));
+        speakingRms = Math.min(1, rms * 3.2);
+        remoteAudioMeterTicks += 1;
+        if (!remoteAudioNonZeroLogged && rms > 0.002) {
+          remoteAudioNonZeroLogged = true;
+          emitDebugEvent(debugCallId, 'remote_audio.rms.nonzero', {
+            rms,
+            speakingRms,
+            contextState: context.state
+          });
+        } else if (callState === 'speaking' && remoteAudioMeterTicks % 30 === 0) {
+          emitDebugEvent(debugCallId, 'remote_audio.rms.sample', {
+            rms,
+            speakingRms,
+            contextState: context.state
+          });
+        }
         remoteAudioMeterFrame = requestAnimationFrame(updateMeter);
       };
       remoteAudioMeterFrame = requestAnimationFrame(updateMeter);
@@ -1058,7 +1106,8 @@
       emitDebugEvent(debugCallId, 'remote_audio.play.ok', {
         method: 'AudioContext',
         sampleRate: context.sampleRate,
-        state: context.state
+        state: context.state,
+        reusedContext
       });
     } catch (error: unknown) {
       emitDebugEvent(debugCallId, 'remote_audio.play.failed', {
@@ -1090,6 +1139,8 @@
     remoteAudioAnalyser?.disconnect();
     remoteAudioSource = null;
     remoteAudioAnalyser = null;
+    remoteAudioMeterTicks = 0;
+    remoteAudioNonZeroLogged = false;
   
     if (remoteAudioElement) {
       remoteAudioElement.pause();
@@ -1159,14 +1210,11 @@
       <button type="button" onclick={returnToThread}>Return to Thread</button>
     </div>
   {:else}
-    <div class="call-canvas">
-      <VoiceVisualizer state={visualState} {listeningRms} {speakingRms} />
-      <CallTranscript turns={transcript} {activeAiText} interrupted={callState === 'interrupted'} />
-    </div>
-
     <div class="toolbar-wrap">
       <CallToolbar
         muted={serverMuted}
+        stateLabel={callControlStateLabel}
+        ready={callState === 'listening' && canUseToolbar}
         disabled={!canUseToolbar}
         interruptEnabled={callState === 'thinking' || callState === 'speaking'}
         endEnabled={!ending}
@@ -1176,6 +1224,11 @@
         onInterrupt={interrupt}
         onEnd={hangup}
       />
+    </div>
+
+    <div class="call-canvas">
+      <VoiceVisualizer state={visualState} {listeningRms} {speakingRms} />
+      <CallTranscript turns={transcript} {activeAiText} interrupted={callState === 'interrupted'} />
     </div>
   {/if}
 </section>
@@ -1251,7 +1304,7 @@
   .toolbar-wrap {
     position: sticky;
     z-index: 6;
-    bottom: calc(64px + env(safe-area-inset-bottom));
+    top: calc(8px + env(safe-area-inset-top));
     display: grid;
     gap: var(--space-sm);
   }
@@ -1297,7 +1350,7 @@
   @media (max-width: 799px) {
     .call-route {
       min-height: calc(100vh - 88px);
-      padding-bottom: calc(144px + env(safe-area-inset-bottom));
+      padding-bottom: calc(72px + env(safe-area-inset-bottom));
     }
 
     .call-header {
@@ -1314,7 +1367,7 @@
     }
 
     .toolbar-wrap {
-      bottom: calc(64px + env(safe-area-inset-bottom));
+      top: calc(6px + env(safe-area-inset-top));
     }
   }
 </style>

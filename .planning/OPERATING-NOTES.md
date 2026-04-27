@@ -50,6 +50,15 @@ as durable context, not one-off preferences.
   substitutes.
 - When the user points out a sequencing or architecture mistake, correct the
   underlying approach and update durable docs; do not just patch the symptom.
+- Subagents must never run `codex`, `claude`, or another agent CLI from the
+  shell to work around missing nested-subagent capability. If a workflow needs a
+  specialist agent, the main agent must spawn that specialist directly and
+  manage the checkpoint loop itself.
+- For Codex `$gsd-debug` sessions, do not delegate to a debug session manager
+  that may try nested subagents. The main agent should create or update the
+  `.planning/debug/*.md` file, spawn `gsd-debugger` directly, wait for the
+  result, then handle fixes, deployment, and follow-up checkpoints in the main
+  agent.
 - Keep updates concrete and short. Say what is blocked, what exact help is
   needed, and what the agent will do after that help is provided.
 - When asking the user for a checkpoint, manual test, approval, or other human

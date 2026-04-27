@@ -42,6 +42,12 @@ class ScriptedOutboundAudioTrack:
 
     async def enqueue(self, chunk: bytes) -> None:
         self.chunks.append(chunk)
+        self.last_enqueue_stats = {
+            "duration_ms": 120,
+            "samples": 5760,
+            "rms": 512.0,
+            "peak": 2048.0,
+        }
 
     async def stop_current(self) -> None:
         self.stop_calls += 1
@@ -212,6 +218,22 @@ def test_inbound_audio_emits_user_final_after_vad_end() -> None:
     }
     assert session.stats()["incoming_audio_frames"] == 2
     assert session.stats()["dropped_audio_frames"] == 0
+
+
+def test_near_silent_finalized_turn_does_not_reach_stt() -> None:
+    vad = ScriptedVadAdapter()
+    stt = ScriptedSttAdapter()
+    silent_pcm = np.zeros(320, dtype=np.int16).tobytes()
+    source = ScriptedInboundAudioFrameSource(silent_pcm, silent_pcm)
+    session, _ = _new_session(vad_adapter=vad, stt_adapter=stt)
+
+    first_event = _run(session.handle_inbound_audio_frame(source.frames[0]))
+    second_event = _run(session.handle_inbound_audio_frame(source.frames[1]))
+
+    assert first_event is None
+    assert second_event is None
+    assert stt.calls == []
+    assert session.state == "listening"
 
 
 def test_inbound_audio_emits_failed_event_when_stt_needs_manual_transcript() -> None:
@@ -398,6 +420,12 @@ def test_speak_text_queues_audio_and_emits_done_for_final_chunk() -> None:
     assert track.chunks == [b"scripted-wav"]
     assert track.wait_calls
     assert [item["type"] for item in events] == ["ai_audio_started", "ai_done"]
+    assert events[0]["audio"] == {
+        "duration_ms": 120,
+        "samples": 5760,
+        "rms": 512.0,
+        "peak": 2048.0,
+    }
     assert event["type"] == "ai_done"
     assert session.state == "listening"
 
