@@ -5,10 +5,13 @@ from io import BytesIO
 from typing import Any
 
 import numpy as np
+import pytest
 import soundfile as sf
 
+import app.call.tracks as tracks_module
 import app.call.session as session_module
-from app.call.tracks import QueuedAudioOutputTrack, normalize_inbound_audio_frame
+from app.config import AiBackendSettings
+from app.call.tracks import PcmAudioFrame, QueuedAudioOutputTrack, normalize_inbound_audio_frame
 from app.call.session import (
     CALL_TTS_AUDIO_PREROLL_SECONDS,
     CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS,
@@ -566,6 +569,52 @@ def test_queued_audio_output_track_idle_frames_emit_silent_keepalive() -> None:
     assert frame.sample_rate == 16000
     assert frame.samples == 320
     assert np.max(np.abs(frame.to_ndarray())) == 0
+
+
+def test_queued_audio_output_track_paces_tts_frames_in_realtime(monkeypatch: Any) -> None:
+    now = 1000.0
+    sleeps: list[float] = []
+
+    def fake_monotonic() -> float:
+        return now
+
+    async def fake_sleep(delay: float) -> None:
+        nonlocal now
+        sleeps.append(delay)
+        now += max(delay, 0.0)
+
+    monkeypatch.setattr(tracks_module.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(tracks_module.asyncio, "sleep", fake_sleep)
+
+    async def scenario() -> None:
+        track = QueuedAudioOutputTrack(sample_rate=16000, frame_ms=20)
+        samples = np.full(1600, 0.25, dtype=np.float32)
+        buffer = BytesIO()
+        sf.write(buffer, samples, 16000, format="WAV")
+
+        await track.enqueue(buffer.getvalue())
+        for _ in range(5):
+            await track.recv()
+
+    _run(scenario())
+
+    assert len(sleeps) == 4
+    assert sum(sleeps) == pytest.approx(0.08, abs=0.005)
+
+
+def test_default_vad_max_turn_does_not_force_end_at_five_seconds() -> None:
+    settings = AiBackendSettings()
+    session = CallSession(session_id="vad-default", settings=settings)
+    pcm = np.full(320, 2000, dtype=np.int16).tobytes()
+    result: dict[str, bool] = {"end_of_turn": False}
+
+    for _ in range(250):
+        frame = PcmAudioFrame(pcm=pcm, sample_rate=16000, channels=1)
+        session._turn_frames.append(frame)
+        result = session._accept_vad_frame(frame)
+
+    assert settings.vad_max_turn_ms > 5000
+    assert result["end_of_turn"] is False
 
 
 def test_speak_text_generic_adapter_uses_real_reference_audio() -> None:

@@ -5,6 +5,7 @@ import fractions
 import logging
 import os
 import tempfile
+import time
 from io import BytesIO
 from dataclasses import dataclass, field
 from typing import Any
@@ -62,6 +63,7 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
         self._pts = 0
         self._recv_count = 0
         self._idle_frame_count = 0
+        self._next_frame_at: float | None = None
         self.last_enqueue_stats: dict[str, float | int] = {
             "duration_ms": 0,
             "samples": 0,
@@ -73,6 +75,7 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
     async def recv(self) -> Any:
         from av import AudioFrame
 
+        await self._pace_realtime()
         self._recv_count += 1
         samples = await self._next_samples()
         frame = AudioFrame.from_ndarray(samples.reshape(1, -1), format="s16", layout="mono")
@@ -148,10 +151,8 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
     async def _next_samples(self) -> np.ndarray:
         while self._buffer.size < self.frame_samples and self.readyState != "ended":
             try:
-                chunk = await asyncio.wait_for(
-                    self._queue.get(), timeout=self.frame_samples / self.sample_rate
-                )
-            except asyncio.TimeoutError:
+                chunk = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
                 break
             except asyncio.CancelledError:
                 break
@@ -193,6 +194,22 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
             # the remote media element audible without leaking a carrier tone.
             self._idle_frame_count += 1
         return samples
+
+    async def _pace_realtime(self) -> None:
+        frame_duration = self.frame_samples / max(self.sample_rate, 1)
+        now = time.monotonic()
+        if self._next_frame_at is None:
+            self._next_frame_at = now
+
+        wait_seconds = self._next_frame_at - now
+        if wait_seconds > 0:
+            await asyncio.sleep(wait_seconds)
+            now = time.monotonic()
+
+        if self._next_frame_at < now - frame_duration:
+            self._next_frame_at = now + frame_duration
+        else:
+            self._next_frame_at += frame_duration
 
 
 @dataclass(frozen=True)
