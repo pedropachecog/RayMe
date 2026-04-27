@@ -58,6 +58,19 @@ ai-backend\.venv\Scripts\python.exe ai-backend\scripts\run_https.py --host 192.1
 "@
 Set-Content -Path "C:\Users\pmpg\rayme\start-ai-backend.cmd" -Value $aiLauncher -Encoding ASCII
 
+$webLauncher = @"
+@echo off
+cd /d C:\Users\pmpg\rayme\RayMe
+set "RAYME_WEB_BIND_HOST=192.168.1.199"
+set "RAYME_WEB_PORT=8443"
+set "RAYME_WEB_PUBLIC_URL=https://192.168.1.199:8443"
+set "RAYME_AI_BACKEND_BASE_URL=https://192.168.1.199:9443"
+set "RAYME_DATABASE_URL=sqlite+aiosqlite:///C:/Users/pmpg/rayme/RayMe/web-ui/server/data/rayme.sqlite3"
+set "RAYME_ALLOWED_ORIGINS=https://192.168.1.199:8443,https://rayme.local:8443"
+web-ui\server\.venv\Scripts\python.exe web-ui\server\scripts\run_dev_https.py --host 192.168.1.199 --port 8443 --cert C:\Users\pmpg\rayme\phase1-tls\rayme.local+1.pem --key C:\Users\pmpg\rayme\phase1-tls\rayme.local+1-key.pem >> C:\Users\pmpg\rayme\logs\web-ui.run.log 2>>&1
+"@
+Set-Content -Path "C:\Users\pmpg\rayme\start-web-ui.cmd" -Value $webLauncher -Encoding ASCII
+
 Write-Host "== Building web client"
 Set-Location "$repo\web-ui\client"
 npm run build
@@ -70,6 +83,12 @@ if ($ports) {
   $ports.OwningProcess | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force }
 }
 Start-Sleep -Seconds 3
+
+Write-Host "== Asserting canonical scheduled tasks"
+schtasks /Delete /TN RayMePhase1AI /F 2>&1 | Out-Null
+schtasks /Delete /TN RayMePhase1Web /F 2>&1 | Out-Null
+schtasks /Create /TN RayMePhase1AI /TR "C:\Users\pmpg\rayme\start-ai-backend.cmd" /SC ONCE /ST 23:59 /F | Out-Host
+schtasks /Create /TN RayMePhase1Web /TR "C:\Users\pmpg\rayme\start-web-ui.cmd" /SC ONCE /ST 23:59 /F | Out-Host
 
 Write-Host "== Starting scheduled tasks"
 schtasks /Run /TN RayMePhase1AI | Out-Host
