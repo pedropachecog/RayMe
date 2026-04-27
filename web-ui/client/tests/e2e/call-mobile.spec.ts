@@ -1,6 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { fulfillJson, installBrowserErrorGuard, installMockCallMedia } from './helpers/acceptance';
+import {
+  fulfillJson,
+  installBrowserErrorGuard,
+  installCallDebugEventRoute,
+  installMockCallMedia
+} from './helpers/acceptance';
 import { makeThreadDetail } from './helpers/fixtures';
 
 const threadId = 'call-mobile-thread';
@@ -49,6 +54,7 @@ test.describe('mobile-chromium call path', () => {
 });
 
 async function installMobileRoutes(page: Page) {
+  await installCallDebugEventRoute(page);
   await page.route(`**/api/threads/${threadId}`, async (route) => {
     await fulfillJson(route, makeThreadDetail({
       id: threadId,

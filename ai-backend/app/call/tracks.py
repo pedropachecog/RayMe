@@ -86,10 +86,31 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
             )
         return frame
 
-    async def enqueue(self, wav_bytes: bytes) -> None:
+    async def enqueue(self, wav_bytes: bytes) -> float:
         samples = _wav_bytes_to_int16(wav_bytes, target_sample_rate=self.sample_rate)
         if samples.size:
             await self._queue.put(samples)
+        return samples.size / self.sample_rate if samples.size else 0.0
+
+    async def wait_until_idle(self, *, timeout: float | None = None) -> bool:
+        deadline = None
+        if timeout is not None:
+            deadline = asyncio.get_running_loop().time() + max(timeout, 0.0)
+
+        while self.readyState != "ended":
+            if self._queue.empty() and self._buffer.size == 0:
+                return True
+            if deadline is not None and asyncio.get_running_loop().time() >= deadline:
+                logger.info(
+                    "[rayme-call] track.wait_until_idle.timeout recv_count=%d "
+                    "queue_size=%d buffer_size=%d",
+                    self._recv_count,
+                    self._queue.qsize(),
+                    self._buffer.size,
+                )
+                return False
+            await asyncio.sleep(self.frame_samples / self.sample_rate)
+        return False
 
     async def stop_current(self) -> None:
         while not self._queue.empty():

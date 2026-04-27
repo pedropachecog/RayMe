@@ -336,19 +336,12 @@ class CallSession:
         reference_audio_content_type: str | None = None,
     ) -> dict[str, Any]:
         self._cancelled_ai_turns.discard(turn_id)
-        self.state = "speaking"
+        self.state = "thinking"
         current_task = asyncio.current_task()
         if current_task is not None:
             self.active_turn_task = current_task
 
-        audio_started_event = simple_event(
-            AI_AUDIO_STARTED_EVENT,
-            session_id=self.session_id,
-            turn_id=turn_id,
-            voice_id=voice_id,
-            engine_id=engine_id,
-        )
-        await self.emit_event(audio_started_event)
+        audio_started_event: dict[str, Any] | None = None
 
         try:
             result = await self._synthesize_speech(
@@ -362,9 +355,20 @@ class CallSession:
                 reference_audio_content_type=reference_audio_content_type,
             )
             if turn_id in self._cancelled_ai_turns:
-                return {"status": "cancelled", "turn_id": turn_id, "ai_audio_started_event": audio_started_event}
+                return {"status": "cancelled", "turn_id": turn_id}
             wav_bytes = bytes(result.get("wav_bytes") or b"")
-            await self._queue_outbound_audio(wav_bytes)
+            playback_seconds = await self._queue_outbound_audio(wav_bytes)
+            if wav_bytes:
+                self.state = "speaking"
+                audio_started_event = simple_event(
+                    AI_AUDIO_STARTED_EVENT,
+                    session_id=self.session_id,
+                    turn_id=turn_id,
+                    voice_id=voice_id,
+                    engine_id=engine_id,
+                )
+                await self.emit_event(audio_started_event)
+                await self._wait_for_outbound_audio_playback(playback_seconds)
         except asyncio.CancelledError:
             self._cancelled_ai_turns.add(turn_id)
             raise
@@ -379,14 +383,18 @@ class CallSession:
             )
             event["engine_id"] = engine_id
             await self.emit_event(event)
-            return {**event, "ai_audio_started_event": audio_started_event}
+            if audio_started_event is not None:
+                return {**event, "ai_audio_started_event": audio_started_event}
+            return event
         finally:
             if self.active_turn_task is current_task:
                 self.active_turn_task = None
 
         if turn_id in self._cancelled_ai_turns:
             self.state = "listening"
-            return {"status": "cancelled", "turn_id": turn_id, "ai_audio_started_event": audio_started_event}
+            if audio_started_event is not None:
+                return {"status": "cancelled", "turn_id": turn_id, "ai_audio_started_event": audio_started_event}
+            return {"status": "cancelled", "turn_id": turn_id}
 
         if final_chunk:
             self.state = "listening"
@@ -399,15 +407,19 @@ class CallSession:
                     engine_id=engine_id,
                 )
             )
-            return {**done_event, "ai_audio_started_event": audio_started_event}
+            if audio_started_event is not None:
+                return {**done_event, "ai_audio_started_event": audio_started_event}
+            return done_event
 
-        return {
+        queued_event = {
             "status": "queued",
             "session_id": self.session_id,
             "turn_id": turn_id,
             "engine_id": engine_id,
-            "ai_audio_started_event": audio_started_event,
         }
+        if audio_started_event is not None:
+            queued_event["ai_audio_started_event"] = audio_started_event
+        return queued_event
 
     async def cancel_ai_turn(self, turn_id: str | None = None) -> None:
         active = self.active_turn_task
@@ -763,13 +775,13 @@ class CallSession:
             result = result.model_dump()
         return dict(result)
 
-    async def _queue_outbound_audio(self, wav_bytes: bytes) -> None:
+    async def _queue_outbound_audio(self, wav_bytes: bytes) -> float:
         if not wav_bytes:
             logger.info(
                 "[rayme-call] tts.enqueue_empty session=%s",
                 self.session_id,
             )
-            return
+            return 0.0
         enqueue = getattr(self.outbound_audio_track, "enqueue", None)
         if callable(enqueue):
             logger.info(
@@ -779,14 +791,34 @@ class CallSession:
             )
             result = enqueue(wav_bytes)
             if inspect.isawaitable(result):
-                await result
-            return
+                result = await result
+            return float(result or 0.0)
         logger.info(
             "[rayme-call] tts.enqueue session=%s wav_bytes=%d target=buffer",
             self.session_id,
             len(wav_bytes),
         )
         self.outbound_audio_buffer.append(wav_bytes)
+        return 0.0
+
+    async def _wait_for_outbound_audio_playback(self, playback_seconds: float) -> None:
+        wait_until_idle = getattr(self.outbound_audio_track, "wait_until_idle", None)
+        if not callable(wait_until_idle):
+            return
+        timeout = max(playback_seconds + 2.0, 2.0)
+        logger.info(
+            "[rayme-call] tts.playback_wait session=%s expected_ms=%d timeout_ms=%d",
+            self.session_id,
+            int(playback_seconds * 1000),
+            int(timeout * 1000),
+        )
+        result = wait_until_idle(timeout=timeout)
+        completed = await result if inspect.isawaitable(result) else bool(result)
+        logger.info(
+            "[rayme-call] tts.playback_wait.done session=%s completed=%s",
+            self.session_id,
+            completed,
+        )
 
 
 class CallSessionManager:

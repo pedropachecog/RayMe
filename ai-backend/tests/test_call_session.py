@@ -38,12 +38,17 @@ class ScriptedOutboundAudioTrack:
     def __init__(self) -> None:
         self.chunks: list[bytes] = []
         self.stop_calls = 0
+        self.wait_calls: list[float | None] = []
 
     async def enqueue(self, chunk: bytes) -> None:
         self.chunks.append(chunk)
 
     async def stop_current(self) -> None:
         self.stop_calls += 1
+
+    async def wait_until_idle(self, *, timeout: float | None = None) -> bool:
+        self.wait_calls.append(timeout)
+        return True
 
 
 class ScriptedTtsAdapter:
@@ -391,6 +396,7 @@ def test_speak_text_queues_audio_and_emits_done_for_final_chunk() -> None:
         }
     ]
     assert track.chunks == [b"scripted-wav"]
+    assert track.wait_calls
     assert [item["type"] for item in events] == ["ai_audio_started", "ai_done"]
     assert event["type"] == "ai_done"
     assert session.state == "listening"
@@ -466,7 +472,7 @@ def test_interrupt_cancels_active_speech_before_ai_done() -> None:
 
     assert track.chunks == []
     assert track.stop_calls == 1
-    assert "ai_audio_started" in [item["type"] for item in events]
+    assert "ai_audio_started" not in [item["type"] for item in events]
     assert "ai_done" not in [item["type"] for item in events]
 
 

@@ -575,7 +575,7 @@
     }
 
     if (event.type === 'ai_audio_started') {
-      callState = 'speaking';
+      applyCallState('speaking');
       if (event.text) {
         appendAiText(event.text, event.turn_id ?? undefined);
       }
@@ -594,11 +594,11 @@
       if (event.retry_allowed) {
         blockingPanel = null;
         appendCallNotice(message, event.turn_id ?? undefined);
-        callState = 'listening';
+        applyCallState('listening');
         return;
       }
 
-      callState = 'failed';
+      applyCallState('failed');
       blockingPanel = {
         body: message,
         action: 'Return to Thread',
@@ -637,7 +637,7 @@
       }
     ];
     activeAiText = '';
-    callState = 'thinking';
+    applyCallState('thinking');
   }
 
   function appendCallNotice(text: string, turnId?: string) {
@@ -731,15 +731,12 @@
 
   function handleTurnStreamEvent(event: CallTurnStreamEvent) {
     if (event.type === 'ai_token' && event.text) {
-      if (callState === 'thinking') {
-        callState = 'speaking';
-      }
       appendAiText(event.text, event.turn_id);
       return;
     }
 
     if (event.type === 'ai_audio_started') {
-      callState = 'speaking';
+      applyCallState('speaking');
       return;
     }
 
@@ -754,7 +751,7 @@
         event.message
       );
       appendCallNotice(message, event.turn_id);
-      callState = 'listening';
+      applyCallState('listening');
     }
   }
 
@@ -783,7 +780,7 @@
 
   function finishAiTurn() {
     activeAiText = '';
-    callState = 'listening';
+    applyCallState('listening');
   }
 
   async function toggleMute() {

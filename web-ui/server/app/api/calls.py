@@ -392,14 +392,14 @@ async def create_call_turn(
                         },
                     ),
                 )
-                tts_error: AiBackendClientError | None = None
+                speak_result: dict[str, Any] | None = None
                 while not tts_task.done():
                     await asyncio.sleep(2.0)
                     # SSE comment — keeps the HTTP connection alive without
                     # being interpreted as an event by the client
                     yield ": keepalive\n\n"
                 try:
-                    await tts_task
+                    speak_result = await tts_task
                 except AiBackendClientError as exc:
                     logger.warning(
                         "[call-turn] speak_call.sync_failed call=%s turn=%s "
@@ -412,6 +412,9 @@ async def create_call_turn(
                     # TTS failed but LLM text was saved. Yield ai_done so the
                     # browser transitions from 'speaking' back to 'listening'.
                     # The user sees the AI text but no audio — they can try again.
+                audio_started_event = _extract_ai_audio_started_event(speak_result)
+                if audio_started_event is not None:
+                    yield _sse(audio_started_event)
                 logger.info(
                     "[call-turn] ai_done call=%s turn=%s visible_text_len=%d",
                     call_id,
@@ -667,6 +670,20 @@ def _decode_sse_event(raw_event: str) -> dict[str, Any]:
             return {}
         return payload if isinstance(payload, dict) else {}
     return {}
+
+
+def _extract_ai_audio_started_event(speak_result: Mapping[str, Any] | None) -> dict[str, Any] | None:
+    if speak_result is None:
+        return None
+    event = speak_result.get("event")
+    candidates = [
+        speak_result.get("ai_audio_started_event"),
+        event.get("ai_audio_started_event") if isinstance(event, Mapping) else None,
+    ]
+    for candidate in candidates:
+        if isinstance(candidate, Mapping) and candidate.get("type") == "ai_audio_started":
+            return dict(candidate)
+    return None
 
 
 __all__ = [
