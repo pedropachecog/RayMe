@@ -12,6 +12,7 @@ type SettingsState = {
   ai_backend_url: string;
   llm_base_url: string;
   llm_model: string;
+  llm_disable_thinking: boolean;
   llm_api_key_configured: boolean;
   save_ai_audio: boolean;
   save_mic_audio: boolean;
@@ -52,6 +53,7 @@ const staleSettings: SettingsState = {
   ai_backend_url: 'https://127.0.0.1:9443',
   llm_base_url: 'https://api.openai.com/v1',
   llm_model: 'gpt-stale-default',
+  llm_disable_thinking: true,
   llm_api_key_configured: true,
   save_ai_audio: true,
   save_mic_audio: false,
@@ -100,6 +102,7 @@ test('Settings Test Connection saves current form values before probing endpoint
       ai_backend_url: payload.ai_backend_url ?? currentSettings.ai_backend_url,
       llm_base_url: payload.llm_base_url ?? currentSettings.llm_base_url,
       llm_model: payload.llm_model ?? currentSettings.llm_model,
+      llm_disable_thinking: payload.llm_disable_thinking ?? currentSettings.llm_disable_thinking,
       save_ai_audio: payload.save_ai_audio ?? currentSettings.save_ai_audio,
       save_mic_audio: payload.save_mic_audio ?? currentSettings.save_mic_audio,
       vad_threshold: payload.vad_threshold ?? currentSettings.vad_threshold,

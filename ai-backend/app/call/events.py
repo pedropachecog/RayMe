@@ -6,6 +6,7 @@ from typing import Any, Literal, TypedDict
 from typing_extensions import NotRequired
 
 USER_FINAL_EVENT = "user_final"
+STATE_EVENT = "state"
 AI_AUDIO_STARTED_EVENT = "ai_audio_started"
 AI_DONE_EVENT = "ai_done"
 MUTED_EVENT = "muted"
@@ -65,6 +66,7 @@ def user_final_event(
 
 def simple_event(
     event_type: Literal[
+        "state",
         "ai_audio_started",
         "ai_done",
         "muted",

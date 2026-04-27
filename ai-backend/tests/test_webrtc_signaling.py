@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from io import BytesIO
 from typing import Any
 
+import numpy as np
 import pytest
+import soundfile as sf
 from fastapi.testclient import TestClient
 
 import app.api.webrtc as webrtc_module
@@ -12,6 +15,16 @@ MUTE_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/mute"
 INTERRUPT_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/interrupt"
 END_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/end"
 SPEAK_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/speak"
+
+
+def _scripted_wav_bytes() -> bytes:
+    buffer = BytesIO()
+    samples = np.full(2400, 0.25, dtype=np.float32)
+    sf.write(buffer, samples, 24000, format="WAV")
+    return buffer.getvalue()
+
+
+SCRIPTED_WAV_BYTES = _scripted_wav_bytes()
 
 
 class ScriptedTtsAdapter:
@@ -37,7 +50,7 @@ class ScriptedTtsAdapter:
         )
         if self.fail:
             raise RuntimeError("raw model failure")
-        return {"wav_bytes": b"scripted-wav", "sample_rate": 24000, "duration_ms": 100}
+        return {"wav_bytes": SCRIPTED_WAV_BYTES, "sample_rate": 24000, "duration_ms": 100}
 
 
 class ScriptedModelManager:

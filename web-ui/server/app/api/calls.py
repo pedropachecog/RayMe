@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
 from typing import Any, Literal
@@ -329,6 +330,7 @@ async def create_call_turn(
         base_url=endpoint_settings.llm_base_url,
         api_key=endpoint_settings.llm_api_key,
         model=endpoint_settings.llm_model,
+        disable_thinking=endpoint_settings.llm_disable_thinking,
     )
 
     async def events() -> AsyncIterator[str]:
@@ -336,6 +338,8 @@ async def create_call_turn(
         if current_task is not None:
             _ACTIVE_LLM_TURNS[call_id] = current_task
         accumulated: list[str] = []
+        llm_started = time.perf_counter()
+        first_token_logged = False
         try:
             async for raw_event in stream_chat_completion(
                 completion_settings,
@@ -347,6 +351,16 @@ async def create_call_turn(
                     token = str(event.get("text") or "")
                     if not token:
                         continue
+                    if not first_token_logged:
+                        first_token_logged = True
+                        logger.info(
+                            "[call-turn] llm.first_token call=%s turn=%s elapsed_ms=%d disable_thinking=%s model=%s",
+                            call_id,
+                            payload.turn_id,
+                            int((time.perf_counter() - llm_started) * 1000),
+                            completion_settings.disable_thinking,
+                            completion_settings.model,
+                        )
                     accumulated.append(token)
                     yield _sse({"type": "ai_token", "turn_id": payload.turn_id, "text": token})
                     continue
@@ -362,6 +376,13 @@ async def create_call_turn(
                     return
 
             visible_text = "".join(accumulated)
+            logger.info(
+                "[call-turn] llm.done call=%s turn=%s elapsed_ms=%d chars=%d",
+                call_id,
+                payload.turn_id,
+                int((time.perf_counter() - llm_started) * 1000),
+                len(visible_text),
+            )
             if visible_text:
                 message = await service.record_ai_speech(call_id, visible_text)
                 # Block the SSE stream until TTS synthesis completes and audio

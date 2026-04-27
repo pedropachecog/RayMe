@@ -84,6 +84,9 @@ class WhisperSttAdapter:
     def transcribe_audio(self, **kwargs: Any) -> dict[str, Any]:
         return self.transcribe(**kwargs)
 
+    def warmup(self) -> None:
+        self._ensure_model()
+
     def _ensure_model(self) -> Any:
         if self.model is None:
             require_cuda_device_config(

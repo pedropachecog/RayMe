@@ -5,6 +5,7 @@ import base64
 import inspect
 import json
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from typing import Any
@@ -29,6 +30,7 @@ from app.call.tracks import (
     InboundAudioFrameNormalizer,
     OutboundAudioBuffer,
     PcmAudioFrame,
+    audio_stats_for_wav_bytes,
     normalize_inbound_audio_frame,
     write_pcm_frames_to_temp_wav,
 )
@@ -120,11 +122,12 @@ class CallSession:
                 )
             return False if was_raw_bytes else None
 
-        # During "thinking" state the AI is generating LLM text. Accepting
-        # inbound audio during this window causes ambient noise to accumulate
-        # in the turn buffer, which Whisper then hallucinates (e.g. "thank you"
-        # from room-tone silence).  Drop frames so the next turn starts clean.
-        if self.state == "thinking":
+        # During understanding/thinking states the AI is transcribing or
+        # generating. Accepting inbound audio during this window causes ambient
+        # noise to accumulate in the turn buffer, which Whisper then
+        # hallucinates (e.g. "thank you" from room-tone silence). Drop frames
+        # so the next turn starts clean.
+        if self.state in {"understanding", "thinking"}:
             self.dropped_audio_frames += 1
             return False if was_raw_bytes else None
 
@@ -207,6 +210,10 @@ class CallSession:
             return None
         self._turn_index += 1
         turn_id = f"user-turn-{self._turn_index}"
+        self.state = "understanding"
+        await self.emit_event(
+            simple_event("state", session_id=self.session_id, turn_id=turn_id, state="understanding")
+        )
         logger.info(
             "[rayme-call] stt.begin session=%s turn=%s frames=%d pcm_bytes=%d "
             "rms=%s peak=%s",
@@ -217,6 +224,7 @@ class CallSession:
             f"{audio_stats['rms']:.1f}" if audio_stats is not None else "unknown",
             f"{audio_stats['peak']:.1f}" if audio_stats is not None else "unknown",
         )
+        stt_started = time.perf_counter()
         self._turn_frames.clear()
         self._turn_started_at = None
         self._speech_seen = False
@@ -227,9 +235,10 @@ class CallSession:
             transcription = await asyncio.to_thread(self._transcribe_turn, frames)
         except Exception as exc:
             logger.exception(
-                "[rayme-call] stt.failed session=%s turn=%s exc=%s",
+                "[rayme-call] stt.failed session=%s turn=%s elapsed_ms=%d exc=%s",
                 self.session_id,
                 turn_id,
+                int((time.perf_counter() - stt_started) * 1000),
                 exc.__class__.__name__,
             )
             event = failed_event(
@@ -247,11 +256,12 @@ class CallSession:
         status = str(transcription.get("status") or "")
         logger.info(
             "[rayme-call] stt.result session=%s turn=%s transcript_len=%d "
-            "language=%s",
+            "language=%s elapsed_ms=%d",
             self.session_id,
             turn_id,
             len(text),
             transcription.get("language"),
+            int((time.perf_counter() - stt_started) * 1000),
         )
         if status != "accepted" or not text:
             event = failed_event(
@@ -383,9 +393,11 @@ class CallSession:
             if turn_id in self._cancelled_ai_turns:
                 return {"status": "cancelled", "turn_id": turn_id}
             wav_bytes = bytes(result.get("wav_bytes") or b"")
-            playback_seconds = await self._queue_outbound_audio(wav_bytes)
             if wav_bytes:
-                audio_stats = self._outbound_audio_stats()
+                audio_stats = audio_stats_for_wav_bytes(
+                    wav_bytes,
+                    target_sample_rate=int(getattr(self.outbound_audio_track, "sample_rate", 48000)),
+                )
                 self.state = "speaking"
                 audio_started_event = simple_event(
                     AI_AUDIO_STARTED_EVENT,
@@ -396,6 +408,12 @@ class CallSession:
                     audio=audio_stats,
                 )
                 await self.emit_event(audio_started_event)
+                # Let the browser unmute the remote media element before the
+                # first speech frame is enqueued; otherwise Android Chrome can
+                # begin audible playback late and only expose the tail.
+                await asyncio.sleep(0.08)
+            playback_seconds = await self._queue_outbound_audio(wav_bytes)
+            if wav_bytes:
                 await self._wait_for_outbound_audio_playback(playback_seconds)
         except asyncio.CancelledError:
             self._cancelled_ai_turns.add(turn_id)

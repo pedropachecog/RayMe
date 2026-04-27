@@ -21,8 +21,8 @@
   import VoiceVisualizer from '$lib/components/call/VoiceVisualizer.svelte';
   import StatusChip from '$lib/components/StatusChip.svelte';
 
-  type ActiveCallState = Extract<CallStateName, 'connecting' | 'listening' | 'thinking' | 'speaking' | 'interrupted' | 'ended' | 'failed'>;
-  type VisualState = Extract<CallStateName, 'listening' | 'thinking' | 'speaking'>;
+  type ActiveCallState = Extract<CallStateName, 'connecting' | 'listening' | 'understanding' | 'thinking' | 'speaking' | 'interrupted' | 'ended' | 'failed'>;
+  type VisualState = Extract<CallStateName, 'listening' | 'understanding' | 'thinking' | 'speaking'>;
   type BlockingAction = 'Retry Microphone' | 'Open Character' | 'Choose Voice' | 'Open Settings' | 'Return to Thread';
 
   interface BlockingPanel {
@@ -89,7 +89,9 @@
   const characterName = $derived(thread?.character_name ?? 'RayMe');
   const title = $derived(thread?.title?.trim() || characterName);
   const visualState = $derived<VisualState>(
-    callState === 'thinking' || callState === 'speaking' ? callState : 'listening'
+    callState === 'understanding' || callState === 'thinking' || callState === 'speaking'
+      ? callState
+      : 'listening'
   );
   const statusTone = $derived(callState === 'failed' ? 'danger' : callState === 'connecting' ? 'neutral' : 'healthy');
   const statusLabel = $derived(labelForState(callState));
@@ -537,6 +539,7 @@
     const normalized = nextState.toLowerCase();
     if (
       normalized === 'listening' ||
+      normalized === 'understanding' ||
       normalized === 'thinking' ||
       normalized === 'speaking' ||
       normalized === 'interrupted' ||
@@ -548,13 +551,18 @@
       callState = normalized;
       // Gate microphone during AI turns to prevent ambient noise from
       // being transcribed as phantom turns ("thank you" from silence).
-      if (prevState === 'listening' && (normalized === 'thinking' || normalized === 'speaking')) {
+      if (
+        prevState === 'listening' &&
+        (normalized === 'understanding' || normalized === 'thinking' || normalized === 'speaking')
+      ) {
         disableMicrophone();
       } else if (normalized === 'listening' && prevState !== 'listening') {
         enableMicrophone();
       }
+      syncRemoteAudioAudibility();
     } else {
       callState = 'listening';
+      syncRemoteAudioAudibility();
     }
   }
 
@@ -582,10 +590,29 @@
     });
   }
 
+  function syncRemoteAudioAudibility() {
+    if (!remoteAudioElement) {
+      return;
+    }
+    const shouldPlayAudibly = callState === 'speaking';
+    if (remoteAudioElement.muted !== !shouldPlayAudibly) {
+      remoteAudioElement.muted = !shouldPlayAudibly;
+      emitDebugEvent(callId, 'remote_audio.audibility', {
+        muted: remoteAudioElement.muted,
+        callState
+      });
+    }
+  }
+
   async function handleCallDataEvent(event: CallEvent) {
     if (event.type === 'user_final') {
       appendUserFinal(event.text, event.turn_id);
       await submitUserTurn(event);
+      return;
+    }
+
+    if (event.type === 'state') {
+      applyCallState(event.state);
       return;
     }
 
@@ -1031,6 +1058,7 @@
     element.autoplay = true;
     element.playsInline = true;
     element.controls = false;
+    element.muted = callState !== 'speaking';
     element.srcObject = stream;
     remoteAudioElement = element;
     element.addEventListener('playing', () => {
@@ -1174,8 +1202,11 @@
     if (state === 'connecting') {
       return 'Connecting';
     }
+    if (state === 'understanding') {
+      return 'Understanding';
+    }
     if (state === 'thinking') {
-      return 'Thinking';
+      return 'Composing';
     }
     if (state === 'speaking') {
       return 'Speaking';
@@ -1236,7 +1267,7 @@
         stateLabel={callControlStateLabel}
         ready={callState === 'listening' && canUseToolbar}
         disabled={!canUseToolbar}
-        interruptEnabled={callState === 'thinking' || callState === 'speaking'}
+        interruptEnabled={callState === 'understanding' || callState === 'thinking' || callState === 'speaking'}
         endEnabled={!ending}
         inputPickerSupported={false}
         outputPickerSupported={false}

@@ -17,6 +17,7 @@ SETTING_FIELDS = (
     "llm_base_url",
     "llm_api_key",
     "llm_model",
+    "llm_disable_thinking",
     "save_ai_audio",
     "save_mic_audio",
     "vad_threshold",
@@ -33,6 +34,7 @@ class EndpointSettings:
     llm_base_url: str
     llm_api_key: str
     llm_model: str
+    llm_disable_thinking: bool
     save_ai_audio: bool
     save_mic_audio: bool
     vad_threshold: float
@@ -50,6 +52,7 @@ class EndpointSettings:
             "ai_backend_url": self.ai_backend_url,
             "llm_base_url": self.llm_base_url,
             "llm_model": self.llm_model,
+            "llm_disable_thinking": self.llm_disable_thinking,
             "llm_api_key_configured": self.llm_api_key_configured,
             "save_ai_audio": self.save_ai_audio,
             "save_mic_audio": self.save_mic_audio,
@@ -67,6 +70,7 @@ class EndpointSettings:
             "llm_base_url": self.llm_base_url,
             "llm_api_key": self.llm_api_key,
             "llm_model": self.llm_model,
+            "llm_disable_thinking": self.llm_disable_thinking,
             "save_ai_audio": self.save_ai_audio,
             "save_mic_audio": self.save_mic_audio,
             "vad_threshold": self.vad_threshold,
@@ -124,6 +128,7 @@ class SettingsService:
             "llm_base_url": self._runtime_settings.llm_base_url,
             "llm_api_key": self._runtime_settings.llm_api_key,
             "llm_model": self._runtime_settings.llm_model,
+            "llm_disable_thinking": self._runtime_settings.llm_disable_thinking,
             "save_ai_audio": True,
             "save_mic_audio": False,
             "vad_threshold": 0.5,
@@ -138,6 +143,7 @@ class SettingsService:
             llm_base_url=str(values["llm_base_url"]),
             llm_api_key=str(values["llm_api_key"]),
             llm_model=str(values["llm_model"]),
+            llm_disable_thinking=bool(values["llm_disable_thinking"]),
             save_ai_audio=bool(values["save_ai_audio"]),
             save_mic_audio=bool(values["save_mic_audio"]),
             vad_threshold=float(values["vad_threshold"]),
@@ -149,14 +155,14 @@ class SettingsService:
 
 def _clean_setting_value(key: str, value: Any) -> object:
     if value is None:
-        if key in {"save_ai_audio", "save_mic_audio"}:
+        if key in {"save_ai_audio", "save_mic_audio", "llm_disable_thinking"}:
             return False
         if key == "vad_threshold":
             return 0.5
         if key == "vad_end_silence_ms":
             return 700
         return ""
-    if key in {"save_ai_audio", "save_mic_audio"}:
+    if key in {"save_ai_audio", "save_mic_audio", "llm_disable_thinking"}:
         return bool(value)
     if key == "vad_threshold":
         return float(value)
@@ -166,7 +172,7 @@ def _clean_setting_value(key: str, value: Any) -> object:
 
 
 def _clean_persisted_setting(key: str, value: Any) -> object:
-    if key in {"save_ai_audio", "save_mic_audio"}:
+    if key in {"save_ai_audio", "save_mic_audio", "llm_disable_thinking"}:
         return bool(value)
     if key == "vad_threshold":
         return float(value)

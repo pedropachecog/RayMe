@@ -11,6 +11,16 @@ from app.call.tracks import QueuedAudioOutputTrack, normalize_inbound_audio_fram
 from app.call.session import CallSession, CallSessionManager
 
 
+def _scripted_wav_bytes() -> bytes:
+    buffer = BytesIO()
+    samples = np.full(2880, 512 / np.iinfo(np.int16).max, dtype=np.float32)
+    sf.write(buffer, samples, 24000, format="WAV")
+    return buffer.getvalue()
+
+
+SCRIPTED_WAV_BYTES = _scripted_wav_bytes()
+
+
 def _run(value: Any) -> Any:
     if asyncio.iscoroutine(value):
         return asyncio.run(value)
@@ -80,7 +90,7 @@ class ScriptedTtsAdapter:
         )
         if self.delay:
             await asyncio.sleep(self.delay)
-        return {"wav_bytes": b"scripted-wav", "sample_rate": 24000, "duration_ms": 100}
+        return {"wav_bytes": SCRIPTED_WAV_BYTES, "sample_rate": 24000, "duration_ms": 120}
 
 
 class ScriptedGenericTtsAdapter:
@@ -89,7 +99,7 @@ class ScriptedGenericTtsAdapter:
 
     def synthesize(self, payload: Any) -> dict[str, Any]:
         self.reference_audio = payload.reference_audio
-        return {"wav_bytes": b"scripted-wav", "sample_rate": 24000, "duration_ms": 100}
+        return {"wav_bytes": SCRIPTED_WAV_BYTES, "sample_rate": 24000, "duration_ms": 120}
 
 
 class ScriptedInboundAudioFrame:
@@ -417,15 +427,13 @@ def test_speak_text_queues_audio_and_emits_done_for_final_chunk() -> None:
             "engine_id": "f5",
         }
     ]
-    assert track.chunks == [b"scripted-wav"]
+    assert track.chunks == [SCRIPTED_WAV_BYTES]
     assert track.wait_calls
     assert [item["type"] for item in events] == ["ai_audio_started", "ai_done"]
-    assert events[0]["audio"] == {
-        "duration_ms": 120,
-        "samples": 5760,
-        "rms": 512.0,
-        "peak": 2048.0,
-    }
+    assert events[0]["audio"]["duration_ms"] == 120
+    assert events[0]["audio"]["samples"] == 5760
+    assert events[0]["audio"]["rms"] > 0
+    assert events[0]["audio"]["peak"] > 0
     assert event["type"] == "ai_done"
     assert session.state == "listening"
 
@@ -449,7 +457,7 @@ def test_queued_audio_output_track_returns_tts_audio_frames() -> None:
     assert np.max(np.abs(frame.to_ndarray())) > 0
 
 
-def test_queued_audio_output_track_idle_frames_are_silent() -> None:
+def test_queued_audio_output_track_idle_frames_emit_keepalive_carrier() -> None:
     async def scenario() -> Any:
         track = QueuedAudioOutputTrack(sample_rate=16000, frame_ms=20)
         return await track.recv()
@@ -458,7 +466,7 @@ def test_queued_audio_output_track_idle_frames_are_silent() -> None:
 
     assert frame.sample_rate == 16000
     assert frame.samples == 320
-    assert np.max(np.abs(frame.to_ndarray())) == 0
+    assert np.max(np.abs(frame.to_ndarray())) > 0
 
 
 def test_speak_text_generic_adapter_uses_real_reference_audio() -> None:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import fractions
 import logging
+import math
 import os
 import tempfile
 from io import BytesIO
@@ -94,21 +95,17 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
 
     async def enqueue(self, wav_bytes: bytes) -> float:
         samples = _wav_bytes_to_int16(wav_bytes, target_sample_rate=self.sample_rate)
-        rms = float(np.sqrt(np.mean(np.square(samples.astype(np.float32))))) if samples.size else 0.0
-        peak = float(np.max(np.abs(samples.astype(np.float32)))) if samples.size else 0.0
-        duration_seconds = samples.size / self.sample_rate if samples.size else 0.0
-        self.last_enqueue_stats = {
-            "duration_ms": int(duration_seconds * 1000),
-            "samples": int(samples.size),
-            "rms": rms,
-            "peak": peak,
-        }
+        self.last_enqueue_stats = audio_stats_for_int16_samples(
+            samples,
+            sample_rate=self.sample_rate,
+        )
+        duration_seconds = float(self.last_enqueue_stats["duration_ms"]) / 1000.0
         logger.info(
             "[rayme-call] track.enqueue stats samples=%d duration_ms=%d rms=%.1f peak=%.1f",
-            samples.size,
-            int(duration_seconds * 1000),
-            rms,
-            peak,
+            self.last_enqueue_stats["samples"],
+            self.last_enqueue_stats["duration_ms"],
+            self.last_enqueue_stats["rms"],
+            self.last_enqueue_stats["peak"],
         )
         if samples.size:
             await self._queue.put(samples)
@@ -187,11 +184,16 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
                     peak,
                 )
         else:
-            # Emit real digital silence while no AI audio is queued. A previous
-            # RTP keepalive workaround used a low-amplitude sine wave here; once
-            # Android Chrome playback moved to a real media element, that carrier
-            # became audible and could leak back into VAD through the speaker.
+            # Emit a carrier while no AI audio is queued so Opus keeps RTP
+            # packets flowing during STT/LLM/TTS gaps. The browser mutes the
+            # media element outside the speaking state so this keepalive does
+            # not reach the user.
             self._idle_frame_count += 1
+            phase = 2 * math.pi * 440 * self._pts / self.sample_rate
+            amplitude = 500
+            t = np.arange(self.frame_samples, dtype=np.float32)
+            samples_f = amplitude * np.sin(phase + 2 * math.pi * 440 * t / self.sample_rate)
+            samples = samples_f.astype(np.int16)
         return samples
 
 
@@ -279,6 +281,31 @@ def _wav_bytes_to_int16(wav_bytes: bytes, *, target_sample_rate: int) -> np.ndar
         )
     clipped = np.clip(mono, -1.0, 1.0)
     return (clipped * np.iinfo(np.int16).max).astype(np.int16)
+
+
+def audio_stats_for_wav_bytes(
+    wav_bytes: bytes,
+    *,
+    target_sample_rate: int,
+) -> dict[str, float | int]:
+    return audio_stats_for_int16_samples(
+        _wav_bytes_to_int16(wav_bytes, target_sample_rate=target_sample_rate),
+        sample_rate=target_sample_rate,
+    )
+
+
+def audio_stats_for_int16_samples(
+    samples: np.ndarray,
+    *,
+    sample_rate: int,
+) -> dict[str, float | int]:
+    float_samples = samples.astype(np.float32)
+    return {
+        "duration_ms": int(samples.size * 1000 / sample_rate) if samples.size else 0,
+        "samples": int(samples.size),
+        "rms": float(np.sqrt(np.mean(np.square(float_samples)))) if samples.size else 0.0,
+        "peak": float(np.max(np.abs(float_samples))) if samples.size else 0.0,
+    }
 
 
 def _pcm_to_float32(frame: PcmAudioFrame, *, target_sample_rate: int) -> np.ndarray:

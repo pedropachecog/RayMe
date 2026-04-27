@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+import logging
 from typing import Any
 
 from app.config import AiBackendSettings
 from app.models.engine_metadata import ENGINE_METADATA, EngineMetadata, EngineStatus
 from app.models.tts_registry import build_default_tts_adapters
+
+logger = logging.getLogger(__name__)
 
 
 VramProbe = Callable[[], Mapping[str, int | float]]
@@ -41,6 +44,9 @@ class ModelManager:
         self.vram_probe: VramProbe = vram_probe or self._probe_vram
         self.loading_engine: str | None = None
         self.resident_tts_engine: str | None = None
+        self.stt_adapter: Any | None = None
+        self.vad_adapter: Any | None = None
+        self.stt_ready = False
         self._statuses = {
             engine.id: EngineStatus(id=engine.id, label=engine.label)
             for engine in ENGINE_METADATA
@@ -72,6 +78,8 @@ class ModelManager:
                     self.settings.default_tts_engine,
                     "default engine load failed",
                 )
+        if self.settings.load_models_on_startup:
+            self._warm_speech_models()
         self._started = True
 
     def shutdown(self) -> None:
@@ -131,6 +139,7 @@ class ModelManager:
             "stt_model": self.settings.stt_model,
             "stt_compute_type": self.settings.stt_compute_type,
             "stt_language": self.settings.stt_language,
+            "stt_ready": self.stt_ready,
             "vad_ready": True,
             "vad_threshold": self.settings.vad_threshold,
             "vad_end_silence_ms": self.settings.vad_end_silence_ms,
@@ -172,6 +181,32 @@ class ModelManager:
         status.resident = False
         status.state = "unavailable"
         status.unavailable_reason = reason
+
+    def _warm_speech_models(self) -> None:
+        try:
+            from app.models.stt import WhisperSttAdapter
+            from app.models.vad import SileroVadAdapter
+
+            if self.stt_adapter is None:
+                self.stt_adapter = WhisperSttAdapter(settings=self.settings)
+            warmup = getattr(self.stt_adapter, "warmup", None)
+            if callable(warmup):
+                warmup()
+            if self.vad_adapter is None:
+                self.vad_adapter = SileroVadAdapter(
+                    threshold=self.settings.vad_threshold,
+                    end_silence_ms=self.settings.vad_end_silence_ms,
+                    sampling_rate=16000,
+                )
+            self.stt_ready = True
+            logger.info("[rayme-call] stt.warmup model=%s ready=True", self.settings.stt_model)
+        except Exception as exc:
+            self.stt_ready = False
+            logger.exception(
+                "[rayme-call] stt.warmup_failed model=%s exc=%s",
+                self.settings.stt_model,
+                exc.__class__.__name__,
+            )
 
     def _safe_vram_probe(self) -> dict[str, int | float]:
         try:

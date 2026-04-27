@@ -173,6 +173,26 @@ async def test_openai_compatible_generation_uses_fresh_random_seed() -> None:
     assert 0 <= request["seed"] <= CHAT_COMPLETION_SEED_LIMIT
 
 
+async def test_qwen_generation_can_disable_thinking() -> None:
+    scripted_client = ScriptedOpenAIClient()
+    settings = ChatCompletionSettings(
+        base_url="http://llm.local/v1",
+        model="unsloth/Qwen3.5-27B",
+        api_key="server-secret",
+        disable_thinking=True,
+    )
+
+    await collect_chat_completion(
+        settings,
+        [{"role": "user", "content": "Say hello"}],
+        client=scripted_client,
+    )
+
+    request = scripted_client.chat.completions.requests[0]
+    assert request["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert request["messages"][-1]["content"].endswith("/no_think")
+
+
 def test_done_event_contains_full_thread_message_shape() -> None:
     alternate = MessageAlternateShape(
         id="alternate-selected",

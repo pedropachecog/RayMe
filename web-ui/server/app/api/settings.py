@@ -34,6 +34,7 @@ class SettingsPatch(BaseModel):
     llm_base_url: str | None = Field(default=None, max_length=500)
     llm_api_key: str | None = Field(default=None, max_length=2000)
     llm_model: str | None = Field(default=None, max_length=200)
+    llm_disable_thinking: bool | None = None
     save_ai_audio: bool | None = None
     save_mic_audio: bool | None = None
     vad_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
@@ -68,6 +69,7 @@ class PublicSettings(BaseModel):
     ai_backend_url: str
     llm_base_url: str
     llm_model: str
+    llm_disable_thinking: bool
     llm_api_key_configured: bool
     save_ai_audio: bool
     save_mic_audio: bool

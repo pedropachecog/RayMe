@@ -24,6 +24,7 @@
   let aiBackendUrl = '';
   let llmBaseUrl = '';
   let llmModel = '';
+  let llmDisableThinking = true;
   let llmApiKey = '';
   let llmApiKeyConfigured = false;
   let saveAiAudio = true;
@@ -81,6 +82,7 @@
     aiBackendUrl = settings.ai_backend_url ?? '';
     llmBaseUrl = settings.llm_base_url ?? '';
     llmModel = settings.llm_model ?? '';
+    llmDisableThinking = settings.llm_disable_thinking ?? true;
     llmApiKey = '';
     llmApiKeyConfigured = settings.llm_api_key_configured === true;
     saveAiAudio = settings.save_ai_audio ?? true;
@@ -112,6 +114,7 @@
         ai_backend_url: aiBackendUrl,
         llm_base_url: llmBaseUrl,
         llm_model: llmModel,
+        llm_disable_thinking: llmDisableThinking,
         save_ai_audio: saveAiAudio,
         save_mic_audio: saveMicAudio,
         vad_threshold: clampNumber(vadThreshold, 0, 1),
@@ -305,6 +308,13 @@
           testing={testingEndpoint === 'llm'}
           onTest={testLlmEndpoint}
         />
+        <label class="toggle-row">
+          <input type="checkbox" bind:checked={llmDisableThinking} />
+          <span>
+            <strong>Disable Qwen thinking</strong>
+            <small>Live calls request direct responses from Qwen models.</small>
+          </span>
+        </label>
       </div>
 
       <aside class="readiness-panel" aria-labelledby="mobile-readiness-title">
@@ -440,6 +450,41 @@
     background: rgba(9, 19, 40, 0.78);
     padding: var(--space-lg);
     box-shadow: inset 0 0 0 1px rgba(64, 72, 93, 0.14);
+  }
+
+  .toggle-row {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: var(--space-sm);
+    align-items: start;
+    border-radius: var(--radius-md);
+    background: rgba(9, 19, 40, 0.78);
+    padding: var(--space-md);
+    box-shadow: inset 0 0 0 1px rgba(64, 72, 93, 0.14);
+  }
+
+  .toggle-row input {
+    width: 20px;
+    height: 20px;
+    margin-top: 2px;
+    accent-color: var(--color-primary);
+  }
+
+  .toggle-row span {
+    display: grid;
+    gap: 2px;
+  }
+
+  .toggle-row strong {
+    color: var(--color-text);
+    font-size: var(--font-label);
+    line-height: var(--line-label);
+  }
+
+  .toggle-row small {
+    color: var(--color-text-muted);
+    font-size: var(--font-label);
+    line-height: var(--line-label);
   }
 
   .settings-skeleton,

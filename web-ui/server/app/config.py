@@ -26,6 +26,7 @@ class Settings(BaseModel, frozen=True):
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: str = ""
     llm_model: str = "gpt-4.1-mini"
+    llm_disable_thinking: bool = True
 
     @field_validator("web_bind_host")
     @classmethod
@@ -84,6 +85,7 @@ ENV_TO_FIELD = {
     "RAYME_LLM_BASE_URL": "llm_base_url",
     "RAYME_LLM_API_KEY": "llm_api_key",
     "RAYME_LLM_MODEL": "llm_model",
+    "RAYME_LLM_DISABLE_THINKING": "llm_disable_thinking",
 }
 
 

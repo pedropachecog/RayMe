@@ -1,13 +1,19 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { fulfillJson, installBrowserErrorGuard, installMockCallMedia } from './helpers/acceptance';
+import {
+  fulfillJson,
+  installBrowserErrorGuard,
+  installCallDebugEventRoute,
+  installMockCallMedia
+} from './helpers/acceptance';
 import { makeThreadDetail } from './helpers/fixtures';
 
 const threadId = 'call-visualizer-thread';
 
-test('voice visualizer reflects Listening, Thinking, and Speaking call states', async ({ page }) => {
+test('voice visualizer reflects Listening, Understanding, Composing, and Speaking call states', async ({ page }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
   await installMockCallMedia(page);
+  await installCallDebugEventRoute(page);
   await installVisualizerRoutes(page);
 
   await page.goto(`/chat/${threadId}`);
@@ -19,7 +25,10 @@ test('voice visualizer reflects Listening, Thinking, and Speaking call states', 
   await expect(visualizer).toHaveAttribute('data-call-state', 'listening');
   await expect(visualizer).toHaveAttribute('data-listening-rms', /0\.[1-9]/);
 
-  await expect(visualizer.getByText('Thinking')).toBeVisible();
+  await expect(visualizer.getByText('Understanding')).toBeVisible();
+  await expect(visualizer).toHaveAttribute('data-call-state', 'understanding');
+
+  await expect(visualizer.getByText('Composing')).toBeVisible();
   await expect(visualizer).toHaveAttribute('data-call-state', 'thinking');
 
   await expect(visualizer.getByText('Speaking')).toBeVisible();
@@ -48,6 +57,7 @@ async function installVisualizerRoutes(page: Page) {
       state: 'listening',
       events: [
         { type: 'state', state: 'Listening', listeningRms: 0.2 },
+        { type: 'state', state: 'Understanding' },
         { type: 'state', state: 'Thinking' },
         { type: 'state', state: 'Speaking', speakingRms: 0.4 }
       ]

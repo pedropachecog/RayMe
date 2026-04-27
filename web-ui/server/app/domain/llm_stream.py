@@ -27,6 +27,7 @@ class ChatCompletionSettings:
     base_url: str
     model: str
     api_key: str | None = None
+    disable_thinking: bool = False
 
 
 class TokenEvent(TypedDict):
@@ -122,12 +123,17 @@ async def _stream_text_tokens(
         return
 
     create = completion_client.chat.completions.create
-    stream = await create(
-        model=settings.model,
-        messages=[dict(message) for message in messages],
-        seed=_random_chat_completion_seed(),
-        stream=True,
-    )
+    request_kwargs: dict[str, Any] = {
+        "model": settings.model,
+        "messages": _prepare_messages(settings, messages),
+        "seed": _random_chat_completion_seed(),
+        "stream": True,
+    }
+    if _should_disable_thinking(settings):
+        request_kwargs["extra_body"] = {
+            "chat_template_kwargs": {"enable_thinking": False},
+        }
+    stream = await create(**request_kwargs)
     async for chunk in stream:
         token = _chunk_delta_text(chunk)
         if token:
@@ -143,6 +149,26 @@ def _openai_client(settings: ChatCompletionSettings) -> AsyncOpenAI:
 
 def _random_chat_completion_seed() -> int:
     return secrets.randbelow(CHAT_COMPLETION_SEED_LIMIT + 1)
+
+
+def _should_disable_thinking(settings: ChatCompletionSettings) -> bool:
+    return settings.disable_thinking and "qwen" in settings.model.lower()
+
+
+def _prepare_messages(
+    settings: ChatCompletionSettings,
+    messages: Sequence[PromptContextMessage],
+) -> list[dict[str, Any]]:
+    prepared = [dict(message) for message in messages]
+    if not _should_disable_thinking(settings):
+        return prepared
+    for message in reversed(prepared):
+        if message.get("role") == "user":
+            content = str(message.get("content") or "").rstrip()
+            if "/no_think" not in content:
+                message["content"] = f"{content}\n\n/no_think" if content else "/no_think"
+            break
+    return prepared
 
 
 def _chunk_delta_text(chunk: object) -> str | None:

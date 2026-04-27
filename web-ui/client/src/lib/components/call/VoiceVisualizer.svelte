@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { CallStateName } from '$lib/api/types';
 
-  export let state: Extract<CallStateName, 'listening' | 'thinking' | 'speaking'> = 'listening';
+  export let state: Extract<CallStateName, 'listening' | 'understanding' | 'thinking' | 'speaking'> = 'listening';
   export let listeningRms: number | null | undefined = undefined;
   export let speakingRms: number | null | undefined = undefined;
 
@@ -23,9 +23,13 @@
     return Math.max(0, Math.min(1, value));
   }
 
-  function labelForState(nextState: typeof state): 'Listening' | 'Thinking' | 'Speaking' {
+  function labelForState(nextState: typeof state): 'Listening' | 'Understanding' | 'Composing' | 'Speaking' {
+    if (nextState === 'understanding') {
+      return 'Understanding';
+    }
+
     if (nextState === 'thinking') {
-      return 'Thinking';
+      return 'Composing';
     }
 
     if (nextState === 'speaking') {
@@ -36,6 +40,10 @@
   }
 
   function createBars(nextState: typeof state, energy: number, hasMeter: boolean): number[] {
+    if (nextState === 'understanding') {
+      return [0.34, 0.48, 0.62, 0.78, 0.62, 0.48, 0.34];
+    }
+
     if (nextState === 'thinking') {
       return [0.38, 0.56, 0.74, 0.92, 0.74, 0.56, 0.38];
     }
@@ -49,6 +57,7 @@
 </script>
 
 <section
+  class:understanding={state === 'understanding'}
   class:thinking={state === 'thinking'}
   class:metered={meterAvailable}
   class="voice-visualizer"
@@ -67,7 +76,15 @@
 
   <div class="status-label">
     <p>{stateLabel}</p>
-    <span>{state === 'thinking' ? 'Preparing a response' : meterAvailable ? 'Live audio energy' : 'Live audio fallback'}</span>
+    <span>
+      {state === 'understanding'
+        ? 'Transcribing speech'
+        : state === 'thinking'
+          ? 'Generating a response'
+          : meterAvailable
+            ? 'Live audio energy'
+            : 'Live audio fallback'}
+    </span>
   </div>
 
   <div class="waveform" aria-hidden="true">
@@ -93,6 +110,7 @@
       0 24px 72px rgba(0, 0, 0, 0.2);
   }
 
+  .voice-visualizer.understanding,
   .voice-visualizer.thinking {
     background:
       radial-gradient(circle at 50% 44%, rgba(182, 160, 255, 0.22), transparent 34%),
@@ -115,6 +133,7 @@
     animation: listening-pulse 1.8s ease-in-out infinite;
   }
 
+  .understanding .pulse-field span,
   .thinking .pulse-field span {
     background: linear-gradient(135deg, rgba(182, 160, 255, 0.16), rgba(112, 170, 255, 0.1));
     box-shadow: 0 0 68px rgba(182, 160, 255, 0.24);
@@ -182,6 +201,7 @@
     animation-delay: calc(var(--bar-index) * -92ms);
   }
 
+  .understanding .waveform span,
   .thinking .waveform span {
     background: linear-gradient(135deg, #b6a0ff 0%, #70aaff 100%);
     box-shadow: 0 0 22px rgba(182, 160, 255, 0.32);

@@ -19,6 +19,7 @@ const publicSettings = {
   ai_backend_url: 'https://192.168.1.199:9443',
   llm_base_url: 'https://api.openai.com/v1',
   llm_model: 'gpt-4o-mini',
+  llm_disable_thinking: true,
   llm_api_key_configured: true,
   save_ai_audio: true,
   save_mic_audio: false,

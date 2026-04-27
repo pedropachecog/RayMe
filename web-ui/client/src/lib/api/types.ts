@@ -180,6 +180,7 @@ export type CallStateName =
   | 'idle'
   | 'connecting'
   | 'listening'
+  | 'understanding'
   | 'thinking'
   | 'speaking'
   | 'interrupted'
@@ -244,6 +245,12 @@ export interface CallTranscriptTurn {
 
 export type CallEvent =
   | {
+      type: 'state';
+      session_id: string;
+      turn_id?: string | null;
+      state: CallStateName | string;
+    }
+  | {
       type: 'user_final';
       session_id: string;
       turn_id: string;
@@ -298,6 +305,7 @@ export interface SettingsPayload {
   ai_backend_url: string;
   llm_base_url: string;
   llm_model: string;
+  llm_disable_thinking: boolean;
   llm_api_key_configured: boolean;
   save_ai_audio: boolean;
   save_mic_audio: boolean;
@@ -313,6 +321,7 @@ export interface SettingsUpdatePayload {
   ai_backend_url?: string | null;
   llm_base_url?: string | null;
   llm_model?: string | null;
+  llm_disable_thinking?: boolean | null;
   llm_api_key?: string | null;
   save_ai_audio?: boolean | null;
   save_mic_audio?: boolean | null;

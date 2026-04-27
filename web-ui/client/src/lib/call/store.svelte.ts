@@ -56,6 +56,7 @@ const CALL_STATES: CallStateName[] = [
   'idle',
   'connecting',
   'listening',
+  'understanding',
   'thinking',
   'speaking',
   'interrupted',

@@ -55,6 +55,7 @@ DEFAULT_SETTINGS_EXTENSIONS = {
     "vad_end_silence_ms": 700,
     "stt_model": "distil-large-v3",
     "tts_default_engine": "f5",
+    "llm_disable_thinking": True,
 }
 
 
@@ -147,6 +148,7 @@ def test_get_and_patch_settings_persist_values_without_echoing_raw_key(
             "ai_backend_url": "https://ai.local:9443",
             "llm_base_url": "https://llm.local/v1",
             "llm_model": "configured-model",
+            "llm_disable_thinking": False,
             "llm_api_key": raw_llm_api_key,
             "save_ai_audio": False,
             "save_mic_audio": True,
@@ -164,6 +166,7 @@ def test_get_and_patch_settings_persist_values_without_echoing_raw_key(
     assert body["ai_backend_url"] == "https://ai.local:9443"
     assert body["llm_base_url"] == "https://llm.local/v1"
     assert body["llm_model"] == "configured-model"
+    assert body["llm_disable_thinking"] is False
     assert body["llm_api_key_configured"] is True
     assert "save_ai_audio" in body
     assert "save_mic_audio" in body
@@ -282,6 +285,7 @@ async def test_settings_service_persists_phase2_defaults_with_json_types(tmp_pat
             assert defaults.vad_end_silence_ms == 700
             assert defaults.stt_model == "distil-large-v3"
             assert defaults.tts_default_engine == "f5"
+            assert defaults.llm_disable_thinking is True
             assert await session.get(AppSetting, SETTINGS_KEY) is None
 
             await service.update(
@@ -292,6 +296,7 @@ async def test_settings_service_persists_phase2_defaults_with_json_types(tmp_pat
                     "vad_end_silence_ms": "900",
                     "stt_model": " distil-large-v3 ",
                     "tts_default_engine": " f5 ",
+                    "llm_disable_thinking": False,
                 }
             )
 
@@ -305,6 +310,7 @@ async def test_settings_service_persists_phase2_defaults_with_json_types(tmp_pat
             assert isinstance(row.value_json["vad_end_silence_ms"], int)
             assert row.value_json["stt_model"] == "distil-large-v3"
             assert row.value_json["tts_default_engine"] == "f5"
+            assert row.value_json["llm_disable_thinking"] is False
     finally:
         await engine.dispose()
 

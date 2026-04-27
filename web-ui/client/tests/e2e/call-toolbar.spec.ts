@@ -27,7 +27,7 @@ test('call toolbar exposes mute, interrupt, device picker fallback, and end cont
   await page.getByRole('button', { name: 'Mute' }).click();
   await expect(page.getByRole('button', { name: 'Unmute' })).toBeVisible();
 
-  await expect(page.getByTestId('voice-visualizer').getByText('Thinking')).toBeVisible();
+  await expect(page.getByTestId('voice-visualizer').getByText('Composing')).toBeVisible();
   await page.getByRole('button', { name: 'More call options' }).click();
   await expect(page.getByRole('button', { name: 'Interrupt' })).toBeVisible();
   await page.getByRole('button', { name: 'Interrupt' }).click();
