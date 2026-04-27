@@ -371,8 +371,14 @@ async def create_call_turn(
                 # the WebRTC ICE connection during the TTS gap.
                 # ai_audio_started / ai_done for the media pipeline are still
                 # delivered via the WebRTC data channel independently.
-                try:
-                    await _speak_call(
+                #
+                # We yield SSE keepalive comments during the wait to prevent
+                # FastAPI's StreamingResponse from timing out the idle HTTP
+                # connection. An idle SSE connection is cancelled, which
+                # propagates CancelledError to _synthesize_speech on the AI
+                # backend, aborting F5-TTS mid-inference.
+                tts_task = asyncio.create_task(
+                    _speak_call(
                         backend,
                         endpoint_settings.ai_backend_url,
                         session_id,
@@ -384,7 +390,16 @@ async def create_call_turn(
                             "final_chunk": True,
                             **voice_reference,
                         },
-                    )
+                    ),
+                )
+                tts_error: AiBackendClientError | None = None
+                while not tts_task.done():
+                    await asyncio.sleep(2.0)
+                    # SSE comment — keeps the HTTP connection alive without
+                    # being interpreted as an event by the client
+                    yield ": keepalive\n\n"
+                try:
+                    await tts_task
                 except AiBackendClientError as exc:
                     logger.warning(
                         "[call-turn] speak_call.sync_failed call=%s turn=%s "

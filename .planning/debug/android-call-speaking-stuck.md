@@ -1,19 +1,71 @@
 ---
-status: awaiting_human_verify
+status: fixing
 created: 2026-04-27T03:30:00Z
-updated: 2026-04-27T05:00:00Z
-handoff_for: next-agent
+updated: 2026-04-27T20:00:00Z
 ---
 
-# Handoff: OMEN Deployment Infrastructure Broken + Call Debugging Stalled
+# Debug Session: Android Call Speaking No Audio
 
-## What Needs to Be Done
+## Current Focus
 
-Two problems:
+reasoning_checkpoint:
+  hypothesis: The SSE connection on Android Chrome is interrupted during TTS synthesis (10-15s) because the server yields no SSE data during `await _speak_call()`. FastAPI's StreamingResponse closes the HTTP connection when no data flows for the server's idle timeout, which cancels the SSE generator task. This in-flight CancelledError propagates to `_synthesize_speech` -> `run_in_executor` -> F5-TTS, aborting the TTS synthesis. No audio is enqueued, so the browser hears only silence keepalive (speakingRms=0.04).
 
-1. **OMEN deployment infrastructure is broken** — ad-hoc PS1 scripts hijacked the scheduled tasks. The app is COMPLETELY DOWN (ports 8443 and 9443 not responding). Need to clean up the ad-hoc scripts and restore proper deployment via `scripts/deploy-omen.sh`.
+  confirming_evidence:
+    - OMEN logs show `asyncio.exceptions.CancelledError` at `_synthesize_speech` line 667
+    - WebRTC disconnects and reconnects during TTS (browser logs show ice=disconnected -> connected cycles)
+    - speak_call returns HTTP 500 (CancelledError passes `except Exception` since it inherits BaseException)
+    - TTS succeeds later (wav_bytes logged) — the issue is timing, not F5-TTS itself
+    - calls.py SSE generator yields zero data during `await _speak_call()` — idle connection
+    - The 200 OK for `/turns` confirms the SSE generator eventually completes
 
-2. **Android call debugging stalled** — we were making progress (VAD/STT works, turns complete) but the call gets stuck in "speaking" with no audio. The fixes at commit 8244cb0 caused regressions (stuck in listening, call won't start). The data channel keepalive fix at 02bca89 was pushed but never tested because the app is down.
+  falsification_test: Add SSE keepalive ping during `_speak_call()`. If TTS stops being cancelled, the hypothesis is confirmed.
+
+  fix_rationale: SSE keepalive yields periodic comment-only SSE events during `_speak_call()`, preventing the HTTP idle timeout. CancelledError handling in `speak_session` catches it explicitly (returns 502 instead of 500).
+
+  blind_spots:
+    - If the cancellation source is not the SSE idle timeout but something else (e.g., browser closing and reopening the SSE connection)
+    - If the browser discards WebRTC connection during SSE gap despite silence keepalive
+
+### Problem A: No AI Audio (Post-8d20fd2)
+
+hypothesis: SSE idle timeout during `_speak_call()` causes the FastAPI StreamingResponse to close, cancelling the SSE generator task. CancelledError propagates to `_synthesize_speech` -> `run_in_executor`, aborting TTS synthesis.
+
+test: Add SSE keepalive during _speak_call(). If TTS stops being cancelled, hypothesis confirmed.
+
+expecting: TTS completes, audio is enqueued, browser hears audio.
+
+next_action: Implement SSE keepalive + CancelledError handling + deploy.
+
+### Problem B: Silence Transcribed as "Thank You"
+
+hypothesis: The client's microphone track stays enabled during AI thinking/speaking. Ambient noise flows through VAD -> STT -> Whisper hallucinates "thank you" from silence. The server-side `handle_inbound_audio_frame` only drops frames when `muted=True` or state in {"ended","failed"}, NOT when state is "speaking" or "thinking". During LLM generation, state is "listening" (reset after user_final), so audio accumulates.
+
+confirming_evidence:
+  - session.py line 109: `if self.muted or self.state in {"ended", "failed"}` — does NOT include "speaking" or "thinking"
+  - session.py line 241: `self.state = "listening"` after finalize_user_turn — state resets to listening during LLM gen
+  - Client +page.svelte never disables mic tracks during AI turn
+  - No `set_muted` call made by web UI before LLM generation
+
+falsification_test: If we add "speaking" to the drop states and disable client mic during AI turn, silence should no longer be transcribed.
+
+fix_rationale: Dual defense — client disables mic track on thinking/speaking (primary), server drops frames during speaking (safety net).
+
+blind_spots:
+  - If the Whisper hallucination is from very short silence bursts that pass VAD before the AI turn starts
+  - If the VAD threshold is too low, letting room noise through even when user isn't speaking
+
+## Symptoms
+
+expected: AI audio plays during 'speaking' state on Android Chrome
+actual: UI reaches 'speaking', shows AI text, but no audio is heard. State transitions to 'listening'.
+errors:
+  - CancelledError during TTS synthesis (AI backend logs)
+  - tts.enqueue after data channel closed
+  - track.send.progress queue_size=0 buffer_size=0
+  - speak_call.background_failed
+reproduction: Start call on Android Chrome, speak, wait for AI response. Text appears but no audio.
+started: After commit 8244cb0 (SSE unblock fix)
 
 ## Problem 1: Ad-Hoc PS1 Scripts on OMEN
 
@@ -190,3 +242,26 @@ ssh rayme-pmpg 'powershell -NoProfile -Command "Get-Content C:\\Users\\pmpg\\ray
 - Do NOT run Playwright E2E tests
 - Do NOT reintroduce fake/synthetic success paths
 - Do NOT mark resolved until live Android path works end-to-end
+
+## Investigation Evidence (2026-04-27T19:00:00Z)
+
+### Problem A: No AI Audio
+
+- checked: Full audio delivery path — TTS synthesis -> _queue_outbound_audio -> QueuedAudioOutputTrack.enqueue -> aiortc RTP -> browser ontrack -> AudioContext -> speakers
+- found: Path looks correct. TTS fix (8d20fd2) keeps connection alive. But OMEN logs are sparse after 10:55 AM restart — no speak_call logs visible.
+- checked: Client attachRemoteAudio — AudioContext resume() called if suspended, but resume() requires user gesture on Android Chrome
+- implication: If AudioContext suspends, resume() silently fails. TTS audio never plays.
+
+### Problem B: Silence Transcribed as "Thank You"
+
+- checked: session.py handle_inbound_audio_frame line 109
+- found: Frame drop condition is `if self.muted or self.state in {"ended", "failed"}` — does NOT include "speaking" or "thinking"
+- checked: Client +page.svelte — no mic gating during AI turns
+- found: Mic tracks never disabled during thinking/speaking states. Audio continuously flows to server.
+- implication: Ambient noise gets transcribed during AI thinking/speaking. This is the root cause of "thank you" hallucination.
+
+### Applied Fixes
+
+- Fix B1: Server-side frame drop during speaking state (session.py)
+- Fix B2: Client-side mic gating — disable mic on thinking/speaking, re-enable on listening (+page.svelte)
+- Fix A1: Added diagnostics logging to track TTS synthesis and audio delivery

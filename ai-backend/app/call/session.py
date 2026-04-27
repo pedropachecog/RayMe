@@ -106,7 +106,7 @@ class CallSession:
     async def handle_inbound_audio_frame(self, frame: Any) -> dict[str, Any] | bool | None:
         self.incoming_audio_frames += 1
         was_raw_bytes = isinstance(frame, bytes)
-        if self.muted or self.state in {"ended", "failed"}:
+        if self.muted or self.state in {"ended", "failed", "speaking"}:
             self.dropped_audio_frames += 1
             if self.incoming_audio_frames % 100 == 0:
                 logger.info(
@@ -118,6 +118,14 @@ class CallSession:
                     self.muted,
                     self.state,
                 )
+            return False if was_raw_bytes else None
+
+        # During "thinking" state the AI is generating LLM text. Accepting
+        # inbound audio during this window causes ambient noise to accumulate
+        # in the turn buffer, which Whisper then hallucinates (e.g. "thank you"
+        # from room-tone silence).  Drop frames so the next turn starts clean.
+        if self.state == "thinking":
+            self.dropped_audio_frames += 1
             return False if was_raw_bytes else None
 
         normalized = normalize_inbound_audio_frame(frame)
@@ -238,7 +246,11 @@ class CallSession:
             ended_at=ended_at,
         )
         await self.emit_event(event)
-        self.state = "listening"
+        # Transition to "thinking" — the AI is now generating LLM text.
+        # Inbound audio during this window would be ambient noise that Whisper
+        # hallucinates into phantom transcriptions ("thank you" from silence).
+        # Dropped by the guard in handle_inbound_audio_frame.
+        self.state = "thinking"
         return {
             "type": event["type"],
             "session_id": event["session_id"],

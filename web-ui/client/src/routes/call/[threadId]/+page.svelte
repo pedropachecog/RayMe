@@ -529,10 +529,42 @@
       normalized === 'failed' ||
       normalized === 'connecting'
     ) {
+      const prevState = callState;
       callState = normalized;
+      // Gate microphone during AI turns to prevent ambient noise from
+      // being transcribed as phantom turns ("thank you" from silence).
+      if (prevState === 'listening' && (normalized === 'thinking' || normalized === 'speaking')) {
+        disableMicrophone();
+      } else if (normalized === 'listening' && prevState !== 'listening') {
+        enableMicrophone();
+      }
     } else {
       callState = 'listening';
     }
+  }
+
+  function disableMicrophone() {
+    if (!localMediaStream) {
+      return;
+    }
+    for (const track of localMediaStream.getAudioTracks()) {
+      track.enabled = false;
+    }
+    emitDebugEvent(callId, 'mic.disable', {
+      reason: `callState=${callState}`
+    });
+  }
+
+  function enableMicrophone() {
+    if (!localMediaStream) {
+      return;
+    }
+    for (const track of localMediaStream.getAudioTracks()) {
+      track.enabled = true;
+    }
+    emitDebugEvent(callId, 'mic.enable', {
+      reason: `callState=${callState}`
+    });
   }
 
   async function handleCallDataEvent(event: CallEvent) {

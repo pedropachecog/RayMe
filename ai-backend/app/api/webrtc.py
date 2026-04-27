@@ -227,6 +227,23 @@ async def speak_session(
             reference_transcript=payload.reference_transcript,
             reference_audio_content_type=payload.reference_audio_content_type,
         )
+    except asyncio.CancelledError:
+        # The SSE generator on the web-ui side was cancelled (e.g., HTTP
+        # connection closed). Return 502 so the web-ui client sees a
+        # processing error rather than an opaque 500 Internal Server Error.
+        logger.info(
+            "[rayme-call] speak.cancelled session=%s turn=%s",
+            session_id,
+            payload.turn_id,
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "call_tts_failed",
+                "message": "Speech playback cancelled",
+                "engine_id": payload.engine_id,
+            },
+        )
     except HTTPException:
         raise
     except Exception as exc:
