@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import fractions
+import logging
+import math
 import os
 import tempfile
 from io import BytesIO
@@ -11,6 +13,8 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 from aiortc import MediaStreamTrack
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -57,16 +61,29 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
         self._queue: asyncio.Queue[np.ndarray | None] = asyncio.Queue()
         self._buffer = np.asarray([], dtype=np.int16)
         self._pts = 0
+        self._recv_count = 0
+        self._idle_frame_count = 0
 
     async def recv(self) -> Any:
         from av import AudioFrame
 
+        self._recv_count += 1
         samples = await self._next_samples()
         frame = AudioFrame.from_ndarray(samples.reshape(1, -1), format="s16", layout="mono")
         frame.sample_rate = self.sample_rate
         frame.pts = self._pts
         frame.time_base = fractions.Fraction(1, self.sample_rate)
         self._pts += self.frame_samples
+        # Log periodically for diagnostics
+        if self._recv_count % 50 == 0:
+            logger.info(
+                "[rayme-call] track.send.progress recv_count=%d idle_frames=%d "
+                "queue_size=%d buffer_size=%d",
+                self._recv_count,
+                self._idle_frame_count,
+                self._queue.qsize(),
+                self._buffer.size,
+            )
         return frame
 
     async def enqueue(self, wav_bytes: bytes) -> None:
@@ -109,18 +126,26 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
             samples[: self._buffer.size] = self._buffer
             self._buffer = np.asarray([], dtype=np.int16)
         else:
-            # Silence frame — add audible jitter so Opus DTX does not
-            # suppress the frame entirely. Without any packet flow during
-            # the STT+LLM+TTS processing gap, ICE times out on the remote
-            # side (especially Android Chrome) and the connection fails
-            # before TTS audio arrives.
+            # Silence frame — inject a low-amplitude sine wave so Opus
+            # DTX does not suppress the frame. Without any packet flow
+            # during the STT+LLM+TTS processing gap, ICE times out on
+            # the remote side (especially Android Chrome) and the
+            # connection fails before TTS audio arrives.
             #
-            # The jitter range must be large enough that the Opus encoder
-            # treats the frame as non-silence. Values near zero (e.g. -4..4)
-            # are still suppressed by DTX. Use -100..100 (~0.3% of full
-            # scale) which is inaudible but above the Opus comfort noise
-            # floor.
-            samples[:] = np.random.randint(-100, 100, size=self.frame_samples, dtype=np.int16)
+            # A sine wave is used instead of random jitter because:
+            # 1. Random jitter (-100..100) was still suppressed by Opus DTX
+            #    in live testing on Android Chrome (commit ac20bd3 failed)
+            # 2. A sine wave at 440Hz with amplitude 500 (~1.5% of full
+            #    scale) is inaudible at this level but produces a consistent
+            #    spectral pattern that Opus DTX cannot suppress
+            # 3. The phase advances with _pts so each frame is a continuous
+            #    sine wave (not a discontinuous random signal)
+            self._idle_frame_count += 1
+            phase = 2 * math.pi * 440 * self._pts / self.sample_rate
+            amplitude = 500
+            t = np.arange(self.frame_samples, dtype=np.float32)
+            samples_f = amplitude * np.sin(phase + 2 * math.pi * 440 * t / self.sample_rate)
+            samples = samples_f.astype(np.int16)
         return samples
 
 
