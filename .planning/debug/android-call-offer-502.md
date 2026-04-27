@@ -1,8 +1,8 @@
 ---
-status: awaiting_human_verify
+status: blocked
 trigger: "Android Chrome Phase 3 live call: microphone permission is granted and Android shows mic listening, then the RayMe call UI still fails or becomes unusable."
 created: 2026-04-25T23:36:09Z
-updated: 2026-04-26T23:55:00Z
+updated: 2026-04-27T00:30:00Z
 ---
 
 # Debug Session: Android Call Offer 502
@@ -27,15 +27,23 @@ updated: 2026-04-26T23:55:00Z
 
 ## Current Focus
 
-- status: awaiting_human_verify — Jitter amplitude increase deployed (commits `a7a8ef2`, `ac20bd3`). Waiting for user to test on Android Chrome.
-
-- last_fix: Opus DTX suppression fix (commits `a7a8ef2`, `ac20bd3`)
-  - Added tiny jitter to silence frames in `QueuedAudioOutputTrack._next_samples()` so Opus DTX does not suppress them
-  - Reduced data channel keepalive interval from 4s to 1s
-  - Browser responds to backend ping events for bidirectional packet flow
-  - Browser handles `ai_audio_started`/`ai_done` via data channel as fallback (in case SSE stream is slow)
-
-- next_action: Fix the ICE timeout with stronger measures — see reasoning_checkpoint below.
+reasoning_checkpoint:
+  hypothesis: "The asyncio event loop on the AI backend is blocked during STT (1-3s) and TTS (5-15s), preventing aiortc from polling QueuedAudioOutputTrack.recv() and sending RTP keepalive packets. The browser's ICE times out from lack of inbound packets."
+  confirming_evidence:
+    - "F5TtsAdapter.synthesize() calls runtime.infer() synchronously (ai-backend/app/models/tts_f5.py:54). No async/await."
+    - "WhisperSttAdapter.transcribe() calls model.transcribe() synchronously (ai-backend/app/models/stt.py:124). No async/await."
+    - "CallSession._transcribe_turn() is a sync method that calls adapter.transcribe_pcm() or adapter.transcribe() directly (session.py:597-627)"
+    - "CallSession._synthesize_speech() was async but called the sync TTS method directly on the event loop thread"
+    - "aiortc's RTCPeerConnection runs on the same asyncio event loop as the FastAPI server"
+    - "QueuedAudioOutputTrack.recv() is polled by aiortc's internal event loop — if the event loop is blocked, no RTP packets are sent"
+    - "All three keepalive attempts (jitter [-4,4], jitter [-100,100], sine wave 440Hz amplitude 500) failed identically — because the packets were generated but never transmitted (event loop blocked)"
+    - "Backend logs show full pipeline success but never detects browser disconnection — because ICE state change handlers also run on the blocked event loop"
+  falsification_test: "If asyncio.to_thread() is used for STT and TTS, and the browser ICE still times out, then the hypothesis is wrong. If ICE stays connected and audio arrives, the hypothesis is confirmed."
+  fix_rationale: "By offloading blocking STT and TTS calls to a thread pool via asyncio.to_thread(), the event loop remains free to: (1) poll QueuedAudioOutputTrack.recv() and send RTP keepalive packets, (2) process ICE state changes from the browser, (3) handle data channel keepalive pings. The keepalive sine wave was already in place — it just never got transmitted because the event loop was blocked."
+  blind_spots:
+    - "If the GIL prevents the event loop from running while TTS holds it, asyncio.to_thread() may not help (but it should, since to_thread uses a separate thread)"
+    - "If the browser's ICE timeout is shorter than the STT processing time (before the event loop is freed), the connection may still fail for the first few seconds"
+    - "If aiortc's internal polling has its own timeout that's shorter than the processing gap, freeing the event loop may not be enough"
 
 ## BLOCKING DISCOVERY UPDATE (2026-04-26) — Voice Blob Pipeline Analysis
 
@@ -1249,4 +1257,225 @@ The ICE timeout fix from commit `c0dbb34` did NOT work. The same cascade occurre
 next_action: ask user to reproduce on Android Chrome; expected outcome is
 ICE stays connected during processing gap, `speakingRms` rises above 0.04,
 and user hears AI audio.
+
+---
+
+## 2026-04-27T00:20:00Z — Sine Wave Keepalive (a282ae4)
+
+### Rationale
+
+Both random jitter approaches failed:
+- `[-4, 4]` — suppressed by Opus DTX (too small)
+- `[-100, 100]` — still suppressed by Opus DTX (treated as comfort noise)
+
+Opus DTX classifies random noise as "comfort noise" and suppresses it.
+A continuous 440 Hz sine wave is a real tone — Opus must encode it as
+audio content, not silence. Amplitude 500 (~1.5% of full scale) is
+inaudible but above DTX's silence detection threshold.
+
+### Changes
+
+- `ai-backend/app/call/tracks.py` — replace `np.random.randint(-100, 100)`
+  with phase-continuous 440 Hz sine wave at amplitude 500
+- Added diagnostic logging every 50 frames (recv_count, idle_frame_count,
+  queue_size, buffer_size)
+
+### Deploy Confirmation
+
+- Commit: `a282ae4`
+- `scripts/deploy-omen.sh` completed: `OMEN deploy complete: a282ae48d2cb6de80dbe70874c4b5376fc4089fd`
+- Tests: `uv run --project ai-backend pytest ai-backend/tests -q` → **71 passed**
+
+next_action: ask user to reproduce on Android Chrome; expected outcome is
+Opus encodes sine wave frames as real packets, ICE stays connected during
+processing gap, `speakingRms` rises above 0.04, and user hears AI audio.
+
+---
+
+## 2026-04-27T00:30:00Z — Event Loop Blocking (bc60630)
+
+### Rationale
+
+The sine wave keepalive (a282ae4) packets are being generated by
+`QueuedAudioOutputTrack.recv()` but never transmitted over the network.
+The asyncio event loop is blocked during STT (1-3s) and TTS (5-15s)
+inference, so aiortc cannot poll the outbound track and send RTP
+keepalive packets to keep ICE alive.
+
+All previous keepalive attempts failed for this reason:
+- Jitter `[-4, 4]` — never transmitted (event loop blocked)
+- Jitter `[-100, 100]` — never transmitted (event loop blocked)
+- Sine wave 440 Hz — never transmitted (event loop blocked)
+
+### Root Cause
+
+`asyncio.to_thread()` was NOT being used for blocking STT/TTS calls:
+- `WhisperSttAdapter.transcribe()` runs synchronously on event loop thread
+- `F5TtsAdapter.synthesize()` runs synchronously on event loop thread
+- During the 5-15s TTS window, aiortc's internal polling is frozen
+- No RTP packets leave the backend → browser ICE times out → connection fails
+
+### Fix
+
+Offload blocking STT and TTS to thread pool via `asyncio.to_thread()`:
+- `finalize_user_turn()` → `await asyncio.to_thread(self._transcribe_turn, frames)`
+- `_synthesize_speech()` → `await asyncio.to_thread(self._run_sync_synthesis, ...)`
+
+The event loop remains free to:
+1. Poll `QueuedAudioOutputTrack.recv()` and send RTP keepalive packets
+2. Process ICE state changes from the browser
+3. Handle data channel keepalive pings
+
+### Deploy Confirmation
+
+- Commit: `bc60630`
+- `scripts/deploy-omen.sh` completed
+- OMEN listeners confirmed on ports 8443/9443
+
+### Captured Boundary Trace (commit bc60630, Android Chrome reproduction)
+
+| Boundary | Outcome |
+|---|---|
+| OMEN deployed HEAD | `bc60630` |
+| Android client | `192.168.1.253` |
+| Voice blob | OK |
+| `/api/calls/start` | 201 Created |
+| `/api/calls/{id}/offer` | 200 OK |
+| WebRTC negotiation | OK (ICE completed, connected) |
+| Data channel | OK (opened, messages flowing) |
+| Inbound audio | OK (frames flowing, VAD works) |
+| VAD | OK (speech_start, end_of_turn) |
+| STT | OK (transcript_len=47, language=en) |
+| `user_final` via data channel | OK (readyState=open) |
+| Browser received `user_final` | OK |
+| `/turns` SSE | 200 OK (LLM + TTS processing) |
+| Backend keepalive | **WORKING** (`track.send.progress` shows sine wave frames being polled) |
+| Browser ICE | **disconnected -> failed** (despite keepalive packets being sent) |
+| Browser `speakingRms` | **0.04** (floor value — NO audio data) |
+| Browser `remoteAudioElementPlaying` | **false** |
+| Backend inbound track | MediaStreamError at frame 1626 |
+| Backend data channel | **closed** (before TTS events) |
+| Backend TTS | **NEVER CALLED** — `/webrtc/speak` never invoked |
+| Audio audible on Android | **NO** |
+
+### Key Finding
+
+**The event loop fix worked** — `track.send.progress` logs now show continuous
+sine wave keepalive frame polling (recv_count = idle_frames, 50-850 frames).
+The packets are being generated and queued by aiortc.
+
+**But ICE still disconnects on Android Chrome** during the processing gap.
+The sine wave keepalive packets are being sent, but they may not be arriving
+fast enough on the client side, or Android Chrome has an extremely aggressive
+ICE timeout that fires before the keepalive packets can prevent disconnection.
+
+### Why `/webrtc/speak` Was Never Called
+
+The web facade (`web-ui/server/app/api/calls.py`) streams LLM tokens via SSE
+from `/turns`. After all tokens are streamed, it calls `_speak_call()` which
+forwards to AI backend `/webrtc/speak`. However, the logs show:
+- Only ONE `/turns` POST visible (turn 1 submitted)
+- No `/webrtc/speak` request in logs
+- The SSE stream may be getting interrupted by ICE failure before completion
+
+### Two Remaining Sub-Problems
+
+1. **ICE disconnect despite keepalive**: Even with event loop free and sine wave
+   keepalive, Android Chrome's ICE still disconnects. The processing gap (STT ~1-3s
+   + LLM streaming + TTS ~5-15s) exceeds Android Chrome's ICE timeout. The sine
+   wave keepalive packets ARE being sent (backend logs confirm), but may not be
+   arriving fast enough on the client side, or Android Chrome has an aggressive
+   ICE disconnect timeout.
+
+2. **Frontend stuck in "speaking"**: When ICE fails during the SSE `/turns` stream:
+   - The HTTP connection may be reset, interrupting `readTurnStream()`
+   - If interrupted after first `ai_token` (which sets `callState = 'speaking'`)
+     but before `ai_done`, the call gets stuck permanently
+   - The ICE failure handler (lines 242-251 of `+page.svelte`) only emits debug
+     events — doesn't change `callState`
+   - No timeout mechanism to recover from stuck state
+   - The data channel `ai_done` fallback only works if data channel is still open,
+     but ICE failure closes it
+
+### reasoning_checkpoint
+
+  hypothesis: "Android Chrome's WebRTC stack terminates the ICE connection during
+    prolonged periods (20-30s) where no bidirectional media flows, even when the
+    backend is sending keepalive packets. The sine wave keepalive keeps the event
+    loop free and packets are queued, but Android Chrome may have an aggressive
+    ICE timeout or the packets are not arriving frequently enough to maintain the
+    connection."
+
+  confirming_evidence:
+    - "track.send.progress logs show keepalive packets being polled continuously
+      (recv_count=idle_frames)"
+    - "Browser still shows ICE disconnected->failed during processing gap"
+    - "speakingRms=0.04 (floor) confirms no audio data reaches browser"
+    - "Data channel closes before TTS events can be sent"
+    - "The same pattern occurs with all keepalive strategies (jitter, sine wave)"
+
+  falsification_test: "If the keepalive packets are reaching the browser and keeping
+    ICE alive, speakingRms should rise above 0.04 when TTS audio arrives. If it
+    remains at 0.04, the packets are not maintaining the connection."
+
+  blind_spots:
+    - "If Android Chrome requires bidirectional packet flow (both send AND receive)
+      to maintain ICE, unidirectional keepalive from backend may not be sufficient"
+    - "If the keepalive packets are being sent but not received due to NAT/firewall
+      timeout, increasing the frequency or using a different approach may help"
+    - "If the `/turns` SSE stream is being interrupted by the ICE failure, the
+      frontend will get stuck in 'speaking' even if audio eventually arrives"
+
+---
+
+## 2026-04-27T00:45:00Z — "Stuck in Speaking" Symptom
+
+### New User-Visible Symptom
+
+After deploying bc60630 (event loop fix), the call now gets **stuck in "speaking"**
+mode. The UI shows "speaking" indefinitely and never transitions back to "listening".
+No audio is heard, but the state machine is stuck.
+
+### Root Cause Analysis
+
+The frontend transitions to "speaking" on first `ai_token` receipt
+(`+page.svelte:703`), but there's no recovery path when the SSE stream
+is interrupted by ICE failure:
+
+1. Turn submitted via `/turns` SSE endpoint
+2. Browser receives first LLM tokens → `callState = 'speaking'`
+3. Browser ICE disconnects during processing gap (no bidirectional media)
+4. SSE stream interrupted (HTTP connection broken by ICE failure)
+5. `ai_done` never received on SSE (stream broken) OR data channel (closed by ICE failure)
+6. Call stuck in "speaking" forever — `finishAiTurn()` is the ONLY path back to "listening"
+
+### Code Path
+
+`handleTurnStreamEvent()` in `+page.svelte`:
+- `event.type === 'ai_token'` → `callState = 'speaking'` (line 703)
+- `event.type === 'ai_done'` → `finishAiTurn()` → `callState = 'listening'`
+- No other transition from "speaking" to "listening"
+
+`readTurnStream()` exception handling:
+- If `await activeTurnReader.read()` throws (ICE failure), exception propagates
+- Catch block sets `callState = 'failed'` (NOT 'listening')
+- The call becomes permanently stuck in "speaking" or "failed"
+
+### Fix Direction
+
+1. **Add ICE failure recovery**: When `connectionState === 'failed'`, call
+   `finishAiTurn()` to reset to "listening"
+2. **Add turn timeout**: If no `ai_done` received within X seconds,
+   automatically transition to "listening" with error notice
+3. **Fix ICE disconnect**: Address the underlying cause so audio actually arrives
+
+### Status
+
+**BLOCKED** — Two issues remain:
+1. ICE disconnect during processing gap (underlying cause)
+2. Frontend stuck in "speaking" (user-facing symptom)
+
+The debug session is paused pending user direction. The debug file now
+contains the complete trace history of all root causes found and fixes
+applied during this session.
 

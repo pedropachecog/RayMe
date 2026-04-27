@@ -1,96 +1,192 @@
 ---
-status: fixing
-trigger: "Android call stuck in 'speaking' with no audible audio"
+status: awaiting_human_verify
 created: 2026-04-27T03:30:00Z
-updated: 2026-04-27T03:37:00Z
+updated: 2026-04-27T05:00:00Z
+handoff_for: next-agent
 ---
 
-## Current Focus
+# Handoff: OMEN Deployment Infrastructure Broken + Call Debugging Stalled
 
-reasoning_checkpoint:
-  hypothesis: "The /turns SSE generator blocks on _speak_call (TTS synthesis 5-15s) before yielding ai_done. The browser SSE reader blocks indefinitely waiting for ai_done. During this gap, WebRTC ICE times out on Android (despite keepalive), killing the peer connection. Additionally, VAD early-returns when speech_detected=False, bypassing the max turn duration safety net."
-  confirming_evidence:
-    - "calls.py line 366: speak_result = await _speak_call(...) blocks the SSE generator. ai_done yield (line 391) comes AFTER _speak_call returns."
-    - "client.ts line 665: activeTurnReader.read() has no timeout - blocks forever if server hangs"
-    - "session.py line 148-149: if not speech_detected: return None - returns before checking end_of_turn, bypassing max turn duration"
-    - "session.py line 563: end_of_turn = self._speech_seen and (...) - requires speech, so ambient-only turns never end"
-    - "Outbound track logs: ALL entries show queue_size=0, buffer_size=0 - TTS audio was never queued"
-    - "DTLS ConnectionError logged - peer connection dies during the TTS blocking gap"
-    - "Audio flows through WebRTC independently of SSE - ai_done is purely a UI state signal"
-  falsification_test: "If ai_done were being delivered to the browser (via SSE or data channel) during the observed timeframe, the fix would be wrong. Check data channel logs for ai_done delivery - if it was delivered, the browser would have transitioned to 'listening'."
-  fix_rationale: "Yield ai_done before _speak_call because ai_done is a UI state signal (transition from 'speaking' to 'listening'), and audio flows through WebRTC independently. The browser does not need to wait for TTS to finish before knowing the AI has completed its turn. This eliminates the blocking gap that kills the WebRTC connection. VAD fix ensures ambient-only turns still finalize after max duration."
-  blind_spots:
-    - "If the browser UI shows 'listening' before TTS audio arrives, there could be a brief visual inconsistency. However, the 440Hz keepalive should maintain the connection long enough for TTS to start."
-    - "If _speak_call raises an exception in the background task, it will be unhandled. Need to add error handling."
-    - "The data channel ai_done will still fire after TTS completes via _speak_call - but by then the browser already transitioned from SSE ai_done. The data channel handler is idempotent (calls finishAiTurn which just sets listening), so this is harmless."
+## What Needs to Be Done
 
-hypothesis: "CONFIRMED - SSE generator blocks on TTS, preventing ai_done. VAD early-return bypasses max duration."
-test: "Implement fixes and deploy for live Android testing"
-expecting: "Browser receives ai_done immediately after LLM completes, transitions to 'listening'. TTS audio still plays through WebRTC."
-next_action: "Fix calls.py: yield ai_done before _speak_call, dispatch TTS as background task. Fix session.py: remove VAD early return, fix end_of_turn formula."
+Two problems:
 
-## Symptoms
+1. **OMEN deployment infrastructure is broken** — ad-hoc PS1 scripts hijacked the scheduled tasks. The app is COMPLETELY DOWN (ports 8443 and 9443 not responding). Need to clean up the ad-hoc scripts and restore proper deployment via `scripts/deploy-omen.sh`.
 
-expected: After the AI speaks, the call status should transition from "speaking" back to "listening", and the TTS audio should be audible on Android
-actual: Call status is stuck in "speaking" — never returns to "listening". No generated audio is audible on Android Chrome.
-errors: AI backend logs show a DTLS ConnectionError "Cannot send encrypted data, not connected" — the peer connection dies while still in the speaking state. Session remains active (active_sessions: 1) after hangup.
-reproduction: Open https://192.168.1.199:8443 on Android Chrome, start a call, speak. VAD detects speech, STT transcribes, user_final event sent. Then call gets stuck in "speaking".
-started: Multi-session ongoing issue. Previously stuck in "Listening", recent fixes moved it forward but now stuck in "speaking".
+2. **Android call debugging stalled** — we were making progress (VAD/STT works, turns complete) but the call gets stuck in "speaking" with no audio. The fixes at commit 8244cb0 caused regressions (stuck in listening, call won't start). The data channel keepalive fix at 02bca89 was pushed but never tested because the app is down.
 
-## Eliminated
+## Problem 1: Ad-Hoc PS1 Scripts on OMEN
 
-- hypothesis: Browser never received user_final data channel event.
-  evidence: Web UI logs show POST /turns 200 OK — browser DID submit a turn.
-  timestamp: 2026-04-27T03:30Z
+**Created by:** A previous Claude session on 4/24/2026 ~15:22
 
-- hypothesis: LLM never generated tokens.
-  evidence: Browser reached "speaking" state, which requires receiving at least one ai_token SSE event (handleTurnStreamEvent sets callState='speaking' on first ai_token).
-  timestamp: 2026-04-27T03:30Z
+**Location:** `C:\Users\pmpg\rayme\` on OMEN (outside the git repo)
 
-- hypothesis: Data channel was never open.
-  evidence: AI backend logs show event.sent type=user_final readyState=open — data channel WAS open when user_final was sent.
-  timestamp: 2026-04-27T03:30Z
+**The 3 files:**
 
-## Evidence
+| File | What it does |
+|------|-------------|
+| `reconfigure-hidden-runtime.ps1` | Creates the other 2 scripts, kills existing processes, recreates scheduled tasks `RayMePhase1AI` / `RayMePhase1Web` to point to `.ps1` instead of `.cmd` |
+| `start-ai-backend-hidden.ps1` | Starts AI backend via `Start-Process -WindowStyle Hidden` with hardcoded paths |
+| `start-web-ui-hidden.ps1` | Starts web UI via `Start-Process -WindowStyle Hidden` with hardcoded env vars |
 
-- timestamp: 2026-04-27T03:30Z
-  checked: AI backend outbound track progress logs
-  found: ALL recv_count entries show idle_frames=recv_count, queue_size=0, buffer_size=0
-  implication: TTS audio was NEVER queued to the outbound track at any point during the call
+**Content of `start-ai-backend-hidden.ps1`:**
+```powershell
+$ErrorActionPreference = 'Stop'
+$repo = 'C:\Users\pmpg\rayme\RayMe'
+$logs = 'C:\Users\pmpg\rayme\logs'
+Start-Process -WindowStyle Hidden `
+  -WorkingDirectory $repo `
+  -FilePath 'C:\Users\pmpg\rayme\RayMe\ai-backend\.venv\Scripts\python.exe' `
+  -ArgumentList 'ai-backend\scripts\run_https.py --host 192.168.1.199 --port 9443 --cert C:\Users\pmpg\rayme\phase1-tls\rayme.local+1.pem --key C:\Users\pmpg\rayme\phase1-tls\rayme.local+1-key.pem' `
+  -RedirectStandardOutput "$logs\ai-backend.hidden.out.log" `
+  -RedirectStandardError "$logs\ai-backend.hidden.err.log"
+```
 
-- timestamp: 2026-04-27T03:30Z
-  checked: AI backend logs for /speak endpoint access
-  found: No POST /webrtc/sessions/{id}/speak visible in access logs (only /webrtc/offer, /health, /webrtc/status)
-  implication: Either _speak_call was never invoked, TTS synthesis is still running (log not flushed), or voice reference check aborted the turn
+**Content of `start-web-ui-hidden.ps1`:**
+```powershell
+$ErrorActionPreference = 'Stop'
+$repo = 'C:\Users\pmpg\rayme\RayMe'
+$logs = 'C:\Users\pmpg\rayme\logs'
+$env:RAYME_WEB_BIND_HOST = '192.168.1.199'
+$env:RAYME_WEB_PORT = '8443'
+$env:RAYME_WEB_PUBLIC_URL = 'https://192.168.1.199:8443'
+$env:RAYME_AI_BACKEND_BASE_URL = 'https://192.168.1.199:9443'
+$env:RAYME_DATABASE_URL = 'sqlite+aiosqlite:///C:/Users/pmpg/rayme/RayMe/web-ui/server/data/rayme.sqlite3'
+$env:RAYME_ALLOWED_ORIGINS = 'https://192.168.1.199:8443,https://rayme.local:8443'
+Start-Process -WindowStyle Hidden `
+  -WorkingDirectory $repo `
+  -FilePath 'C:\Users\pmpg\rayme\RayMe\web-ui\server\.venv\Scripts\python.exe' `
+  -ArgumentList 'web-ui\server\scripts\run_dev_https.py --host 192.168.1.199 --port 8443 --cert C:\Users\pmpg\rayme\phase1-tls\rayme.local+1.pem --key C:\Users\pmpg\rayme\phase1-tls\rayme.local+1-key.pem' `
+  -RedirectStandardOutput "$logs\web-ui.hidden.out.log" `
+  -RedirectStandardError "$logs\web-ui.hidden.err.log"
+```
 
-- timestamp: 2026-04-27T03:30Z
-  checked: Browser /turns SSE handling code (client.ts readTurnStream)
-  found: activeTurnReader.read() has NO timeout — blocks indefinitely
-  implication: If server generator blocks during TTS (5-15s), browser reader hangs forever waiting for ai_done
+**Content of `reconfigure-hidden-runtime.ps1`:**
+```powershell
+$ErrorActionPreference = 'Continue'
+$root = 'C:\Users\pmpg\rayme'
+$repo = 'C:\Users\pmpg\rayme\RayMe'
+$logs = 'C:\Users\pmpg\rayme\logs'
+New-Item -ItemType Directory -Force -Path $logs | Out-Null
 
-- timestamp: 2026-04-27T03:30Z
-  checked: /turns handler code (calls.py lines 334-422)
-  found: _speak_call is a blocking await (TTS synthesis 5-15s). ai_done yield comes AFTER _speak_call returns. If TTS hangs, ai_done is never yielded.
-  implication: Browser stuck in "speaking" because ai_done never arrives through SSE
+# Creates the two .ps1 scripts above via Set-Content
+# Then kills existing processes matching run_https.py / run_dev_https.py
+# Then deletes and recreates scheduled tasks:
+#   schtasks /Delete /TN RayMePhase1AI /F
+#   schtasks /Delete /TN RayMePhase1Web /F
+#   schtasks /Create /TN RayMePhase1AI /TR "powershell.exe -NoProfile ... -File C:\Users\pmpg\rayme\start-ai-backend-hidden.ps1" /SC ONCE /ST 23:59 /F
+#   schtasks /Create /TN RayMePhase1Web /TR "powershell.exe -NoProfile ... -File C:\Users\pmpg\rayme\start-web-ui-hidden.ps1" /SC ONCE /ST 23:59 /F
+#   schtasks /Run /TN RayMePhase1AI
+#   schtasks /Run /TN RayMePhase1Web
+```
 
-- timestamp: 2026-04-27T03:30Z
-  checked: VAD early-return logic (session.py lines 148-150)
-  found: if not speech_detected: return None — returns early WITHOUT checking end_of_turn. Max turn duration safety net is bypassed.
-  implication: Turn 3 (ambient noise only, _speech_seen=False) can never finalize
+**Why this broke things:**
 
-- timestamp: 2026-04-27T03:30Z
-  checked: VAD end_of_turn formula (session.py lines 561-565)
-  found: end_of_turn = self._speech_seen AND (silence >= threshold OR forced_end). Requires _speech_seen=True.
-  implication: Even with max turn duration, if _speech_seen is False, end_of_turn is always False
+The proper `scripts/deploy-omen.sh` writes `start-ai-backend.cmd` (a `.cmd` file) and uses `schtasks` to start services. The PS1 scripts OVERRODE the scheduled tasks to point to `.ps1` files. Now:
+- `deploy-omen.sh` writes `.cmd` but scheduled tasks run `.ps1`
+- The scheduled tasks are one-shot (ONCE at 23:59) — they ran once and won't auto-restart
+- Last ran 4/26/2026 23:43 — processes crashed and never restarted
+- The app is completely DOWN
 
-- timestamp: 2026-04-27T03:30Z
-  checked: Web UI server logs
-  found: Only ONE POST to /turns (for turn 1). No second POST for turn 2's user_final.
-  implication: Browser only processed turn 1. Turn 2 user_final was sent but either browser never received it (data channel timing?) or browser never called /turns again because it was stuck processing turn 1.
+**Also check:** `.local/phase1-tls/reconfigure-hidden-runtime.ps1` exists in the local repo. Check if it was committed to git or is only in `.gitignore`. It should NOT be tracked.
 
-## Resolution
+## Problem 2: Android Call Debugging
 
-root_cause: "The /turns SSE generator blocks on _speak_call (TTS synthesis 5-15s) before yielding ai_done. Browser's SSE reader blocks forever waiting for ai_done. Combined with WebRTC ICE timeout during the gap, the peer connection dies. Additionally, VAD early-returns when speech_detected=False (session.py line 148-149), bypassing the max turn duration safety net. The end_of_turn formula requires _speech_seen=True, so ambient-only turns can never finalize."
-fix: "(1) calls.py: yield ai_done immediately after LLM completes, dispatch TTS as asyncio.ensure_future background task. (2) session.py: removed early return when speech_detected=False, fixed end_of_turn formula to allow forced_end (max duration) regardless of _speech_seen in both Silero and energy-based paths."
-verification: "Deploying for live Android test."
-files_changed: ["web-ui/server/app/api/calls.py", "ai-backend/app/call/session.py"]
+**Current state:**
+- Local HEAD: 02bca89 (pushed to origin)
+- OMEN deployed: bc60630 (behind — needs deploy)
+- Fixes 8244cb0 + 02bca89 are pushed but NOT deployed because app is down
+
+**Fixes pending deployment:**
+1. `8244cb0` — SSE unblock (yield ai_done before TTS) + VAD max turn safety net
+2. `02bca89` — Data channel ping sent immediately on open (was delayed 0.5s)
+
+**Known issues from prior investigation:**
+- VAD/STT works (turns 1 & 2 completed successfully in logs)
+- `user_final` events sent via data channel
+- Browser received events, submitted `/turns`
+- SSE generator blocked on TTS (5-15s) before yielding `ai_done` — browser stuck in "speaking"
+- VAD early-returned when `speech_detected=False`, bypassing max turn duration
+- DTLS ConnectionError — peer connection died during TTS blocking gap
+- Outbound track logs show `queue_size=0, buffer_size=0` — TTS audio never queued
+
+**What the 8244cb0 fix caused:**
+- First call: stuck in listening, never transcribed
+- Second call: "RayMe could not start this call" error
+- Root cause: 8244cb0 was NOT deployed (OMEN was at bc60630, "ahead 1")
+- The regressions may have been from the data channel dying, not the code changes
+
+## What to Do
+
+### Step 1: Clean up ad-hoc PS1 scripts on OMEN
+
+Via `ssh rayme-pmpg` (SSH works):
+
+```powershell
+# Delete the 3 ad-hoc scripts
+Remove-Item C:\Users\pmpg\rayme\start-ai-backend-hidden.ps1 -Force
+Remove-Item C:\Users\pmpg\rayme\start-web-ui-hidden.ps1 -Force
+Remove-Item C:\Users\pmpg\rayme\reconfigure-hidden-runtime.ps1 -Force
+
+# Delete the hijacked scheduled tasks
+schtasks /Delete /TN RayMePhase1AI /F
+schtasks /Delete /TN RayMePhase1Web /F
+```
+
+### Step 2: Restore proper deployment
+
+From WSL/Linux repo root:
+```bash
+cd /d/Pedro/Repos/Program/RayMe
+git push origin main
+scripts/deploy-omen.sh
+```
+
+This will:
+- Write proper `start-ai-backend.cmd`
+- Build web client
+- Kill existing processes on ports 8443/9443
+- Recreate scheduled tasks pointing to `.cmd`
+- Start services
+- Verify health endpoints
+
+### Step 3: Verify services are up
+
+```bash
+ssh rayme-pmpg 'powershell -NoProfile -Command "curl.exe -k --max-time 5 https://192.168.1.199:9443/health"'
+ssh rayme-pmpg 'powershell -NoProfile -Command "curl.exe -k --max-time 5 https://192.168.1.199:8443/api/settings"'
+```
+
+### Step 4: Test Android call
+
+1. Open `https://192.168.1.199:8443` on Android Chrome
+2. Start a call, speak
+3. Watch for: Listening → Thinking → Speaking → Listening
+4. Confirm AI audio is audible
+5. If still broken, read logs and continue debugging
+
+### Step 5: Check local repo for ad-hoc scripts
+
+```bash
+# Check if .local/phase1-tls/reconfigure-hidden-runtime.ps1 is tracked
+git ls-files .local/phase1-tls/reconfigure-hidden-runtime.ps1
+# If tracked, untrack it
+git rm --cached .local/phase1-tls/reconfigure-hidden-runtime.ps1
+# Add to .gitignore if not already
+```
+
+## SSH Commands Reference
+
+```bash
+ssh rayme-pmpg 'powershell -NoProfile -Command "Get-Content C:\\Users\\pmpg\\rayme\\logs\\ai-backend.hidden.err.log -Tail 300"'
+ssh rayme-pmpg 'powershell -NoProfile -Command "Get-Content C:\\Users\\pmpg\\rayme\\logs\\ai-backend.hidden.out.log -Tail 200"'
+ssh rayme-pmpg 'powershell -NoProfile -Command "Get-Content C:\\Users\\pmpg\\rayme\\logs\\web-ui.hidden.out.log -Tail 200"'
+```
+
+## Do Not
+
+- Do NOT create new ad-hoc scripts
+- Do NOT use the ad-hoc PS1 scripts
+- Do NOT run Playwright E2E tests
+- Do NOT reintroduce fake/synthetic success paths
+- Do NOT mark resolved until live Android path works end-to-end
