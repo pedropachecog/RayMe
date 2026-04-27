@@ -92,6 +92,17 @@ export function ensureRemoteCallAudioAudible(audio: Pick<HTMLMediaElement, 'mute
   return true;
 }
 
+export function keepCallMicrophoneTracksLive(stream: Pick<MediaStream, 'getAudioTracks'>): number {
+  let changed = 0;
+  for (const track of stream.getAudioTracks()) {
+    if (!track.enabled) {
+      track.enabled = true;
+      changed += 1;
+    }
+  }
+  return changed;
+}
+
 export function createRmsMeter(): {
   pushSamples: (samples: Float32Array) => void;
   read: () => number;

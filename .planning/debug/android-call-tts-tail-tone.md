@@ -1,8 +1,8 @@
 ---
 status: awaiting_human_verify
-trigger: "Android live call is faster after STT warmup and Qwen thinking disable, but AI speech playback still only produces a brief tone or a fraction of the TTS voice before returning to listening."
+trigger: "Android live call playback improved after paced TTS frames, but mic input stops truly listening after about five seconds of either continuous speech or pre-speech idle while the UI still says Listening."
 created: 2026-04-27T18:42:11Z
-updated: 2026-04-27T20:42:59Z
+updated: 2026-04-27T21:13:59Z
 ---
 
 # Debug Session: Android Call TTS Tail And Tone
@@ -10,21 +10,21 @@ updated: 2026-04-27T20:42:59Z
 ## Current Focus
 
 reasoning_checkpoint:
-  hypothesis: "`QueuedAudioOutputTrack.recv()` returns queued 20ms TTS frames without real-time pacing, causing aiortc to drain and send synthesized speech as a burst; Android Chrome then renders only a partial slice. Separately, `AiBackendSettings.vad_max_turn_ms=5000` forces user turns to finalize at 5 seconds."
+  hypothesis: "The client disables the actual WebRTC microphone MediaStreamTrack during `understanding`/`thinking`/`speaking`; on Android Chrome that can make aiortc's inbound `track.recv()` raise after a short no-audio interval, and RayMe's backend currently returns from `_receive_audio_track()` while the session remains non-failed. When `ai_done` later puts the UI back into `Listening`, the browser mic meter can still run locally, but the backend has no active inbound receive loop for future audio, so the ongoing call is effectively frozen."
   confirming_evidence:
-    - "A 1.0s WAV enqueued to `QueuedAudioOutputTrack` returned 20 frames (400ms media time) in 0.0042s wall time."
-    - "Local aiortc 1.14.0 `AudioStreamTrack.recv()` paces frames by sleeping until the next media timestamp; RayMe's custom `QueuedAudioOutputTrack.recv()` does not."
-    - "Call text path accumulates full LLM `visible_text`, passes it to `/webrtc/sessions/{session_id}/speak`, allows 5000 chars, and enqueues a single full `wav_bytes` payload; no sentence/chunk truncation was found before enqueue."
-    - "A focused VAD experiment with default `AiBackendSettings` forced `end_of_turn` at exactly 5000ms."
-  falsification_test: "After adding pacing, a test that receives 400ms of queued audio should take near 400ms wall time; after raising the max-turn fallback, default continuous speech should not finalize at 5000ms. If live Android still hears only slices with paced RTP and longer VAD cap, the remaining cause is outside these mechanisms."
-  fix_rationale: "Pacing makes RTP production match the media timeline instead of bursting the whole WAV, directly addressing partial browser playout while preserving full text and full synthesized audio. Raising the VAD max-turn fallback removes the reported 5s utterance cap while retaining a safety cutoff for never-ending ambient/noise turns."
-  blind_spots: "Cannot directly inspect Android Chrome jitter buffer locally; live confirmation still requires parent deployment. Chinese/non-Latin synthesis failures may remain engine-specific and are only inspected as a signal, not fixed here."
-next_action: Await parent deployment via `scripts/deploy-omen.sh` and Android Chrome human verification of full TTS playback plus longer-than-5s user utterance capture.
+    - "`applyCallState()` calls `disableMicrophone()` whenever it leaves `listening` for `understanding`, `thinking`, or `speaking`, and `disableMicrophone()` sets every local audio track's `enabled` to `false`."
+    - "The backend already drops inbound frames during `understanding`/`thinking`/`speaking`, so frontend track disabling is not required to prevent phantom STT turns."
+    - "`_receive_audio_track()` catches recv exceptions while ICE/connection are live and returns without failing the session, explicitly keeping outbound audio alive. That preserves playback, but it also permanently ends input receiving for the session."
+    - "The only remaining source 5s cap found in call/VAD code is `vad_max_turn_ms`, now defaulted to 30000; no repository env/config override for a 5000ms VAD max was found."
+  falsification_test: "A regression test should show call state transitions no longer disable the local MediaStreamTrack. Existing backend tests already demonstrate a live ICE recv error exits input receiving without failing the session; after removing client track toggling, Android should no longer trigger that path during normal AI turns."
+  fix_rationale: "Keep the WebRTC microphone sender continuously live for the lifetime of the call and rely on backend session-state guards to ignore audio while RayMe is understanding/thinking/speaking. This preserves inbound media liveness across mobile Chrome's short no-sending/disabled-track behavior and prevents UI Listening from diverging from backend input processing."
+  blind_spots: "Cannot live-test Android Chrome before deployment. If Android still ends inbound media without frontend disabling, backend needs a second fix to surface receiver death to the UI or renegotiate input."
+next_action: Await deployment via the parent workflow and Android Chrome verification that post-AI listening remains active after more than five seconds of idle and continuous speech.
 
 ## Symptoms
 
 expected: After the AI text is generated, the selected TTS voice should be audible for the full response. The user should not hear the idle carrier tone.
-actual: On Android Chrome, the first turn is much faster, but after Composing the user hears either a fraction-of-a-second tone or a fraction of the TTS voice, then the call returns to Listening. Repeating the same prompt shows similar behavior.
+actual: On Android Chrome after commit `fa12a49`, playback is much better: quick back-and-forth works and long AI messages apparently keep reading. The current failure is that input stops truly listening after about five seconds of continuous speech or about five seconds of idle before speaking while the UI still says Listening.
 errors:
   - No explicit user-facing error reported.
   - Audible idle carrier tone leaks briefly.
@@ -32,10 +32,15 @@ errors:
   - After ef08e6a, transcript shows the full LLM text, but voice still plays only part of it.
   - A translation-to-Chinese request generated LLM text, then RayMe reported it could not play audio. Chinese support is not required now, but this may reveal non-Latin TTS failure handling.
   - Voice input appears to stop recognizing the user's utterance before the user is done; investigate suspected short capture/VAD duration cap, possibly around 5 seconds.
+  - After commit `fa12a49`, the UI can remain in Listening while the listening animation no longer reacts as if sound is being recognized.
+  - Waiting about five seconds before speaking can cause input to be ignored.
+  - Speaking continuously for more than about five seconds can cause input to stop being recognized.
+  - After this failure, the previously successful ongoing call flow appears frozen or broken.
 timeline:
   - After commit 3cde3bc deployed to OMEN, Whisper warmup and Qwen no-think improved turn latency.
   - The audio problem changed from silent or last-word-only to brief tone/brief TTS fragment.
-reproduction: Start call on Android Chrome, speak a short prompt to a character configured to answer in two sentences or less, wait through Understanding and Composing, observe audio playback.
+  - After commit `fa12a49` deployed, playback improved substantially, but a remaining input/listening freeze appears around a five-second boundary.
+reproduction: Start call on Android Chrome. Confirm quick short-turn back-and-forth works. Then either speak continuously for more than about five seconds or wait about five seconds before speaking. Observe that the UI still says Listening, but the listening animation does not react like mic audio is being recognized and the ongoing call stops progressing normally.
 
 ## Evidence
 
@@ -123,6 +128,18 @@ reproduction: Start call on Android Chrome, speak a short prompt to a character 
   checked: `uv run pytest -q` in `ai-backend`
   found: 78 tests passed with the existing torch/cuda deprecated `pynvml` warning.
   implication: Full backend regression suite passes after the pacing and VAD max-turn changes.
+- timestamp: 2026-04-27T21:09:23Z
+  checked: User live Android Chrome repro after OMEN deployment of commit `fa12a49`
+  found: Playback is much better for quick back-and-forth and can apparently keep reading long AI messages. The current failure is input/listening-side: speaking for more than about five seconds, or waiting about five seconds before speaking, causes the app to stop truly listening while the UI still says Listening. The listening animation no longer reacts like sound is being recognized. This can happen after a successful call turn and then freezes/breaks the ongoing call flow.
+  implication: The previous TTS pacing fix likely addressed the main playback issue. Continue debugging a separate actual-mic-processing versus displayed-listening-state divergence around a five-second boundary. Inspect remaining 5s caps/timeouts beyond `vad_max_turn_ms`.
+- timestamp: 2026-04-27T21:11:48Z
+  checked: `web-ui/client/src/routes/call/[threadId]/+page.svelte`, `ai-backend/app/api/webrtc.py`, `ai-backend/app/call/session.py`, repository search for 5s caps
+  found: The frontend disables the real local WebRTC microphone track when leaving `listening`; the backend already drops audio in non-listening states; and `_receive_audio_track()` returns on live-ICE recv errors without failing the session. No remaining repository 5000ms VAD max override was found after `AiBackendSettings.vad_max_turn_ms` was raised to 30000.
+  implication: The likely state divergence is caused by killing or starving the mobile WebRTC input sender during AI turns, then silently losing the backend receive loop while UI later reports `Listening`.
+- timestamp: 2026-04-27T21:13:59Z
+  checked: Focused fix and automated regression tests
+  found: Frontend call state transitions now keep local WebRTC microphone tracks enabled instead of toggling them off during AI turns. Added unit coverage for keeping call microphone tracks live. `npm run test:unit -- tests/unit/call-audio.test.ts --run` passed 6 tests; `npm run check` passed; `npm run test:unit -- --run` passed 88 tests; `uv run pytest tests/test_webrtc_signaling.py -q` passed 10 tests; `uv run pytest tests/test_call_session.py -q` passed 24 tests; `uv run pytest -q` passed 78 tests with the existing torch/cuda deprecated `pynvml` warning.
+  implication: The focused fix is locally verified; live Android Chrome verification is still required after deployment.
 
 ## Eliminated
 
@@ -140,12 +157,12 @@ reproduction: Start call on Android Chrome, speak a short prompt to a character 
 ## Resolution
 
 root_cause:
-  `QueuedAudioOutputTrack.recv()` generated 20ms audio frames without real-time pacing. Once TTS was enqueued, aiortc could drain and send hundreds or thousands of milliseconds of synthesized speech in a few milliseconds, so Android Chrome only rendered a partial slice even though the transcript, TTS text, and enqueued WAV were complete. User utterance truncation was also explained by the default `vad_max_turn_ms=5000`, which forced end-of-turn at five seconds.
+  The remaining input/listening freeze was caused by the frontend disabling the actual WebRTC microphone MediaStreamTrack when leaving `listening` for `understanding`, `thinking`, or `speaking`. On Android Chrome this can starve/end the inbound media sender after a short interval. The backend's `_receive_audio_track()` then treats live-ICE recv errors as nonfatal and returns without failing the session, preserving outbound playback but permanently stopping backend mic frame processing while the UI later returns to `Listening`. The earlier playback issue was separately caused by unpaced outbound TTS frames, and the earlier continuous-speech 5s cap was addressed by raising `vad_max_turn_ms` to 30000.
 fix:
-  Added real-time pacing to `QueuedAudioOutputTrack.recv()`, switched queued reads to nonblocking reads under that pacing loop, and raised the default VAD max-turn safety fallback from 5000ms to 30000ms. Added regression coverage for paced outbound TTS frames and avoiding a default five-second forced turn end.
+  Kept the WebRTC microphone sender live for the whole call by replacing frontend mic disable/enable state gating with `keepCallMicrophoneTracksLive()`. Backend session-state guards continue to drop inbound frames while RayMe is understanding/thinking/speaking, so phantom STT prevention stays backend-owned without tearing down mobile WebRTC input. Added regression coverage for keeping call microphone tracks enabled.
 verification:
-  `uv run pytest tests/test_call_session.py -q` passed 24 tests; post-fix timing for 400ms media took 0.3804s wall time; `uv run pytest tests/test_webrtc_signaling.py -q` passed 10 tests; `uv run pytest -q` passed 78 tests with the existing torch/cuda deprecated `pynvml` warning. Live Android Chrome verification is pending parent deployment.
+  `npm run test:unit -- tests/unit/call-audio.test.ts --run` passed 6 tests; `npm run check` passed; `npm run test:unit -- --run` passed 88 tests; `uv run pytest tests/test_webrtc_signaling.py -q` passed 10 tests; `uv run pytest tests/test_call_session.py -q` passed 24 tests; `uv run pytest -q` passed 78 tests with the existing torch/cuda deprecated `pynvml` warning. Live Android Chrome verification is pending deployment by the parent workflow.
 files_changed:
-  - ai-backend/app/call/tracks.py
-  - ai-backend/app/config.py
-  - ai-backend/tests/test_call_session.py
+  - web-ui/client/src/lib/call/audio.ts
+  - web-ui/client/src/routes/call/[threadId]/+page.svelte
+  - web-ui/client/tests/unit/call-audio.test.ts

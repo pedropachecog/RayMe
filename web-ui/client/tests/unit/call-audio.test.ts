@@ -4,6 +4,7 @@ import {
   createCallRmsMeter,
   ensureRemoteCallAudioAudible,
   getOutputPickerUnavailableCopy,
+  keepCallMicrophoneTracksLive,
   unlockCallAudioContext
 } from '../../src/lib/call/audio';
 
@@ -46,6 +47,17 @@ describe('call audio helpers', () => {
     expect(audio.muted).toBe(false);
     expect(ensureRemoteCallAudioAudible(audio)).toBe(false);
     expect(audio.muted).toBe(false);
+  });
+
+  it('keeps WebRTC microphone tracks enabled across call state transitions', () => {
+    const tracks = [{ enabled: false }, { enabled: true }];
+    const stream = {
+      getAudioTracks: () => tracks
+    } as unknown as MediaStream;
+
+    expect(keepCallMicrophoneTracksLive(stream)).toBe(1);
+    expect(tracks.map((track) => track.enabled)).toEqual([true, true]);
+    expect(keepCallMicrophoneTracksLive(stream)).toBe(0);
   });
 
   it('raises listeningRms for non-zero microphone samples and returns near zero for silence', () => {

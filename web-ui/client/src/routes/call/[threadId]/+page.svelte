@@ -15,7 +15,12 @@
   } from '$lib/api/calls';
   import { loadThread } from '$lib/api/chat';
   import type { CallErrorCode, CallEvent, CallStateName, CallTranscriptTurn, ThreadDetail } from '$lib/api/types';
-  import { ensureRemoteCallAudioAudible, requestCallMicrophone, unlockCallAudioContext } from '$lib/call/audio';
+  import {
+    ensureRemoteCallAudioAudible,
+    keepCallMicrophoneTracksLive,
+    requestCallMicrophone,
+    unlockCallAudioContext
+  } from '$lib/call/audio';
   import CallToolbar from '$lib/components/call/CallToolbar.svelte';
   import CallTranscript from '$lib/components/call/CallTranscript.svelte';
   import VoiceVisualizer from '$lib/components/call/VoiceVisualizer.svelte';
@@ -549,45 +554,27 @@
     ) {
       const prevState = callState;
       callState = normalized;
-      // Gate microphone during AI turns to prevent ambient noise from
-      // being transcribed as phantom turns ("thank you" from silence).
-      if (
-        prevState === 'listening' &&
-        (normalized === 'understanding' || normalized === 'thinking' || normalized === 'speaking')
-      ) {
-        disableMicrophone();
-      } else if (normalized === 'listening' && prevState !== 'listening') {
-        enableMicrophone();
-      }
+      keepMicrophoneSenderLive(prevState, normalized);
       syncRemoteAudioAudibility();
     } else {
       callState = 'listening';
+      keepMicrophoneSenderLive(undefined, 'listening');
       syncRemoteAudioAudibility();
     }
   }
 
-  function disableMicrophone() {
+  function keepMicrophoneSenderLive(prevState: string | undefined, nextState: string) {
     if (!localMediaStream) {
       return;
     }
-    for (const track of localMediaStream.getAudioTracks()) {
-      track.enabled = false;
+    const changed = keepCallMicrophoneTracksLive(localMediaStream);
+    if (changed > 0 || prevState !== nextState) {
+      emitDebugEvent(callId, 'mic.keep_live', {
+        changed,
+        prevState: prevState ?? null,
+        nextState
+      });
     }
-    emitDebugEvent(callId, 'mic.disable', {
-      reason: `callState=${callState}`
-    });
-  }
-
-  function enableMicrophone() {
-    if (!localMediaStream) {
-      return;
-    }
-    for (const track of localMediaStream.getAudioTracks()) {
-      track.enabled = true;
-    }
-    emitDebugEvent(callId, 'mic.enable', {
-      reason: `callState=${callState}`
-    });
   }
 
   function syncRemoteAudioAudibility() {
