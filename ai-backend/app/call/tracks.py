@@ -163,13 +163,14 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
         if self._buffer.size >= self.frame_samples:
             samples = self._buffer[: self.frame_samples]
             self._buffer = self._buffer[self.frame_samples :]
-            if not self._nonzero_send_logged and np.max(np.abs(samples)) > 0:
+            peak = float(np.max(np.abs(samples.astype(np.float32))))
+            if not self._nonzero_send_logged and peak >= 128:
                 self._nonzero_send_logged = True
                 logger.info(
                     "[rayme-call] track.send.first_nonzero recv_count=%d rms=%.1f peak=%.1f",
                     self._recv_count,
                     float(np.sqrt(np.mean(np.square(samples.astype(np.float32))))),
-                    float(np.max(np.abs(samples.astype(np.float32)))),
+                    peak,
                 )
             return samples
 
@@ -177,13 +178,14 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
         if self._buffer.size:
             samples[: self._buffer.size] = self._buffer
             self._buffer = np.asarray([], dtype=np.int16)
-            if not self._nonzero_send_logged and np.max(np.abs(samples)) > 0:
+            peak = float(np.max(np.abs(samples.astype(np.float32))))
+            if not self._nonzero_send_logged and peak >= 128:
                 self._nonzero_send_logged = True
                 logger.info(
                     "[rayme-call] track.send.first_nonzero recv_count=%d rms=%.1f peak=%.1f",
                     self._recv_count,
                     float(np.sqrt(np.mean(np.square(samples.astype(np.float32))))),
-                    float(np.max(np.abs(samples.astype(np.float32)))),
+                    peak,
                 )
         else:
             # Silence frame — inject a low-amplitude sine wave so Opus
