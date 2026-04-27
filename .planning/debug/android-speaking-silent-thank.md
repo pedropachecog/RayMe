@@ -1,8 +1,8 @@
 ---
-status: fixing
+status: deployed-awaiting-live-repro
 trigger: "Android Chrome call now stops listening when generation begins, but the UI shows speaking with no audible audio; silence is still transcribed as 'thank you' and generates more silent responses; controls dialog blocks the status/transcript area."
 created: 2026-04-27T00:00:00Z
-updated: 2026-04-27T17:20:00Z
+updated: 2026-04-27T17:37:00Z
 ---
 
 # Debug Session: Android Speaking Silent And Phantom Thank You
@@ -12,7 +12,7 @@ updated: 2026-04-27T17:20:00Z
 hypothesis: "The backend emits ai_audio_started before TTS exists, then emits ai_done and returns to listening immediately after enqueueing audio rather than after the outbound WebRTC track drains."
 test: "Inspect OMEN web/AI logs for event ordering around tts.enqueue, ai_done, outbound track buffer_size, browser speakingRms, and subsequent user_final events."
 expecting: "If true, logs will show ai_done before queued audio is drained, followed by a new turn while buffer_size is still nonzero or immediately after playback, causing Whisper to transcribe silence/echo."
-next_action: "deploy the playback-boundary fix to OMEN through scripts/deploy-omen.sh and ask for one live Android reproduction"
+next_action: "ask user for one live Android Chrome reproduction against deployed OMEN build; inspect new logs for tts.playback_wait and absence of phantom user_final turns"
 reasoning_checkpoint:
 tdd_checkpoint: "Focused backend/server/client tests pass locally; mobile e2e was corrected to mock the diagnostic route and passes."
 
@@ -58,6 +58,9 @@ reproduction: "Open the deployed RayMe web UI on Android Chrome, start a call, a
 - timestamp: 2026-04-27T17:18:00Z
   observation: "Patched local code so backend stays thinking during synthesis, emits ai_audio_started only after WAV bytes are queued, waits for QueuedAudioOutputTrack to drain before emitting ai_done/listening, and routes client state transitions through applyCallState so mic gating runs for data-channel/SSE events."
   source: "local code changes"
+- timestamp: 2026-04-27T17:35:00Z
+  observation: "Deployed through canonical `scripts/deploy-omen.sh`. OMEN fast-forwarded to `21d1a6de411d9f40cb9e756ab9b0f078b0f3a085`, rebuilt the web client, recreated canonical `RayMePhase1AI` and `RayMePhase1Web` scheduled tasks, verified listeners on 9443 and 8443, and health checks returned resident TTS engine `f5`."
+  source: "scripts/deploy-omen.sh output"
 
 ## Eliminated
 
@@ -72,5 +75,5 @@ reproduction: "Open the deployed RayMe web UI on Android Chrome, start a call, a
 
 root_cause: "Call state and media events were tied to TTS request lifecycle instead of actual playback lifecycle. `ai_audio_started` was emitted before synthesis, so Android showed Speaking while only keepalive/silence was flowing. `ai_done` was emitted immediately after enqueue, so server/client returned to listening and reopened/accepted mic input while the AI response was still buffered or just draining. That produced silence/echo turns that Whisper hallucinated as `thank you`."
 fix: "Delay ai_audio_started until audio bytes are queued, wait for outbound WebRTC track idle before ai_done/listening, keep client tokens in thinking until ai_audio_started, and ensure all data-channel/SSE state transitions run mic gating."
-verification: "Passed: `uv run pytest tests/test_call_session.py tests/test_webrtc_signaling.py` in ai-backend; `uv run pytest tests/test_calls.py` in web-ui/server; `npm run test:unit -- --run tests/unit/call-state.test.ts`; `npm run test:unit -- --run tests/unit/call-audio.test.ts`; `npm run build`; `npm run test:e2e -- tests/e2e/call-mobile.spec.ts --project=mobile-chromium`. Initial Playwright command used a wrong project name (`chromium`) and failed before running tests; rerun used configured project names."
+verification: "Passed: `uv run pytest tests/test_call_session.py tests/test_webrtc_signaling.py` in ai-backend; `uv run pytest tests/test_calls.py` in web-ui/server; `npm run test:unit -- --run tests/unit/call-state.test.ts`; `npm run test:unit -- --run tests/unit/call-audio.test.ts`; `npm run build`; `npm run test:e2e -- tests/e2e/call-mobile.spec.ts --project=mobile-chromium`; OMEN deployment via `scripts/deploy-omen.sh`. Initial Playwright command used a wrong project name (`chromium`) and failed before running tests; rerun used configured project names. Live Android reproduction is still required before claiming the call works end to end."
 files_changed: "ai-backend/app/call/tracks.py; ai-backend/app/call/session.py; ai-backend/tests/test_call_session.py; web-ui/client/src/routes/call/[threadId]/+page.svelte; web-ui/client/tests/e2e/call-mobile.spec.ts; web-ui/server/app/api/calls.py; .planning/debug/android-speaking-silent-thank.md"
