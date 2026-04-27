@@ -192,7 +192,7 @@ class CallSession:
         self._speech_start_frame = None
 
         try:
-            transcription = self._transcribe_turn(frames)
+            transcription = await asyncio.to_thread(self._transcribe_turn, frames)
         except Exception as exc:
             logger.exception(
                 "[rayme-call] stt.failed session=%s turn=%s exc=%s",
@@ -647,6 +647,87 @@ class CallSession:
         if adapter is None:
             return {"wav_bytes": b"", "sample_rate": 24000, "duration_ms": 0}
 
+        # Determine if the TTS method is async. If sync, run it off the event
+        # loop thread so aiortc can continue polling outbound tracks and sending
+        # RTP keepalive packets during the (potentially 10+ second) GPU synthesis
+        # window. If async, await directly (async adapters yield to the loop).
+        is_async = self._is_tts_method_async(adapter, reference_audio_b64)
+        if is_async:
+            result = await self._do_async_synthesis(
+                adapter,
+                turn_id,
+                text,
+                voice_id,
+                engine_id,
+                reference_audio_b64,
+                reference_transcript,
+                reference_audio_content_type,
+            )
+        else:
+            result = await asyncio.to_thread(
+                self._run_sync_synthesis,
+                adapter,
+                turn_id,
+                text,
+                voice_id,
+                engine_id,
+                reference_audio_b64,
+                reference_transcript,
+                reference_audio_content_type,
+            )
+        if hasattr(result, "model_dump"):
+            result = result.model_dump()
+        return dict(result)
+
+    def _is_tts_method_async(self, adapter: Any, reference_audio_b64: str | None) -> bool:
+        """Check if the TTS adapter's synthesis method is a coroutine function."""
+        if hasattr(adapter, "synthesize_call_text"):
+            return inspect.iscoroutinefunction(adapter.synthesize_call_text)
+        return inspect.iscoroutinefunction(getattr(adapter, "synthesize", None))
+
+    async def _do_async_synthesis(
+        self,
+        adapter: Any,
+        turn_id: str,
+        text: str,
+        voice_id: str,
+        engine_id: str,
+        reference_audio_b64: str | None,
+        reference_transcript: str | None,
+        reference_audio_content_type: str | None,
+    ) -> Any:
+        """Await an async TTS adapter."""
+        if hasattr(adapter, "synthesize_call_text"):
+            return await adapter.synthesize_call_text(
+                turn_id=turn_id,
+                text=text,
+                voice_id=voice_id,
+                engine_id=engine_id,
+            )
+        if not reference_audio_b64:
+            raise ValueError("call TTS reference audio is required")
+        return await adapter.synthesize(
+            TtsSynthesisInput(
+                text=text,
+                reference_audio=base64.b64decode(reference_audio_b64, validate=True),
+                reference_transcript=reference_transcript,
+                reference_audio_content_type=reference_audio_content_type,
+                speech_speed=1.0,
+            )
+        )
+
+    def _run_sync_synthesis(
+        self,
+        adapter: Any,
+        turn_id: str,
+        text: str,
+        voice_id: str,
+        engine_id: str,
+        reference_audio_b64: str | None,
+        reference_transcript: str | None,
+        reference_audio_content_type: str | None,
+    ) -> dict[str, Any]:
+        """Synchronous TTS synthesis, called from asyncio.to_thread()."""
         if hasattr(adapter, "synthesize_call_text"):
             result = adapter.synthesize_call_text(
                 turn_id=turn_id,
@@ -666,8 +747,6 @@ class CallSession:
                     speech_speed=1.0,
                 )
             )
-        if inspect.isawaitable(result):
-            result = await result
         if hasattr(result, "model_dump"):
             result = result.model_dump()
         return dict(result)
