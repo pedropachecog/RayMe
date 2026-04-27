@@ -39,6 +39,9 @@ from app.models.tts_registry import TtsSynthesisInput
 
 EventSink = Callable[[dict[str, Any]], Awaitable[None] | None]
 
+CALL_TTS_AUDIO_PREROLL_SECONDS = 0.25
+CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS = 0.75
+
 
 class NullPeerConnection:
     connectionState = "new"
@@ -393,10 +396,15 @@ class CallSession:
             if turn_id in self._cancelled_ai_turns:
                 return {"status": "cancelled", "turn_id": turn_id}
             wav_bytes = bytes(result.get("wav_bytes") or b"")
+            playback_seconds = 0.0
             if wav_bytes:
                 audio_stats = audio_stats_for_wav_bytes(
                     wav_bytes,
                     target_sample_rate=int(getattr(self.outbound_audio_track, "sample_rate", 48000)),
+                )
+                playback_seconds = await self._queue_outbound_audio(
+                    wav_bytes,
+                    preroll_seconds=CALL_TTS_AUDIO_PREROLL_SECONDS,
                 )
                 self.state = "speaking"
                 audio_started_event = simple_event(
@@ -408,13 +416,9 @@ class CallSession:
                     audio=audio_stats,
                 )
                 await self.emit_event(audio_started_event)
-                # Let the browser unmute the remote media element before the
-                # first speech frame is enqueued; otherwise Android Chrome can
-                # begin audible playback late and only expose the tail.
-                await asyncio.sleep(0.08)
-            playback_seconds = await self._queue_outbound_audio(wav_bytes)
-            if wav_bytes:
                 await self._wait_for_outbound_audio_playback(playback_seconds)
+            else:
+                await self._queue_outbound_audio(wav_bytes)
         except asyncio.CancelledError:
             self._cancelled_ai_turns.add(turn_id)
             raise
@@ -848,7 +852,7 @@ class CallSession:
             result = result.model_dump()
         return dict(result)
 
-    async def _queue_outbound_audio(self, wav_bytes: bytes) -> float:
+    async def _queue_outbound_audio(self, wav_bytes: bytes, *, preroll_seconds: float = 0.0) -> float:
         if not wav_bytes:
             logger.info(
                 "[rayme-call] tts.enqueue_empty session=%s",
@@ -858,11 +862,16 @@ class CallSession:
         enqueue = getattr(self.outbound_audio_track, "enqueue", None)
         if callable(enqueue):
             logger.info(
-                "[rayme-call] tts.enqueue session=%s wav_bytes=%d target=track",
+                "[rayme-call] tts.enqueue session=%s wav_bytes=%d preroll_ms=%d target=track",
                 self.session_id,
                 len(wav_bytes),
+                int(preroll_seconds * 1000),
             )
-            result = enqueue(wav_bytes)
+            result = self._call_track_enqueue(
+                enqueue,
+                wav_bytes,
+                preroll_seconds=preroll_seconds,
+            )
             if inspect.isawaitable(result):
                 result = await result
             return float(result or 0.0)
@@ -873,6 +882,21 @@ class CallSession:
         )
         self.outbound_audio_buffer.append(wav_bytes)
         return 0.0
+
+    def _call_track_enqueue(
+        self,
+        enqueue: Callable[..., Any],
+        wav_bytes: bytes,
+        *,
+        preroll_seconds: float,
+    ) -> Any:
+        try:
+            parameters = inspect.signature(enqueue).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        if "preroll_seconds" in parameters:
+            return enqueue(wav_bytes, preroll_seconds=preroll_seconds)
+        return enqueue(wav_bytes)
 
     async def _wait_for_outbound_audio_playback(self, playback_seconds: float) -> None:
         wait_until_idle = getattr(self.outbound_audio_track, "wait_until_idle", None)
@@ -892,6 +916,13 @@ class CallSession:
             self.session_id,
             completed,
         )
+        if CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS > 0:
+            logger.info(
+                "[rayme-call] tts.playout_hold session=%s hold_ms=%d",
+                self.session_id,
+                int(CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS * 1000),
+            )
+            await asyncio.sleep(CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS)
 
 
 class CallSessionManager:

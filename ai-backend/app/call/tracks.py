@@ -93,17 +93,22 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
             )
         return frame
 
-    async def enqueue(self, wav_bytes: bytes) -> float:
+    async def enqueue(self, wav_bytes: bytes, *, preroll_seconds: float = 0.0) -> float:
         samples = _wav_bytes_to_int16(wav_bytes, target_sample_rate=self.sample_rate)
+        preroll_samples = int(self.sample_rate * max(preroll_seconds, 0.0))
+        if preroll_samples > 0:
+            samples = np.concatenate([np.zeros(preroll_samples, dtype=np.int16), samples])
         self.last_enqueue_stats = audio_stats_for_int16_samples(
             samples,
             sample_rate=self.sample_rate,
         )
         duration_seconds = float(self.last_enqueue_stats["duration_ms"]) / 1000.0
         logger.info(
-            "[rayme-call] track.enqueue stats samples=%d duration_ms=%d rms=%.1f peak=%.1f",
+            "[rayme-call] track.enqueue stats samples=%d duration_ms=%d "
+            "preroll_ms=%d rms=%.1f peak=%.1f",
             self.last_enqueue_stats["samples"],
             self.last_enqueue_stats["duration_ms"],
+            int(preroll_samples * 1000 / self.sample_rate) if self.sample_rate else 0,
             self.last_enqueue_stats["rms"],
             self.last_enqueue_stats["peak"],
         )

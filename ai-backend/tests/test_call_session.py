@@ -7,8 +7,14 @@ from typing import Any
 import numpy as np
 import soundfile as sf
 
+import app.call.session as session_module
 from app.call.tracks import QueuedAudioOutputTrack, normalize_inbound_audio_frame
-from app.call.session import CallSession, CallSessionManager
+from app.call.session import (
+    CALL_TTS_AUDIO_PREROLL_SECONDS,
+    CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS,
+    CallSession,
+    CallSessionManager,
+)
 
 
 def _scripted_wav_bytes() -> bytes:
@@ -47,17 +53,20 @@ class ScriptedAiTurn:
 class ScriptedOutboundAudioTrack:
     def __init__(self) -> None:
         self.chunks: list[bytes] = []
+        self.preroll_seconds: list[float] = []
         self.stop_calls = 0
         self.wait_calls: list[float | None] = []
 
-    async def enqueue(self, chunk: bytes) -> None:
+    async def enqueue(self, chunk: bytes, *, preroll_seconds: float = 0.0) -> float:
         self.chunks.append(chunk)
+        self.preroll_seconds.append(preroll_seconds)
         self.last_enqueue_stats = {
-            "duration_ms": 120,
-            "samples": 5760,
+            "duration_ms": int(120 + preroll_seconds * 1000),
+            "samples": int(5760 + preroll_seconds * 48000),
             "rms": 512.0,
             "peak": 2048.0,
         }
+        return float(self.last_enqueue_stats["duration_ms"]) / 1000.0
 
     async def stop_current(self) -> None:
         self.stop_calls += 1
@@ -428,6 +437,7 @@ def test_speak_text_queues_audio_and_emits_done_for_final_chunk() -> None:
         }
     ]
     assert track.chunks == [SCRIPTED_WAV_BYTES]
+    assert track.preroll_seconds == [CALL_TTS_AUDIO_PREROLL_SECONDS]
     assert track.wait_calls
     assert [item["type"] for item in events] == ["ai_audio_started", "ai_done"]
     assert events[0]["audio"]["duration_ms"] == 120
@@ -436,6 +446,73 @@ def test_speak_text_queues_audio_and_emits_done_for_final_chunk() -> None:
     assert events[0]["audio"]["peak"] > 0
     assert event["type"] == "ai_done"
     assert session.state == "listening"
+
+
+def test_speak_text_queues_audio_before_audio_started_event() -> None:
+    order: list[str] = []
+
+    class OrderedTrack(ScriptedOutboundAudioTrack):
+        async def enqueue(self, chunk: bytes, *, preroll_seconds: float = 0.0) -> float:
+            order.append("enqueue")
+            return await super().enqueue(chunk, preroll_seconds=preroll_seconds)
+
+        async def wait_until_idle(self, *, timeout: float | None = None) -> bool:
+            order.append("wait_until_idle")
+            return await super().wait_until_idle(timeout=timeout)
+
+    def sink(event: dict[str, Any]) -> None:
+        order.append(event["type"])
+
+    track = OrderedTrack()
+    adapter = ScriptedTtsAdapter()
+    session, _ = _new_session(
+        tts_adapter=adapter,
+        outbound_audio_track=track,
+        event_sink=sink,
+    )
+
+    _run(
+        session.speak_text(
+            "ai-turn-order",
+            "Hello from AI.",
+            "voice-1",
+            "f5",
+            final_chunk=True,
+        )
+    )
+
+    assert order.index("enqueue") < order.index("ai_audio_started")
+    assert order.index("ai_audio_started") < order.index("wait_until_idle")
+    assert track.preroll_seconds == [CALL_TTS_AUDIO_PREROLL_SECONDS]
+
+
+def test_speak_text_holds_speaking_after_track_drains(monkeypatch: Any) -> None:
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(session_module.asyncio, "sleep", fake_sleep)
+
+    track = ScriptedOutboundAudioTrack()
+    adapter = ScriptedTtsAdapter()
+    session, _ = _new_session(
+        tts_adapter=adapter,
+        outbound_audio_track=track,
+    )
+
+    _run(
+        session.speak_text(
+            "ai-turn-hold",
+            "Hello from AI.",
+            "voice-1",
+            "f5",
+            final_chunk=True,
+        )
+    )
+
+    assert CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS in sleeps
+    assert 0.08 not in sleeps
 
 
 def test_queued_audio_output_track_returns_tts_audio_frames() -> None:
@@ -455,6 +532,28 @@ def test_queued_audio_output_track_returns_tts_audio_frames() -> None:
     assert frame.sample_rate == 16000
     assert frame.samples == 320
     assert np.max(np.abs(frame.to_ndarray())) > 0
+
+
+def test_queued_audio_output_track_preroll_sends_silence_before_tts() -> None:
+    async def scenario() -> Any:
+        track = QueuedAudioOutputTrack(sample_rate=16000, frame_ms=20)
+        samples = np.full(1600, 0.25, dtype=np.float32)
+        buffer = BytesIO()
+        sf.write(buffer, samples, 16000, format="WAV")
+
+        duration = await track.enqueue(buffer.getvalue(), preroll_seconds=0.04)
+        first = await track.recv()
+        second = await track.recv()
+        third = await track.recv()
+
+        return duration, first, second, third
+
+    duration, first, second, third = _run(scenario())
+
+    assert abs(duration - 0.14) < 0.001
+    assert np.max(np.abs(first.to_ndarray())) == 0
+    assert np.max(np.abs(second.to_ndarray())) == 0
+    assert np.max(np.abs(third.to_ndarray())) > 0
 
 
 def test_queued_audio_output_track_idle_frames_emit_keepalive_carrier() -> None:
