@@ -27,9 +27,9 @@ updated: 2026-04-26T23:55:00Z
 
 ## Current Focus
 
-- status: investigating — ICE timeout fix (commit `c0dbb34`) deployed and tested. User reports no improvement. OMEN logs pulled and analyzed.
+- status: awaiting_human_verify — Jitter amplitude increase deployed (commits `a7a8ef2`, `ac20bd3`). Waiting for user to test on Android Chrome.
 
-- last_fix: ICE timeout prevention during STT+LLM+TTS processing gap (commit `c0dbb34`)
+- last_fix: Opus DTX suppression fix (commits `a7a8ef2`, `ac20bd3`)
   - Added tiny jitter to silence frames in `QueuedAudioOutputTrack._next_samples()` so Opus DTX does not suppress them
   - Reduced data channel keepalive interval from 4s to 1s
   - Browser responds to backend ping events for bidirectional packet flow
@@ -1238,4 +1238,15 @@ The ICE timeout fix from commit `c0dbb34` did NOT work. The same cascade occurre
       even continuous packet flow may not be enough"
     - "If the data channel close is caused by the DTLS connection closing
       (not just ICE), the keepalive won't help"
+
+### Deploy Confirmation
+
+- Commits: `a7a8ef2` (jitter range [-4,4] -> [-100,100]), `ac20bd3` (keepalive 1s -> 0.5s)
+- `scripts/deploy-omen.sh` completed: `OMEN deploy complete: ac20bd3d758c2f1036882bbd518cdea04c201160`
+- OMEN listeners confirmed on ports 8443/9443
+- Tests: `uv run --project ai-backend pytest ai-backend/tests -q` -> **71 passed**
+
+next_action: ask user to reproduce on Android Chrome; expected outcome is
+ICE stays connected during processing gap, `speakingRms` rises above 0.04,
+and user hears AI audio.
 
