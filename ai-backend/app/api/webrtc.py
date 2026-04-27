@@ -587,18 +587,30 @@ async def _data_channel_keepalive(session: CallSession, channel: Any) -> None:
     if not callable(send):
         return
 
-    interval = 0.5
+    interval = 2.0
+
+    def _send_ping() -> bool:
+        try:
+            if getattr(channel, "readyState", "closed") != "open":
+                return False
+            send('{"type":"ping"}')
+            return True
+        except Exception:
+            return False
+
+    # Send first ping immediately — the data channel just opened,
+    # and on Android Chrome the NAT binding can expire within seconds
+    # if no packets flow from backend to browser. Waiting 0.5s for
+    # the first ping was too long.
+    if not _send_ping():
+        return
 
     try:
         while True:
             await asyncio.sleep(interval)
-            if getattr(channel, "readyState", "closed") != "open":
-                break
             if session.state in {"ended", "failed"}:
                 break
-            try:
-                send('{"type":"ping"}')
-            except Exception:
+            if not _send_ping():
                 break
     except asyncio.CancelledError:
         return
