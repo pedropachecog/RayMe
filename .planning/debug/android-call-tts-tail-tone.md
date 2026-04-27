@@ -2,7 +2,7 @@
 status: awaiting_human_verify
 trigger: "Android live call playback improved after paced TTS frames, but mic input stops truly listening after about five seconds of either continuous speech or pre-speech idle while the UI still says Listening."
 created: 2026-04-27T18:42:11Z
-updated: 2026-04-27T21:13:59Z
+updated: 2026-04-27T21:31:21Z
 ---
 
 # Debug Session: Android Call TTS Tail And Tone
@@ -10,16 +10,16 @@ updated: 2026-04-27T21:13:59Z
 ## Current Focus
 
 reasoning_checkpoint:
-  hypothesis: "The client disables the actual WebRTC microphone MediaStreamTrack during `understanding`/`thinking`/`speaking`; on Android Chrome that can make aiortc's inbound `track.recv()` raise after a short no-audio interval, and RayMe's backend currently returns from `_receive_audio_track()` while the session remains non-failed. When `ai_done` later puts the UI back into `Listening`, the browser mic meter can still run locally, but the backend has no active inbound receive loop for future audio, so the ongoing call is effectively frozen."
+  hypothesis: "Android Chrome produces a transient inbound `track.recv()` exception/gap around the five-second idle/speech boundary while ICE remains connected, and `_receive_audio_track()` treats that as permanent input end by returning, leaving the UI in `Listening` and outbound TTS alive but no backend receive loop to process later mic frames."
   confirming_evidence:
-    - "`applyCallState()` calls `disableMicrophone()` whenever it leaves `listening` for `understanding`, `thinking`, or `speaking`, and `disableMicrophone()` sets every local audio track's `enabled` to `false`."
-    - "The backend already drops inbound frames during `understanding`/`thinking`/`speaking`, so frontend track disabling is not required to prevent phantom STT turns."
-    - "`_receive_audio_track()` catches recv exceptions while ICE/connection are live and returns without failing the session, explicitly keeping outbound audio alive. That preserves playback, but it also permanently ends input receiving for the session."
-    - "The only remaining source 5s cap found in call/VAD code is `vad_max_turn_ms`, now defaulted to 30000; no repository env/config override for a 5000ms VAD max was found."
-  falsification_test: "A regression test should show call state transitions no longer disable the local MediaStreamTrack. Existing backend tests already demonstrate a live ICE recv error exits input receiving without failing the session; after removing client track toggling, Android should no longer trigger that path during normal AI turns."
-  fix_rationale: "Keep the WebRTC microphone sender continuously live for the lifetime of the call and rely on backend session-state guards to ignore audio while RayMe is understanding/thinking/speaking. This preserves inbound media liveness across mobile Chrome's short no-sending/disabled-track behavior and prevents UI Listening from diverging from backend input processing."
-  blind_spots: "Cannot live-test Android Chrome before deployment. If Android still ends inbound media without frontend disabling, backend needs a second fix to surface receiver death to the UI or renegotiate input."
-next_action: Await deployment via the parent workflow and Android Chrome verification that post-AI listening remains active after more than five seconds of idle and continuous speech.
+    - "Live repro after commit 5e237bc shows quick turns still work, but waiting more than five seconds before speaking or speaking more than five seconds freezes input with UI still `Listening`."
+    - "Source search found no remaining active 5000ms VAD cap after `vad_max_turn_ms` was raised to 30000."
+    - "`_receive_audio_track()` returns permanently on any `track.recv()` exception when ICE/connection are still live."
+    - "A focused regression test with a live peer connection and an inbound track that raises three transient recv errors then returns a frame failed red: current code made only one recv call and processed zero inbound frames."
+  falsification_test: "After changing live-ICE recv exceptions to retry with backoff, the same test must process the resumed frame; existing media-stream-error test must still prove the session is not failed; call-session and WebRTC tests must pass."
+  fix_rationale: "Retrying live-ICE recv errors preserves the previous TTS-safe behavior of not failing/closing the outbound track, but avoids killing input processing permanently on a transient Android Chrome RTP/read gap."
+  blind_spots: "Cannot live-test Android Chrome or inspect OMEN runtime logs in this child task. The exact browser/aiortc exception class at five seconds is inferred from matching code behavior and reproduced with a generic exception."
+next_action: Await parent deployment and live Android Chrome verification of >5s idle-before-speech and >5s continuous-speech call input.
 
 ## Symptoms
 
@@ -140,6 +140,26 @@ reproduction: Start call on Android Chrome. Confirm quick short-turn back-and-fo
   checked: Focused fix and automated regression tests
   found: Frontend call state transitions now keep local WebRTC microphone tracks enabled instead of toggling them off during AI turns. Added unit coverage for keeping call microphone tracks live. `npm run test:unit -- tests/unit/call-audio.test.ts --run` passed 6 tests; `npm run check` passed; `npm run test:unit -- --run` passed 88 tests; `uv run pytest tests/test_webrtc_signaling.py -q` passed 10 tests; `uv run pytest tests/test_call_session.py -q` passed 24 tests; `uv run pytest -q` passed 78 tests with the existing torch/cuda deprecated `pynvml` warning.
   implication: The focused fix is locally verified; live Android Chrome verification is still required after deployment.
+- timestamp: 2026-04-27T21:24:46Z
+  checked: User live Android Chrome repro after OMEN deployment of commit `5e237bc`
+  found: Behavior is exactly the same as before the mic-track keepalive fix. Quick short-turn calls still work. Waiting more than five seconds before speaking does not work and freezes the call. Speaking for more than five seconds also does not work and freezes the call.
+  implication: The frontend mic-track disabling hypothesis is falsified as the live root cause. Continue debugging a distinct five-second input freeze path while preserving the already-improved TTS playback behavior.
+- timestamp: 2026-04-27T21:26:34Z
+  checked: Source search and full read of call input path
+  found: No remaining source `5000` VAD cap is active after `vad_max_turn_ms` was raised to 30000. The remaining input-side freeze candidate is `_receive_audio_track()`: on any `track.recv()` exception while ICE/connection are still live, it logs `track.recv.inbound_ended` and returns permanently without failing the session.
+  implication: A transient Android Chrome RTP/read gap can kill backend input processing while preserving UI `Listening` and outbound playback. This matches quick turns working but the call freezing after a longer idle/speech boundary.
+- timestamp: 2026-04-27T21:27:24Z
+  checked: `uv run pytest tests/test_webrtc_signaling.py::test_receive_audio_track_recovers_from_transient_live_ice_recv_errors -q` before fix
+  found: Test failed red. The scripted track raised one live-ICE recv exception, `_receive_audio_track()` returned, `recv_calls` was 1 instead of at least 4, and no resumed audio frame was processed.
+  implication: The code has the exact permanent input-loop death behavior needed to explain the live five-second freeze once Android Chrome/aiortc emits a transient recv exception.
+- timestamp: 2026-04-27T21:31:21Z
+  checked: Focused receive-loop fix and regression tests
+  found: `_receive_audio_track()` now retries live-ICE recv exceptions with bounded backoff instead of returning, while still failing on failed/closed peer states and preserving outbound audio. The old media-stream-error regression was updated to verify the session is not failed/closed and the loop exits when the session ends. New regression coverage proves resumed frames after transient live-ICE recv errors are processed.
+  implication: Backend listening no longer silently dies after a transient Android Chrome/aiortc inbound read gap, which is the concrete mechanism behind UI `Listening` diverging from actual input processing.
+- timestamp: 2026-04-27T21:31:21Z
+  checked: Automated verification
+  found: `uv run pytest tests/test_webrtc_signaling.py::test_receive_audio_track_recovers_from_transient_live_ice_recv_errors tests/test_webrtc_signaling.py::test_receive_audio_track_media_stream_error_with_live_ice_does_not_fail_session -q` passed 2 tests; `uv run pytest tests/test_webrtc_signaling.py -q` passed 11 tests; `uv run pytest tests/test_call_session.py -q` passed 24 tests; `uv run pytest -q` passed 79 tests with the existing torch/cuda deprecated `pynvml` warning.
+  implication: Focused red/green regression and adjacent backend coverage pass locally. Live Android Chrome verification still requires parent deployment.
 
 ## Eliminated
 
@@ -153,16 +173,18 @@ reproduction: Start call on Android Chrome. Confirm quick short-turn back-and-fo
 - hypothesis: Keeping the WebRTC audio element unmuted and replacing idle carrier frames with silence fully fixes Android playback.
   reason: After commit ef08e6a was deployed, the tone issue improved, but longer generated replies still play only a partial audible slice while the transcript contains the full LLM text.
   timestamp: 2026-04-27T20:34:40Z
+- hypothesis: Keeping the WebRTC microphone MediaStreamTrack enabled across non-listening states fully fixes the Android input freeze.
+  reason: After commit 5e237bc was deployed, user live Android Chrome repro showed no behavior change: quick turns work, but waiting more than five seconds before speaking or speaking more than five seconds still freezes the call.
+  timestamp: 2026-04-27T21:24:46Z
 
 ## Resolution
 
 root_cause:
-  The remaining input/listening freeze was caused by the frontend disabling the actual WebRTC microphone MediaStreamTrack when leaving `listening` for `understanding`, `thinking`, or `speaking`. On Android Chrome this can starve/end the inbound media sender after a short interval. The backend's `_receive_audio_track()` then treats live-ICE recv errors as nonfatal and returns without failing the session, preserving outbound playback but permanently stopping backend mic frame processing while the UI later returns to `Listening`. The earlier playback issue was separately caused by unpaced outbound TTS frames, and the earlier continuous-speech 5s cap was addressed by raising `vad_max_turn_ms` to 30000.
+  The actual five-second input freeze was caused by the backend WebRTC receive loop treating any inbound `track.recv()` exception while ICE/connection were still live as permanent input end. The previous TTS-safe behavior intentionally did not fail/close the session, preserving outbound playback, but it also returned from `_receive_audio_track()` and permanently stopped backend mic frame processing. When Android Chrome/aiortc emits a transient inbound read/RTP gap around the five-second idle/speech boundary, the UI can later show `Listening` while no backend receive loop remains to process speech.
 fix:
-  Kept the WebRTC microphone sender live for the whole call by replacing frontend mic disable/enable state gating with `keepCallMicrophoneTracksLive()`. Backend session-state guards continue to drop inbound frames while RayMe is understanding/thinking/speaking, so phantom STT prevention stays backend-owned without tearing down mobile WebRTC input. Added regression coverage for keeping call microphone tracks enabled.
+  Changed `_receive_audio_track()` to retry live-ICE/live-connection recv exceptions with bounded backoff instead of returning, resetting the error count after a good frame. Failed/closed peer states still fail the session, disconnected states still use the reconnect path, and outbound playback remains preserved. Added a regression test that fails before the fix by scripting transient recv errors followed by a resumed audio frame, and updated the existing live-ICE MediaStreamError test to assert no fail/close while allowing the long-lived receive loop to exit on session end.
 verification:
-  `npm run test:unit -- tests/unit/call-audio.test.ts --run` passed 6 tests; `npm run check` passed; `npm run test:unit -- --run` passed 88 tests; `uv run pytest tests/test_webrtc_signaling.py -q` passed 10 tests; `uv run pytest tests/test_call_session.py -q` passed 24 tests; `uv run pytest -q` passed 78 tests with the existing torch/cuda deprecated `pynvml` warning. Live Android Chrome verification is pending deployment by the parent workflow.
+  `uv run pytest tests/test_webrtc_signaling.py::test_receive_audio_track_recovers_from_transient_live_ice_recv_errors tests/test_webrtc_signaling.py::test_receive_audio_track_media_stream_error_with_live_ice_does_not_fail_session -q` passed 2 tests; `uv run pytest tests/test_webrtc_signaling.py -q` passed 11 tests; `uv run pytest tests/test_call_session.py -q` passed 24 tests; `uv run pytest -q` passed 79 tests with the existing torch/cuda deprecated `pynvml` warning. Live Android Chrome verification is pending parent deployment.
 files_changed:
-  - web-ui/client/src/lib/call/audio.ts
-  - web-ui/client/src/routes/call/[threadId]/+page.svelte
-  - web-ui/client/tests/unit/call-audio.test.ts
+  - ai-backend/app/api/webrtc.py
+  - ai-backend/tests/test_webrtc_signaling.py

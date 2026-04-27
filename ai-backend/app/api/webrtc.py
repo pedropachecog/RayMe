@@ -513,6 +513,7 @@ async def _receive_audio_track(session: CallSession, track: Any) -> None:
         getattr(track, "id", None),
     )
     frame_count = 0
+    consecutive_live_recv_errors = 0
     while session.state not in {"ended", "failed"}:
         try:
             frame = await track.recv()
@@ -560,21 +561,25 @@ async def _receive_audio_track(session: CallSession, track: Any) -> None:
                     await session.fail(reason="connection_failed")
                     return
                 continue
-            # The inbound track ended or had a codec error while ICE/connection
-            # are still alive (e.g. the remote side stopped sending audio after
-            # the user finished speaking on mobile).  This is NOT a fatal
-            # connection failure — the outbound audio track must remain alive so
-            # that TTS audio already in-flight can be delivered.  Exit the
-            # receive loop without failing the session.
+            # The inbound read can raise while ICE/connection are still alive
+            # on mobile Chrome. Treat that as a transient RTP/read gap: keep
+            # outbound audio alive and keep the input receive loop ready for
+            # resumed microphone frames instead of silently killing listening.
+            consecutive_live_recv_errors += 1
+            backoff_seconds = min(1.0, 0.1 * consecutive_live_recv_errors)
             logger.info(
-                "[rayme-call] track.recv.inbound_ended session=%s frames=%d "
-                "exc=%s — outbound track kept alive",
+                "[rayme-call] track.recv.live_retry session=%s frames=%d "
+                "exc=%s consecutive=%d backoff=%.1fs",
                 session.session_id,
                 frame_count,
                 exc_name,
+                consecutive_live_recv_errors,
+                backoff_seconds,
             )
-            return
+            await asyncio.sleep(backoff_seconds)
+            continue
         frame_count += 1
+        consecutive_live_recv_errors = 0
         if frame_count == 1:
             logger.info(
                 "[rayme-call] track.recv.first_frame session=%s sample_rate=%s "

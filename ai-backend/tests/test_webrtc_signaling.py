@@ -317,8 +317,10 @@ def test_receive_audio_track_media_stream_error_with_live_ice_does_not_fail_sess
     class ScriptedInboundTrack:
         kind = "audio"
         id = "inbound-1"
+        calls = 0
 
         async def recv(self) -> Any:
+            self.calls += 1
             # Raise immediately — the error path is what we are testing, not
             # frame processing.  ICE and conn states are still "alive" so the
             # fallthrough must NOT call session.fail().
@@ -332,7 +334,7 @@ def test_receive_audio_track_media_stream_error_with_live_ice_does_not_fail_sess
         async def close(self) -> None:
             self.close_calls += 1
 
-    async def _run_test() -> tuple[int, str]:
+    async def _run_test() -> tuple[int, str, int]:
         settings = AiBackendSettings()
         manager = CallSessionManager(settings=settings)
         pc = LivePeerConnection()
@@ -349,10 +351,13 @@ def test_receive_audio_track_media_stream_error_with_live_ice_does_not_fail_sess
             outbound_audio_track=outbound_track,
         )
         track = ScriptedInboundTrack()
-        await webrtc_module._receive_audio_track(session, track)
-        return pc.close_calls, session.state
+        task = asyncio.create_task(webrtc_module._receive_audio_track(session, track))
+        await asyncio.sleep(0.25)
+        session.state = "ended"
+        await task
+        return pc.close_calls, session.state, track.calls
 
-    close_calls, state = asyncio.run(_run_test())
+    close_calls, state, recv_calls = asyncio.run(_run_test())
 
     assert close_calls == 0, (
         "peer_connection.close() must NOT be called when MediaStreamError fires "
@@ -361,3 +366,60 @@ def test_receive_audio_track_media_stream_error_with_live_ice_does_not_fail_sess
     assert state not in {"failed"}, (
         f"session.fail() must NOT be called; got state={state!r}"
     )
+    assert recv_calls > 1
+
+
+def test_receive_audio_track_recovers_from_transient_live_ice_recv_errors() -> None:
+    """Transient recv errors while ICE is live must not permanently kill input."""
+    import asyncio
+
+    from app.call.session import CallSession
+    from app.call.tracks import PcmAudioFrame
+
+    class TransientRecvError(Exception):
+        pass
+
+    class ResumingInboundTrack:
+        kind = "audio"
+        id = "inbound-resumes"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def recv(self) -> Any:
+            self.calls += 1
+            if self.calls <= 3:
+                raise TransientRecvError("temporary RTP read gap")
+            await asyncio.sleep(0.005)
+            return PcmAudioFrame(
+                pcm=(b"\x00\x20" * 320),
+                sample_rate=16000,
+                channels=1,
+            )
+
+    class LivePeerConnection:
+        connectionState = "connected"
+        iceConnectionState = "completed"
+
+    class EndingCallSession(CallSession):
+        async def handle_inbound_audio_frame(self, frame: Any) -> Any:
+            result = await super().handle_inbound_audio_frame(frame)
+            self.state = "ended"
+            return result
+
+    async def _run_test() -> tuple[int, int, str]:
+        session = EndingCallSession(
+            session_id="test-transient-recv-error",
+            peer_connection=LivePeerConnection(),
+            vad_adapter=None,
+            stt_adapter=None,
+        )
+        track = ResumingInboundTrack()
+        await webrtc_module._receive_audio_track(session, track)
+        return track.calls, session.incoming_audio_frames, session.state
+
+    recv_calls, incoming_frames, state = asyncio.run(_run_test())
+
+    assert recv_calls >= 4
+    assert incoming_frames == 1
+    assert state == "ended"
