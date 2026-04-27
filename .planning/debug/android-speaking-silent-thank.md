@@ -59,7 +59,7 @@ reproduction: "Open the deployed RayMe web UI on Android Chrome, start a call, a
   observation: "Patched local code so backend stays thinking during synthesis, emits ai_audio_started only after WAV bytes are queued, waits for QueuedAudioOutputTrack to drain before emitting ai_done/listening, and routes client state transitions through applyCallState so mic gating runs for data-channel/SSE events."
   source: "local code changes"
 - timestamp: 2026-04-27T17:35:00Z
-  observation: "Deployed through canonical `scripts/deploy-omen.sh`. OMEN fast-forwarded to `21d1a6de411d9f40cb9e756ab9b0f078b0f3a085`, rebuilt the web client, recreated canonical `RayMePhase1AI` and `RayMePhase1Web` scheduled tasks, verified listeners on 9443 and 8443, and health checks returned resident TTS engine `f5`."
+  observation: "Deployed through canonical `scripts/deploy-omen.sh`. OMEN fast-forwarded to the playback-boundary fix, rebuilt the web client, recreated canonical `RayMePhase1AI` and `RayMePhase1Web` scheduled tasks, verified listeners on 9443 and 8443, and health checks returned resident TTS engine `f5`."
   source: "scripts/deploy-omen.sh output"
 
 ## Eliminated
