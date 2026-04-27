@@ -363,31 +363,22 @@ async def create_call_turn(
 
             visible_text = "".join(accumulated)
             if visible_text:
-                speak_result = await _speak_call(
-                    backend,
-                    endpoint_settings.ai_backend_url,
-                    session_id,
-                    {
-                        "turn_id": payload.turn_id,
-                        "text": visible_text,
-                        "voice_id": call["voice_id"],
-                        "engine_id": call["engine_id"],
-                        "final_chunk": True,
-                        **voice_reference,
-                    },
-                )
-                nested_event = speak_result.get("event") or {}
-                audio_started = (
-                    speak_result.get("ai_audio_started_event")
-                    or nested_event.get("ai_audio_started_event")
-                )
-                if audio_started:
-                    yield _sse({
-                        "type": "ai_audio_started",
-                        "turn_id": payload.turn_id,
-                        "session_id": session_id,
-                    })
-            message = await service.record_ai_speech(call_id, visible_text)
+                message = await service.record_ai_speech(call_id, visible_text)
+            else:
+                message = None
+            # Yield ai_done immediately so the browser SSE reader unblocks
+            # and transitions from 'speaking' to 'listening'. TTS runs as a
+            # background task -- ai_audio_started / ai_done events for the
+            # media pipeline are delivered via the WebRTC data channel from
+            # the AI backend, independently of the SSE stream.
+            logger.info(
+                "[call-turn] ai_done call=%s turn=%s visible_text_len=%d "
+                "tts_background=%s",
+                call_id,
+                payload.turn_id,
+                len(visible_text),
+                bool(visible_text),
+            )
             yield _sse(
                 {
                     "type": "ai_done",
@@ -395,6 +386,19 @@ async def create_call_turn(
                     "message": message,
                 }
             )
+            if visible_text:
+                asyncio.ensure_future(
+                    _speak_call_background(
+                        backend,
+                        endpoint_settings.ai_backend_url,
+                        session_id,
+                        payload.turn_id,
+                        visible_text,
+                        call["voice_id"],
+                        call["engine_id"],
+                        voice_reference,
+                    ),
+                )
         except asyncio.CancelledError:
             return
         except AiBackendClientError:
@@ -539,6 +543,53 @@ async def _speak_call(
     if not hasattr(backend, "speak_call"):
         raise _missing_backend_method("speak_call")
     return dict(await backend.speak_call(base_url, session_id, payload))
+
+
+async def _speak_call_background(
+    backend: Any,
+    base_url: str,
+    session_id: str,
+    turn_id: str,
+    text: str,
+    voice_id: str,
+    engine_id: str,
+    voice_reference: dict[str, Any],
+) -> None:
+    """Fire-and-forget TTS call after SSE stream ends.
+
+    Runs in the background so the SSE generator is not blocked during TTS
+    synthesis (5-15 seconds on GPU). The AI backend delivers
+    ai_audio_started / ai_done via the WebRTC data channel independently.
+    """
+    try:
+        await _speak_call(
+            backend,
+            base_url,
+            session_id,
+            {
+                "turn_id": turn_id,
+                "text": text,
+                "voice_id": voice_id,
+                "engine_id": engine_id,
+                "final_chunk": True,
+                **voice_reference,
+            },
+        )
+    except AiBackendClientError as exc:
+        logger.warning(
+            "[call-turn] speak_call.background_failed turn=%s session=%s "
+            "code=%s message=%s",
+            turn_id,
+            session_id,
+            exc.code,
+            exc.message,
+        )
+    except Exception:
+        logger.exception(
+            "[call-turn] speak_call.background_exception turn=%s session=%s",
+            turn_id,
+            session_id,
+        )
 
 
 def _missing_backend_method(method_name: str) -> AiBackendUnavailable:

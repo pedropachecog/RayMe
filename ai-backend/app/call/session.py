@@ -145,8 +145,6 @@ class CallSession:
                 self.session_id,
                 len(self._turn_frames),
             )
-        if not speech_detected:
-            return None
         if not end_of_turn:
             if self._speech_seen and self._silence_ms != silence_before \
                and self._silence_ms > 0 and self._silence_ms % 200 < 40:
@@ -558,10 +556,13 @@ class CallSession:
             turn_duration_ms = frame_idx * frame_ms
             forced_end = turn_duration_ms >= max_turn_ms
 
+            # Max turn duration forces end even if no speech was detected
+            # (ambient noise only). Without this, turns with zero speech
+            # would never finalize.
             return {
                 "speech_detected": self._speech_seen,
-                "end_of_turn": self._speech_seen
-                and (self._silence_ms >= end_silence_ms or forced_end),
+                "end_of_turn": forced_end
+                or (self._speech_seen and self._silence_ms >= end_silence_ms),
             }
 
         energy = float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
@@ -578,9 +579,8 @@ class CallSession:
 
         return {
             "speech_detected": self._speech_seen or energy >= threshold,
-            "end_of_turn": self._speech_seen
-            and (self._silence_ms >= end_silence_ms
-                 or turn_duration_ms >= max_turn_ms),
+            "end_of_turn": turn_duration_ms >= max_turn_ms
+            or (self._speech_seen and self._silence_ms >= end_silence_ms),
         }
 
     def _buffered_turn_samples(self) -> np.ndarray:
