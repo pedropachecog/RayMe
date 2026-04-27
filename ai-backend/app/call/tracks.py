@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import fractions
 import logging
-import math
 import os
 import tempfile
 from io import BytesIO
@@ -188,26 +187,11 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
                     peak,
                 )
         else:
-            # Silence frame — inject a low-amplitude sine wave so Opus
-            # DTX does not suppress the frame. Without any packet flow
-            # during the STT+LLM+TTS processing gap, ICE times out on
-            # the remote side (especially Android Chrome) and the
-            # connection fails before TTS audio arrives.
-            #
-            # A sine wave is used instead of random jitter because:
-            # 1. Random jitter (-100..100) was still suppressed by Opus DTX
-            #    in live testing on Android Chrome (commit ac20bd3 failed)
-            # 2. A sine wave at 440Hz with amplitude 500 (~1.5% of full
-            #    scale) is inaudible at this level but produces a consistent
-            #    spectral pattern that Opus DTX cannot suppress
-            # 3. The phase advances with _pts so each frame is a continuous
-            #    sine wave (not a discontinuous random signal)
+            # Emit real digital silence while no AI audio is queued. A previous
+            # RTP keepalive workaround used a low-amplitude sine wave here; once
+            # Android Chrome playback moved to a real media element, that carrier
+            # became audible and could leak back into VAD through the speaker.
             self._idle_frame_count += 1
-            phase = 2 * math.pi * 440 * self._pts / self.sample_rate
-            amplitude = 500
-            t = np.arange(self.frame_samples, dtype=np.float32)
-            samples_f = amplitude * np.sin(phase + 2 * math.pi * 440 * t / self.sample_rate)
-            samples = samples_f.astype(np.int16)
         return samples
 
 

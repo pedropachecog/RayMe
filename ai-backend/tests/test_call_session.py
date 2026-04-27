@@ -449,6 +449,18 @@ def test_queued_audio_output_track_returns_tts_audio_frames() -> None:
     assert np.max(np.abs(frame.to_ndarray())) > 0
 
 
+def test_queued_audio_output_track_idle_frames_are_silent() -> None:
+    async def scenario() -> Any:
+        track = QueuedAudioOutputTrack(sample_rate=16000, frame_ms=20)
+        return await track.recv()
+
+    frame = _run(scenario())
+
+    assert frame.sample_rate == 16000
+    assert frame.samples == 320
+    assert np.max(np.abs(frame.to_ndarray())) == 0
+
+
 def test_speak_text_generic_adapter_uses_real_reference_audio() -> None:
     adapter = ScriptedGenericTtsAdapter()
     session, _ = _new_session(tts_adapter=adapter)
