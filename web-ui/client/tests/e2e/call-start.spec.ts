@@ -173,12 +173,12 @@ test('waits out the disconnected grace period before re-offering call media', as
   await page.clock.install();
   await setCurrentMockPeerState(page, 'disconnected', 'disconnected');
 
-  await page.clock.fastForward(2_400);
+  await page.clock.fastForward(2_000);
   expect(counters.offerCount).toBe(1);
   expect(counters.endCount).toBe(0);
   expect(debugEventCount(counters, 'pc.media_reconnect.scheduled')).toBe(1);
 
-  await page.clock.fastForward(100);
+  await page.clock.fastForward(500);
   await expect.poll(() => counters.offerCount).toBe(2);
   expect(counters.endCount).toBe(0);
   await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
@@ -206,6 +206,30 @@ test('does not re-offer when disconnected media recovers within the grace period
   const snapshot = await getMockCallMediaSnapshot(page);
   expect(snapshot.peers).toHaveLength(1);
   expect(snapshot.peers[0]).toMatchObject({ connectionState: 'connected', closed: false });
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  assertNoBrowserErrors();
+});
+
+test('re-offers when ICE disconnects while aggregate peer state stays connected', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  const counters = await installReconnectCallRoutes(page);
+
+  await startReconnectCall(page, counters);
+  await page.clock.install();
+  await setCurrentMockPeerState(page, 'connected', 'connected');
+  await setCurrentMockPeerIceState(page, 'disconnected');
+
+  await page.clock.fastForward(2_400);
+  expect(counters.offerCount).toBe(1);
+  expect(counters.endCount).toBe(0);
+  expect(debugEventCount(counters, 'pc.media_reconnect.scheduled')).toBe(1);
+
+  await page.clock.fastForward(100);
+  await expect.poll(() => counters.offerCount).toBe(2);
+  expect(counters.endCount).toBe(0);
   await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
   assertNoBrowserErrors();
 });
@@ -287,6 +311,24 @@ async function setCurrentMockPeerState(
       peer.setMockConnectionState(connectionState, iceConnectionState);
     },
     { connectionState, iceConnectionState }
+  );
+}
+
+async function setCurrentMockPeerIceState(page: Page, iceConnectionState: RTCIceConnectionState) {
+  await page.evaluate(
+    ({ iceConnectionState }) => {
+      const target = window as Window & {
+        __raymeMockPeerConnections?: Array<{
+          setMockIceConnectionState: (iceConnectionState: RTCIceConnectionState) => void;
+        }>;
+      };
+      const peer = target.__raymeMockPeerConnections?.at(-1);
+      if (!peer) {
+        throw new Error('No mock peer connection is available');
+      }
+      peer.setMockIceConnectionState(iceConnectionState);
+    },
+    { iceConnectionState }
   );
 }
 

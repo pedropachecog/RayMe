@@ -59,6 +59,8 @@
     | { type: 'ai_done'; turn_id?: string }
     | { type: 'error'; turn_id?: string; code?: string; message?: string };
 
+  type MediaReconnectReason = 'failed' | 'disconnected';
+
   let thread = $state<ThreadDetail | null>(null);
   let loadState = $state<'loading' | 'ready' | 'error'>('loading');
   let callState = $state<ActiveCallState>('connecting');
@@ -251,9 +253,21 @@
 
   function attachPeerConnectionDebug(connection: RTCPeerConnection, debugCallId: string) {
     connection.addEventListener('iceconnectionstatechange', () => {
+      const iceConnectionState = connection.iceConnectionState;
       emitDebugEvent(debugCallId, 'pc.iceconnectionstatechange', {
-        iceConnectionState: connection.iceConnectionState
+        iceConnectionState
       });
+      if (iceConnectionState === 'failed' || iceConnectionState === 'disconnected') {
+        scheduleBrowserMediaReconnect(
+          connection,
+          debugCallId,
+          iceConnectionState === 'failed' ? 'failed' : 'disconnected'
+        );
+      }
+      if ((iceConnectionState === 'connected' || iceConnectionState === 'completed') && isBrowserMediaConnected(connection)) {
+        clearMediaReconnectTimer();
+        mediaReconnectAttempts = 0;
+      }
     });
     connection.addEventListener('connectionstatechange', () => {
       emitDebugEvent(debugCallId, 'pc.connectionstatechange', {
@@ -273,7 +287,7 @@
           connection.connectionState === 'failed' ? 'failed' : 'disconnected'
         );
       }
-      if (connection.connectionState === 'connected') {
+      if (connection.connectionState === 'connected' && isBrowserMediaConnected(connection)) {
         clearMediaReconnectTimer();
         mediaReconnectAttempts = 0;
         try {
@@ -312,13 +326,45 @@
   function scheduleBrowserMediaReconnect(
     connection: RTCPeerConnection,
     debugCallId: string,
-    reason: 'failed' | 'disconnected'
+    reason: MediaReconnectReason
   ) {
-    if (mediaReconnecting || mediaReconnectTimer || connection !== peerConnection) {
+    const guardSkips: string[] = [];
+    if (mediaReconnecting) {
+      guardSkips.push('already_reconnecting');
+    }
+    if (connection !== peerConnection) {
+      guardSkips.push('stale_peer');
+    }
+    if (!callId) {
+      guardSkips.push('missing_call_id');
+    }
+    if (!sessionId) {
+      guardSkips.push('missing_session_id');
+    }
+    if (!localMediaStream) {
+      guardSkips.push('missing_local_media');
+    }
+    if (callState === 'ended' || callState === 'failed') {
+      guardSkips.push(`terminal_state_${callState}`);
+    }
+
+    if (guardSkips.length > 0) {
+      emitMediaReconnectGuardSkip(connection, debugCallId, reason, 'schedule', guardSkips);
       return;
     }
-    if (!callId || !sessionId || !localMediaStream || callState === 'ended' || callState === 'failed') {
-      return;
+    if (mediaReconnectTimer) {
+      if (reason === 'failed') {
+        clearMediaReconnectTimer();
+        emitDebugEvent(debugCallId, 'pc.media_reconnect.upgrade', {
+          reason,
+          attempts: mediaReconnectAttempts,
+          connectionState: connection.connectionState,
+          iceConnectionState: connection.iceConnectionState
+        });
+      } else {
+        emitMediaReconnectGuardSkip(connection, debugCallId, reason, 'schedule', ['timer_pending']);
+        return;
+      }
     }
     if (mediaReconnectAttempts >= MEDIA_RECONNECT_MAX_ATTEMPTS) {
       emitDebugEvent(debugCallId, 'pc.media_reconnect.give_up', {
@@ -342,7 +388,7 @@
     });
     mediaReconnectTimer = window.setTimeout(() => {
       mediaReconnectTimer = 0;
-      if (connection.connectionState === 'connected') {
+      if (isBrowserMediaConnected(connection)) {
         return;
       }
       void reconnectBrowserMedia(connection, debugCallId, reason);
@@ -352,9 +398,26 @@
   async function reconnectBrowserMedia(
     failedConnection: RTCPeerConnection,
     debugCallId: string,
-    reason: 'failed' | 'disconnected'
+    reason: MediaReconnectReason
   ) {
-    if (mediaReconnecting || failedConnection !== peerConnection || !localMediaStream || !callId || !sessionId) {
+    const guardSkips: string[] = [];
+    if (mediaReconnecting) {
+      guardSkips.push('already_reconnecting');
+    }
+    if (failedConnection !== peerConnection) {
+      guardSkips.push('stale_peer');
+    }
+    if (!localMediaStream) {
+      guardSkips.push('missing_local_media');
+    }
+    if (!callId) {
+      guardSkips.push('missing_call_id');
+    }
+    if (!sessionId) {
+      guardSkips.push('missing_session_id');
+    }
+    if (guardSkips.length > 0) {
+      emitMediaReconnectGuardSkip(failedConnection, debugCallId, reason, 'start', guardSkips);
       return;
     }
 
@@ -403,6 +466,37 @@
       window.clearTimeout(mediaReconnectTimer);
       mediaReconnectTimer = 0;
     }
+  }
+
+  function isBrowserMediaConnected(connection: RTCPeerConnection) {
+    return (
+      connection.connectionState === 'connected' &&
+      (connection.iceConnectionState === 'connected' || connection.iceConnectionState === 'completed')
+    );
+  }
+
+  function emitMediaReconnectGuardSkip(
+    connection: RTCPeerConnection,
+    debugCallId: string,
+    reason: MediaReconnectReason,
+    phase: 'schedule' | 'start',
+    guardSkips: string[]
+  ) {
+    emitDebugEvent(debugCallId, 'pc.media_reconnect.guard_skip', {
+      reason,
+      phase,
+      guardSkips,
+      attempts: mediaReconnectAttempts,
+      hasTimer: Boolean(mediaReconnectTimer),
+      mediaReconnecting,
+      callState,
+      connectionState: connection.connectionState,
+      iceConnectionState: connection.iceConnectionState,
+      isCurrentPeer: connection === peerConnection,
+      hasCallId: Boolean(callId),
+      hasSessionId: Boolean(sessionId),
+      hasLocalMedia: Boolean(localMediaStream)
+    });
   }
 
   function emitDebugEvent(debugCallId: string, name: string, detail: Record<string, unknown>): void {

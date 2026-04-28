@@ -2,7 +2,7 @@
 status: awaiting_human_verify
 trigger: "Android live call playback improved after paced TTS frames, but mic input stops truly listening after about five seconds of either continuous speech or pre-speech idle while the UI still says Listening."
 created: 2026-04-27T18:42:11Z
-updated: 2026-04-28T13:41:12Z
+updated: 2026-04-28T15:29:00Z
 ---
 
 # Debug Session: Android Call TTS Tail And Tone
@@ -10,16 +10,15 @@ updated: 2026-04-28T13:41:12Z
 ## Current Focus
 
 reasoning_checkpoint:
-  hypothesis: "The live freeze is caused by an unrecovered browser WebRTC media transport failure. Android Chrome moves the active RTCPeerConnection to `failed` while RayMe still has a valid call session, but the frontend only logs the failure and remains in Listening. A reconnect attempt would currently be unsafe because backend existing-session offers do not replace `session.peer_connection`, leaving old receive/error handling bound to the stale peer."
+  hypothesis: "Android Chrome can surface the live transport loss first as `iceconnectionstatechange: disconnected` while aggregate `connectionState` remains `connected`; the deployed reconnect patch only scheduled from aggregate `connectionstatechange`, so this ICE-only production path logged diagnostics but did not re-offer media."
   confirming_evidence:
-    - "Live failed call `call_b1f29d16b0994c36899d14a0636c72c3` shows backend pings, backend `track.recv.progress`, backend `track.send.progress`, and browser `remoteAudioElementPlaying=true` before Chrome emits `connectionState=failed`."
-    - "Current frontend source has no automatic recovery path in `connectionstatechange`; the red e2e test observed no second `/offer` after simulated `connectionState=failed`."
-    - "Current `CallSessionManager.create_session()` keeps the old `peer_connection` on an existing-session offer; the red backend test observed `session.peer_connection` still pointing to the first peer."
-    - "Current `_receive_audio_track()` has no way to know which peer owns a track; the red test could not pass an owner peer for superseded-loop exit."
-  falsification_test: "After the patch, the same simulated browser failure must send a second `/offer` without `/end`, existing-session re-offer must replace peer/outbound track and close the old peer, and receive loops owned by superseded peers must exit without failing the session."
-  fix_rationale: "Re-offering creates a new media transport for the same call instead of freezing the UI, and replacing the backend peer connection makes that re-offer authoritative for future connection-state and track-recv decisions."
-  blind_spots: "The patch recovers from Chrome's failed transport; it does not yet identify the lower-level ICE/DTLS reason Chrome decides to fail, because live stats are still not logged."
-next_action: "Parent should commit/deploy this patch via `scripts/deploy-omen.sh` only, then run the Android Chrome long-idle and long-speaking live repro to verify recovery."
+    - "OMEN web logs repeatedly show `pc.iceconnectionstatechange disconnected` before `/end`, with no `pc.media_reconnect.*` events."
+    - "OMEN source/build contain the reconnect scheduler, ruling out a missing build artifact."
+    - "A new Playwright reproduction with `connectionState=connected` and `iceConnectionState=disconnected` failed red: one offer and zero `pc.media_reconnect.scheduled` events."
+  falsification_test: "If scheduling from ICE disconnect still leaves the red e2e at one offer, or if live logs after deployment show `pc.media_reconnect.guard_skip` with a different guard reason, this hypothesis is incomplete."
+  fix_rationale: "Scheduling from ICE `disconnected`/`failed` covers the earliest transport-loss signal Chrome reports, and treating ICE disconnected as not recovered prevents the timer from skipping reconnect just because aggregate `connectionState` is still `connected`."
+  blind_spots: "The freshest `rtc_a9...` log appears to have `/end` after user exit without a browser `pc.connection.failed` line, so live validation still needs a new deployment and hard browser reload to distinguish remaining stale-client or user-hangup cases."
+next_action: "Parent should review, commit, deploy via `scripts/deploy-omen.sh` only, then hard-reload Android Chrome and rerun the long-idle/long-speaking live repro."
 
 ## Symptoms
 
@@ -258,6 +257,26 @@ reproduction: Start call on Android Chrome. Confirm quick short-turn back-and-fo
   checked: Parent review of reconnect patch
   found: Added one extra recovery-race regression: if the old peer marks the session failed with `connection_failed` before the re-offer reaches the backend, the re-offer now replaces the peer and restores the session to `listening`. Focused backend reconnect/keepalive tests passed 4 tests. Backend focused suites passed 40 tests. Full backend passed 85 tests with the existing torch/pynvml warning. `npm run check` passed. Focused frontend unit passed 6 tests. Full frontend unit passed 88 tests. The reconnect e2e was tightened to wait for the initial offer counter, then the focused reconnect e2e passed and the full call-start e2e passed 6 tests.
   implication: The reconnect patch is locally verified including the race where backend failure and browser re-offer overlap.
+- timestamp: 2026-04-28T14:10:00Z
+  checked: User live Android Chrome repro after OMEN deployment of commit `856ea4b`
+  found: Symptoms remain exactly the same. Quick short turns work, but waiting about five seconds before speaking or speaking longer than about five seconds still freezes/breaks the call.
+  implication: The deployed reconnect patch did not recover the live Android Chrome failure.
+- timestamp: 2026-04-28T14:10:00Z
+  checked: OMEN runtime and fresh logs after failed `856ea4b` repro
+  found: OMEN is running `856ea4b`. AI logs for recent failed session `rtc_a9e708a2f0c2469cba5e1f8d96472337` show the keepalive fix active (`datachannel.open ... already_open=True`), first turn success, second turn in `state=listening`, VAD `speech_start`, then aiortc `Cannot send data, not connected`, backend peer/data channel close, and `/webrtc/sessions/{session}/end`. Web logs show Chrome emitting `pc.iceconnectionstatechange disconnected`, `pc.connection.failed`, and `pc.connectionstatechange failed`, but no `pc.media_reconnect.scheduled`, `pc.media_reconnect.start`, `pc.media_reconnect.ok`, `pc.media_reconnect.failed`, or `pc.media_reconnect.give_up` before `/api/calls/{call_id}/end`.
+  implication: The live failure reaches the frontend failed-connection diagnostic, but the reconnect scheduler is not taking action. Investigate the scheduler guard values, peer identity check, call state at failure time, and whether `/end` is user-initiated after the unrecovered freeze or app-initiated during teardown.
+- timestamp: 2026-04-28T14:48:00Z
+  checked: OMEN `web-ui.run.log`, deployed source/build, and new Playwright ICE-only regression
+  found: OMEN source and built client both contain the `pc.media_reconnect.*` scheduler code, but post-restart live calls still show `pc.iceconnectionstatechange disconnected` before `/end` and no reconnect diagnostics. A new e2e where ICE becomes `disconnected` while aggregate `connectionState` stays `connected` failed red: offer count stayed at 1 and `pc.media_reconnect.scheduled` count was 0.
+  implication: The current reconnect patch misses a real browser event path: ICE-level transport disconnects are only logged, not used to schedule recovery.
+- timestamp: 2026-04-28T14:54:00Z
+  checked: Focused frontend patch and e2e
+  found: `+page.svelte` now schedules reconnect from ICE `disconnected`/`failed`, only treats media as recovered when aggregate connection is connected and ICE is connected/completed, upgrades pending disconnected recovery to immediate failed recovery, and logs `pc.media_reconnect.guard_skip` for every guard return. The ICE-only e2e passed after failing red.
+  implication: The missed production ICE-disconnect path now schedules/reoffers instead of silently doing nothing, and future live guard skips will be observable.
+- timestamp: 2026-04-28T15:29:00Z
+  checked: Frontend verification after ICE reconnect patch
+  found: `npm run check` passed; `npm run test:unit -- tests/unit/call-audio.test.ts --run` passed 6 tests; `npm run test:e2e -- tests/e2e/call-start.spec.ts --project=desktop-chromium` passed 10 tests; `npm run test:unit -- --run` passed 88 tests; `npm run build` passed; `git diff --check` passed.
+  implication: The focused regression, adjacent call-start recovery flows, full frontend unit suite, and production bundle build are locally verified.
 
 ## Eliminated
 
@@ -286,20 +305,19 @@ reproduction: Start call on Android Chrome. Confirm quick short-turn back-and-fo
 - hypothesis: Starting backend data-channel keepalive for already-open channels fully fixes the Android five-second input freeze.
   reason: After deployment of commit `1dd6341`, live logs show `datachannel.open ... already_open=True` and repeated browser `event_type=ping`, but the same failure still occurs.
   timestamp: 2026-04-28T13:15:51Z
+- hypothesis: Frontend media reconnect on `connectionState=failed` fully fixes the Android five-second input freeze.
+  reason: After deployment of commit `856ea4b`, live logs still show the same failure. The browser logs `pc.connection.failed`, but no `pc.media_reconnect.*` diagnostics appear, so the reconnect path is not executing or is returning before scheduling.
+  timestamp: 2026-04-28T14:10:00Z
 
 ## Resolution
 
 root_cause:
-  Android Chrome is failing the native WebRTC media/ICE transport during long live-call listening/speaking spans while the RayMe session is still otherwise active: backend data-channel pings are flowing, backend inbound RTP frames are being processed, and outbound silent RTP is being pulled. Current frontend code only logged the browser `connectionState=failed` and left the UI in Listening, so the call froze until the user exited. A reconnect attempt was also impossible to support correctly because backend existing-session offers kept `session.peer_connection` pointed at the stale old peer, and old receive loops had no superseded-peer exit.
+  The `856ea4b` reconnect patch only scheduled browser media recovery from aggregate `connectionstatechange` failed/disconnected events. Android Chrome's live failure can first surface as `iceconnectionstatechange: disconnected` while aggregate `connectionState` remains `connected`; the frontend logged that ICE disconnect but did not schedule recovery. The reconnect timer also considered aggregate `connectionState === connected` sufficient recovery, so an ICE-only disconnect would have been skipped even if scheduled. This is why the live path could show ICE/connection failure diagnostics and then `/end` with no `pc.media_reconnect.*` recovery events.
 fix:
-  Added frontend media reconnect on browser `failed`/sustained `disconnected` peer states: close the failed peer/data channel, keep the mic stream, send a new offer for the same call/session, and do not call `/end` during recovery. Added backend re-offer support by replacing and closing the previous peer connection for existing sessions, updating adapters/tracks, and making old `_receive_audio_track()` loops exit when their owning peer is superseded.
+  Frontend media reconnect now schedules from ICE `disconnected`/`failed` as well as aggregate connection failure, treats media as healthy only when aggregate connection is connected and ICE is connected/completed, upgrades a pending disconnected recovery to immediate failed recovery, and logs `pc.media_reconnect.guard_skip` for any future guard return instead of silently doing nothing.
 verification:
-  Focused tests failed red before the fix and passed after. Full local verification passed: backend focused suites, full backend suite, frontend check, focused/full unit suites, call-start e2e suite, and `git diff --check`. Parent review added and verified an extra backend recovery-race guard. Not deployed yet; live Android Chrome validation remains pending.
+  Added a red Playwright regression for `iceConnectionState=disconnected` while `connectionState=connected`; it failed before the fix with one offer and zero `pc.media_reconnect.scheduled` events, then passed after the patch. Also passed frontend check, focused call-audio unit test, full frontend unit suite, full call-start e2e suite, production build, and `git diff --check`. Not deployed or live-verified in this subtask.
 files_changed:
-  - ai-backend/app/api/webrtc.py
-  - ai-backend/app/call/session.py
-  - ai-backend/tests/test_call_session.py
-  - ai-backend/tests/test_webrtc_signaling.py
   - web-ui/client/src/routes/call/[threadId]/+page.svelte
   - web-ui/client/tests/e2e/call-start.spec.ts
   - web-ui/client/tests/e2e/helpers/acceptance.ts

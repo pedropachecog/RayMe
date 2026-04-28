@@ -226,6 +226,11 @@ export async function installMockCallMedia(page: Page) {
         this.dispatchMockEvent('connectionstatechange');
       }
 
+      setMockIceConnectionState(iceConnectionState: RTCIceConnectionState) {
+        this.iceConnectionState = iceConnectionState;
+        this.dispatchMockEvent('iceconnectionstatechange');
+      }
+
       private dispatchRemoteTrack() {
         if (!this.ontrack) {
           return;
