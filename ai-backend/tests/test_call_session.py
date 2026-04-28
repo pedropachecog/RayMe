@@ -208,6 +208,62 @@ def test_create_session_returns_stable_session_id() -> None:
     assert session.stats()["session_id"] == "call-session-1"
 
 
+def test_existing_session_reoffer_replaces_peer_connection_and_track() -> None:
+    manager = CallSessionManager()
+    first_peer = ScriptedPeerConnection()
+    second_peer = ScriptedPeerConnection()
+    first_track = ScriptedOutboundAudioTrack()
+    second_track = ScriptedOutboundAudioTrack()
+
+    session = _run(
+        manager.create_session(
+            session_id="call-session-reconnect",
+            peer_connection=first_peer,
+            outbound_audio_track=first_track,
+        )
+    )
+    same_session = _run(
+        manager.create_session(
+            session_id="call-session-reconnect",
+            peer_connection=second_peer,
+            outbound_audio_track=second_track,
+        )
+    )
+
+    assert same_session is session
+    assert session.peer_connection is second_peer
+    assert session.outbound_audio_track is second_track
+    assert first_peer.close_calls == 1
+
+
+def test_existing_session_reoffer_recovers_connection_failed_session() -> None:
+    manager = CallSessionManager()
+    first_peer = ScriptedPeerConnection()
+    second_peer = ScriptedPeerConnection()
+
+    session = _run(
+        manager.create_session(
+            session_id="call-session-reconnect-failed",
+            peer_connection=first_peer,
+        )
+    )
+    first_peer.connectionState = "failed"
+    _run(session.handle_connection_state_change())
+
+    same_session = _run(
+        manager.create_session(
+            session_id="call-session-reconnect-failed",
+            peer_connection=second_peer,
+        )
+    )
+
+    assert same_session is session
+    assert session.peer_connection is second_peer
+    assert session.state == "listening"
+    assert session.end_reason is None
+    assert session.ended_at is None
+
+
 def test_mute_stops_server_consumption() -> None:
     session, _ = _new_session()
 

@@ -76,6 +76,10 @@ export async function installCallDebugEventRoute(page: Page) {
 
 export async function installMockCallMedia(page: Page) {
   await page.addInitScript(() => {
+    type MockPeerWindow = Window & {
+      __raymeMockPeerConnections?: MockRTCPeerConnection[];
+    };
+
     const mediaDevices = {
       async getUserMedia() {
         return new MediaStream();
@@ -97,10 +101,31 @@ export async function installMockCallMedia(page: Page) {
 
     class MockRTCPeerConnection {
       iceGatheringState = 'complete';
+      iceConnectionState = 'new';
+      connectionState = 'new';
       localDescription: RTCSessionDescriptionInit | null = null;
+      private listeners = new Map<string, Array<(event: Event) => void>>();
+
+      constructor() {
+        const target = window as MockPeerWindow;
+        target.__raymeMockPeerConnections = target.__raymeMockPeerConnections ?? [];
+        target.__raymeMockPeerConnections.push(this);
+      }
 
       createDataChannel() {
-        return {};
+        return {
+          label: 'rayme-events',
+          readyState: 'open',
+          send() {},
+          close() {
+            this.readyState = 'closed';
+            this.onclose?.();
+          },
+          onopen: null as (() => void) | null,
+          onclose: null as (() => void) | null,
+          onerror: null as ((event: Event) => void) | null,
+          onmessage: null as ((event: MessageEvent) => void) | null
+        };
       }
 
       addTrack() {
@@ -120,9 +145,31 @@ export async function installMockCallMedia(page: Page) {
 
       async setRemoteDescription() {}
 
-      addEventListener() {}
+      addEventListener(eventName: string, handler: (event: Event) => void) {
+        const handlers = this.listeners.get(eventName) ?? [];
+        handlers.push(handler);
+        this.listeners.set(eventName, handlers);
+      }
 
-      close() {}
+      close() {
+        this.connectionState = 'closed';
+        this.iceConnectionState = 'closed';
+        this.dispatchMockEvent('connectionstatechange');
+        this.dispatchMockEvent('iceconnectionstatechange');
+      }
+
+      setMockConnectionState(connectionState: RTCPeerConnectionState, iceConnectionState = this.iceConnectionState) {
+        this.connectionState = connectionState;
+        this.iceConnectionState = iceConnectionState;
+        this.dispatchMockEvent('connectionstatechange');
+      }
+
+      private dispatchMockEvent(eventName: string) {
+        const event = new Event(eventName);
+        for (const handler of this.listeners.get(eventName) ?? []) {
+          handler(event);
+        }
+      }
     }
 
     Object.defineProperty(window, 'RTCPeerConnection', {

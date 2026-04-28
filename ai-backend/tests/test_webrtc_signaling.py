@@ -425,6 +425,56 @@ def test_receive_audio_track_recovers_from_transient_live_ice_recv_errors() -> N
     assert state == "ended"
 
 
+def test_receive_audio_track_exits_when_peer_connection_is_superseded() -> None:
+    """Old receive loops must stop after a media reconnect installs a new peer."""
+    import asyncio
+
+    from app.call.session import CallSession
+    from app.call.tracks import PcmAudioFrame
+
+    class EndlessInboundTrack:
+        kind = "audio"
+        id = "old-inbound"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def recv(self) -> Any:
+            self.calls += 1
+            await asyncio.sleep(0.005)
+            return PcmAudioFrame(
+                pcm=(b"\x00\x20" * 320),
+                sample_rate=16000,
+                channels=1,
+            )
+
+    class LivePeerConnection:
+        connectionState = "connected"
+        iceConnectionState = "completed"
+
+    async def _run_test() -> tuple[int, int, str]:
+        old_peer = LivePeerConnection()
+        new_peer = LivePeerConnection()
+        session = CallSession(
+            session_id="test-superseded-peer",
+            peer_connection=old_peer,
+            vad_adapter=None,
+            stt_adapter=None,
+        )
+        track = EndlessInboundTrack()
+        task = asyncio.create_task(webrtc_module._receive_audio_track(session, track, old_peer))
+        await asyncio.sleep(0.02)
+        session.peer_connection = new_peer
+        await asyncio.wait_for(task, timeout=0.5)
+        return track.calls, session.incoming_audio_frames, session.state
+
+    recv_calls, incoming_frames, state = asyncio.run(_run_test())
+
+    assert recv_calls >= 1
+    assert incoming_frames >= 1
+    assert state == "listening"
+
+
 def test_data_channel_keepalive_starts_when_browser_channel_already_open() -> None:
     """Browser-created channels can arrive at aiortc already open.
 

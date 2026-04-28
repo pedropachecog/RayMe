@@ -479,7 +479,7 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
             track_id,
         )
         if kind == "audio":
-            asyncio.create_task(_receive_audio_track(session, track))
+            asyncio.create_task(_receive_audio_track(session, track, peer_connection))
 
     @peer_connection.on("connectionstatechange")
     async def on_connectionstatechange() -> None:
@@ -519,7 +519,11 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
         )
 
 
-async def _receive_audio_track(session: CallSession, track: Any) -> None:
+async def _receive_audio_track(
+    session: CallSession,
+    track: Any,
+    peer_connection: Any | None = None,
+) -> None:
     logger.info(
         "[rayme-call] track.recv.start session=%s kind=%s id=%s",
         session.session_id,
@@ -529,11 +533,27 @@ async def _receive_audio_track(session: CallSession, track: Any) -> None:
     frame_count = 0
     consecutive_live_recv_errors = 0
     while session.state not in {"ended", "failed"}:
+        if peer_connection is not None and session.peer_connection is not peer_connection:
+            logger.info(
+                "[rayme-call] track.recv.superseded session=%s frames=%d",
+                session.session_id,
+                frame_count,
+            )
+            break
         try:
             frame = await track.recv()
         except Exception as exc:
             exc_name = exc.__class__.__name__
-            pc = session.peer_connection
+            if peer_connection is not None and session.peer_connection is not peer_connection:
+                logger.info(
+                    "[rayme-call] track.recv.superseded session=%s frames=%d "
+                    "after_exc=%s",
+                    session.session_id,
+                    frame_count,
+                    exc_name,
+                )
+                break
+            pc = peer_connection or session.peer_connection
             ice_state = getattr(pc, "iceConnectionState", "?")
             conn_state = getattr(pc, "connectionState", "?")
             logger.info(

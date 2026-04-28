@@ -2,7 +2,7 @@
 status: awaiting_human_verify
 trigger: "Android live call playback improved after paced TTS frames, but mic input stops truly listening after about five seconds of either continuous speech or pre-speech idle while the UI still says Listening."
 created: 2026-04-27T18:42:11Z
-updated: 2026-04-28T13:10:00Z
+updated: 2026-04-28T13:41:12Z
 ---
 
 # Debug Session: Android Call TTS Tail And Tone
@@ -10,16 +10,16 @@ updated: 2026-04-28T13:10:00Z
 ## Current Focus
 
 reasoning_checkpoint:
-  hypothesis: "The backend data-channel keepalive never starts on Android because `peer.on_datachannel` receives the browser-created channel with `readyState=open`, while `_attach_peer_handlers()` only starts `_data_channel_keepalive()` from a future `open` event."
+  hypothesis: "The live freeze is caused by an unrecovered browser WebRTC media transport failure. Android Chrome moves the active RTCPeerConnection to `failed` while RayMe still has a valid call session, but the frontend only logs the failure and remains in Listening. A reconnect attempt would currently be unsafe because backend existing-session offers do not replace `session.peer_connection`, leaving old receive/error handling bound to the stale peer."
   confirming_evidence:
-    - "Live AI log for `rtc_233c9e43bf9c4a5696822cc8060416e3` shows `peer.on_datachannel ... readyState=open`, but no backend `datachannel.open` log for that channel."
-    - "Live web log has no `datachannel.message` ping events from the backend before the failed long listening span."
-    - "The red test `test_data_channel_keepalive_starts_when_browser_channel_already_open` fails because the already-open fake channel sends `[]` instead of the expected first ping."
-    - "Quick short turns create normal data-channel traffic (`state`, `user_final`, `ai_audio_started`, `ai_done`), while waiting or speaking longer leaves the data channel idle after `ai_done`."
-  falsification_test: "If starting keepalive immediately for already-open channels does not send pings in the focused unit test, or live logs after deployment still show no ping events, this hypothesis is wrong or incomplete."
-  fix_rationale: "Starting `_data_channel_keepalive()` when the channel is already open closes the missed-event gap without changing media tracks, VAD, TTS, or frontend state handling."
-  blind_spots: "This does not prove Android Chrome will keep the entire peer alive until a deployed live repro; it only proves the missing keepalive mechanism that matches the control-channel idle pattern."
-next_action: "Parent should deploy through `scripts/deploy-omen.sh` only, then live-verify Android Chrome quick turns, >5s idle-before-speech, and >5s continuous speech; live logs should show backend `datachannel.open ... already_open=True` plus browser ping messages."
+    - "Live failed call `call_b1f29d16b0994c36899d14a0636c72c3` shows backend pings, backend `track.recv.progress`, backend `track.send.progress`, and browser `remoteAudioElementPlaying=true` before Chrome emits `connectionState=failed`."
+    - "Current frontend source has no automatic recovery path in `connectionstatechange`; the red e2e test observed no second `/offer` after simulated `connectionState=failed`."
+    - "Current `CallSessionManager.create_session()` keeps the old `peer_connection` on an existing-session offer; the red backend test observed `session.peer_connection` still pointing to the first peer."
+    - "Current `_receive_audio_track()` has no way to know which peer owns a track; the red test could not pass an owner peer for superseded-loop exit."
+  falsification_test: "After the patch, the same simulated browser failure must send a second `/offer` without `/end`, existing-session re-offer must replace peer/outbound track and close the old peer, and receive loops owned by superseded peers must exit without failing the session."
+  fix_rationale: "Re-offering creates a new media transport for the same call instead of freezing the UI, and replacing the backend peer connection makes that re-offer authoritative for future connection-state and track-recv decisions."
+  blind_spots: "The patch recovers from Chrome's failed transport; it does not yet identify the lower-level ICE/DTLS reason Chrome decides to fail, because live stats are still not logged."
+next_action: "Parent should commit/deploy this patch via `scripts/deploy-omen.sh` only, then run the Android Chrome long-idle and long-speaking live repro to verify recovery."
 
 ## Symptoms
 
@@ -37,6 +37,7 @@ errors:
   - Speaking continuously for more than about five seconds can cause input to stop being recognized.
   - After this failure, the previously successful ongoing call flow appears frozen or broken.
   - After OMEN deployment of commits `d995d22` and `8d27249`, the same failure remains unchanged: quick short messages work; waiting about five seconds before speaking or speaking for more than five seconds fails.
+  - After OMEN deployment of commit `1dd6341`, backend data-channel pings are active, but the same failure remains unchanged.
 timeline:
   - After commit 3cde3bc deployed to OMEN, Whisper warmup and Qwen no-think improved turn latency.
   - The audio problem changed from silent or last-word-only to brief tone/brief TTS fragment.
@@ -213,6 +214,50 @@ reproduction: Start call on Android Chrome. Confirm quick short-turn back-and-fo
   checked: Automated verification
   found: `uv run pytest tests/test_webrtc_signaling.py::test_data_channel_keepalive_starts_when_browser_channel_already_open -q` passed after failing red. `uv run pytest tests/test_webrtc_signaling.py -q` passed 12 tests. `uv run pytest tests/test_call_session.py -q` passed 25 tests. `uv run pytest -q` passed 82 tests with the existing torch/cuda deprecated `pynvml` warning. `git diff --check` passed.
   implication: The focused regression and adjacent backend suites pass locally. Live Android Chrome verification still requires parent deployment.
+- timestamp: 2026-04-28T13:15:51Z
+  checked: User live Android Chrome repro after OMEN deployment of commit `1dd6341`
+  found: Same failure remains. Quick short messages still work, but the long wait/speak scenarios still fail.
+  implication: Starting keepalive for already-open data channels is not sufficient to fix the live Android failure.
+- timestamp: 2026-04-28T13:15:51Z
+  checked: OMEN AI logs after failed `1dd6341` repro
+  found: OMEN is running `1dd6341`. In failed session `rtc_d58c66a3653347a0a59ebfc90659a073`, backend logs `peer.on_datachannel ... readyState=open`, then `datachannel.open ... already_open=True`, proving the keepalive fix is deployed and active. The first quick turn completes. The second turn starts listening with bounded VAD (`analysis_samples=3200`), receives media frames up to 1959, and logs `vad.speech_start ... turn_frames=948` before `peer.signalingstatechange state=closed`, `MediaStreamError`, datachannel close, ICE closed, and connection closed.
+  implication: The backend is not simply idle or missing the user's speech; it sees speech and then the WebRTC peer closes before end-of-turn/STT can complete.
+- timestamp: 2026-04-28T13:15:51Z
+  checked: OMEN web logs after failed `1dd6341` repro
+  found: For `call_b1f29d16b0994c36899d14a0636c72c3`, browser debug logs show repeated `datachannel.message ... event_type=ping` entries during the long failed span, then `pc.iceconnectionstatechange disconnected`, `pc.connection.failed`, `pc.connectionstatechange failed`, `/end`, `remote_audio.track.ended`, and `datachannel.close`.
+  implication: Data-channel keepalive traffic is flowing, so the remaining failure is a media/ICE connection failure or browser-side failure handling problem.
+- timestamp: 2026-04-28T13:20:33Z
+  checked: Source read of `web-ui/client/src/routes/call/[threadId]/+page.svelte`, `web-ui/client/src/lib/api/calls.ts`, `web-ui/server/app/api/calls.py`, `ai-backend/app/api/webrtc.py`, `ai-backend/app/call/session.py`, and named tests
+  found: Current frontend source only logs `pc.connection.failed` on browser `connectionstatechange` failed/disconnected; it does not directly call `endCall()` from that listener. Browser `/end` calls in source come from setup failure or explicit toolbar hangup/route teardown. Backend aiortc `connectionState == "failed"` calls `CallSession.fail()`, which closes the peer connection immediately.
+  implication: The live `/end` entry after `pc.connection.failed` is not explained by current source as an automatic frontend failure handler. A backend-side aiortc failure path or stale deployed frontend bundle must be distinguished before patching behavior.
+- timestamp: 2026-04-28T13:20:33Z
+  checked: Project skill discovery and worktree state
+  found: No project-local `.claude/skills/*/SKILL.md`, `.agents/skills/*/SKILL.md`, or `rules/*.md` files are present. Worktree has unrelated dirty files (`.claude/settings.json`, `.planning/debug/android-call-speaking-stuck.md`, `.claude/hooks/ssh-restore-startup.sh`, `.codex/`, `.planning/bugs/`) plus this debug file.
+  implication: Continue with repository-local patterns only and avoid touching unrelated user changes.
+- timestamp: 2026-04-28T13:22:37Z
+  checked: Live OMEN logs for failed call `call_b1f29d16b0994c36899d14a0636c72c3` / `rtc_d58c66a3653347a0a59ebfc90659a073`
+  found: During the failed span the browser receives repeated backend `ping` data-channel messages and the backend continues `track.recv.progress` in `state=listening` plus `track.send.progress` silent RTP. Chrome then reports `pc.iceconnectionstatechange disconnected` and `pc.connectionstatechange failed` with `remoteAudioElementPlaying=true`; only after those browser-native failure logs does `/api/calls/{call_id}/end` arrive. On the AI side, the peer closes and then the web server calls `/webrtc/sessions/{session_id}/end`.
+  implication: The current source is not prematurely ending the call on `disconnected`; the live freeze is an unrecovered browser WebRTC transport failure. A recovery patch must re-offer/reconnect media instead of leaving the UI in Listening.
+- timestamp: 2026-04-28T13:22:37Z
+  checked: `CallSessionManager.create_session()` re-offer behavior
+  found: If a session already exists, the manager updates data channel, event sink, TTS adapter, and outbound audio track, but not `peer_connection`. A frontend reconnect that sends a new offer would attach new peer handlers while `session.peer_connection` still points at the old closed peer.
+  implication: Backend re-offer support is a necessary part of the fix; otherwise old-track recv errors and connection-state handling would still consult the stale peer connection after reconnect.
+- timestamp: 2026-04-28T13:25:59Z
+  checked: Red regression tests before fix
+  found: `uv run pytest tests/test_call_session.py::test_existing_session_reoffer_replaces_peer_connection_and_track tests/test_webrtc_signaling.py::test_receive_audio_track_exits_when_peer_connection_is_superseded -q` failed: existing sessions kept the old peer connection, and `_receive_audio_track()` did not accept a peer argument for superseded-loop detection. `npm run test:e2e -- tests/e2e/call-start.spec.ts --project=desktop-chromium --grep "re-offers call media"` failed with `offerCount` stuck at 1 instead of 2 after simulated browser `connectionState=failed`.
+  implication: The code lacks both frontend reconnect and backend re-offer support needed to recover from the observed Android Chrome transport failure.
+- timestamp: 2026-04-28T13:29:12Z
+  checked: Focused reconnect patch and red/green tests
+  found: Patched frontend failed/disconnected handling to schedule a media reconnect and send a new offer without calling `/end`; patched backend existing-session offers to replace/close the old peer connection; patched `_receive_audio_track()` to exit when its owning peer is superseded. The two backend red tests now pass, and the Playwright reconnect e2e now observes a second `/offer` and zero `/end` calls.
+  implication: The confirmed no-recovery/re-offer bug is fixed in the targeted path; adjacent suites still need to run.
+- timestamp: 2026-04-28T13:32:09Z
+  checked: Full local verification after patch
+  found: `uv run pytest tests/test_webrtc_signaling.py tests/test_call_session.py -q` passed 39 tests. `uv run pytest -q` passed 84 tests with the existing torch/pynvml warning. `npm run check` passed. `npm run test:unit -- tests/unit/call-audio.test.ts --run` passed 6 tests. `npm run test:unit -- --run` passed 88 tests. `npm run test:e2e -- tests/e2e/call-start.spec.ts --project=desktop-chromium --grep "re-offers call media"` passed after failing red. `npm run test:e2e -- tests/e2e/call-start.spec.ts --project=desktop-chromium` passed 6 tests. `git diff --check` passed.
+  implication: The patch is locally verified against the original failure mechanism and adjacent backend/frontend behavior. Live Android verification still requires deployment by the parent.
+- timestamp: 2026-04-28T13:41:12Z
+  checked: Parent review of reconnect patch
+  found: Added one extra recovery-race regression: if the old peer marks the session failed with `connection_failed` before the re-offer reaches the backend, the re-offer now replaces the peer and restores the session to `listening`. Focused backend reconnect/keepalive tests passed 4 tests. Backend focused suites passed 40 tests. Full backend passed 85 tests with the existing torch/pynvml warning. `npm run check` passed. Focused frontend unit passed 6 tests. Full frontend unit passed 88 tests. The reconnect e2e was tightened to wait for the initial offer counter, then the focused reconnect e2e passed and the full call-start e2e passed 6 tests.
+  implication: The reconnect patch is locally verified including the race where backend failure and browser re-offer overlap.
 
 ## Eliminated
 
@@ -238,15 +283,23 @@ reproduction: Start call on Android Chrome. Confirm quick short-turn back-and-fo
 - hypothesis: The delayed duplicate turn-stream `ai_audio_started` directly closes the browser peer connection.
   evidence: Frontend inspection shows that `ai_audio_started` only applies the UI state `speaking`, keeps microphone tracks enabled, and ensures the remote audio element is unmuted. The only frontend peer-closing paths are startup failure, explicit hangup, or route destroy.
   timestamp: 2026-04-28T12:55:00Z
+- hypothesis: Starting backend data-channel keepalive for already-open channels fully fixes the Android five-second input freeze.
+  reason: After deployment of commit `1dd6341`, live logs show `datachannel.open ... already_open=True` and repeated browser `event_type=ping`, but the same failure still occurs.
+  timestamp: 2026-04-28T13:15:51Z
 
 ## Resolution
 
 root_cause:
-  The live Android Chrome freeze is caused by missed backend data-channel keepalive startup for browser-created data channels that arrive at aiortc already open. In the failed live session, the backend logged `peer.on_datachannel ... readyState=open`, but never logged backend `datachannel.open` and the browser never received data-channel ping messages. `_attach_peer_handlers()` only started `_data_channel_keepalive()` from a future `open` event, so this path left the app/control channel idle after first-turn `ai_done`. Quick short turns still worked because normal `state`/`user_final`/`ai_audio_started`/`ai_done` events refreshed the data channel before the idle gap; waiting about five seconds or speaking continuously longer than that produced no data-channel events and the Android peer eventually disconnected/failed.
+  Android Chrome is failing the native WebRTC media/ICE transport during long live-call listening/speaking spans while the RayMe session is still otherwise active: backend data-channel pings are flowing, backend inbound RTP frames are being processed, and outbound silent RTP is being pulled. Current frontend code only logged the browser `connectionState=failed` and left the UI in Listening, so the call froze until the user exited. A reconnect attempt was also impossible to support correctly because backend existing-session offers kept `session.peer_connection` pointed at the stale old peer, and old receive loops had no superseded-peer exit.
 fix:
-  Added duplicate-safe immediate keepalive startup when the incoming `rayme-events` data channel is already `readyState=open`, while preserving the existing future `open` event handler and close cancellation. Added a regression test that failed before the fix because an already-open channel sent no ping, then passed after the fix.
+  Added frontend media reconnect on browser `failed`/sustained `disconnected` peer states: close the failed peer/data channel, keep the mic stream, send a new offer for the same call/session, and do not call `/end` during recovery. Added backend re-offer support by replacing and closing the previous peer connection for existing sessions, updating adapters/tracks, and making old `_receive_audio_track()` loops exit when their owning peer is superseded.
 verification:
-  `uv run pytest tests/test_webrtc_signaling.py::test_data_channel_keepalive_starts_when_browser_channel_already_open -q` failed red before the fix and passed after. `uv run pytest tests/test_webrtc_signaling.py -q` passed 12 tests. `uv run pytest tests/test_call_session.py -q` passed 25 tests. `uv run pytest -q` passed 82 tests with the existing torch/cuda deprecated `pynvml` warning. `git diff --check` passed. Live Android Chrome verification is pending parent deployment.
+  Focused tests failed red before the fix and passed after. Full local verification passed: backend focused suites, full backend suite, frontend check, focused/full unit suites, call-start e2e suite, and `git diff --check`. Parent review added and verified an extra backend recovery-race guard. Not deployed yet; live Android Chrome validation remains pending.
 files_changed:
   - ai-backend/app/api/webrtc.py
+  - ai-backend/app/call/session.py
+  - ai-backend/tests/test_call_session.py
   - ai-backend/tests/test_webrtc_signaling.py
+  - web-ui/client/src/routes/call/[threadId]/+page.svelte
+  - web-ui/client/tests/e2e/call-start.spec.ts
+  - web-ui/client/tests/e2e/helpers/acceptance.ts

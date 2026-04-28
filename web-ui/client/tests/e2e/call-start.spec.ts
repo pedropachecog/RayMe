@@ -79,6 +79,36 @@ test('streams two user to AI cycles in one call and reaches the ended state', as
   assertNoBrowserErrors();
 });
 
+test('re-offers call media instead of ending when browser peer connection fails', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  const counters = await installReconnectCallRoutes(page);
+
+  await page.goto(`/chat/${threadId}`);
+  await page.getByRole('button', { name: 'Start call' }).click();
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  await expect.poll(() => counters.offerCount).toBe(1);
+
+  await page.evaluate(() => {
+    const target = window as Window & {
+      __raymeMockPeerConnections?: Array<{
+        setMockConnectionState: (
+          connectionState: RTCPeerConnectionState,
+          iceConnectionState?: RTCIceConnectionState
+        ) => void;
+      }>;
+    };
+    target.__raymeMockPeerConnections?.at(-1)?.setMockConnectionState('failed', 'disconnected');
+  });
+
+  await expect.poll(() => counters.offerCount).toBe(2);
+  expect(counters.endCount).toBe(0);
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  assertNoBrowserErrors();
+});
+
 test('shows a call notice in the transcript when /turns returns a type=error SSE event', async ({
   page
 }) => {
@@ -160,6 +190,51 @@ async function installTurnErrorCallRoutes(page: Page) {
   await page.route('**/api/calls/*/end', async (route) => {
     await fulfillJson(route, { state: 'ended' });
   });
+}
+
+async function installReconnectCallRoutes(page: Page) {
+  await installCallDebugEventRoute(page);
+  const counters = {
+    offerCount: 0,
+    endCount: 0
+  };
+  const thread = makeThreadDetail({
+    id: threadId,
+    character_id: characterId,
+    title: 'Call Start Aster',
+    character_name: 'Call Start Aster',
+    messages: []
+  });
+
+  await page.route(`**/api/threads/${threadId}`, async (route) => {
+    await fulfillJson(route, thread);
+  });
+  await page.route('**/api/characters/*/portrait**', async (route) => {
+    await route.fulfill({ status: 204 });
+  });
+  await page.route('**/api/calls/start', async (route) => {
+    await fulfillJson(route, {
+      call_id: 'call-reconnect-01',
+      session_id: 'rtc-call-reconnect-01',
+      thread_id: threadId,
+      state: 'listening'
+    }, 201);
+  });
+  await page.route('**/api/calls/*/offer', async (route) => {
+    counters.offerCount += 1;
+    await fulfillJson(route, {
+      call_id: 'call-reconnect-01',
+      session_id: 'rtc-call-reconnect-01',
+      answer: { type: 'answer', sdp: 'v=0\r\n' },
+      event_channel: 'rayme-events'
+    });
+  });
+  await page.route('**/api/calls/*/end', async (route) => {
+    counters.endCount += 1;
+    await fulfillJson(route, { call_id: 'call-reconnect-01', session_id: 'rtc-call-reconnect-01', reason: 'hangup' });
+  });
+
+  return counters;
 }
 
 async function installCallStartRoutes(page: Page, options: { failOffer?: boolean } = {}) {

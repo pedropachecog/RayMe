@@ -77,6 +77,9 @@
   let localMediaStream: MediaStream | null = null;
   let peerConnection: RTCPeerConnection | null = null;
   let eventsChannel: RTCDataChannel | null = null;
+  let mediaReconnectTimer = 0;
+  let mediaReconnecting = false;
+  let mediaReconnectAttempts = 0;
   let localAudioContext: AudioContext | null = null;
   let localMicSource: MediaStreamAudioSourceNode | null = null;
   let localMicAnalyser: AnalyserNode | null = null;
@@ -89,6 +92,9 @@
   let remoteAudioMeterFrame = 0;
   let remoteAudioMeterTicks = 0;
   let remoteAudioNonZeroLogged = false;
+
+  const MEDIA_RECONNECT_DISCONNECTED_GRACE_MS = 2500;
+  const MEDIA_RECONNECT_MAX_ATTEMPTS = 2;
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'RayMe');
@@ -261,8 +267,15 @@
           remoteAudioElementPlaying: remoteAudioElement ? !remoteAudioElement.paused : false,
           speakingRms: speakingRms
         });
+        scheduleBrowserMediaReconnect(
+          connection,
+          debugCallId,
+          connection.connectionState === 'failed' ? 'failed' : 'disconnected'
+        );
       }
       if (connection.connectionState === 'connected') {
+        clearMediaReconnectTimer();
+        mediaReconnectAttempts = 0;
         try {
           if (eventsChannel && (eventsChannel.readyState === 'closed' || eventsChannel.readyState === 'closing')) {
             emitDebugEvent(debugCallId, 'datachannel.recreate', {
@@ -294,6 +307,102 @@
         url: error.url
       });
     });
+  }
+
+  function scheduleBrowserMediaReconnect(
+    connection: RTCPeerConnection,
+    debugCallId: string,
+    reason: 'failed' | 'disconnected'
+  ) {
+    if (mediaReconnecting || mediaReconnectTimer || connection !== peerConnection) {
+      return;
+    }
+    if (!callId || !sessionId || !localMediaStream || callState === 'ended' || callState === 'failed') {
+      return;
+    }
+    if (mediaReconnectAttempts >= MEDIA_RECONNECT_MAX_ATTEMPTS) {
+      emitDebugEvent(debugCallId, 'pc.media_reconnect.give_up', {
+        reason,
+        attempts: mediaReconnectAttempts
+      });
+      applyCallState('failed');
+      blockingPanel = {
+        body: 'The call ended because the connection dropped. Your transcript so far was saved.',
+        action: 'Return to Thread',
+        tone: 'danger'
+      };
+      return;
+    }
+
+    const delayMs = reason === 'failed' ? 0 : MEDIA_RECONNECT_DISCONNECTED_GRACE_MS;
+    emitDebugEvent(debugCallId, 'pc.media_reconnect.scheduled', {
+      reason,
+      delayMs,
+      attempts: mediaReconnectAttempts
+    });
+    mediaReconnectTimer = window.setTimeout(() => {
+      mediaReconnectTimer = 0;
+      if (connection.connectionState === 'connected') {
+        return;
+      }
+      void reconnectBrowserMedia(connection, debugCallId, reason);
+    }, delayMs);
+  }
+
+  async function reconnectBrowserMedia(
+    failedConnection: RTCPeerConnection,
+    debugCallId: string,
+    reason: 'failed' | 'disconnected'
+  ) {
+    if (mediaReconnecting || failedConnection !== peerConnection || !localMediaStream || !callId || !sessionId) {
+      return;
+    }
+
+    mediaReconnecting = true;
+    mediaReconnectAttempts += 1;
+    emitDebugEvent(debugCallId, 'pc.media_reconnect.start', {
+      reason,
+      attempt: mediaReconnectAttempts
+    });
+
+    try {
+      detachRemoteAudio();
+      eventsChannel?.close?.();
+      eventsChannel = null;
+      failedConnection.close();
+      if (peerConnection === failedConnection) {
+        peerConnection = null;
+      }
+
+      await connectBrowserMedia({ call_id: callId, session_id: sessionId });
+      applyCallState('listening');
+      emitDebugEvent(debugCallId, 'pc.media_reconnect.ok', {
+        attempt: mediaReconnectAttempts
+      });
+    } catch (error) {
+      emitDebugEvent(debugCallId, 'pc.media_reconnect.failed', {
+        attempt: mediaReconnectAttempts,
+        name: (error as DOMException)?.name ?? 'unknown',
+        message: (error as Error)?.message ?? ''
+      });
+      if (mediaReconnectAttempts >= MEDIA_RECONNECT_MAX_ATTEMPTS) {
+        applyCallState('failed');
+        blockingPanel = {
+          body: 'The call ended because the connection dropped. Your transcript so far was saved.',
+          action: 'Return to Thread',
+          tone: 'danger'
+        };
+      }
+    } finally {
+      mediaReconnecting = false;
+    }
+  }
+
+  function clearMediaReconnectTimer() {
+    if (mediaReconnectTimer) {
+      window.clearTimeout(mediaReconnectTimer);
+      mediaReconnectTimer = 0;
+    }
   }
 
   function emitDebugEvent(debugCallId: string, name: string, detail: Record<string, unknown>): void {
@@ -998,6 +1107,8 @@
   }
 
   function stopBrowserMedia() {
+    clearMediaReconnectTimer();
+    mediaReconnecting = false;
     stopLocalMicMeter();
     detachRemoteAudio();
     remoteAudioContext?.close().catch(() => undefined);

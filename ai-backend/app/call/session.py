@@ -967,10 +967,32 @@ class CallSessionManager:
     ) -> CallSession:
         existing = self._sessions.get(session_id)
         if existing is not None:
+            if (
+                peer_connection is not None
+                and peer_connection is not existing.peer_connection
+            ):
+                previous_peer = existing.peer_connection
+                existing.peer_connection = peer_connection
+                if (
+                    existing.state == "failed"
+                    and existing.end_reason == "connection_failed"
+                ):
+                    existing.state = "listening"
+                    existing.end_reason = None
+                    existing.ended_at = None
+                close = getattr(previous_peer, "close", None)
+                if callable(close):
+                    result = close()
+                    if inspect.isawaitable(result):
+                        await result
             if data_channel is not None:
                 existing.data_channel = data_channel
             if event_sink is not None:
                 existing.event_sink = event_sink
+            if vad_adapter is not None:
+                existing.vad_adapter = vad_adapter
+            if stt_adapter is not None:
+                existing.stt_adapter = stt_adapter
             if tts_adapter is not None:
                 existing.tts_adapter = tts_adapter
             if outbound_audio_track is not None:
