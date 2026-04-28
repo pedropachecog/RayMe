@@ -92,9 +92,32 @@ schtasks /Create /TN RayMePhase1Web /TR "C:\Users\pmpg\rayme\start-web-ui.cmd" /
 
 Write-Host "== Starting scheduled tasks"
 schtasks /Run /TN RayMePhase1AI | Out-Host
-Start-Sleep -Seconds 12
+
+function Wait-RayMeListener {
+  param(
+    [Parameter(Mandatory = $true)][int]$Port,
+    [int]$TimeoutSeconds = 180
+  )
+
+  $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+  do {
+    $listener = Get-NetTCPConnection -State Listen -LocalPort $Port -ErrorAction SilentlyContinue
+    if ($listener) {
+      return $listener
+    }
+    Start-Sleep -Seconds 2
+  } while ((Get-Date) -lt $deadline)
+
+  throw "Timed out waiting for listener on port $Port"
+}
+
+Write-Host "== Waiting for AI listener"
+Wait-RayMeListener -Port 9443 | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize
+
 schtasks /Run /TN RayMePhase1Web | Out-Host
-Start-Sleep -Seconds 8
+
+Write-Host "== Waiting for web listener"
+Wait-RayMeListener -Port 8443 | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize
 
 Write-Host "== Verifying listeners"
 Get-NetTCPConnection -State Listen -LocalPort 8443,9443 |
@@ -103,10 +126,19 @@ Get-NetTCPConnection -State Listen -LocalPort 8443,9443 |
 
 Write-Host "== Verifying health"
 $aiHealth = curl.exe -k -sS https://192.168.1.199:9443/health
+if ($LASTEXITCODE -ne 0) { throw "AI backend health request failed" }
 $webHealth = curl.exe -k -sS https://192.168.1.199:8443/api/settings
-$aiHealth | ConvertFrom-Json | Select-Object service,status,resident_tts_engine | Format-List
+if ($LASTEXITCODE -ne 0) { throw "Web UI settings request failed" }
+$aiStatus = $aiHealth | ConvertFrom-Json
+$aiStatus | Select-Object service,status,stt_ready,vad_ready,resident_tts_engine | Format-List
+if (-not $aiStatus.stt_ready -or -not $aiStatus.vad_ready -or $aiStatus.resident_tts_engine -ne "f5") {
+  throw "AI backend is not ready for live calls"
+}
 $webStatus = ($webHealth | ConvertFrom-Json).ai_backend_status
 $webStatus | Select-Object endpoint_status,resident_tts_engine | Format-List
+if ($webStatus.endpoint_status -match "unreachable" -or $webStatus.resident_tts_engine -ne "f5") {
+  throw "Web UI cannot reach the resident F5 AI backend"
+}
 POWERSHELL
 
 echo "OMEN deploy complete: ${local_head}"
