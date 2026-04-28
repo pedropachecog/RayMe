@@ -420,6 +420,15 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
         )
         if label == RAYME_EVENTS_CHANNEL:
             session.data_channel = channel
+
+            def start_keepalive() -> None:
+                nonlocal keepalive_task
+                if keepalive_task is not None and not keepalive_task.done():
+                    return
+                keepalive_task = asyncio.create_task(
+                    _data_channel_keepalive(session, channel)
+                )
+
             if hasattr(channel, "on"):
                 @channel.on("open")
                 def on_dc_open() -> None:
@@ -428,10 +437,7 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
                         session.session_id,
                         label,
                     )
-                    nonlocal keepalive_task
-                    keepalive_task = asyncio.create_task(
-                        _data_channel_keepalive(session, channel)
-                    )
+                    start_keepalive()
 
                 @channel.on("close")
                 def on_dc_close() -> None:
@@ -453,6 +459,14 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
                         label,
                         error.__class__.__name__ if error else "?",
                     )
+
+            if getattr(channel, "readyState", None) == "open":
+                logger.info(
+                    "[rayme-call] datachannel.open session=%s label=%s already_open=True",
+                    session.session_id,
+                    label,
+                )
+                start_keepalive()
 
     @peer_connection.on("track")
     def on_track(track: Any) -> None:

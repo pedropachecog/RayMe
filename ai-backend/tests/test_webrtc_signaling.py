@@ -423,3 +423,69 @@ def test_receive_audio_track_recovers_from_transient_live_ice_recv_errors() -> N
     assert recv_calls >= 4
     assert incoming_frames == 1
     assert state == "ended"
+
+
+def test_data_channel_keepalive_starts_when_browser_channel_already_open() -> None:
+    """Browser-created channels can arrive at aiortc already open.
+
+    Regression for Android Chrome live calls: if the backend only starts
+    keepalive from a future "open" event, this already-open path never sends
+    pings during long listening/user-speaking spans.
+    """
+    import asyncio
+
+    from app.call.session import CallSession
+
+    class ScriptedDataChannel:
+        label = webrtc_module.RAYME_EVENTS_CHANNEL
+
+        def __init__(self) -> None:
+            self.readyState = "open"
+            self.sent: list[str] = []
+            self.handlers: dict[str, Any] = {}
+
+        def on(self, event_name: str) -> Any:
+            def decorator(handler: Any) -> Any:
+                self.handlers[event_name] = handler
+                return handler
+
+            return decorator
+
+        def send(self, data: str) -> None:
+            self.sent.append(data)
+
+        def close(self) -> None:
+            self.readyState = "closed"
+            close_handler = self.handlers.get("close")
+            if close_handler is not None:
+                close_handler()
+
+    class ScriptedPeerConnection:
+        connectionState = "connected"
+        iceConnectionState = "completed"
+
+        def __init__(self) -> None:
+            self.handlers: dict[str, Any] = {}
+
+        def on(self, event_name: str) -> Any:
+            def decorator(handler: Any) -> Any:
+                self.handlers[event_name] = handler
+                return handler
+
+            return decorator
+
+    async def _run_test() -> list[str]:
+        peer = ScriptedPeerConnection()
+        session = CallSession(session_id="test-already-open-datachannel", peer_connection=peer)
+        webrtc_module._attach_peer_handlers(peer, session)
+        channel = ScriptedDataChannel()
+
+        peer.handlers["datachannel"](channel)
+        await asyncio.sleep(0)
+        channel.close()
+        await asyncio.sleep(0)
+        return channel.sent
+
+    sent = asyncio.run(_run_test())
+
+    assert sent[:1] == ['{"type":"ping"}']

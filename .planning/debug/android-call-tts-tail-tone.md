@@ -2,7 +2,7 @@
 status: awaiting_human_verify
 trigger: "Android live call playback improved after paced TTS frames, but mic input stops truly listening after about five seconds of either continuous speech or pre-speech idle while the UI still says Listening."
 created: 2026-04-27T18:42:11Z
-updated: 2026-04-27T22:06:30Z
+updated: 2026-04-28T13:10:00Z
 ---
 
 # Debug Session: Android Call TTS Tail And Tone
@@ -10,15 +10,16 @@ updated: 2026-04-27T22:06:30Z
 ## Current Focus
 
 reasoning_checkpoint:
-  hypothesis: "Live-call VAD work grows with total turn duration because `_accept_vad_frame()` calls Silero `speech_timestamps()` on the entire accumulated turn buffer every 20ms; after roughly five seconds of idle or speech this blocks the backend receive loop/turn finalization while the browser animation still reacts locally."
+  hypothesis: "The backend data-channel keepalive never starts on Android because `peer.on_datachannel` receives the browser-created channel with `readyState=open`, while `_attach_peer_handlers()` only starts `_data_channel_keepalive()` from a future `open` event."
   confirming_evidence:
-    - "New live repro says the listening animation now reacts while speaking, proving frontend capture is alive, but the call still sticks in Listening after longer than five seconds."
-    - "`_accept_vad_frame()` passes `_buffered_turn_samples()` into `adapter.speech_timestamps()` on every inbound frame; `_buffered_turn_samples()` contains the full current turn."
-    - "The red regression `test_silero_vad_analysis_window_stays_bounded_after_five_seconds` observed `max(vad.calls) == 96000` samples after six seconds, proving VAD input grows unbounded instead of staying near a recent window."
-  falsification_test: "After bounding only the VAD analysis window, the red regression must pass while `len(session._turn_frames) == 300` still proves STT retains the full turn; existing VAD end-of-turn and >5s max-turn tests must still pass."
-  fix_rationale: "Silero only needs a recent analysis window to detect current speech and trailing silence; bounding that window prevents event-loop stalls while preserving the complete turn buffer used for final Whisper transcription."
-  blind_spots: "Local tests prove unbounded VAD input but do not measure OMEN GPU/CPU timing directly. Live Android verification is still required after deployment."
-next_action: Await parent deployment and live Android Chrome verification of >5s idle-before-speech, >5s continuous speech, and first F5 generation startup latency.
+    - "Live AI log for `rtc_233c9e43bf9c4a5696822cc8060416e3` shows `peer.on_datachannel ... readyState=open`, but no backend `datachannel.open` log for that channel."
+    - "Live web log has no `datachannel.message` ping events from the backend before the failed long listening span."
+    - "The red test `test_data_channel_keepalive_starts_when_browser_channel_already_open` fails because the already-open fake channel sends `[]` instead of the expected first ping."
+    - "Quick short turns create normal data-channel traffic (`state`, `user_final`, `ai_audio_started`, `ai_done`), while waiting or speaking longer leaves the data channel idle after `ai_done`."
+  falsification_test: "If starting keepalive immediately for already-open channels does not send pings in the focused unit test, or live logs after deployment still show no ping events, this hypothesis is wrong or incomplete."
+  fix_rationale: "Starting `_data_channel_keepalive()` when the channel is already open closes the missed-event gap without changing media tracks, VAD, TTS, or frontend state handling."
+  blind_spots: "This does not prove Android Chrome will keep the entire peer alive until a deployed live repro; it only proves the missing keepalive mechanism that matches the control-channel idle pattern."
+next_action: "Parent should deploy through `scripts/deploy-omen.sh` only, then live-verify Android Chrome quick turns, >5s idle-before-speech, and >5s continuous speech; live logs should show backend `datachannel.open ... already_open=True` plus browser ping messages."
 
 ## Symptoms
 
@@ -35,6 +36,7 @@ errors:
   - Waiting about five seconds before speaking can cause input to be ignored.
   - Speaking continuously for more than about five seconds can cause input to stop being recognized.
   - After this failure, the previously successful ongoing call flow appears frozen or broken.
+  - After OMEN deployment of commits `d995d22` and `8d27249`, the same failure remains unchanged: quick short messages work; waiting about five seconds before speaking or speaking for more than five seconds fails.
 timeline:
   - After commit 3cde3bc deployed to OMEN, Whisper warmup and Qwen no-think improved turn latency.
   - The audio problem changed from silent or last-word-only to brief tone/brief TTS fragment.
@@ -179,6 +181,38 @@ reproduction: Start call on Android Chrome. Confirm quick short-turn back-and-fo
   checked: Automated verification
   found: `uv run pytest tests/test_call_session.py::test_silero_vad_analysis_window_stays_bounded_after_five_seconds tests/test_call_session.py::test_silero_silence_gap_finalizes_turn_even_with_loud_ambient_noise tests/test_call_session.py::test_default_vad_max_turn_does_not_force_end_at_five_seconds tests/test_tts_registry.py::test_f5_adapter_load_builds_runtime_before_first_synthesis tests/test_gpu_runtime.py::test_f5_production_load_requires_torch_cuda -q` passed 5 tests. `uv run pytest tests/test_call_session.py tests/test_tts_registry.py tests/test_model_manager.py tests/test_webrtc_signaling.py -q` passed 55 tests with the existing torch/pynvml warning. `uv run pytest -q` passed 81 tests with the same existing warning. `git diff --check` passed.
   implication: Focused red/green tests and adjacent backend suites pass locally. Live Android Chrome verification still requires parent deployment.
+- timestamp: 2026-04-28T12:17:38Z
+  checked: User live Android Chrome repro after OMEN deployment of commits `d995d22` and `8d27249`
+  found: Nothing changed. Exact same symptoms remain: quick short messages work, but either waiting about five seconds before speaking or speaking continuously for more than five seconds freezes the call.
+  implication: The bounded Silero VAD analysis fix and F5 startup warmup are not sufficient to fix the live input freeze.
+- timestamp: 2026-04-28T12:17:38Z
+  checked: OMEN runtime state and logs after failed repro
+  found: OMEN is running deployed HEAD `8d27249` with listeners on ports 9443 and 8443. AI logs for `rtc_233c9e43bf9c4a5696822cc8060416e3` show a successful first turn, then second-turn listening with bounded `analysis_samples=3200`, continuous `track.recv.progress` until frame 2000, followed by peer signaling closed, `MediaStreamError`, datachannel close, ICE closed, and connection closed.
+  implication: The deployed code is active, VAD analysis is bounded, and the next failure is not explained by unbounded VAD compute. The browser/peer connection is being closed/failing after the first AI turn while the backend is waiting for the next user turn.
+- timestamp: 2026-04-28T12:17:38Z
+  checked: OMEN web debug logs for `call_3f179096348e437387c98bd837368bae`
+  found: Browser debug logs show datachannel `ai_done`, then a delayed duplicate turn-stream `call.ai_audio_started` for the same turn, then state debug `mic.keep_live` changes from listening to speaking, then `pc.iceconnectionstatechange` disconnected, `pc.connectionstatechange` disconnected, `pc.connection.failed`, later `connectionState=failed`, and `/end`.
+  implication: Investigate client/server turn-stream event ordering and frontend call-state handling after `ai_done`; a stale `ai_audio_started` may be putting the UI back into Speaking or otherwise interfering with the live peer connection after the turn completes.
+- timestamp: 2026-04-28T12:55:00Z
+  checked: `web-ui/client/src/routes/call/[threadId]/+page.svelte`
+  found: The delayed turn-stream `ai_audio_started` is accepted without turn-order guarding and can cause a stale `listening` -> `speaking` UI transition, but that path only calls `keepCallMicrophoneTracksLive()` and `ensureRemoteCallAudioAudible()`; the page only closes browser media on startup failure, explicit hangup, or route destroy.
+  implication: The stale SSE event is a real invalid UI transition but does not provide a direct app-code path for closing the peer connection.
+- timestamp: 2026-04-28T12:55:00Z
+  checked: Live OMEN AI/web logs for `rtc_233c9e43bf9c4a5696822cc8060416e3` / `call_3f179096348e437387c98bd837368bae`
+  found: Backend logs `peer.on_datachannel ... readyState=open`, but there is no backend `datachannel.open` log and no browser `datachannel.message` ping events. `_data_channel_keepalive()` is only started by the backend `open` handler, so this already-open channel never starts keepalive. The failure occurs after the first-turn `ai_done` when no further data-channel events are emitted during the next idle/listening span.
+  implication: This matches quick short turns working while >5s idle or >5s continuous speech fails: short turns produce normal data-channel traffic before the idle gap, but long silent/listening spans do not.
+- timestamp: 2026-04-28T13:02:00Z
+  checked: `uv run pytest tests/test_webrtc_signaling.py::test_data_channel_keepalive_starts_when_browser_channel_already_open -q`
+  found: Test failed red: the already-open fake data channel sent `[]` instead of `['{\"type\":\"ping\"}']`.
+  implication: The current backend definitely misses keepalive startup for the exact `readyState=open` ordering observed in the live Android repro logs.
+- timestamp: 2026-04-28T13:10:00Z
+  checked: Focused keepalive fix in `ai-backend/app/api/webrtc.py`
+  found: `_attach_peer_handlers()` now starts `_data_channel_keepalive()` immediately when the browser-created `rayme-events` data channel is already `readyState=open`, while preserving the existing future `open` handler and close cancellation.
+  implication: The backend no longer depends on an `open` event that aiortc may have already missed before handler registration.
+- timestamp: 2026-04-28T13:10:00Z
+  checked: Automated verification
+  found: `uv run pytest tests/test_webrtc_signaling.py::test_data_channel_keepalive_starts_when_browser_channel_already_open -q` passed after failing red. `uv run pytest tests/test_webrtc_signaling.py -q` passed 12 tests. `uv run pytest tests/test_call_session.py -q` passed 25 tests. `uv run pytest -q` passed 82 tests with the existing torch/cuda deprecated `pynvml` warning. `git diff --check` passed.
+  implication: The focused regression and adjacent backend suites pass locally. Live Android Chrome verification still requires parent deployment.
 
 ## Eliminated
 
@@ -198,17 +232,21 @@ reproduction: Start call on Android Chrome. Confirm quick short-turn back-and-fo
 - hypothesis: Retrying transient live-ICE `track.recv()` exceptions fully fixes the Android input freeze.
   evidence: After the latest attempted fix, the listening animation now fires while speaking, so capture is visibly alive, but taking longer than five seconds still leaves the call stuck in Listening with no turn progress.
   timestamp: 2026-04-27T22:01:34Z
+- hypothesis: Bounding Silero VAD analysis to a recent window fully fixes the Android five-second input freeze.
+  reason: After deployment of commit `d995d22` and deploy-script commit `8d27249`, user live repro reports no behavior change. OMEN logs prove the bounded VAD code is active (`analysis_samples=3200`) during the second listening turn before the peer connection closes.
+  timestamp: 2026-04-28T12:17:38Z
+- hypothesis: The delayed duplicate turn-stream `ai_audio_started` directly closes the browser peer connection.
+  evidence: Frontend inspection shows that `ai_audio_started` only applies the UI state `speaking`, keeps microphone tracks enabled, and ensures the remote audio element is unmuted. The only frontend peer-closing paths are startup failure, explicit hangup, or route destroy.
+  timestamp: 2026-04-28T12:55:00Z
 
 ## Resolution
 
 root_cause:
-  The remaining five-second Android Chrome input freeze was caused by unbounded backend live-call VAD work. For Silero-style VAD, `_accept_vad_frame()` called `adapter.speech_timestamps()` on `_buffered_turn_samples()` for every 20ms inbound frame, and `_buffered_turn_samples()` contained the entire accumulated turn. Both "wait more than five seconds before speaking" and "speak continuously for more than five seconds" therefore made synchronous per-frame VAD analysis grow with total turn duration on the backend event loop. The browser could still animate from local mic input, but backend receive/turn finalization stalled and the call stayed stuck in Listening. The first F5 generation delay had a separate startup cause: `ModelManager.startup()` selected F5 as resident, but `F5TtsAdapter.load()` did not construct the heavy `F5TTS()` runtime until first synthesis.
+  The live Android Chrome freeze is caused by missed backend data-channel keepalive startup for browser-created data channels that arrive at aiortc already open. In the failed live session, the backend logged `peer.on_datachannel ... readyState=open`, but never logged backend `datachannel.open` and the browser never received data-channel ping messages. `_attach_peer_handlers()` only started `_data_channel_keepalive()` from a future `open` event, so this path left the app/control channel idle after first-turn `ai_done`. Quick short turns still worked because normal `state`/`user_final`/`ai_audio_started`/`ai_done` events refreshed the data channel before the idle gap; waiting about five seconds or speaking continuously longer than that produced no data-channel events and the Android peer eventually disconnected/failed.
 fix:
-  Bounded the Silero VAD analysis input to a recent window large enough for end-of-utterance detection, while preserving the full `_turn_frames` buffer for final Whisper transcription. Added a regression proving six seconds of frames no longer makes VAD receive more than a two-second window while STT still retains all 300 frames. Changed `F5TtsAdapter.load()` to build and retain the runtime at startup, and `unload()` to release it. Added a regression proving `load()` builds the runtime before first synthesis.
+  Added duplicate-safe immediate keepalive startup when the incoming `rayme-events` data channel is already `readyState=open`, while preserving the existing future `open` event handler and close cancellation. Added a regression test that failed before the fix because an already-open channel sent no ping, then passed after the fix.
 verification:
-  `uv run pytest tests/test_call_session.py::test_silero_vad_analysis_window_stays_bounded_after_five_seconds tests/test_call_session.py::test_silero_silence_gap_finalizes_turn_even_with_loud_ambient_noise tests/test_call_session.py::test_default_vad_max_turn_does_not_force_end_at_five_seconds tests/test_tts_registry.py::test_f5_adapter_load_builds_runtime_before_first_synthesis tests/test_gpu_runtime.py::test_f5_production_load_requires_torch_cuda -q` passed 5 tests. `uv run pytest tests/test_call_session.py tests/test_tts_registry.py tests/test_model_manager.py tests/test_webrtc_signaling.py -q` passed 55 tests with the existing torch/cuda deprecated `pynvml` warning. `uv run pytest -q` passed 81 tests with the same existing warning. `git diff --check -- ai-backend/app/call/session.py ai-backend/app/models/tts_f5.py ai-backend/tests/test_call_session.py ai-backend/tests/test_tts_registry.py .planning/debug/android-call-tts-tail-tone.md` passed with no output. Live Android Chrome verification is pending parent deployment.
+  `uv run pytest tests/test_webrtc_signaling.py::test_data_channel_keepalive_starts_when_browser_channel_already_open -q` failed red before the fix and passed after. `uv run pytest tests/test_webrtc_signaling.py -q` passed 12 tests. `uv run pytest tests/test_call_session.py -q` passed 25 tests. `uv run pytest -q` passed 82 tests with the existing torch/cuda deprecated `pynvml` warning. `git diff --check` passed. Live Android Chrome verification is pending parent deployment.
 files_changed:
-  - ai-backend/app/call/session.py
-  - ai-backend/app/models/tts_f5.py
-  - ai-backend/tests/test_call_session.py
-  - ai-backend/tests/test_tts_registry.py
+  - ai-backend/app/api/webrtc.py
+  - ai-backend/tests/test_webrtc_signaling.py
