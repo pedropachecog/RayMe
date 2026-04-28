@@ -34,10 +34,13 @@ class F5TtsAdapter(ImportGatedTtsAdapter):
         self._ensure_runtime_available()
         if self._runtime_factory is None:
             require_torch_cuda_runtime("F5-TTS")
+        if self._runtime is None:
+            self._runtime = self._build_runtime()
         self.loaded = True
 
     def unload(self) -> None:
         self.loaded = False
+        self._runtime = None
 
     def synthesize(self, request: TtsSynthesisInput) -> TtsSynthesisOutput:
         if not self.loaded:

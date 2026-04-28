@@ -2,7 +2,7 @@
 status: awaiting_human_verify
 trigger: "Android live call playback improved after paced TTS frames, but mic input stops truly listening after about five seconds of either continuous speech or pre-speech idle while the UI still says Listening."
 created: 2026-04-27T18:42:11Z
-updated: 2026-04-27T21:31:21Z
+updated: 2026-04-27T22:06:30Z
 ---
 
 # Debug Session: Android Call TTS Tail And Tone
@@ -10,16 +10,15 @@ updated: 2026-04-27T21:31:21Z
 ## Current Focus
 
 reasoning_checkpoint:
-  hypothesis: "Android Chrome produces a transient inbound `track.recv()` exception/gap around the five-second idle/speech boundary while ICE remains connected, and `_receive_audio_track()` treats that as permanent input end by returning, leaving the UI in `Listening` and outbound TTS alive but no backend receive loop to process later mic frames."
+  hypothesis: "Live-call VAD work grows with total turn duration because `_accept_vad_frame()` calls Silero `speech_timestamps()` on the entire accumulated turn buffer every 20ms; after roughly five seconds of idle or speech this blocks the backend receive loop/turn finalization while the browser animation still reacts locally."
   confirming_evidence:
-    - "Live repro after commit 5e237bc shows quick turns still work, but waiting more than five seconds before speaking or speaking more than five seconds freezes input with UI still `Listening`."
-    - "Source search found no remaining active 5000ms VAD cap after `vad_max_turn_ms` was raised to 30000."
-    - "`_receive_audio_track()` returns permanently on any `track.recv()` exception when ICE/connection are still live."
-    - "A focused regression test with a live peer connection and an inbound track that raises three transient recv errors then returns a frame failed red: current code made only one recv call and processed zero inbound frames."
-  falsification_test: "After changing live-ICE recv exceptions to retry with backoff, the same test must process the resumed frame; existing media-stream-error test must still prove the session is not failed; call-session and WebRTC tests must pass."
-  fix_rationale: "Retrying live-ICE recv errors preserves the previous TTS-safe behavior of not failing/closing the outbound track, but avoids killing input processing permanently on a transient Android Chrome RTP/read gap."
-  blind_spots: "Cannot live-test Android Chrome or inspect OMEN runtime logs in this child task. The exact browser/aiortc exception class at five seconds is inferred from matching code behavior and reproduced with a generic exception."
-next_action: Await parent deployment and live Android Chrome verification of >5s idle-before-speech and >5s continuous-speech call input.
+    - "New live repro says the listening animation now reacts while speaking, proving frontend capture is alive, but the call still sticks in Listening after longer than five seconds."
+    - "`_accept_vad_frame()` passes `_buffered_turn_samples()` into `adapter.speech_timestamps()` on every inbound frame; `_buffered_turn_samples()` contains the full current turn."
+    - "The red regression `test_silero_vad_analysis_window_stays_bounded_after_five_seconds` observed `max(vad.calls) == 96000` samples after six seconds, proving VAD input grows unbounded instead of staying near a recent window."
+  falsification_test: "After bounding only the VAD analysis window, the red regression must pass while `len(session._turn_frames) == 300` still proves STT retains the full turn; existing VAD end-of-turn and >5s max-turn tests must still pass."
+  fix_rationale: "Silero only needs a recent analysis window to detect current speech and trailing silence; bounding that window prevents event-loop stalls while preserving the complete turn buffer used for final Whisper transcription."
+  blind_spots: "Local tests prove unbounded VAD input but do not measure OMEN GPU/CPU timing directly. Live Android verification is still required after deployment."
+next_action: Await parent deployment and live Android Chrome verification of >5s idle-before-speech, >5s continuous speech, and first F5 generation startup latency.
 
 ## Symptoms
 
@@ -160,6 +159,26 @@ reproduction: Start call on Android Chrome. Confirm quick short-turn back-and-fo
   checked: Automated verification
   found: `uv run pytest tests/test_webrtc_signaling.py::test_receive_audio_track_recovers_from_transient_live_ice_recv_errors tests/test_webrtc_signaling.py::test_receive_audio_track_media_stream_error_with_live_ice_does_not_fail_session -q` passed 2 tests; `uv run pytest tests/test_webrtc_signaling.py -q` passed 11 tests; `uv run pytest tests/test_call_session.py -q` passed 24 tests; `uv run pytest -q` passed 79 tests with the existing torch/cuda deprecated `pynvml` warning.
   implication: Focused red/green regression and adjacent backend coverage pass locally. Live Android Chrome verification still requires parent deployment.
+- timestamp: 2026-04-27T22:01:34Z
+  checked: User live Android Chrome repro after latest attempted fix
+  found: The listening animation now fires while speaking, but if the user takes longer than five seconds it still freezes the call. The UI remains stuck in Listening, but the app does not actually listen or progress. The first F5 generation also takes a couple of seconds to start.
+  implication: Frontend capture/animation and previous receive-loop retry work changed the visible symptom but did not fix backend turn completion. Continue investigation after capture: backend VAD/STT end-of-turn, session state, timers, and model warmup.
+- timestamp: 2026-04-27T22:02:36Z
+  checked: `CallSession._accept_vad_frame()` and model startup paths
+  found: With a Silero-style VAD adapter, every 20ms inbound frame calls `adapter.speech_timestamps(self._buffered_turn_samples())`, where `_buffered_turn_samples()` contains the entire accumulated turn. The full turn buffer is also retained for STT, so idle-before-speech and continuous-speech both make per-frame VAD work grow with total turn length. Separately, `ModelManager.startup()` calls `F5TtsAdapter.load()`, but `load()` does not build `F5TTS()`; the heavy runtime is built lazily on first `synthesize()`.
+  implication: The remaining freeze can be a backend event-loop/receive-loop stall from unbounded per-frame VAD analysis rather than missing capture. The first F5 generation delay is explained by lazy runtime construction despite startup load.
+- timestamp: 2026-04-27T22:03:21Z
+  checked: `uv run pytest tests/test_call_session.py::test_silero_vad_analysis_window_stays_bounded_after_five_seconds -q` before fix
+  found: Test failed red: after 300 frames / six seconds, the fake Silero adapter received up to 96000 samples instead of a bounded <=32000 sample analysis window, while the full turn buffer contained 300 frames.
+  implication: The code directly reproduces unbounded per-frame VAD analysis past the five-second boundary without needing Android-specific capture failure.
+- timestamp: 2026-04-27T22:06:30Z
+  checked: Focused VAD-window and F5 warmup fixes
+  found: `_accept_vad_frame()` now passes only a recent VAD analysis window to Silero while preserving the complete `_turn_frames` buffer for STT. `F5TtsAdapter.load()` now builds and retains the F5 runtime, and `unload()` releases it.
+  implication: Live-call VAD work no longer grows unbounded after five seconds, and startup residency now actually warms F5 instead of deferring heavy runtime creation to the first generated reply.
+- timestamp: 2026-04-27T22:06:30Z
+  checked: Automated verification
+  found: `uv run pytest tests/test_call_session.py::test_silero_vad_analysis_window_stays_bounded_after_five_seconds tests/test_call_session.py::test_silero_silence_gap_finalizes_turn_even_with_loud_ambient_noise tests/test_call_session.py::test_default_vad_max_turn_does_not_force_end_at_five_seconds tests/test_tts_registry.py::test_f5_adapter_load_builds_runtime_before_first_synthesis tests/test_gpu_runtime.py::test_f5_production_load_requires_torch_cuda -q` passed 5 tests. `uv run pytest tests/test_call_session.py tests/test_tts_registry.py tests/test_model_manager.py tests/test_webrtc_signaling.py -q` passed 55 tests with the existing torch/pynvml warning. `uv run pytest -q` passed 81 tests with the same existing warning. `git diff --check` passed.
+  implication: Focused red/green tests and adjacent backend suites pass locally. Live Android Chrome verification still requires parent deployment.
 
 ## Eliminated
 
@@ -176,15 +195,20 @@ reproduction: Start call on Android Chrome. Confirm quick short-turn back-and-fo
 - hypothesis: Keeping the WebRTC microphone MediaStreamTrack enabled across non-listening states fully fixes the Android input freeze.
   reason: After commit 5e237bc was deployed, user live Android Chrome repro showed no behavior change: quick turns work, but waiting more than five seconds before speaking or speaking more than five seconds still freezes the call.
   timestamp: 2026-04-27T21:24:46Z
+- hypothesis: Retrying transient live-ICE `track.recv()` exceptions fully fixes the Android input freeze.
+  evidence: After the latest attempted fix, the listening animation now fires while speaking, so capture is visibly alive, but taking longer than five seconds still leaves the call stuck in Listening with no turn progress.
+  timestamp: 2026-04-27T22:01:34Z
 
 ## Resolution
 
 root_cause:
-  The actual five-second input freeze was caused by the backend WebRTC receive loop treating any inbound `track.recv()` exception while ICE/connection were still live as permanent input end. The previous TTS-safe behavior intentionally did not fail/close the session, preserving outbound playback, but it also returned from `_receive_audio_track()` and permanently stopped backend mic frame processing. When Android Chrome/aiortc emits a transient inbound read/RTP gap around the five-second idle/speech boundary, the UI can later show `Listening` while no backend receive loop remains to process speech.
+  The remaining five-second Android Chrome input freeze was caused by unbounded backend live-call VAD work. For Silero-style VAD, `_accept_vad_frame()` called `adapter.speech_timestamps()` on `_buffered_turn_samples()` for every 20ms inbound frame, and `_buffered_turn_samples()` contained the entire accumulated turn. Both "wait more than five seconds before speaking" and "speak continuously for more than five seconds" therefore made synchronous per-frame VAD analysis grow with total turn duration on the backend event loop. The browser could still animate from local mic input, but backend receive/turn finalization stalled and the call stayed stuck in Listening. The first F5 generation delay had a separate startup cause: `ModelManager.startup()` selected F5 as resident, but `F5TtsAdapter.load()` did not construct the heavy `F5TTS()` runtime until first synthesis.
 fix:
-  Changed `_receive_audio_track()` to retry live-ICE/live-connection recv exceptions with bounded backoff instead of returning, resetting the error count after a good frame. Failed/closed peer states still fail the session, disconnected states still use the reconnect path, and outbound playback remains preserved. Added a regression test that fails before the fix by scripting transient recv errors followed by a resumed audio frame, and updated the existing live-ICE MediaStreamError test to assert no fail/close while allowing the long-lived receive loop to exit on session end.
+  Bounded the Silero VAD analysis input to a recent window large enough for end-of-utterance detection, while preserving the full `_turn_frames` buffer for final Whisper transcription. Added a regression proving six seconds of frames no longer makes VAD receive more than a two-second window while STT still retains all 300 frames. Changed `F5TtsAdapter.load()` to build and retain the runtime at startup, and `unload()` to release it. Added a regression proving `load()` builds the runtime before first synthesis.
 verification:
-  `uv run pytest tests/test_webrtc_signaling.py::test_receive_audio_track_recovers_from_transient_live_ice_recv_errors tests/test_webrtc_signaling.py::test_receive_audio_track_media_stream_error_with_live_ice_does_not_fail_session -q` passed 2 tests; `uv run pytest tests/test_webrtc_signaling.py -q` passed 11 tests; `uv run pytest tests/test_call_session.py -q` passed 24 tests; `uv run pytest -q` passed 79 tests with the existing torch/cuda deprecated `pynvml` warning. Live Android Chrome verification is pending parent deployment.
+  `uv run pytest tests/test_call_session.py::test_silero_vad_analysis_window_stays_bounded_after_five_seconds tests/test_call_session.py::test_silero_silence_gap_finalizes_turn_even_with_loud_ambient_noise tests/test_call_session.py::test_default_vad_max_turn_does_not_force_end_at_five_seconds tests/test_tts_registry.py::test_f5_adapter_load_builds_runtime_before_first_synthesis tests/test_gpu_runtime.py::test_f5_production_load_requires_torch_cuda -q` passed 5 tests. `uv run pytest tests/test_call_session.py tests/test_tts_registry.py tests/test_model_manager.py tests/test_webrtc_signaling.py -q` passed 55 tests with the existing torch/cuda deprecated `pynvml` warning. `uv run pytest -q` passed 81 tests with the same existing warning. `git diff --check -- ai-backend/app/call/session.py ai-backend/app/models/tts_f5.py ai-backend/tests/test_call_session.py ai-backend/tests/test_tts_registry.py .planning/debug/android-call-tts-tail-tone.md` passed with no output. Live Android Chrome verification is pending parent deployment.
 files_changed:
-  - ai-backend/app/api/webrtc.py
-  - ai-backend/tests/test_webrtc_signaling.py
+  - ai-backend/app/call/session.py
+  - ai-backend/app/models/tts_f5.py
+  - ai-backend/tests/test_call_session.py
+  - ai-backend/tests/test_tts_registry.py

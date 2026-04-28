@@ -617,6 +617,23 @@ def test_default_vad_max_turn_does_not_force_end_at_five_seconds() -> None:
     assert result["end_of_turn"] is False
 
 
+def test_silero_vad_analysis_window_stays_bounded_after_five_seconds() -> None:
+    settings = AiBackendSettings(vad_end_silence_ms=700, vad_max_turn_ms=30000)
+    vad = ScriptedSileroVadAdapter(sampling_rate=16000)
+    session = CallSession(session_id="vad-window", settings=settings, vad_adapter=vad)
+    pcm = np.full(320, 2000, dtype=np.int16).tobytes()
+
+    for _ in range(300):  # 6 seconds at 20 ms/frame.
+        frame = PcmAudioFrame(pcm=pcm, sample_rate=16000, channels=1)
+        session._turn_frames.append(frame)
+        result = session._accept_vad_frame(frame)
+        assert result["end_of_turn"] is False
+
+    assert len(session._turn_frames) == 300, "STT still needs the full turn buffer"
+    assert vad.calls
+    assert max(vad.calls) <= 16000 * 2
+
+
 def test_speak_text_generic_adapter_uses_real_reference_audio() -> None:
     adapter = ScriptedGenericTtsAdapter()
     session, _ = _new_session(tts_adapter=adapter)

@@ -595,15 +595,17 @@ class CallSession:
                     )),
                 )
 
-            timestamps = list(adapter.speech_timestamps(buffered_samples))
+            vad_samples = self._recent_vad_samples(buffered_samples, adapter)
+            timestamps = list(adapter.speech_timestamps(vad_samples))
             if frame_idx == 10:
                 logger.info(
                     "[rayme-call] vad.silero session=%s ts_count=%d "
-                    "threshold=%.2f sr=%d",
+                    "threshold=%.2f sr=%d analysis_samples=%d",
                     self.session_id,
                     len(timestamps),
                     adapter.threshold,
                     adapter.sampling_rate,
+                    len(vad_samples),
                 )
                 if timestamps:
                     logger.info(
@@ -619,7 +621,7 @@ class CallSession:
                 if self._speech_start_frame is None:
                     self._speech_start_frame = frame_idx
                 last_end_sample = int(timestamps[-1].get("end", 0))
-                silence_samples = max(len(buffered_samples) - last_end_sample, 0)
+                silence_samples = max(len(vad_samples) - last_end_sample, 0)
                 self._silence_ms = int(silence_samples * 1000 / sampling_rate)
             elif self._speech_seen:
                 self._silence_ms += frame_ms
@@ -667,6 +669,15 @@ class CallSession:
         if not chunks:
             return np.asarray([], dtype=np.float32)
         return np.concatenate(chunks).astype(np.float32, copy=False)
+
+    def _recent_vad_samples(self, samples: np.ndarray, adapter: Any) -> np.ndarray:
+        sampling_rate = int(getattr(adapter, "sampling_rate", 16000)) or 16000
+        end_silence_ms = int(self.settings.vad_end_silence_ms)
+        window_seconds = max(2.0, (end_silence_ms + 500) / 1000.0)
+        max_samples = max(int(sampling_rate * window_seconds), 1)
+        if len(samples) <= max_samples:
+            return samples
+        return samples[-max_samples:]
 
     def _transcribe_turn(self, frames: list[PcmAudioFrame]) -> dict[str, Any]:
         adapter = self.stt_adapter

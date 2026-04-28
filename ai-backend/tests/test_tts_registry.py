@@ -375,6 +375,27 @@ def test_f5_adapter_uses_runtime_infer_and_returns_wav_bytes() -> None:
     assert result.wav_bytes.startswith(b"RIFF")
 
 
+def test_f5_adapter_load_builds_runtime_before_first_synthesis() -> None:
+    f5_module = importlib.import_module("app.models.tts_f5")
+    F5TtsAdapter = getattr(f5_module, "F5TtsAdapter")
+
+    runtime = object()
+    builds = 0
+
+    def runtime_factory() -> object:
+        nonlocal builds
+        builds += 1
+        return runtime
+
+    adapter = F5TtsAdapter(runtime_factory=runtime_factory)
+
+    adapter.load()
+
+    assert adapter.loaded is True
+    assert adapter._runtime is runtime
+    assert builds == 1
+
+
 def test_f5_runtime_audio_loader_avoids_torchcodec_dependency(tmp_path: Path) -> None:
     f5_module = importlib.import_module("app.models.tts_f5")
     load_audio = getattr(f5_module, "_load_audio_with_soundfile")
