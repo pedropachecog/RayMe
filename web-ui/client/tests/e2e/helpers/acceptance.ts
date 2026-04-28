@@ -78,6 +78,8 @@ export async function installMockCallMedia(page: Page) {
   await page.addInitScript(() => {
     type MockPeerWindow = Window & {
       __raymeMockPeerConnections?: MockRTCPeerConnection[];
+      __raymeMockDataChannels?: MockRTCDataChannel[];
+      __raymeMockRemoteAudioStreams?: MediaStream[];
     };
 
     const mediaDevices = {
@@ -99,11 +101,62 @@ export async function installMockCallMedia(page: Page) {
       value: mediaDevices
     });
 
+    let nextPeerId = 1;
+    let nextDataChannelId = 1;
+
+    class MockRTCDataChannel {
+      readonly id = nextDataChannelId++;
+      readonly label: string;
+      readonly ownerPeerId: number;
+      readyState: RTCDataChannelState = 'open';
+      sentMessages: string[] = [];
+      closeCount = 0;
+      onopen: (() => void) | null = null;
+      onclose: (() => void) | null = null;
+      onerror: ((event: Event) => void) | null = null;
+      onmessage: ((event: MessageEvent) => void) | null = null;
+
+      constructor(label: string, ownerPeerId: number) {
+        this.label = label;
+        this.ownerPeerId = ownerPeerId;
+        const target = window as MockPeerWindow;
+        target.__raymeMockDataChannels = target.__raymeMockDataChannels ?? [];
+        target.__raymeMockDataChannels.push(this);
+      }
+
+      send(message: string) {
+        this.sentMessages.push(message);
+      }
+
+      close() {
+        if (this.readyState === 'closed') {
+          return;
+        }
+
+        this.readyState = 'closed';
+        this.closeCount += 1;
+        this.onclose?.();
+      }
+
+      emitMockMessage(data: string) {
+        this.onmessage?.(new MessageEvent('message', { data }));
+      }
+    }
+
     class MockRTCPeerConnection {
+      readonly id = nextPeerId++;
       iceGatheringState = 'complete';
       iceConnectionState = 'new';
       connectionState = 'new';
+      signalingState = 'stable';
       localDescription: RTCSessionDescriptionInit | null = null;
+      remoteDescription: RTCSessionDescriptionInit | null = null;
+      createdOfferCount = 0;
+      closed = false;
+      dataChannels: MockRTCDataChannel[] = [];
+      remoteStream: MediaStream | null = null;
+      ondatachannel: ((event: RTCDataChannelEvent) => void) | null = null;
+      ontrack: ((event: RTCTrackEvent) => void) | null = null;
       private listeners = new Map<string, Array<(event: Event) => void>>();
 
       constructor() {
@@ -112,20 +165,10 @@ export async function installMockCallMedia(page: Page) {
         target.__raymeMockPeerConnections.push(this);
       }
 
-      createDataChannel() {
-        return {
-          label: 'rayme-events',
-          readyState: 'open',
-          send() {},
-          close() {
-            this.readyState = 'closed';
-            this.onclose?.();
-          },
-          onopen: null as (() => void) | null,
-          onclose: null as (() => void) | null,
-          onerror: null as ((event: Event) => void) | null,
-          onmessage: null as ((event: MessageEvent) => void) | null
-        };
+      createDataChannel(label = 'rayme-events') {
+        const channel = new MockRTCDataChannel(label, this.id);
+        this.dataChannels.push(channel);
+        return channel;
       }
 
       addTrack() {
@@ -133,9 +176,17 @@ export async function installMockCallMedia(page: Page) {
       }
 
       async createOffer() {
+        this.createdOfferCount += 1;
         return {
           type: 'offer' as RTCSdpType,
-          sdp: 'v=0\r\ns=RayMe test\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\na=ice-ufrag:test\r\n'
+          sdp: [
+            'v=0',
+            `s=RayMe test peer ${this.id}`,
+            'm=audio 9 UDP/TLS/RTP/SAVPF 111',
+            `a=ice-ufrag:test-${this.id}`,
+            `a=x-rayme-mock-peer-id:${this.id}`,
+            ''
+          ].join('\r\n')
         };
       }
 
@@ -143,7 +194,10 @@ export async function installMockCallMedia(page: Page) {
         this.localDescription = description;
       }
 
-      async setRemoteDescription() {}
+      async setRemoteDescription(description: RTCSessionDescriptionInit) {
+        this.remoteDescription = description;
+        this.dispatchRemoteTrack();
+      }
 
       addEventListener(eventName: string, handler: (event: Event) => void) {
         const handlers = this.listeners.get(eventName) ?? [];
@@ -152,6 +206,14 @@ export async function installMockCallMedia(page: Page) {
       }
 
       close() {
+        if (this.closed) {
+          return;
+        }
+
+        this.closed = true;
+        for (const channel of this.dataChannels) {
+          channel.close();
+        }
         this.connectionState = 'closed';
         this.iceConnectionState = 'closed';
         this.dispatchMockEvent('connectionstatechange');
@@ -164,6 +226,25 @@ export async function installMockCallMedia(page: Page) {
         this.dispatchMockEvent('connectionstatechange');
       }
 
+      private dispatchRemoteTrack() {
+        if (!this.ontrack) {
+          return;
+        }
+
+        const stream = createMockRemoteAudioStream();
+        this.remoteStream = stream;
+        const target = window as MockPeerWindow;
+        target.__raymeMockRemoteAudioStreams = target.__raymeMockRemoteAudioStreams ?? [];
+        target.__raymeMockRemoteAudioStreams.push(stream);
+        const track = stream.getAudioTracks()[0] ?? ({ kind: 'audio', id: `mock-track-${this.id}`, readyState: 'live' } as MediaStreamTrack);
+        this.ontrack({
+          track,
+          streams: [stream],
+          receiver: null,
+          transceiver: null
+        } as unknown as RTCTrackEvent);
+      }
+
       private dispatchMockEvent(eventName: string) {
         const event = new Event(eventName);
         for (const handler of this.listeners.get(eventName) ?? []) {
@@ -171,6 +252,38 @@ export async function installMockCallMedia(page: Page) {
         }
       }
     }
+
+    function createMockRemoteAudioStream() {
+      const AudioContextCtor =
+        typeof AudioContext !== 'undefined'
+          ? AudioContext
+          : (globalThis as typeof globalThis & { webkitAudioContext?: typeof AudioContext })
+              .webkitAudioContext;
+
+      if (AudioContextCtor) {
+        try {
+          const context = new AudioContextCtor();
+          const destination = context.createMediaStreamDestination();
+          const oscillator = context.createOscillator();
+          oscillator.connect(destination);
+          oscillator.start();
+          return destination.stream;
+        } catch {
+          return new MediaStream();
+        }
+      }
+
+      return new MediaStream();
+    }
+
+    const originalPlay = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function play() {
+      if (this.srcObject instanceof MediaStream) {
+        return Promise.resolve();
+      }
+
+      return originalPlay.call(this);
+    };
 
     Object.defineProperty(window, 'RTCPeerConnection', {
       configurable: true,

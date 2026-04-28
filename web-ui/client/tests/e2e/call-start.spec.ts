@@ -6,6 +6,36 @@ import { makeCharacter, makeThreadDetail } from './helpers/fixtures';
 const characterId = 'call-start-character';
 const threadId = 'call-start-thread';
 
+type ReconnectRouteCounters = {
+  offerCount: number;
+  endCount: number;
+  offers: Array<{ peerId: number | null; sdp: string }>;
+  debugEvents: Array<{ event: string; detail: Record<string, unknown>; session_id?: string }>;
+};
+
+type MockCallMediaSnapshot = {
+  peers: Array<{
+    id: number;
+    connectionState: RTCPeerConnectionState;
+    iceConnectionState: RTCIceConnectionState;
+    createdOfferCount: number;
+    closed: boolean;
+    localDescriptionType: string | null;
+    remoteDescriptionType: string | null;
+    dataChannelIds: number[];
+    remoteStreamId: string | null;
+  }>;
+  channels: Array<{
+    id: number;
+    label: string;
+    ownerPeerId: number;
+    readyState: RTCDataChannelState;
+    closeCount: number;
+    sentMessages: string[];
+  }>;
+  remoteStreams: Array<{ id: string; audioTracks: number }>;
+};
+
 test('starts a call from the thread header Start call control', async ({ page }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
   await installMockCallMedia(page);
@@ -75,37 +105,133 @@ test('streams two user to AI cycles in one call and reaches the ended state', as
   await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
 
   await page.getByRole('button', { name: 'End Call' }).click();
-  await expect(page.getByRole('button', { name: 'Return to Thread' })).toBeVisible();
+  await expect(page.getByRole('status').getByRole('button', { name: 'Return to Thread' })).toBeVisible();
   assertNoBrowserErrors();
 });
 
-test('re-offers call media instead of ending when browser peer connection fails', async ({
+test('re-offers with a new peer instead of ending when browser peer connection fails', async ({
   page
 }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
   await installMockCallMedia(page);
   const counters = await installReconnectCallRoutes(page);
 
-  await page.goto(`/chat/${threadId}`);
-  await page.getByRole('button', { name: 'Start call' }).click();
-  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
-  await expect.poll(() => counters.offerCount).toBe(1);
+  await startReconnectCall(page, counters);
+  const beforeFailure = await getMockCallMediaSnapshot(page);
+  expect(beforeFailure.peers).toHaveLength(1);
+  expect(beforeFailure.channels).toHaveLength(1);
+  expect(beforeFailure.remoteStreams).toHaveLength(1);
 
-  await page.evaluate(() => {
-    const target = window as Window & {
-      __raymeMockPeerConnections?: Array<{
-        setMockConnectionState: (
-          connectionState: RTCPeerConnectionState,
-          iceConnectionState?: RTCIceConnectionState
-        ) => void;
-      }>;
-    };
-    target.__raymeMockPeerConnections?.at(-1)?.setMockConnectionState('failed', 'disconnected');
-  });
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
 
   await expect.poll(() => counters.offerCount).toBe(2);
   expect(counters.endCount).toBe(0);
   await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+
+  const afterReconnect = await getMockCallMediaSnapshot(page);
+  expect(afterReconnect.peers).toHaveLength(2);
+  expect(counters.offers.map((offer) => offer.peerId)).toEqual([
+    afterReconnect.peers[0].id,
+    afterReconnect.peers[1].id
+  ]);
+  expect(afterReconnect.peers[0]).toMatchObject({
+    closed: true,
+    createdOfferCount: 1
+  });
+  expect(afterReconnect.peers[1]).toMatchObject({
+    closed: false,
+    createdOfferCount: 1,
+    localDescriptionType: 'offer',
+    remoteDescriptionType: 'answer'
+  });
+  expect(afterReconnect.channels).toHaveLength(2);
+  expect(afterReconnect.channels[0]).toMatchObject({
+    ownerPeerId: afterReconnect.peers[0].id,
+    readyState: 'closed',
+    closeCount: 1
+  });
+  expect(afterReconnect.channels[1]).toMatchObject({
+    ownerPeerId: afterReconnect.peers[1].id,
+    readyState: 'open',
+    closeCount: 0
+  });
+  expect(afterReconnect.remoteStreams).toHaveLength(2);
+  expect(debugEventCount(counters, 'datachannel.attach')).toBe(2);
+  expect(debugEventCount(counters, 'datachannel.close')).toBe(1);
+  expect(debugEventCount(counters, 'remote_audio.attach')).toBe(2);
+  assertNoBrowserErrors();
+});
+
+test('waits out the disconnected grace period before re-offering call media', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  const counters = await installReconnectCallRoutes(page);
+
+  await startReconnectCall(page, counters);
+  await page.clock.install();
+  await setCurrentMockPeerState(page, 'disconnected', 'disconnected');
+
+  await page.clock.fastForward(2_400);
+  expect(counters.offerCount).toBe(1);
+  expect(counters.endCount).toBe(0);
+  expect(debugEventCount(counters, 'pc.media_reconnect.scheduled')).toBe(1);
+
+  await page.clock.fastForward(100);
+  await expect.poll(() => counters.offerCount).toBe(2);
+  expect(counters.endCount).toBe(0);
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  assertNoBrowserErrors();
+});
+
+test('does not re-offer when disconnected media recovers within the grace period', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  const counters = await installReconnectCallRoutes(page);
+
+  await startReconnectCall(page, counters);
+  await page.clock.install();
+  await setCurrentMockPeerState(page, 'disconnected', 'disconnected');
+
+  await page.clock.fastForward(1_000);
+  expect(counters.offerCount).toBe(1);
+  await setCurrentMockPeerState(page, 'connected', 'connected');
+  await page.clock.fastForward(2_000);
+
+  expect(counters.offerCount).toBe(1);
+  expect(counters.endCount).toBe(0);
+  const snapshot = await getMockCallMediaSnapshot(page);
+  expect(snapshot.peers).toHaveLength(1);
+  expect(snapshot.peers[0]).toMatchObject({ connectionState: 'connected', closed: false });
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  assertNoBrowserErrors();
+});
+
+test('gives up after the reconnect attempt limit without calling end', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  const counters = await installReconnectCallRoutes(page);
+
+  await startReconnectCall(page, counters);
+
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await expect.poll(() => counters.offerCount).toBe(2);
+  await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.ok')).toBe(1);
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await expect.poll(() => counters.offerCount).toBe(3);
+  await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.ok')).toBe(2);
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+
+  await expect(page.getByRole('alert').getByText('The call ended because the connection dropped.')).toBeVisible();
+  expect(counters.offerCount).toBe(3);
+  expect(counters.endCount).toBe(0);
+  expect(debugEventCount(counters, 'pc.media_reconnect.give_up')).toBe(1);
+  await expect(page.getByTestId('voice-visualizer')).toHaveCount(0);
   assertNoBrowserErrors();
 });
 
@@ -130,6 +256,101 @@ test('shows a call notice in the transcript when /turns returns a type=error SSE
   await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
   assertNoBrowserErrors();
 });
+
+async function startReconnectCall(page: Page, counters: ReconnectRouteCounters) {
+  await page.goto(`/chat/${threadId}`);
+  await page.getByRole('button', { name: 'Start call' }).click();
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  await expect.poll(() => counters.offerCount).toBe(1);
+  await expect.poll(async () => (await getMockCallMediaSnapshot(page)).peers.length).toBe(1);
+}
+
+async function setCurrentMockPeerState(
+  page: Page,
+  connectionState: RTCPeerConnectionState,
+  iceConnectionState: RTCIceConnectionState = connectionState as RTCIceConnectionState
+) {
+  await page.evaluate(
+    ({ connectionState, iceConnectionState }) => {
+      const target = window as Window & {
+        __raymeMockPeerConnections?: Array<{
+          setMockConnectionState: (
+            connectionState: RTCPeerConnectionState,
+            iceConnectionState?: RTCIceConnectionState
+          ) => void;
+        }>;
+      };
+      const peer = target.__raymeMockPeerConnections?.at(-1);
+      if (!peer) {
+        throw new Error('No mock peer connection is available');
+      }
+      peer.setMockConnectionState(connectionState, iceConnectionState);
+    },
+    { connectionState, iceConnectionState }
+  );
+}
+
+async function getMockCallMediaSnapshot(page: Page): Promise<MockCallMediaSnapshot> {
+  return page.evaluate(() => {
+    const target = window as Window & {
+      __raymeMockPeerConnections?: Array<{
+        id: number;
+        connectionState: RTCPeerConnectionState;
+        iceConnectionState: RTCIceConnectionState;
+        createdOfferCount: number;
+        closed: boolean;
+        localDescription: RTCSessionDescriptionInit | null;
+        remoteDescription: RTCSessionDescriptionInit | null;
+        dataChannels: Array<{ id: number }>;
+        remoteStream: MediaStream | null;
+      }>;
+      __raymeMockDataChannels?: Array<{
+        id: number;
+        label: string;
+        ownerPeerId: number;
+        readyState: RTCDataChannelState;
+        closeCount: number;
+        sentMessages: string[];
+      }>;
+      __raymeMockRemoteAudioStreams?: MediaStream[];
+    };
+
+    return {
+      peers: (target.__raymeMockPeerConnections ?? []).map((peer) => ({
+        id: peer.id,
+        connectionState: peer.connectionState,
+        iceConnectionState: peer.iceConnectionState,
+        createdOfferCount: peer.createdOfferCount,
+        closed: peer.closed,
+        localDescriptionType: peer.localDescription?.type ?? null,
+        remoteDescriptionType: peer.remoteDescription?.type ?? null,
+        dataChannelIds: peer.dataChannels.map((channel) => channel.id),
+        remoteStreamId: peer.remoteStream?.id ?? null
+      })),
+      channels: (target.__raymeMockDataChannels ?? []).map((channel) => ({
+        id: channel.id,
+        label: channel.label,
+        ownerPeerId: channel.ownerPeerId,
+        readyState: channel.readyState,
+        closeCount: channel.closeCount,
+        sentMessages: [...channel.sentMessages]
+      })),
+      remoteStreams: (target.__raymeMockRemoteAudioStreams ?? []).map((stream) => ({
+        id: stream.id,
+        audioTracks: stream.getAudioTracks().length
+      }))
+    };
+  });
+}
+
+function debugEventCount(counters: ReconnectRouteCounters, event: string) {
+  return counters.debugEvents.filter((entry) => entry.event === event).length;
+}
+
+function readMockPeerIdFromSdp(sdp: string) {
+  const match = /^a=x-rayme-mock-peer-id:(\d+)$/m.exec(sdp);
+  return match ? Number(match[1]) : null;
+}
 
 async function installTurnErrorCallRoutes(page: Page) {
   await installCallDebugEventRoute(page);
@@ -193,10 +414,11 @@ async function installTurnErrorCallRoutes(page: Page) {
 }
 
 async function installReconnectCallRoutes(page: Page) {
-  await installCallDebugEventRoute(page);
-  const counters = {
+  const counters: ReconnectRouteCounters = {
     offerCount: 0,
-    endCount: 0
+    endCount: 0,
+    offers: [],
+    debugEvents: []
   };
   const thread = makeThreadDetail({
     id: threadId,
@@ -212,6 +434,19 @@ async function installReconnectCallRoutes(page: Page) {
   await page.route('**/api/characters/*/portrait**', async (route) => {
     await route.fulfill({ status: 204 });
   });
+  await page.route('**/api/calls/*/_debug/event', async (route) => {
+    const payload = route.request().postDataJSON() as {
+      event?: string;
+      detail?: Record<string, unknown>;
+      session_id?: string;
+    };
+    counters.debugEvents.push({
+      event: payload.event ?? '',
+      detail: payload.detail ?? {},
+      session_id: payload.session_id
+    });
+    await fulfillJson(route, { status: 'ok' });
+  });
   await page.route('**/api/calls/start', async (route) => {
     await fulfillJson(route, {
       call_id: 'call-reconnect-01',
@@ -222,6 +457,12 @@ async function installReconnectCallRoutes(page: Page) {
   });
   await page.route('**/api/calls/*/offer', async (route) => {
     counters.offerCount += 1;
+    const payload = route.request().postDataJSON() as { offer?: { sdp?: string } };
+    const sdp = payload.offer?.sdp ?? '';
+    counters.offers.push({
+      peerId: readMockPeerIdFromSdp(sdp),
+      sdp
+    });
     await fulfillJson(route, {
       call_id: 'call-reconnect-01',
       session_id: 'rtc-call-reconnect-01',
