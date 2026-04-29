@@ -1,0 +1,10 @@
+[features]
+codex_hooks = true
+
+[[hooks.SessionStart]]
+matcher = "startup|resume"
+
+[[hooks.SessionStart.hooks]]
+type = "command"
+command = 'bash "$(git rev-parse --show-toplevel)/.codex/hooks/ssh-restore-startup.sh"'
+statusMessage = "Restoring SSH access"
