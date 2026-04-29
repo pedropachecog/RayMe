@@ -184,6 +184,7 @@ def _new_session(
     tts_adapter: Any | None = None,
     outbound_audio_track: Any | None = None,
     event_sink: Any | None = None,
+    settings: AiBackendSettings | None = None,
 ) -> tuple[Any, ScriptedPeerConnection]:
     peer = ScriptedPeerConnection()
     session = CallSession(
@@ -194,6 +195,7 @@ def _new_session(
         tts_adapter=tts_adapter,
         outbound_audio_track=outbound_audio_track,
         event_sink=event_sink,
+        settings=settings,
     )
     return session, peer
 
@@ -359,6 +361,29 @@ class ScriptedSileroVadAdapter:
         return [{"start": 0, "end": min(end, total_samples)}]
 
 
+class FlakySileroVadAdapter:
+    """Mimics a brief Silero false-negative gap during continuous speech."""
+
+    def __init__(
+        self,
+        *,
+        false_silence_calls: set[int],
+        sampling_rate: int = 16000,
+        threshold: float = 0.5,
+    ) -> None:
+        self.false_silence_calls = false_silence_calls
+        self.sampling_rate = sampling_rate
+        self.threshold = threshold
+        self.calls = 0
+
+    def speech_timestamps(self, audio: Any) -> list[dict[str, int]]:
+        self.calls += 1
+        if self.calls in self.false_silence_calls:
+            return []
+        total_samples = int(len(audio))
+        return [{"start": 0, "end": total_samples}]
+
+
 def test_silero_silence_gap_finalizes_turn_even_with_loud_ambient_noise() -> None:
     """Regression: with browser AGC, raw RMS energy stays high every frame.
     Silero must drive end_of_turn from the gap between last speech and buffer end,
@@ -374,9 +399,10 @@ def test_silero_silence_gap_finalizes_turn_even_with_loud_ambient_noise() -> Non
         speech_end_sample=speech_end_sample,
     )
     stt = ScriptedSttAdapter()
-    session, _ = _new_session(vad_adapter=vad, stt_adapter=stt)
+    settings = AiBackendSettings(call_vad_end_silence_ms=700)
+    session, _ = _new_session(vad_adapter=vad, stt_adapter=stt, settings=settings)
 
-    end_silence_ms = int(session.settings.vad_end_silence_ms)
+    end_silence_ms = int(session.settings.call_vad_end_silence_ms)
     silence_frames_needed = (end_silence_ms // 20) + 1
     total_frames = speech_frames_count + silence_frames_needed
 
@@ -394,6 +420,23 @@ def test_silero_silence_gap_finalizes_turn_even_with_loud_ambient_noise() -> Non
     )
     assert final_event["type"] == "user_final"
     assert stt.calls, "STT must run after VAD end_of_turn"
+
+
+def test_call_vad_tolerates_short_false_silero_silence_during_continuous_speech() -> None:
+    frame_samples = 320  # 20 ms at 16 kHz
+    speech_pcm = np.full(frame_samples, 2000, dtype=np.int16).tobytes()
+    vad = FlakySileroVadAdapter(false_silence_calls=set(range(11, 46)))
+    stt = ScriptedSttAdapter()
+    session, _ = _new_session(vad_adapter=vad, stt_adapter=stt)
+
+    for _ in range(55):
+        result = _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(speech_pcm)))
+        assert not (isinstance(result, dict) and result.get("type") == "user_final")
+
+    assert stt.calls == []
+    assert session.state == "listening"
+    assert session._speech_seen is True
+    assert session._silence_ms == 0
 
 
 def test_inbound_audio_normalizer_scales_integer_channels_before_mixing() -> None:
@@ -673,6 +716,26 @@ def test_default_vad_max_turn_does_not_force_end_at_five_seconds() -> None:
     assert result["end_of_turn"] is False
 
 
+def test_default_call_vad_max_turn_allows_continuous_speech_beyond_thirty_seconds() -> None:
+    settings = AiBackendSettings()
+    vad = ScriptedSileroVadAdapter(sampling_rate=16000)
+    session = CallSession(
+        session_id="call-vad-long-turn",
+        settings=settings,
+        vad_adapter=vad,
+    )
+    pcm = np.full(320, 2000, dtype=np.int16).tobytes()
+    result: dict[str, bool] = {"end_of_turn": False}
+
+    for _ in range(1600):  # 32 seconds at 20 ms/frame.
+        frame = PcmAudioFrame(pcm=pcm, sample_rate=16000, channels=1)
+        session._turn_frames.append(frame)
+        result = session._accept_vad_frame(frame)
+
+    assert settings.call_vad_max_turn_ms > 30000
+    assert result["end_of_turn"] is False
+
+
 def test_silero_vad_analysis_window_stays_bounded_after_five_seconds() -> None:
     settings = AiBackendSettings(vad_end_silence_ms=700, vad_max_turn_ms=30000)
     vad = ScriptedSileroVadAdapter(sampling_rate=16000)
@@ -687,7 +750,7 @@ def test_silero_vad_analysis_window_stays_bounded_after_five_seconds() -> None:
 
     assert len(session._turn_frames) == 300, "STT still needs the full turn buffer"
     assert vad.calls
-    assert max(vad.calls) <= 16000 * 2
+    assert max(vad.calls) <= 16000 * 3
 
 
 def test_speak_text_generic_adapter_uses_real_reference_audio() -> None:

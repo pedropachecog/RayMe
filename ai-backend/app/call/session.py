@@ -167,7 +167,7 @@ class CallSession:
                     "threshold_ms=%d",
                     self.session_id,
                     self._silence_ms,
-                    int(self.settings.vad_end_silence_ms),
+                    self._call_end_silence_ms(),
                 )
             return None
 
@@ -560,7 +560,7 @@ class CallSession:
 
         samples = np.frombuffer(frame.pcm, dtype=np.int16).astype(np.float32)
         frame_ms = int((len(samples) / max(frame.sample_rate, 1)) * 1000)
-        end_silence_ms = int(self.settings.vad_end_silence_ms)
+        end_silence_ms = self._call_end_silence_ms()
 
         # DIAG: log per-frame energy for first frame + frame 10
         frame_idx = len(self._turn_frames)
@@ -627,8 +627,8 @@ class CallSession:
                 self._silence_ms += frame_ms
 
             # Max turn duration safety net: force end if Silero keeps
-            # classifying everything as continuous speech beyond vad_max_turn_ms
-            max_turn_ms = int(getattr(getattr(self, 'settings', None), 'vad_max_turn_ms', 10000))
+            # classifying everything as continuous speech beyond the call cap.
+            max_turn_ms = self._call_max_turn_ms()
             turn_duration_ms = frame_idx * frame_ms
             forced_end = turn_duration_ms >= max_turn_ms
 
@@ -650,7 +650,7 @@ class CallSession:
         elif self._speech_seen:
             self._silence_ms += frame_ms
 
-        max_turn_ms = int(getattr(getattr(self, 'settings', None), 'vad_max_turn_ms', 10000))
+        max_turn_ms = self._call_max_turn_ms()
         turn_duration_ms = frame_idx * frame_ms
 
         return {
@@ -672,12 +672,30 @@ class CallSession:
 
     def _recent_vad_samples(self, samples: np.ndarray, adapter: Any) -> np.ndarray:
         sampling_rate = int(getattr(adapter, "sampling_rate", 16000)) or 16000
-        end_silence_ms = int(self.settings.vad_end_silence_ms)
+        end_silence_ms = self._call_end_silence_ms()
         window_seconds = max(2.0, (end_silence_ms + 500) / 1000.0)
         max_samples = max(int(sampling_rate * window_seconds), 1)
         if len(samples) <= max_samples:
             return samples
         return samples[-max_samples:]
+
+    def _call_end_silence_ms(self) -> int:
+        return int(
+            getattr(
+                self.settings,
+                "call_vad_end_silence_ms",
+                self.settings.vad_end_silence_ms,
+            )
+        )
+
+    def _call_max_turn_ms(self) -> int:
+        return int(
+            getattr(
+                self.settings,
+                "call_vad_max_turn_ms",
+                self.settings.vad_max_turn_ms,
+            )
+        )
 
     def _transcribe_turn(self, frames: list[PcmAudioFrame]) -> dict[str, Any]:
         adapter = self.stt_adapter
