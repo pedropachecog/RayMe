@@ -1,7 +1,8 @@
 ---
-status: investigating
+status: resolved
 created: 2026-04-26T00:58:20Z
-updated: 2026-04-26T00:58:20Z
+updated: 2026-04-29T02:39:02Z
+closure_reason: superseded by solved Android live-call debug session
 handoff_for: next-agent
 ---
 

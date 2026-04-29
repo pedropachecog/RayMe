@@ -1,7 +1,8 @@
 ---
-status: awaiting_human_verify
+status: resolved
 created: 2026-04-27T03:30:00Z
-updated: 2026-04-27T20:30:00Z
+updated: 2026-04-29T02:39:02Z
+closure_reason: superseded by solved Android live-call debug session
 ---
 
 # Debug Session: Android Call Speaking No Audio

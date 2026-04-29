@@ -1,8 +1,9 @@
 ---
-status: active
+status: resolved
 trigger: "Call work was claimed before the implementation proved end-to-end microphone, turn generation, and audio playback behavior."
 created: 2026-04-26T00:14:20Z
-updated: 2026-04-26T00:14:20Z
+updated: 2026-04-29T02:39:02Z
+closure_reason: call-working incident criteria satisfied by final live-call fix and user acceptance
 ---
 
 # Debug Incident: Call Working Criteria Failure

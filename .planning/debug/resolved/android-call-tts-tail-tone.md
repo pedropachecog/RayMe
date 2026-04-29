@@ -1,8 +1,8 @@
 ---
-status: awaiting_human_verify
+status: resolved
 trigger: "Android live call playback improved after paced TTS frames, but mic input stops truly listening after about five seconds of either continuous speech or pre-speech idle while the UI still says Listening."
 created: 2026-04-27T18:42:11Z
-updated: 2026-04-28T15:29:00Z
+updated: 2026-04-29T02:39:02Z
 ---
 
 # Debug Session: Android Call TTS Tail And Tone
@@ -317,6 +317,8 @@ fix:
   Frontend media reconnect now schedules from ICE `disconnected`/`failed` as well as aggregate connection failure, treats media as healthy only when aggregate connection is connected and ICE is connected/completed, upgrades a pending disconnected recovery to immediate failed recovery, and logs `pc.media_reconnect.guard_skip` for any future guard return instead of silently doing nothing.
 verification:
   Added a red Playwright regression for `iceConnectionState=disconnected` while `connectionState=connected`; it failed before the fix with one offer and zero `pc.media_reconnect.scheduled` events, then passed after the patch. Also passed frontend check, focused call-audio unit test, full frontend unit suite, full call-start e2e suite, production build, and `git diff --check`. Not deployed or live-verified in this subtask.
+closure:
+  User confirmed on 2026-04-29 that the problem has been solved and asked to stop this debug session. Commit `1db1e93 fix(call): reconnect on ice-only media loss` was pushed and deployed to OMEN via `scripts/deploy-omen.sh`.
 files_changed:
   - web-ui/client/src/routes/call/[threadId]/+page.svelte
   - web-ui/client/tests/e2e/call-start.spec.ts

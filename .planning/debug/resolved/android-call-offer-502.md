@@ -1,8 +1,9 @@
 ---
-status: blocked
+status: resolved
 trigger: "Android Chrome Phase 3 live call: microphone permission is granted and Android shows mic listening, then the RayMe call UI still fails or becomes unusable."
 created: 2026-04-25T23:36:09Z
-updated: 2026-04-27T00:30:00Z
+updated: 2026-04-29T02:39:02Z
+closure_reason: superseded by solved Android live-call debug session
 ---
 
 # Debug Session: Android Call Offer 502
@@ -1478,4 +1479,3 @@ is interrupted by ICE failure:
 The debug session is paused pending user direction. The debug file now
 contains the complete trace history of all root causes found and fixes
 applied during this session.
-

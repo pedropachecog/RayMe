@@ -1,8 +1,9 @@
 ---
-status: diagnosed
+status: resolved
 trigger: "Android Chrome call now stops listening when generation begins, but the UI shows speaking with no audible audio; silence is still transcribed as 'thank you' and generates more silent responses; controls dialog blocks the status/transcript area."
 created: 2026-04-27T00:00:00Z
-updated: 2026-04-27T17:30:24Z
+updated: 2026-04-29T02:39:02Z
+closure_reason: superseded by solved Android live-call debug session
 ---
 
 # Debug Session: Android Speaking Silent And Phantom Thank You
