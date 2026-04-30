@@ -1,7 +1,7 @@
 ---
-status: fixing
+status: verifying
 created: 2026-04-29T19:18:06Z
-updated: 2026-04-30T17:38:16Z
+updated: 2026-04-30T17:41:07Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -10,9 +10,9 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 ## Current Focus
 
 hypothesis: Post-`2360feb` diagnostics show the first lost speech is the multi-second browser/WebRTC outage during media reconnect, not browser mic mute and not backend VAD rejection. The browser captures speech while the peer connection is failed/reconnecting; the backend receives no frames until the reoffer completes, then receives VAD-positive speech again.
-test: Implement browser-side reconnect-gap PCM buffering and backend active-turn backfill, preserving ordering by posting the buffered gap after the backend accepts the reoffer but before the browser applies the answer and starts replacement-track media.
-expecting: STT should receive one ordered turn containing pre-reconnect frames, buffered reconnect-gap PCM, and replacement-track frames. Reconnect diagnostics should show `mic.reconnect_backfill.sent` and backend `reconnect_audio.backfill.applied`.
-next_action: Commit, push, deploy with `scripts/deploy-omen.sh`, then ask user to repeat the long-passage repro.
+test: User should repeat the same long-passage phone-call repro on the deployed reconnect-gap backfill build.
+expecting: STT should receive one ordered turn containing pre-reconnect frames, buffered reconnect-gap PCM, and replacement-track frames. Reconnect diagnostics should show `mic.reconnect_backfill.sent` and backend `reconnect_audio.backfill.applied`; the transcript should no longer drop the middle speech spoken during reconnect.
+next_action: Ask user to repeat the long-passage repro on deployed commit `adb035c`; if it still truncates, spawn `gsd-debugger` to inspect the new backfill logs.
 
 ## Symptoms
 
@@ -74,6 +74,11 @@ evidence_files:
   checked: Regression tests for reconnect-gap audio backfill.
   found: `uv run --project ai-backend pytest ai-backend/tests -q` passed: 93 passed, 3 warnings. `uv run --project web-ui/server pytest web-ui/server/tests -q` passed: 151 passed. `npm run build` passed. `npm run test:e2e -- call-start.spec.ts` passed: 20 passed. `git diff --check` passed.
   implication: The fix is covered at backend call-session, AI backend signaling route, Web UI facade route, and existing call reconnect E2E levels.
+
+- timestamp: 2026-04-30T17:41:07Z
+  checked: Reconnect-gap backfill deployment to OMEN.
+  found: Committed and pushed `adb035c` (`fix(call): backfill speech during media reconnect`), then deployed with `scripts/deploy-omen.sh`. OMEN checkout reported `adb035c`; `/webrtc/status` returned `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, and `active_sessions=0`. Generic `/health` remains `degraded` for the known non-F5 TTS engine availability reason while STT/VAD are ready and F5 is resident.
+  implication: The next user phone-call repro will run against the reconnect-gap backfill fix.
 
 - timestamp: 2026-04-30T17:19:00Z
   checked: User live verification after deploying reconnect audio diagnostics (`2360feb`, instrumentation from `3ce53c7`).
@@ -247,6 +252,7 @@ verification:
   - `npm run build` passed after reconnect-gap backfill.
   - `npm run test:e2e -- call-start.spec.ts` passed after reconnect-gap backfill: 20 passed.
   - `git diff --check` passed after reconnect-gap backfill.
+  - `scripts/deploy-omen.sh` deployed reconnect-gap backfill commit `adb035c`; post-deploy `/webrtc/status` was ready.
 files_changed:
   - ai-backend/app/config.py
   - ai-backend/app/call/session.py
