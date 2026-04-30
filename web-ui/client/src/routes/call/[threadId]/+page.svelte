@@ -86,6 +86,11 @@
   let localMicSource: MediaStreamAudioSourceNode | null = null;
   let localMicAnalyser: AnalyserNode | null = null;
   let localMicMeterFrame = 0;
+  let localMicRawRms: number | null = null;
+  let localMicRawPeak: number | null = null;
+  let localMicReconnectDiagTimer = 0;
+  let localMicReconnectDiagStartedAt = 0;
+  let localMicReconnectDiagTick = 0;
   let remoteAudioElement: HTMLAudioElement | null = null;
   let remoteAudioContext: AudioContext | null = null;
   let remoteAudioSource: MediaStreamAudioSourceNode | null = null;
@@ -97,6 +102,8 @@
 
   const MEDIA_RECONNECT_DISCONNECTED_GRACE_MS = 2500;
   const MEDIA_RECONNECT_MAX_ATTEMPTS = 2;
+  const MEDIA_RECONNECT_MIC_DIAG_MS = 7000;
+  const MEDIA_RECONNECT_MIC_DIAG_INTERVAL_MS = 500;
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'RayMe');
@@ -217,7 +224,8 @@
         id: track.id,
         readyState: track.readyState,
         muted: track.muted,
-        enabled: track.enabled
+        enabled: track.enabled,
+        settings: summarizeLocalAudioTrackSettings(track)
       });
       connection.addTrack(track, localMediaStream);
     }
@@ -267,6 +275,11 @@
       if ((iceConnectionState === 'connected' || iceConnectionState === 'completed') && isBrowserMediaConnected(connection)) {
         clearMediaReconnectTimer();
         mediaReconnectAttempts = 0;
+        emitLocalMicReconnectDiagnostic(debugCallId, {
+          phase: 'recovered',
+          reason: 'disconnected',
+          source: 'iceconnectionstatechange'
+        });
       }
     });
     connection.addEventListener('connectionstatechange', () => {
@@ -290,6 +303,11 @@
       if (connection.connectionState === 'connected' && isBrowserMediaConnected(connection)) {
         clearMediaReconnectTimer();
         mediaReconnectAttempts = 0;
+        emitLocalMicReconnectDiagnostic(debugCallId, {
+          phase: 'recovered',
+          reason: 'failed',
+          source: 'connectionstatechange'
+        });
         try {
           if (eventsChannel && (eventsChannel.readyState === 'closed' || eventsChannel.readyState === 'closing')) {
             emitDebugEvent(debugCallId, 'datachannel.recreate', {
@@ -386,9 +404,21 @@
       delayMs,
       attempts: mediaReconnectAttempts
     });
+    emitLocalMicReconnectDiagnostic(debugCallId, {
+      phase: 'scheduled',
+      reason,
+      delayMs,
+      attempts: mediaReconnectAttempts
+    });
+    startLocalMicReconnectDiagnostics(debugCallId, reason);
     mediaReconnectTimer = window.setTimeout(() => {
       mediaReconnectTimer = 0;
       if (isBrowserMediaConnected(connection)) {
+        emitLocalMicReconnectDiagnostic(debugCallId, {
+          phase: 'schedule_cancelled_connected',
+          reason,
+          attempts: mediaReconnectAttempts
+        });
         return;
       }
       void reconnectBrowserMedia(connection, debugCallId, reason);
@@ -427,6 +457,11 @@
       reason,
       attempt: mediaReconnectAttempts
     });
+    emitLocalMicReconnectDiagnostic(debugCallId, {
+      phase: 'start',
+      reason,
+      attempt: mediaReconnectAttempts
+    });
 
     try {
       detachRemoteAudio();
@@ -442,11 +477,22 @@
       emitDebugEvent(debugCallId, 'pc.media_reconnect.ok', {
         attempt: mediaReconnectAttempts
       });
+      emitLocalMicReconnectDiagnostic(debugCallId, {
+        phase: 'ok',
+        reason,
+        attempt: mediaReconnectAttempts
+      });
     } catch (error) {
       emitDebugEvent(debugCallId, 'pc.media_reconnect.failed', {
         attempt: mediaReconnectAttempts,
         name: (error as DOMException)?.name ?? 'unknown',
         message: (error as Error)?.message ?? ''
+      });
+      emitLocalMicReconnectDiagnostic(debugCallId, {
+        phase: 'failed',
+        reason,
+        attempt: mediaReconnectAttempts,
+        name: (error as DOMException)?.name ?? 'unknown'
       });
       if (mediaReconnectAttempts >= MEDIA_RECONNECT_MAX_ATTEMPTS) {
         applyCallState('failed');
@@ -497,6 +543,91 @@
       hasSessionId: Boolean(sessionId),
       hasLocalMedia: Boolean(localMediaStream)
     });
+  }
+
+  function startLocalMicReconnectDiagnostics(debugCallId: string, reason: MediaReconnectReason) {
+    stopLocalMicReconnectDiagnostics();
+    localMicReconnectDiagStartedAt = Date.now();
+    localMicReconnectDiagTick = 0;
+
+    const emitNext = () => {
+      const elapsedMs = Date.now() - localMicReconnectDiagStartedAt;
+      localMicReconnectDiagTick += 1;
+      emitLocalMicReconnectDiagnostic(debugCallId, {
+        phase: 'interval',
+        reason,
+        elapsedMs,
+        tick: localMicReconnectDiagTick,
+        attempts: mediaReconnectAttempts,
+        mediaReconnecting
+      });
+
+      if (elapsedMs >= MEDIA_RECONNECT_MIC_DIAG_MS || !localMediaStream) {
+        stopLocalMicReconnectDiagnostics();
+        return;
+      }
+
+      localMicReconnectDiagTimer = window.setTimeout(
+        emitNext,
+        MEDIA_RECONNECT_MIC_DIAG_INTERVAL_MS
+      );
+    };
+
+    emitNext();
+  }
+
+  function stopLocalMicReconnectDiagnostics() {
+    if (localMicReconnectDiagTimer) {
+      window.clearTimeout(localMicReconnectDiagTimer);
+      localMicReconnectDiagTimer = 0;
+    }
+    localMicReconnectDiagStartedAt = 0;
+    localMicReconnectDiagTick = 0;
+  }
+
+  function emitLocalMicReconnectDiagnostic(
+    debugCallId: string,
+    detail: Record<string, unknown>
+  ) {
+    emitDebugEvent(debugCallId, 'mic.reconnect_diag', {
+      ...detail,
+      callState,
+      hasLocalMedia: Boolean(localMediaStream),
+      trackCount: localMediaStream?.getAudioTracks().length ?? 0,
+      tracks: summarizeLocalAudioTracks(),
+      localAudioContextState: localAudioContext?.state ?? 'none',
+      listeningRms,
+      localMicRawRms,
+      localMicRawPeak
+    });
+  }
+
+  function summarizeLocalAudioTracks() {
+    return (localMediaStream?.getAudioTracks() ?? []).map((track) => ({
+      id: track.id,
+      kind: track.kind,
+      readyState: track.readyState,
+      muted: track.muted,
+      enabled: track.enabled,
+      settings: summarizeLocalAudioTrackSettings(track)
+    }));
+  }
+
+  function summarizeLocalAudioTrackSettings(track: MediaStreamTrack) {
+    const settings =
+      typeof track.getSettings === 'function'
+        ? track.getSettings()
+        : ({} as MediaTrackSettings);
+    return {
+      sampleRate: settings.sampleRate ?? null,
+      sampleSize: settings.sampleSize ?? null,
+      channelCount: settings.channelCount ?? null,
+      echoCancellation: settings.echoCancellation ?? null,
+      noiseSuppression: settings.noiseSuppression ?? null,
+      autoGainControl: settings.autoGainControl ?? null,
+      deviceIdPresent: Boolean(settings.deviceId),
+      groupIdPresent: Boolean(settings.groupId)
+    };
   }
 
   function emitDebugEvent(debugCallId: string, name: string, detail: Record<string, unknown>): void {
@@ -640,10 +771,14 @@
         }
         analyser.getFloatTimeDomainData(samples);
         let sumSquares = 0;
+        let peak = 0;
         for (const sample of samples) {
           sumSquares += sample * sample;
+          peak = Math.max(peak, Math.abs(sample));
         }
         const rms = Math.sqrt(sumSquares / samples.length);
+        localMicRawRms = rms;
+        localMicRawPeak = peak;
         listeningRms = Math.max(0.04, Math.min(1, rms * 3.2));
         localMicMeterFrame = requestAnimationFrame(updateMeter);
       };
@@ -665,6 +800,8 @@
     localMicSource = null;
     localMicAnalyser = null;
     localAudioContext = null;
+    localMicRawRms = null;
+    localMicRawPeak = null;
   }
 
   function waitForIceGathering(connection: RTCPeerConnection): Promise<void> {
@@ -1202,6 +1339,7 @@
 
   function stopBrowserMedia() {
     clearMediaReconnectTimer();
+    stopLocalMicReconnectDiagnostics();
     mediaReconnecting = false;
     stopLocalMicMeter();
     detachRemoteAudio();

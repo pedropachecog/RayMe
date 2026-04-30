@@ -159,6 +159,12 @@ test('re-offers with a new peer instead of ending when browser peer connection f
   expect(debugEventCount(counters, 'datachannel.attach')).toBe(2);
   expect(debugEventCount(counters, 'datachannel.close')).toBe(1);
   expect(debugEventCount(counters, 'remote_audio.attach')).toBe(2);
+  const micReconnectDiagPhases = counters.debugEvents
+    .filter((entry) => entry.event === 'mic.reconnect_diag')
+    .map((entry) => entry.detail.phase);
+  expect(micReconnectDiagPhases).toContain('scheduled');
+  expect(micReconnectDiagPhases).toContain('start');
+  expect(micReconnectDiagPhases).toContain('ok');
   assertNoBrowserErrors();
 });
 

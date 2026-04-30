@@ -1,7 +1,7 @@
 ---
-status: awaiting_human_verify
+status: investigating
 created: 2026-04-29T19:18:06Z
-updated: 2026-04-30T14:20:00Z
+updated: 2026-04-30T16:10:20Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -9,16 +9,10 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 
 ## Current Focus
 
-reasoning_checkpoint:
-  hypothesis: "`e4b93d9` does not arm reconnect grace when the old peer has already failed because `CallSessionManager.create_session()` calls `existing.mark_media_reconnect_pending()` before recovering `existing.state` from `failed` to `listening`, while `mark_media_reconnect_pending()` requires `state == 'listening'`."
-  confirming_evidence:
-    - "Latest OMEN logs for `rtc_2f157017837a4ee4b307bb08cb2630e0` show the browser/media path failed and reoffered mid-turn, but no `vad.reconnect_grace.pending/start/hold` backend log appears."
-    - "The same turn finalized immediately after reoffer on `vad.end_of_turn ... silence_ms=1822` and reached STT with only `frames=1258`, producing the persisted 367-character transcript."
-    - "A focused regression test with an in-progress spoken turn in `failed/connection_failed` state recovers to `listening` on reoffer but leaves `_media_reconnect_grace_pending` false on current code."
-  falsification_test: "If reordering failed-state recovery before `mark_media_reconnect_pending()` does not make the new failed-state reoffer test pass, or if full call-session tests regress, the root cause is not this state-ordering bug."
-  fix_rationale: "Recover the failed live session to `listening` before deciding whether the in-progress speech turn should receive reconnect grace, so the existing guard sees the same state it sees in non-failed reoffers."
-  blind_spots: "This does not prevent the browser/media connection from failing; it only preserves server-side turn finalization through the post-reoffer startup silence. A future live repro is still needed to confirm the Android call path."
-next_action: Deploy with `scripts/deploy-omen.sh`, then rerun the long phone-call passage and check for `vad.reconnect_grace.*` logs plus a full persisted transcript.
+hypothesis: Strongest current hypothesis: after Android/browser WebRTC media reconnect, the replacement outbound microphone path sends silence or no VAD-positive audio for the ongoing user speech. Backend grace now works, but it expires because no voiced frames arrive before finalization.
+test: Add a targeted instrumentation experiment, not a functional fix: log browser local microphone RMS/track state around reconnect and backend per-frame RMS for replacement-track frames while grace is active, then repeat the same long passage.
+expecting: Browser local RMS high + backend replacement RMS low means the loss is in WebRTC send/receive. Browser local RMS low means capture/noise processing muted speech. Backend replacement RMS high + VAD silence means VAD logic is rejecting real speech.
+next_action: Commit and deploy the instrumentation-only patch via `scripts/deploy-omen.sh`, then ask the user to repeat the same long-passage repro so the new browser/backend audio diagnostics can identify the next boundary.
 
 ## Symptoms
 
@@ -32,8 +26,49 @@ reproduction: Start a phone call, speak multi-sentence passages, include around 
 evidence_files:
   - .planning/debug/phone-call-transcript-comparison.md
   - .planning/debug/phone-call-repro-e4b93d9-2026-04-30.md
+  - .planning/debug/phone-call-repro-1239588-2026-04-30.md
 
 ## Investigation Evidence
+
+- timestamp: 2026-04-30T15:56:08Z
+  checked: User live verification after deploying commit `1239588`.
+  found: User repeated the same repro as the previous failed call. RayMe still did not transcribe the whole long text.
+  implication: The debug session is reopened. Prior VAD and reconnect-grace fixes are insufficient, or the latest live failure is a different loss mode. The next debugger should inspect the newest OMEN logs and persisted thread data with fresh eyes.
+
+- timestamp: 2026-04-30T15:57:53Z
+  checked: Local and SSH access before latest OMEN inspection.
+  found: Local checkout is at commit `1239588`. SSH works as `omen-pc\rayme-ssh` and `omen-pc\pmpg`.
+  implication: The latest repro can be investigated against the intended local commit and live OMEN runtime without changing deployment state.
+
+- timestamp: 2026-04-30T16:00:23Z
+  checked: Latest OMEN deployment, active logs, thread API, and call/session IDs after the user's post-`1239588` repro.
+  found: OMEN checkout is deployed at commit `1239588`. Active logs are `C:\Users\pmpg\rayme\logs\ai-backend.run.log` and `web-ui.run.log`. The latest substantive repro is `call_fc27939a380549f2a1a7a0ea38be2ec6` / `rtc_03a72711f2044c55a73cfc184e2151c5` on `thread_3be859853d7a4726a5151ca50b6e7940`; the later `call_0e9421d52da44cd4b5199f4237abfd65` / `rtc_f1a6d6121d764f618351866fb1238d4a` starts and ends immediately with no speech.
+  implication: The live failure happened on the intended fixed commit. The newest no-speech call should not be treated as the truncation repro.
+
+- timestamp: 2026-04-30T16:00:23Z
+  checked: Persisted Web UI thread data for `thread_3be859853d7a4726a5151ca50b6e7940`.
+  found: The latest substantive call persisted user speech `Hey, how are you doing?` followed by a long user row of 448 characters: `Of course, and now I will tell you a story... but stood quite as soon as I clearly realized the loss of my bearings.`
+  implication: Persistence/UI are not the first loss boundary; the thread stores the same already-short transcript that came through `user_final`.
+
+- timestamp: 2026-04-30T16:00:23Z
+  checked: Backend and browser logs for `rtc_03a72711f2044c55a73cfc184e2151c5`.
+  found: The long turn starts at backend frame 1062, VAD sees speech at turn frame 129, the old track fails at frame 2045, browser logs `pc.connectionstatechange failed`, `pc.iceconnectionstatechange disconnected`, and `pc.media_reconnect.start`, backend accepts a same-session reoffer, `vad.reconnect_grace.pending/start` are present, but the replacement track produces no post-reconnect `vad.speech_start`; it logs silence through `silence_ms=1822`, `vad.reconnect_grace.expired`, `vad.end_of_turn turn_frames=1645`, then `stt.begin frames=1645` and `stt.result transcript_len=448`.
+  implication: The prior failed-state grace-ordering bug is fixed in live logs. The current first-loss boundary is still before STT, at media reconnect/VAD: the backend receives a replacement track but only silence/no VAD-positive speech before finalizing the partial turn.
+
+- timestamp: 2026-04-30T16:01:50Z
+  checked: Latest repro evidence preservation.
+  found: Saved `.planning/debug/phone-call-repro-1239588-2026-04-30.md` with deployed commit, call/session/thread IDs, persisted user speech, log boundary summary, first-loss boundary, and the next instrumentation experiment.
+  implication: The post-`1239588` failure can be reloaded without re-querying OMEN logs.
+
+- timestamp: 2026-04-30T16:10:20Z
+  checked: Instrumentation-only patch for the next live experiment.
+  found: Added backend `vad.reconnect_grace.audio` logs with per-frame RMS/peak, Silero timestamp counts, speech flags, silence counters, and grace remaining time while reconnect grace is active. Added browser `mic.reconnect_diag` logs with local microphone RMS/peak, track state/settings, call state, reconnect phase, attempt count, and interval samples around media reconnect. Added an E2E assertion that reconnect emits scheduled/start/ok mic diagnostics.
+  implication: The next repro should distinguish browser capture silence, WebRTC send/receive silence, and backend VAD rejection without changing call behavior.
+
+- timestamp: 2026-04-30T16:10:20Z
+  checked: Regression tests for instrumentation patch.
+  found: `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` passed: 32 passed. `uv run --project ai-backend pytest ai-backend/tests -q` passed: 90 passed, 1 warning. `npm run build` passed. `npm run test:e2e -- call-start.spec.ts` passed: 20 passed. `git diff --check` passed.
+  implication: The instrumentation patch is safe to commit and deploy for the next diagnostic call.
 
 - timestamp: 2026-04-30T13:31:00Z
   checked: Fresh OMEN runtime state after the user's post-`e4b93d9` repro.
@@ -123,10 +158,18 @@ evidence_files:
   evidence: User explicitly clarified they made sure not to pause; observed `vad.end_of_turn silence_ms=722` entries must be false VAD silence or hard cutoff behavior, not real turn endings.
   timestamp: 2026-04-29T19:58:21Z
 
+- hypothesis: The post-`1239588` failure is still caused by failed-state reoffers not arming backend reconnect grace.
+  evidence: Latest live backend logs for `rtc_03a72711f2044c55a73cfc184e2151c5` show `vad.reconnect_grace.pending` and `vad.reconnect_grace.start`, proving the grace-ordering fix is active in this repro.
+  timestamp: 2026-04-30T16:01:50Z
+
+- hypothesis: The latest truncation happens in STT result forwarding, persistence, or UI display after a full `user_final`.
+  evidence: Latest backend logs show `stt.begin` received only `frames=1645` for the long turn and `stt.result transcript_len=448`; the Web UI thread API stores the same 448-character user speech row.
+  timestamp: 2026-04-30T16:01:50Z
+
 ## Resolution
 
-root_cause: Phone call transcription loses chunks before STT. The first loss mode was overly aggressive live-call VAD finalization (`vad.end_of_turn silence_ms=722`) and a 30s hard max-turn cap. After commit `ba6057c`, the remaining loss mode was mid-speech browser media reconnect. After commit `e4b93d9`, the exact remaining bug is that failed-then-reoffered reconnects do not arm reconnect grace: `CallSessionManager.create_session()` calls `mark_media_reconnect_pending()` before recovering `failed/connection_failed` sessions to `listening`, while `mark_media_reconnect_pending()` requires `state == "listening"`. In the latest live repro, this left no `vad.reconnect_grace.*` logs; post-reoffer startup silence finalized the turn before STT.
-fix: Added call-specific VAD settings (`call_vad_end_silence_ms=1800`, `call_vad_max_turn_ms=120000`), updated `CallSession` to use them for live-call turn finalization/windowing, and added regression tests for false Silero silence during continuous speech and continuous speech beyond 30 seconds. Follow-up fix: added `call_media_reconnect_grace_ms=5000`; when a browser reoffer replaces the peer connection during an active spoken turn, `CallSession` arms a short grace window and starts it on the first frame of the new track so reconnect startup silence does not finalize the turn before speech resumes. Post-`e4b93d9` follow-up: recover `failed/connection_failed` sessions before marking reconnect grace so failed-then-reoffered mid-turn calls actually arm the grace window.
+root_cause: Phone call transcription loses chunks before STT. Prior confirmed root causes were overly aggressive live-call VAD finalization, a 30s hard max-turn cap, and failed-state reoffers that did not arm reconnect grace. As of deployed commit `1239588`, those fixes are active, but the latest failure still occurs before STT: after browser media reconnect, backend reconnect grace arms and the replacement track reaches the receive loop, yet no VAD-positive speech arrives before grace expires and the partial turn finalizes. The remaining root cause is not fully isolated between browser microphone capture, WebRTC sending/receiving silent audio, and backend VAD rejecting post-reconnect speech.
+fix: Added call-specific VAD settings (`call_vad_end_silence_ms=1800`, `call_vad_max_turn_ms=120000`), updated `CallSession` to use them for live-call turn finalization/windowing, and added regression tests for false Silero silence during continuous speech and continuous speech beyond 30 seconds. Follow-up fix: added `call_media_reconnect_grace_ms=5000`; when a browser reoffer replaces the peer connection during an active spoken turn, `CallSession` arms a short grace window and starts it on the first frame of the new track so reconnect startup silence does not finalize the turn before speech resumes. Post-`e4b93d9` follow-up: recover `failed/connection_failed` sessions before marking reconnect grace so failed-then-reoffered mid-turn calls actually arm the grace window. No new functional fix is confirmed for the post-`1239588` failure; the next change should be instrumentation to distinguish browser capture from backend received-audio/VAD.
 verification:
   - `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` failed: 28 passed, 1 failed. Failure was `test_silero_silence_gap_finalizes_turn_even_with_loud_ambient_noise`, because the test implicitly expected the old 700 ms call threshold; it now needs to set `call_vad_end_silence_ms=700` explicitly to preserve that regression scenario.
   - `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` passed: 29 passed in 8.28s.
@@ -142,9 +185,11 @@ verification:
   - `uv run --project ai-backend pytest ai-backend/tests -q` passed after the post-`e4b93d9` fix: 90 passed, 1 warning in 23.74s.
   - `git diff --check` passed after the post-`e4b93d9` fix.
   - Live verification still requires deploying via `scripts/deploy-omen.sh` only, then repeating the phone-call passage.
+  - Post-deploy user repro on 2026-04-30 still failed under commit `1239588`; persisted user speech rows and boundary logs saved in `.planning/debug/phone-call-repro-1239588-2026-04-30.md`.
 files_changed:
   - ai-backend/app/config.py
   - ai-backend/app/call/session.py
   - ai-backend/app/api/webrtc.py
   - ai-backend/tests/test_call_session.py
   - .planning/debug/phone-call-repro-e4b93d9-2026-04-30.md
+  - .planning/debug/phone-call-repro-1239588-2026-04-30.md

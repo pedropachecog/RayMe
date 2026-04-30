@@ -102,6 +102,7 @@ class CallSession:
         self._media_reconnect_grace_pending = False
         self._media_reconnect_grace_until = 0.0
         self._media_reconnect_grace_logged = False
+        self._media_reconnect_grace_audio_diag_count = 0
 
     @property
     def active_ai_turn(self) -> Any | None:
@@ -206,6 +207,7 @@ class CallSession:
             time.monotonic() + (grace_ms / 1000.0),
         )
         self._media_reconnect_grace_logged = False
+        self._media_reconnect_grace_audio_diag_count = 0
         logger.info(
             "[rayme-call] vad.reconnect_grace.start session=%s grace_ms=%d",
             self.session_id,
@@ -241,6 +243,7 @@ class CallSession:
             self._speech_seen = False
             self._silence_ms = 0
             self._speech_start_frame = None
+            self._media_reconnect_grace_audio_diag_count = 0
             self.state = "listening"
             return None
         self._turn_index += 1
@@ -265,6 +268,7 @@ class CallSession:
         self._speech_seen = False
         self._silence_ms = 0
         self._speech_start_frame = None
+        self._media_reconnect_grace_audio_diag_count = 0
 
         try:
             transcription = await asyncio.to_thread(self._transcribe_turn, frames)
@@ -598,6 +602,8 @@ class CallSession:
         frame_idx = len(self._turn_frames)
         rms = float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
         peak = float(np.max(np.abs(samples))) if samples.size else 0.0
+        reconnect_diag_frame = self._next_media_reconnect_grace_audio_diag_frame()
+        reconnect_remaining_ms = self._media_reconnect_grace_remaining_ms()
         if frame_idx == 1 or frame_idx == 10:
             logger.info(
                 "[rayme-call] vad.diag session=%s frame=%d samples=%d "
@@ -657,6 +663,31 @@ class CallSession:
                 self._silence_ms = int(silence_samples * 1000 / sampling_rate)
             elif self._speech_seen:
                 self._silence_ms += frame_ms
+            if reconnect_diag_frame is not None:
+                last_end_sample = (
+                    int(timestamps[-1].get("end", 0)) if timestamps else None
+                )
+                logger.info(
+                    "[rayme-call] vad.reconnect_grace.audio session=%s "
+                    "diag_frame=%d turn_frame=%d frame_ms=%d rms=%.1f "
+                    "peak=%.1f speech_now=%s speech_seen=%s silence_ms=%d "
+                    "remaining_ms=%d ts_count=%d analysis_samples=%d "
+                    "last_ts_end=%s threshold=%.2f",
+                    self.session_id,
+                    reconnect_diag_frame,
+                    frame_idx,
+                    frame_ms,
+                    rms,
+                    peak,
+                    bool(timestamps),
+                    self._speech_seen,
+                    self._silence_ms,
+                    reconnect_remaining_ms,
+                    len(timestamps),
+                    len(vad_samples),
+                    last_end_sample if last_end_sample is not None else "none",
+                    adapter.threshold,
+                )
 
             # Max turn duration safety net: force end if Silero keeps
             # classifying everything as continuous speech beyond the call cap.
@@ -683,6 +714,24 @@ class CallSession:
             self._silence_ms = 0
         elif self._speech_seen:
             self._silence_ms += frame_ms
+        if reconnect_diag_frame is not None:
+            logger.info(
+                "[rayme-call] vad.reconnect_grace.audio session=%s "
+                "diag_frame=%d turn_frame=%d frame_ms=%d rms=%.1f "
+                "peak=%.1f speech_now=%s speech_seen=%s silence_ms=%d "
+                "remaining_ms=%d energy_threshold=%.1f",
+                self.session_id,
+                reconnect_diag_frame,
+                frame_idx,
+                frame_ms,
+                rms,
+                peak,
+                energy >= threshold,
+                self._speech_seen,
+                self._silence_ms,
+                reconnect_remaining_ms,
+                threshold,
+            )
 
         max_turn_ms = self._call_max_turn_ms()
         turn_duration_ms = frame_idx * frame_ms
@@ -735,6 +784,21 @@ class CallSession:
 
     def _call_media_reconnect_grace_ms(self) -> int:
         return int(getattr(self.settings, "call_media_reconnect_grace_ms", 0))
+
+    def _media_reconnect_grace_remaining_ms(self) -> int:
+        until = self._media_reconnect_grace_until
+        if until <= 0:
+            return 0
+        return max(int((until - time.monotonic()) * 1000), 0)
+
+    def _next_media_reconnect_grace_audio_diag_frame(self) -> int | None:
+        if self._media_reconnect_grace_remaining_ms() <= 0:
+            return None
+        self._media_reconnect_grace_audio_diag_count += 1
+        diag_frame = self._media_reconnect_grace_audio_diag_count
+        if diag_frame <= 10 or diag_frame % 25 == 0:
+            return diag_frame
+        return None
 
     def _in_media_reconnect_grace(self) -> bool:
         until = self._media_reconnect_grace_until
