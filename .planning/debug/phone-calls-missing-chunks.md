@@ -1,7 +1,7 @@
 ---
-status: fix_verified_local
+status: deployed_awaiting_repro
 created: 2026-04-29T19:18:06Z
-updated: 2026-04-30T21:50:49Z
+updated: 2026-04-30T21:53:27Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -12,7 +12,7 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 hypothesis: The latest post-`dff6545` loss is a partial reconnect-backfill/order gap, not absence of backfill. The browser selected one PCM backfill batch before applying the replacement peer answer, but the Web UI proxy returned `502`; the AI backend nevertheless applied 5.63 seconds of PCM, and later mic audio captured while the browser was still waiting was not inserted into the active turn before replacement-track silence finalized it.
 test: Compare latest Web UI API/SQLite transcript, browser `mic.reconnect_backfill.*` and `mic.reconnect_diag`, backend `reconnect_audio.backfill.*`, `vad.reconnect_grace.*`, `stt.begin/result`, and `event.sent type=user_final` for `call_0daee780dd904a08a8fb69b4d8a68ca2` / `rtc_43b7b92a1b844471979bf0fed4adc8c3`.
 expecting: The persisted transcript should match backend STT, backfill should show partial application/failure semantics, and the first-loss boundary should sit before STT at the browser-backfill/replacement-track transition.
-next_action: Commit, push, deploy through `scripts/deploy-omen.sh`, then ask the user to repeat the Mammoth Cave call repro.
+next_action: Ask the user to repeat the Mammoth Cave call repro and inspect logs if it still cuts off.
 
 ## Symptoms
 
@@ -64,6 +64,11 @@ evidence_files:
   checked: Local fix and regression verification for the post-`dff6545` partial-backfill loss.
   found: Implemented ordered reconnect backfill batches. The browser now sends an initial batch before replacement answer application, then sends a final tail batch for PCM captured while the first request was in flight; the backend holds replacement-track live frames until the final marker so live silence cannot finalize ahead of the tail. The Web UI proxy now uses the WebRTC timeout for reconnect backfill. Added focused backend, proxy, and Playwright regression coverage. Verification passed: focused Python tests, `npm run build`, `npm run test:e2e -- call-start.spec.ts` (22 passed), full `ai-backend` tests (94 passed), full `web-ui/server` tests (152 passed), and `git diff --check`.
   implication: Local evidence supports the debugger's root cause and fix. Live verification still requires canonical OMEN deployment and another user repro.
+
+- timestamp: 2026-04-30T21:53:27Z
+  checked: Canonical OMEN deployment and post-deploy WebRTC readiness.
+  found: Committed and pushed `faba4cc` (`fix(call): drain reconnect backfill tail`). `scripts/deploy-omen.sh` fast-forwarded OMEN to `faba4cc4f62e3f0c8ffd4b57b30f02aec934c1f0`, rebuilt the web client, recreated the canonical scheduled tasks, restarted both services, and reported `OMEN deploy complete`. `GET https://192.168.1.199:9443/webrtc/status` returned `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, `active_sessions=0`.
+  implication: The reconnect tail fix is live on OMEN and ready for another user repro.
 
 - timestamp: 2026-04-30T21:22:55Z
   checked: User live verification after deploying reconnect-gap backfill (`dff6545`, code fix in `adb035c`).
