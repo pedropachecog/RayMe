@@ -15,5 +15,6 @@ class AiBackendSettings(BaseModel, frozen=True):
     vad_max_turn_ms: int = Field(default=30000, ge=1000)
     call_vad_end_silence_ms: int = Field(default=1800, ge=500)
     call_vad_max_turn_ms: int = Field(default=120000, ge=1000)
+    call_media_reconnect_grace_ms: int = Field(default=5000, ge=0)
     call_min_turn_rms: float = Field(default=25.0, ge=0.0)
     load_models_on_startup: bool = True

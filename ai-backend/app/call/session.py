@@ -99,6 +99,9 @@ class CallSession:
         self._silence_ms = 0
         self._speech_start_frame: int | None = None
         self._cancelled_ai_turns: set[str] = set()
+        self._media_reconnect_grace_pending = False
+        self._media_reconnect_grace_until = 0.0
+        self._media_reconnect_grace_logged = False
 
     @property
     def active_ai_turn(self) -> Any | None:
@@ -179,6 +182,35 @@ class CallSession:
             self._silence_ms,
         )
         return await self.finalize_user_turn()
+
+    def mark_media_reconnect_pending(self) -> None:
+        if self.state == "listening" and self._speech_seen and self._turn_frames:
+            self._media_reconnect_grace_pending = True
+            logger.info(
+                "[rayme-call] vad.reconnect_grace.pending session=%s "
+                "turn_frames=%d silence_ms=%d",
+                self.session_id,
+                len(self._turn_frames),
+                self._silence_ms,
+            )
+
+    def start_media_reconnect_grace_if_pending(self) -> None:
+        if not self._media_reconnect_grace_pending:
+            return
+        self._media_reconnect_grace_pending = False
+        grace_ms = self._call_media_reconnect_grace_ms()
+        if grace_ms <= 0:
+            return
+        self._media_reconnect_grace_until = max(
+            self._media_reconnect_grace_until,
+            time.monotonic() + (grace_ms / 1000.0),
+        )
+        self._media_reconnect_grace_logged = False
+        logger.info(
+            "[rayme-call] vad.reconnect_grace.start session=%s grace_ms=%d",
+            self.session_id,
+            grace_ms,
+        )
 
     async def finalize_user_turn(self) -> dict[str, Any] | None:
         if not self._turn_frames:
@@ -632,13 +664,15 @@ class CallSession:
             turn_duration_ms = frame_idx * frame_ms
             forced_end = turn_duration_ms >= max_turn_ms
 
+            silence_end = self._speech_seen and self._silence_ms >= end_silence_ms
+            reconnect_grace = silence_end and self._in_media_reconnect_grace()
+
             # Max turn duration forces end even if no speech was detected
             # (ambient noise only). Without this, turns with zero speech
             # would never finalize.
             return {
                 "speech_detected": self._speech_seen,
-                "end_of_turn": forced_end
-                or (self._speech_seen and self._silence_ms >= end_silence_ms),
+                "end_of_turn": forced_end or (silence_end and not reconnect_grace),
             }
 
         energy = float(np.sqrt(np.mean(np.square(samples)))) if samples.size else 0.0
@@ -652,11 +686,13 @@ class CallSession:
 
         max_turn_ms = self._call_max_turn_ms()
         turn_duration_ms = frame_idx * frame_ms
+        silence_end = self._speech_seen and self._silence_ms >= end_silence_ms
+        reconnect_grace = silence_end and self._in_media_reconnect_grace()
 
         return {
             "speech_detected": self._speech_seen or energy >= threshold,
             "end_of_turn": turn_duration_ms >= max_turn_ms
-            or (self._speech_seen and self._silence_ms >= end_silence_ms),
+            or (silence_end and not reconnect_grace),
         }
 
     def _buffered_turn_samples(self) -> np.ndarray:
@@ -696,6 +732,35 @@ class CallSession:
                 self.settings.vad_max_turn_ms,
             )
         )
+
+    def _call_media_reconnect_grace_ms(self) -> int:
+        return int(getattr(self.settings, "call_media_reconnect_grace_ms", 0))
+
+    def _in_media_reconnect_grace(self) -> bool:
+        until = self._media_reconnect_grace_until
+        if until <= 0:
+            return False
+        now = time.monotonic()
+        if now >= until:
+            self._media_reconnect_grace_until = 0.0
+            logger.info(
+                "[rayme-call] vad.reconnect_grace.expired session=%s "
+                "silence_ms=%d",
+                self.session_id,
+                self._silence_ms,
+            )
+            self._media_reconnect_grace_logged = False
+            return False
+        if not self._media_reconnect_grace_logged:
+            self._media_reconnect_grace_logged = True
+            logger.info(
+                "[rayme-call] vad.reconnect_grace.hold session=%s "
+                "silence_ms=%d remaining_ms=%d",
+                self.session_id,
+                self._silence_ms,
+                int((until - now) * 1000),
+            )
+        return True
 
     def _transcribe_turn(self, frames: list[PcmAudioFrame]) -> dict[str, Any]:
         adapter = self.stt_adapter
@@ -991,6 +1056,7 @@ class CallSessionManager:
             ):
                 previous_peer = existing.peer_connection
                 existing.peer_connection = peer_connection
+                existing.mark_media_reconnect_pending()
                 if (
                     existing.state == "failed"
                     and existing.end_reason == "connection_failed"

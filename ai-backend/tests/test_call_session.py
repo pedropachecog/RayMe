@@ -266,6 +266,36 @@ def test_existing_session_reoffer_recovers_connection_failed_session() -> None:
     assert session.ended_at is None
 
 
+def test_existing_session_reoffer_marks_in_progress_turn_for_reconnect_grace() -> None:
+    manager = CallSessionManager()
+    first_peer = ScriptedPeerConnection()
+    second_peer = ScriptedPeerConnection()
+    session = _run(
+        manager.create_session(
+            session_id="call-session-reconnect-in-progress",
+            peer_connection=first_peer,
+        )
+    )
+    session._turn_frames.append(
+        PcmAudioFrame(
+            pcm=np.full(320, 2000, dtype=np.int16).tobytes(),
+            sample_rate=16000,
+            channels=1,
+        )
+    )
+    session._speech_seen = True
+
+    same_session = _run(
+        manager.create_session(
+            session_id="call-session-reconnect-in-progress",
+            peer_connection=second_peer,
+        )
+    )
+
+    assert same_session is session
+    assert session._media_reconnect_grace_pending is True
+
+
 def test_mute_stops_server_consumption() -> None:
     session, _ = _new_session()
 
@@ -433,6 +463,40 @@ def test_call_vad_tolerates_short_false_silero_silence_during_continuous_speech(
         result = _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(speech_pcm)))
         assert not (isinstance(result, dict) and result.get("type") == "user_final")
 
+    assert stt.calls == []
+    assert session.state == "listening"
+    assert session._speech_seen is True
+    assert session._silence_ms == 0
+
+
+def test_call_vad_reconnect_grace_preserves_turn_until_speech_resumes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 0.0
+    monkeypatch.setattr(session_module.time, "monotonic", lambda: now)
+
+    frame_samples = 320  # 20 ms at 16 kHz
+    speech_pcm = np.full(frame_samples, 2000, dtype=np.int16).tobytes()
+    vad = FlakySileroVadAdapter(false_silence_calls=set(range(2, 42)))
+    stt = ScriptedSttAdapter()
+    settings = AiBackendSettings(
+        call_vad_end_silence_ms=700,
+        call_media_reconnect_grace_ms=5000,
+    )
+    session, _ = _new_session(vad_adapter=vad, stt_adapter=stt, settings=settings)
+
+    first = _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(speech_pcm)))
+    assert first is None
+    session.mark_media_reconnect_pending()
+    session.start_media_reconnect_grace_if_pending()
+
+    for _ in range(40):  # 800 ms: past the 700 ms silence threshold.
+        result = _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(speech_pcm)))
+        assert not (isinstance(result, dict) and result.get("type") == "user_final")
+
+    resumed = _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(speech_pcm)))
+
+    assert resumed is None
     assert stt.calls == []
     assert session.state == "listening"
     assert session._speech_seen is True

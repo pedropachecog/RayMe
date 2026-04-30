@@ -1,7 +1,7 @@
 ---
 status: awaiting_human_verify
 created: 2026-04-29T19:18:06Z
-updated: 2026-04-29T19:58:21Z
+updated: 2026-04-30T12:31:00Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -19,7 +19,7 @@ reasoning_checkpoint:
   falsification_test: "If a test simulating a 700ms false-negative VAD gap during otherwise continuous call speech does not finalize under the new call threshold, and a continuous 32s call turn does not force-finalize, the proposed fix addresses the observed cutoff mechanisms. If real calls still truncate before STT with longer thresholds, the remaining cause is deeper Silero false-negative duration or media capture loss."
   fix_rationale: "Use call-specific VAD finalization thresholds: keep general STT defaults intact, but make live calls tolerate short false VAD gaps and allow long monologues before the safety max forces a chunk."
   blind_spots: "No local reproduction has the user's exact microphone/audio; longer thresholds may add up to ~1.8s response latency after true speech ends, and speech longer than the new max turn still chunks."
-next_action: Commit and deploy with `scripts/deploy-omen.sh`, then reproduce the latest phone-call passage and inspect logs for longer STT frame counts.
+next_action: Run another long-passage phone-call verification and confirm `vad.reconnect_grace.*` logs appear without premature `user_final`.
 tdd_checkpoint:
 
 ## Symptoms
@@ -68,6 +68,14 @@ evidence_files:
   checked: `WhisperSttAdapter`.
   found: Call STT writes the collected PCM frames to a temp WAV and calls faster-whisper with `apply_vad_filter=False`; there is no downstream 30-second transcript slicing in RayMe code. The earliest observed truncation is the VAD-selected frame buffer passed to STT.
   source: `ai-backend/app/models/stt.py`; `ai-backend/app/call/session.py`
+- timestamp: 2026-04-30T12:06:37Z
+  checked: User's post-deploy reproduction call after commit `ba6057c`.
+  found: The deployed threshold change was active (`threshold_ms=1800`) and improved the duration before cutoff, but the two long passages were still truncated. Persisted transcripts are saved in `.planning/debug/phone-call-repro-2026-04-30.md`.
+  source: OMEN thread API; `.planning/debug/phone-call-repro-2026-04-30.md`
+- timestamp: 2026-04-30T12:18:00Z
+  checked: Full call boundary logs for `rtc_5cee6240cccf42079c09a785d6bb6b6b`.
+  found: Both long turns had browser media reconnects mid-turn. After the reoffer, the backend saw new-track silence and finalized on `silence_ms=1822`, producing already-short STT inputs (`user-turn-3` frames=1211, transcript_len=343; `user-turn-4` frames=1620, transcript_len=490).
+  source: OMEN `ai-backend.run.log`; OMEN `web-ui.run.log`
 
 ## Eliminated
 
@@ -81,15 +89,20 @@ evidence_files:
 
 ## Resolution
 
-root_cause: Phone call transcription loses chunks before STT because live-call VAD finalizes turns too aggressively. The latest call logs show affected turns reach `stt.begin` already short, with `vad.end_of_turn silence_ms=722`; the user confirmed they did not pause, so those are false VAD silence gaps. Additionally, the call path has a 30s hard max turn duration that would cut long continuous speech even if false silence is tolerated.
-fix: Added call-specific VAD settings (`call_vad_end_silence_ms=1800`, `call_vad_max_turn_ms=120000`), updated `CallSession` to use them for live-call turn finalization/windowing, and added regression tests for false Silero silence during continuous speech and continuous speech beyond 30 seconds.
+root_cause: Phone call transcription loses chunks before STT. The first loss mode was overly aggressive live-call VAD finalization (`vad.end_of_turn silence_ms=722`) and a 30s hard max-turn cap. After commit `ba6057c`, the remaining loss mode is mid-speech browser media reconnect: Android Chrome drops/reoffers the WebRTC media path during long speech, the server preserves the in-progress turn, but the replacement track begins with startup silence; VAD treats that reconnect gap as the end of the user's speech and finalizes before the rest of the spoken passage arrives.
+fix: Added call-specific VAD settings (`call_vad_end_silence_ms=1800`, `call_vad_max_turn_ms=120000`), updated `CallSession` to use them for live-call turn finalization/windowing, and added regression tests for false Silero silence during continuous speech and continuous speech beyond 30 seconds. Follow-up fix: added `call_media_reconnect_grace_ms=5000`; when a browser reoffer replaces the peer connection during an active spoken turn, `CallSession` arms a short grace window and starts it on the first frame of the new track so reconnect startup silence does not finalize the turn before speech resumes.
 verification:
   - `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` failed: 28 passed, 1 failed. Failure was `test_silero_silence_gap_finalizes_turn_even_with_loud_ambient_noise`, because the test implicitly expected the old 700 ms call threshold; it now needs to set `call_vad_end_silence_ms=700` explicitly to preserve that regression scenario.
   - `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` passed: 29 passed in 8.28s.
   - `uv run --project ai-backend pytest ai-backend/tests -q` passed: 87 passed, 1 warning in 34.92s.
   - Inspected `scripts/deploy-omen.sh`; it deploys git HEAD from `origin/main` after resetting OMEN checkout. Because the fix is currently uncommitted local work, deployment was not run.
   - `git diff --check` passed with no whitespace errors.
+  - Post-deploy user repro on 2026-04-30 still failed under commit `ba6057c`; persisted user speech rows and boundary logs saved in `.planning/debug/phone-call-repro-2026-04-30.md`.
+  - `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` passed after reconnect-grace follow-up: 31 passed in 10.56s.
+  - `uv run --project ai-backend pytest ai-backend/tests -q` passed after reconnect-grace follow-up: 89 passed, 1 warning in 33.04s.
+  - `git diff --check` passed after reconnect-grace follow-up.
 files_changed:
   - ai-backend/app/config.py
   - ai-backend/app/call/session.py
+  - ai-backend/app/api/webrtc.py
   - ai-backend/tests/test_call_session.py

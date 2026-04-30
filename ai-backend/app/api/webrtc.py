@@ -615,6 +615,7 @@ async def _receive_audio_track(
         frame_count += 1
         consecutive_live_recv_errors = 0
         if frame_count == 1:
+            session.start_media_reconnect_grace_if_pending()
             logger.info(
                 "[rayme-call] track.recv.first_frame session=%s sample_rate=%s "
                 "samples=%s",
