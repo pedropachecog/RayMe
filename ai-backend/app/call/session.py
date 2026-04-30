@@ -41,6 +41,7 @@ EventSink = Callable[[dict[str, Any]], Awaitable[None] | None]
 
 CALL_TTS_AUDIO_PREROLL_SECONDS = 0.25
 CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS = 0.75
+CALL_RECONNECT_BACKFILL_HOLD_SECONDS = 12.0
 
 
 class NullPeerConnection:
@@ -104,6 +105,9 @@ class CallSession:
         self._media_reconnect_grace_logged = False
         self._media_reconnect_grace_audio_diag_count = 0
         self._reconnect_audio_backfill_ids: set[str] = set()
+        self._reconnect_live_frame_hold_until = 0.0
+        self._reconnect_live_frame_hold_logged = False
+        self._reconnect_live_frame_hold_frames: list[PcmAudioFrame] = []
 
     @property
     def active_ai_turn(self) -> Any | None:
@@ -139,23 +143,15 @@ class CallSession:
             self.dropped_audio_frames += 1
             return False if was_raw_bytes else None
 
+        self._release_reconnect_live_frames_if_expired()
+
         normalized = normalize_inbound_audio_frame(frame)
-        self._turn_frames.append(normalized)
-        if self._turn_started_at is None:
-            self._turn_started_at = utc_timestamp()
-            logger.info(
-                "[rayme-call] turn.started session=%s frame_count=%d "
-                "sample_rate=%d pcm_bytes=%d",
-                self.session_id,
-                self.incoming_audio_frames,
-                normalized.sample_rate,
-                len(normalized.pcm),
-            )
+        if self._hold_reconnect_live_frame_if_needed(normalized):
+            return None
 
         speech_seen_before = self._speech_seen
         silence_before = self._silence_ms
-        vad_result = self._accept_vad_frame(normalized)
-        speech_detected = vad_result.get("speech_detected", True)
+        vad_result = self._append_turn_frame(normalized)
         end_of_turn = vad_result.get("end_of_turn", False)
 
         if not speech_seen_before and self._speech_seen:
@@ -209,10 +205,17 @@ class CallSession:
         )
         self._media_reconnect_grace_logged = False
         self._media_reconnect_grace_audio_diag_count = 0
+        self._reconnect_live_frame_hold_until = max(
+            self._reconnect_live_frame_hold_until,
+            time.monotonic() + CALL_RECONNECT_BACKFILL_HOLD_SECONDS,
+        )
+        self._reconnect_live_frame_hold_logged = False
         logger.info(
-            "[rayme-call] vad.reconnect_grace.start session=%s grace_ms=%d",
+            "[rayme-call] vad.reconnect_grace.start session=%s grace_ms=%d "
+            "backfill_hold_ms=%d",
             self.session_id,
             grace_ms,
+            int(CALL_RECONNECT_BACKFILL_HOLD_SECONDS * 1000),
         )
 
     async def backfill_reconnect_audio(
@@ -224,6 +227,8 @@ class CallSession:
         backfill_id: str | None = None,
         reason: str | None = None,
         attempt: int | None = None,
+        batch_index: int | None = None,
+        final: bool = True,
     ) -> dict[str, Any]:
         if backfill_id and backfill_id in self._reconnect_audio_backfill_ids:
             logger.info(
@@ -241,13 +246,16 @@ class CallSession:
         if self.muted or self.state in {"ended", "speaking", "understanding", "thinking"}:
             logger.info(
                 "[rayme-call] reconnect_audio.backfill.skip session=%s "
-                "state=%s muted=%s bytes=%d reason=%s attempt=%s",
+                "state=%s muted=%s bytes=%d reason=%s attempt=%s "
+                "batch=%s final=%s",
                 self.session_id,
                 self.state,
                 self.muted,
                 len(pcm),
                 reason or "",
                 attempt if attempt is not None else "",
+                batch_index if batch_index is not None else "",
+                final,
             )
             return {
                 "status": "skipped",
@@ -270,6 +278,8 @@ class CallSession:
             channels=channels,
         )
         if not frames:
+            if final:
+                self._release_reconnect_live_frames(reason="final_empty_backfill")
             return {
                 "status": "empty",
                 "frames": 0,
@@ -279,12 +289,14 @@ class CallSession:
         if self.state != "listening":
             logger.info(
                 "[rayme-call] reconnect_audio.backfill.skip session=%s "
-                "state=%s frames=%d reason=%s attempt=%s",
+                "state=%s frames=%d reason=%s attempt=%s batch=%s final=%s",
                 self.session_id,
                 self.state,
                 len(frames),
                 reason or "",
                 attempt if attempt is not None else "",
+                batch_index if batch_index is not None else "",
+                final,
             )
             return {
                 "status": "skipped",
@@ -298,23 +310,14 @@ class CallSession:
         was_pending = self._media_reconnect_grace_pending
         started_turn = self._turn_started_at is None
         for frame in frames:
-            self._turn_frames.append(frame)
-            if self._turn_started_at is None:
-                self._turn_started_at = utc_timestamp()
-                logger.info(
-                    "[rayme-call] turn.started session=%s frame_count=%d "
-                    "sample_rate=%d pcm_bytes=%d source=reconnect_backfill",
-                    self.session_id,
-                    self.incoming_audio_frames,
-                    frame.sample_rate,
-                    len(frame.pcm),
-                )
-            self._accept_vad_frame(frame)
+            self._append_turn_frame(frame, source="reconnect_backfill")
         # Keep the grace armed for the first replacement-track frame. The
         # backfill inserts missing audio but does not prove the new transport is
         # stable yet, and a short post-reconnect silence should not finalize
         # before the browser's replacement track has a chance to resume.
         self._media_reconnect_grace_pending = was_pending or self._media_reconnect_grace_pending
+        if final:
+            self._release_reconnect_live_frames(reason="final_backfill")
 
         duration_ms = sum(
             int((len(frame.pcm) // 2) * 1000 / max(frame.sample_rate, 1))
@@ -325,7 +328,7 @@ class CallSession:
             "[rayme-call] reconnect_audio.backfill.applied session=%s "
             "backfill_id=%s frames=%d duration_ms=%d bytes=%d rms=%s peak=%s "
             "turn_frames=%d speech_seen=%s silence_ms=%d reason=%s attempt=%s "
-            "started_turn=%s",
+            "batch=%s final=%s held_frames=%d started_turn=%s",
             self.session_id,
             backfill_id or "",
             len(frames),
@@ -338,6 +341,9 @@ class CallSession:
             self._silence_ms,
             reason or "",
             attempt if attempt is not None else "",
+            batch_index if batch_index is not None else "",
+            final,
+            len(self._reconnect_live_frame_hold_frames),
             started_turn,
         )
         return {
@@ -346,6 +352,83 @@ class CallSession:
             "duration_ms": duration_ms,
             "state": self.state,
         }
+
+    def _append_turn_frame(
+        self,
+        frame: PcmAudioFrame,
+        *,
+        source: str = "live",
+    ) -> dict[str, bool]:
+        self._turn_frames.append(frame)
+        if self._turn_started_at is None:
+            self._turn_started_at = utc_timestamp()
+            logger.info(
+                "[rayme-call] turn.started session=%s frame_count=%d "
+                "sample_rate=%d pcm_bytes=%d source=%s",
+                self.session_id,
+                self.incoming_audio_frames,
+                frame.sample_rate,
+                len(frame.pcm),
+                source,
+            )
+        vad_result = self._accept_vad_frame(frame)
+        if vad_result.get("speech_detected", True):
+            self._speech_seen = True
+        return vad_result
+
+    def _release_reconnect_live_frames_if_expired(self) -> None:
+        until = self._reconnect_live_frame_hold_until
+        if until <= 0:
+            return
+        if time.monotonic() >= until:
+            self._release_reconnect_live_frames(reason="timeout")
+
+    def _hold_reconnect_live_frame_if_needed(self, frame: PcmAudioFrame) -> bool:
+        until = self._reconnect_live_frame_hold_until
+        if until <= 0:
+            return False
+        now = time.monotonic()
+        if now >= until:
+            self._release_reconnect_live_frames(reason="timeout")
+            return False
+
+        self._reconnect_live_frame_hold_frames.append(frame)
+        held = len(self._reconnect_live_frame_hold_frames)
+        if not self._reconnect_live_frame_hold_logged or held <= 3 or held % 25 == 0:
+            self._reconnect_live_frame_hold_logged = True
+            logger.info(
+                "[rayme-call] reconnect_audio.live_hold session=%s "
+                "held_frames=%d remaining_ms=%d rms=%.1f peak=%.1f",
+                self.session_id,
+                held,
+                int((until - now) * 1000),
+                *self._pcm_frame_rms_peak(frame),
+            )
+        return True
+
+    def _release_reconnect_live_frames(self, *, reason: str) -> None:
+        frames = list(self._reconnect_live_frame_hold_frames)
+        self._reconnect_live_frame_hold_frames.clear()
+        self._reconnect_live_frame_hold_until = 0.0
+        self._reconnect_live_frame_hold_logged = False
+        if not frames:
+            logger.info(
+                "[rayme-call] reconnect_audio.live_hold.release session=%s "
+                "reason=%s held_frames=0",
+                self.session_id,
+                reason,
+            )
+            return
+
+        logger.info(
+            "[rayme-call] reconnect_audio.live_hold.release session=%s "
+            "reason=%s held_frames=%d",
+            self.session_id,
+            reason,
+            len(frames),
+        )
+        for frame in frames:
+            self._append_turn_frame(frame, source="reconnect_live_hold")
 
     async def finalize_user_turn(self) -> dict[str, Any] | None:
         if not self._turn_frames:
@@ -1011,6 +1094,17 @@ class CallSession:
             "rms": float(np.sqrt(np.mean(np.square(samples)))),
             "peak": float(np.max(np.abs(samples))),
         }
+
+    def _pcm_frame_rms_peak(self, frame: PcmAudioFrame) -> tuple[float, float]:
+        if len(frame.pcm) < 2 or len(frame.pcm) % 2 != 0:
+            return 0.0, 0.0
+        samples = np.frombuffer(frame.pcm, dtype=np.int16).astype(np.float32)
+        if samples.size == 0:
+            return 0.0, 0.0
+        return (
+            float(np.sqrt(np.mean(np.square(samples)))),
+            float(np.max(np.abs(samples))),
+        )
 
     def _pcm_backfill_frames(
         self,

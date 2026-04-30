@@ -229,7 +229,7 @@ class AiBackendClient:
             json=dict(payload),
             processing_message=WEBRTC_FAILED_MESSAGE,
             processing_code="call_reconnect_audio_failed",
-            timeout=self._timeout,
+            timeout=self._webrtc_timeout,
         )
         response_payload = _json_payload(response)
         if not isinstance(response_payload, dict):
@@ -261,11 +261,14 @@ class AiBackendClient:
         **kwargs: Any,
     ) -> httpx.Response:
         try:
+            request_kwargs = dict(kwargs)
+            if timeout is not None:
+                request_kwargs["timeout"] = timeout
             if self._http_client is not None:
-                response = await self._http_client.request(method, url, **kwargs)
+                response = await self._http_client.request(method, url, **request_kwargs)
             else:
-                async with httpx.AsyncClient(timeout=timeout or self._timeout, verify=False) as client:
-                    response = await client.request(method, url, **kwargs)
+                async with httpx.AsyncClient(timeout=self._timeout, verify=False) as client:
+                    response = await client.request(method, url, **request_kwargs)
         except (httpx.TimeoutException, httpx.NetworkError, httpx.TransportError) as exc:
             raise AiBackendUnavailable(code="unreachable", message=UNREACHABLE_MESSAGE) from exc
 

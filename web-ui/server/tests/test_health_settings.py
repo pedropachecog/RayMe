@@ -760,6 +760,37 @@ async def test_ai_backend_client_preserves_sanitized_webrtc_offer_failure_detail
     }
 
 
+async def test_ai_backend_client_uses_webrtc_timeout_for_reconnect_audio_backfill() -> None:
+    from app.domain.ai_backend_client import AiBackendClient
+
+    class CapturingHttpClient:
+        def __init__(self) -> None:
+            self.requests: list[dict[str, object]] = []
+
+        async def request(self, method: str, url: str, **kwargs: object) -> httpx.Response:
+            self.requests.append({"method": method, "url": url, **kwargs})
+            return httpx.Response(
+                200,
+                json={"session_id": "rtc-call-1", "status": "accepted", "frames": 0},
+            )
+
+    http_client = CapturingHttpClient()
+    ai_client = AiBackendClient(
+        http_client=http_client,  # type: ignore[arg-type]
+        timeout=5.0,
+        webrtc_timeout=30.0,
+    )
+
+    result = await ai_client.backfill_call_audio(
+        "https://ai.local:9443",
+        "rtc-call-1",
+        {"pcm_b64": "", "sample_rate": 16000, "channels": 1, "final": True},
+    )
+
+    assert result["status"] == "accepted"
+    assert http_client.requests[0]["timeout"] == 30.0
+
+
 def _ai_backend_client(status: ConnectionStatus):
     class ScriptedAiBackendClient:
         async def get_status(self, _base_url: str) -> AiBackendStatus:

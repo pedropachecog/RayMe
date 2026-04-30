@@ -275,6 +275,8 @@ def test_reconnect_audio_backfill_forwards_to_backend_without_persistence(
                 "reason": "failed",
                 "attempt": 1,
                 "duration_ms": 40,
+                "batch_index": None,
+                "final": True,
             },
         }
     ]

@@ -147,6 +147,18 @@ class ScriptedVadAdapter:
         }
 
 
+class NeverEndingVadAdapter:
+    def __init__(self) -> None:
+        self.frames: list[bytes] = []
+
+    def accept_audio_frame(self, pcm: bytes) -> dict[str, bool]:
+        self.frames.append(pcm)
+        return {
+            "speech_detected": True,
+            "end_of_turn": False,
+        }
+
+
 class ScriptedSttAdapter:
     def __init__(self) -> None:
         self.calls: list[list[bytes]] = []
@@ -604,6 +616,64 @@ def test_reconnect_audio_backfill_ignores_duplicate_ids() -> None:
     assert first["status"] == "accepted"
     assert second["status"] == "duplicate"
     assert len(session._turn_frames) == 1
+
+
+def test_reconnect_audio_backfill_releases_held_replacement_track_after_final_batch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 0.0
+    monkeypatch.setattr(session_module.time, "monotonic", lambda: now)
+
+    vad = NeverEndingVadAdapter()
+    settings = AiBackendSettings(call_media_reconnect_grace_ms=5000)
+    session, _ = _new_session(vad_adapter=vad, settings=settings)
+
+    pre_pcm = np.full(320, 1000, dtype=np.int16).tobytes()
+    gap_one_pcm = np.full(320, 2000, dtype=np.int16).tobytes()
+    gap_two_pcm = np.full(320, 3000, dtype=np.int16).tobytes()
+    live_pcm = np.full(320, 4000, dtype=np.int16).tobytes()
+
+    assert _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(pre_pcm))) is None
+    session.mark_media_reconnect_pending()
+    session.start_media_reconnect_grace_if_pending()
+
+    assert _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(live_pcm))) is None
+    assert [frame.pcm for frame in session._turn_frames] == [pre_pcm]
+    assert [frame.pcm for frame in session._reconnect_live_frame_hold_frames] == [live_pcm]
+
+    first_batch = _run(
+        session.backfill_reconnect_audio(
+            pcm=gap_one_pcm,
+            sample_rate=16000,
+            channels=1,
+            backfill_id="gap-batch-1",
+            batch_index=1,
+            final=False,
+        )
+    )
+    assert first_batch["status"] == "accepted"
+    assert [frame.pcm for frame in session._turn_frames] == [pre_pcm, gap_one_pcm]
+    assert [frame.pcm for frame in session._reconnect_live_frame_hold_frames] == [live_pcm]
+
+    final_batch = _run(
+        session.backfill_reconnect_audio(
+            pcm=gap_two_pcm,
+            sample_rate=16000,
+            channels=1,
+            backfill_id="gap-batch-2",
+            batch_index=2,
+            final=True,
+        )
+    )
+
+    assert final_batch["status"] == "accepted"
+    assert [frame.pcm for frame in session._turn_frames] == [
+        pre_pcm,
+        gap_one_pcm,
+        gap_two_pcm,
+        live_pcm,
+    ]
+    assert session._reconnect_live_frame_hold_frames == []
 
 
 def test_inbound_audio_normalizer_scales_integer_channels_before_mixing() -> None:

@@ -105,6 +105,8 @@
   let localMicRecorderGain: GainNode | null = null;
   let localMicPcmBuffer: LocalMicPcmChunk[] = [];
   let reconnectAudioBackfillStartMs = 0;
+  let reconnectAudioBackfillLastEndMs = 0;
+  let reconnectAudioBackfillBatchIndex = 0;
   let reconnectAudioBackfillId = '';
   let reconnectAudioBackfillReason: MediaReconnectReason | null = null;
   let localMicMeterFrame = 0;
@@ -635,6 +637,8 @@
     }
     const nowMs = performance.now();
     reconnectAudioBackfillStartMs = Math.max(0, nowMs - MIC_BACKFILL_RECONNECT_PREROLL_MS);
+    reconnectAudioBackfillLastEndMs = 0;
+    reconnectAudioBackfillBatchIndex = 0;
     reconnectAudioBackfillId = `${debugCallId || 'call'}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     reconnectAudioBackfillReason = reason;
     emitDebugEvent(debugCallId, 'mic.reconnect_backfill.start', {
@@ -645,8 +649,13 @@
     });
   }
 
-  function clearReconnectAudioBackfill() {
+  function clearReconnectAudioBackfill(backfillId?: string) {
+    if (backfillId && reconnectAudioBackfillId && reconnectAudioBackfillId !== backfillId) {
+      return;
+    }
     reconnectAudioBackfillStartMs = 0;
+    reconnectAudioBackfillLastEndMs = 0;
+    reconnectAudioBackfillBatchIndex = 0;
     reconnectAudioBackfillId = '';
     reconnectAudioBackfillReason = null;
   }
@@ -659,39 +668,140 @@
     if (!callId || !sessionId || reconnectAudioBackfillStartMs <= 0) {
       return;
     }
+    const requestCallId = callId;
+    const requestSessionId = sessionId;
+    const reconnectStartMs = reconnectAudioBackfillStartMs;
+    const baseBackfillId = reconnectAudioBackfillId;
+    const backfillReason = reconnectAudioBackfillReason ?? reason;
     const selection = selectReconnectAudioBackfill(performance.now());
     if (!selection) {
       emitDebugEvent(debugCallId, 'mic.reconnect_backfill.skip', {
         reason,
         attempt,
-        backfillId: reconnectAudioBackfillId,
+        backfillId: baseBackfillId,
         cause: 'empty',
         bufferedChunks: localMicPcmBuffer.length
       });
-      clearReconnectAudioBackfill();
+      reconnectAudioBackfillBatchIndex += 1;
+      void sendReconnectAudioBackfillBatch({
+        debugCallId,
+        requestCallId,
+        requestSessionId,
+        baseBackfillId,
+        reconnectStartMs,
+        reason: backfillReason,
+        attempt,
+        batchIndex: reconnectAudioBackfillBatchIndex,
+        final: true,
+        selection: null
+      }).finally(() => clearReconnectAudioBackfill(baseBackfillId));
       return;
     }
 
-    const backfillId = reconnectAudioBackfillId;
+    reconnectAudioBackfillBatchIndex += 1;
+    const initialBatchIndex = reconnectAudioBackfillBatchIndex;
+    await sendReconnectAudioBackfillBatch({
+      debugCallId,
+      requestCallId,
+      requestSessionId,
+      baseBackfillId,
+      reconnectStartMs,
+      reason: backfillReason,
+      attempt,
+      batchIndex: initialBatchIndex,
+      final: false,
+      selection
+    });
+    reconnectAudioBackfillLastEndMs = selection.endMs;
+
+    const tailSelection = selectReconnectAudioBackfill(
+      performance.now(),
+      reconnectAudioBackfillLastEndMs
+    );
+    reconnectAudioBackfillBatchIndex += 1;
+    const finalBatchIndex = reconnectAudioBackfillBatchIndex;
+    void sendReconnectAudioBackfillBatch({
+      debugCallId,
+      requestCallId,
+      requestSessionId,
+      baseBackfillId,
+      reconnectStartMs,
+      reason: backfillReason,
+      attempt,
+      batchIndex: finalBatchIndex,
+      final: true,
+      selection: tailSelection
+    }).finally(() => clearReconnectAudioBackfill(baseBackfillId));
+  }
+
+  async function sendReconnectAudioBackfillBatch({
+    debugCallId,
+    requestCallId,
+    requestSessionId,
+    baseBackfillId,
+    reconnectStartMs,
+    reason,
+    attempt,
+    batchIndex,
+    final,
+    selection
+  }: {
+    debugCallId: string;
+    requestCallId: string;
+    requestSessionId: string;
+    baseBackfillId: string;
+    reconnectStartMs: number;
+    reason: MediaReconnectReason;
+    attempt: number;
+    batchIndex: number;
+    final: boolean;
+    selection: LocalMicPcmSelection | null;
+  }) {
+    const batchBackfillId = `${baseBackfillId}-batch-${batchIndex}`;
+    const selectedStartOffsetMs =
+      selection ? Math.round(selection.startMs - reconnectStartMs) : null;
+    const selectedEndOffsetMs =
+      selection ? Math.round(selection.endMs - reconnectStartMs) : null;
+    emitDebugEvent(debugCallId, 'mic.reconnect_backfill.sending', {
+      reason,
+      attempt,
+      backfillId: batchBackfillId,
+      baseBackfillId,
+      batchIndex,
+      final,
+      selectedStartOffsetMs,
+      selectedEndOffsetMs,
+      durationMs: selection?.durationMs ?? 0,
+      samples: selection?.samples.length ?? 0,
+      rms: selection?.rms ?? 0,
+      peak: selection?.peak ?? 0
+    });
     try {
-      const response = await backfillCallReconnectAudio(callId, {
-        session_id: sessionId,
-        pcm_b64: int16SamplesToBase64(selection.samples),
+      const response = await backfillCallReconnectAudio(requestCallId, {
+        session_id: requestSessionId,
+        pcm_b64: selection ? int16SamplesToBase64(selection.samples) : '',
         sample_rate: MIC_BACKFILL_SAMPLE_RATE,
         channels: 1,
-        backfill_id: backfillId,
-        reason: reconnectAudioBackfillReason ?? reason,
+        backfill_id: batchBackfillId,
+        reason,
         attempt,
-        duration_ms: selection.durationMs
+        duration_ms: selection?.durationMs ?? 0,
+        batch_index: batchIndex,
+        final
       });
       emitDebugEvent(debugCallId, 'mic.reconnect_backfill.sent', {
         reason,
         attempt,
-        backfillId,
-        durationMs: selection.durationMs,
-        samples: selection.samples.length,
-        rms: selection.rms,
-        peak: selection.peak,
+        backfillId: batchBackfillId,
+        baseBackfillId,
+        batchIndex,
+        final,
+        selectedStartOffsetMs,
+        selectedEndOffsetMs,
+        durationMs: selection?.durationMs ?? 0,
+        samples: selection?.samples.length ?? 0,
+        rms: selection?.rms ?? 0,
+        peak: selection?.peak ?? 0,
         status: response.status,
         frames: response.frames ?? null,
         responseDurationMs: response.duration_ms ?? null
@@ -700,20 +810,26 @@
       emitDebugEvent(debugCallId, 'mic.reconnect_backfill.failed', {
         reason,
         attempt,
-        backfillId,
-        durationMs: selection.durationMs,
-        samples: selection.samples.length,
+        backfillId: batchBackfillId,
+        baseBackfillId,
+        batchIndex,
+        final,
+        selectedStartOffsetMs,
+        selectedEndOffsetMs,
+        durationMs: selection?.durationMs ?? 0,
+        samples: selection?.samples.length ?? 0,
         name: (error as Error)?.name ?? 'unknown',
         message: (error as Error)?.message ?? ''
       });
-    } finally {
-      clearReconnectAudioBackfill();
     }
   }
 
-  function selectReconnectAudioBackfill(endMs: number): LocalMicPcmSelection | null {
+  function selectReconnectAudioBackfill(
+    endMs: number,
+    startMsOverride = reconnectAudioBackfillStartMs
+  ): LocalMicPcmSelection | null {
     const startMs = Math.max(
-      reconnectAudioBackfillStartMs,
+      startMsOverride,
       endMs - MIC_BACKFILL_MAX_MS
     );
     const chunks = localMicPcmBuffer.filter((chunk) => chunk.endMs > startMs && chunk.startMs < endMs);

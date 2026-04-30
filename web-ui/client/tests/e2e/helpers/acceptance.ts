@@ -84,7 +84,7 @@ export async function installMockCallMedia(page: Page) {
 
     const mediaDevices = {
       async getUserMedia() {
-        return new MediaStream();
+        return createMockRemoteAudioStream();
       },
       async enumerateDevices() {
         return [];

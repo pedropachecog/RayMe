@@ -16,6 +16,8 @@ export interface CallReconnectAudioBackfillRequest {
   reason?: string;
   attempt?: number;
   duration_ms?: number;
+  batch_index?: number;
+  final?: boolean;
 }
 
 export class CallApiError extends Error {

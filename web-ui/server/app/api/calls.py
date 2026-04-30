@@ -109,13 +109,15 @@ class CallReconnectAudioRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     session_id: str = Field(min_length=1, max_length=128)
-    pcm_b64: str = Field(min_length=1, max_length=2_000_000)
+    pcm_b64: str = Field(default="", max_length=2_000_000)
     sample_rate: int = Field(default=16000, ge=8000, le=48000)
     channels: int = Field(default=1, ge=1, le=2)
     backfill_id: str | None = Field(default=None, max_length=160)
     reason: str | None = Field(default=None, max_length=80)
     attempt: int | None = Field(default=None, ge=0, le=10)
     duration_ms: int | None = Field(default=None, ge=0, le=30000)
+    batch_index: int | None = Field(default=None, ge=0, le=20)
+    final: bool = True
 
 
 class CallDebugEventRequest(BaseModel):
@@ -516,6 +518,8 @@ async def backfill_call_reconnect_audio(
                 "reason": payload.reason,
                 "attempt": payload.attempt,
                 "duration_ms": payload.duration_ms,
+                "batch_index": payload.batch_index,
+                "final": payload.final,
             },
         )
         return {"call_id": call_id, "session_id": session_id, **result}

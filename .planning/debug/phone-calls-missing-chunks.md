@@ -1,7 +1,7 @@
 ---
-status: verifying
+status: fix_verified_local
 created: 2026-04-29T19:18:06Z
-updated: 2026-04-30T17:41:07Z
+updated: 2026-04-30T21:50:49Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -9,10 +9,10 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 
 ## Current Focus
 
-hypothesis: Post-`2360feb` diagnostics show the first lost speech is the multi-second browser/WebRTC outage during media reconnect, not browser mic mute and not backend VAD rejection. The browser captures speech while the peer connection is failed/reconnecting; the backend receives no frames until the reoffer completes, then receives VAD-positive speech again.
-test: User should repeat the same long-passage phone-call repro on the deployed reconnect-gap backfill build.
-expecting: STT should receive one ordered turn containing pre-reconnect frames, buffered reconnect-gap PCM, and replacement-track frames. Reconnect diagnostics should show `mic.reconnect_backfill.sent` and backend `reconnect_audio.backfill.applied`; the transcript should no longer drop the middle speech spoken during reconnect.
-next_action: Ask user to repeat the long-passage repro on deployed commit `adb035c`; if it still truncates, spawn `gsd-debugger` to inspect the new backfill logs.
+hypothesis: The latest post-`dff6545` loss is a partial reconnect-backfill/order gap, not absence of backfill. The browser selected one PCM backfill batch before applying the replacement peer answer, but the Web UI proxy returned `502`; the AI backend nevertheless applied 5.63 seconds of PCM, and later mic audio captured while the browser was still waiting was not inserted into the active turn before replacement-track silence finalized it.
+test: Compare latest Web UI API/SQLite transcript, browser `mic.reconnect_backfill.*` and `mic.reconnect_diag`, backend `reconnect_audio.backfill.*`, `vad.reconnect_grace.*`, `stt.begin/result`, and `event.sent type=user_final` for `call_0daee780dd904a08a8fb69b4d8a68ca2` / `rtc_43b7b92a1b844471979bf0fed4adc8c3`.
+expecting: The persisted transcript should match backend STT, backfill should show partial application/failure semantics, and the first-loss boundary should sit before STT at the browser-backfill/replacement-track transition.
+next_action: Commit, push, deploy through `scripts/deploy-omen.sh`, then ask the user to repeat the Mammoth Cave call repro.
 
 ## Symptoms
 
@@ -29,6 +29,46 @@ evidence_files:
   - .planning/debug/phone-call-repro-1239588-2026-04-30.md
 
 ## Investigation Evidence
+
+- timestamp: 2026-04-30T21:24:13Z
+  checked: Fresh post-`dff6545` investigation setup.
+  found: Created `.planning/debug/phone-call-repro-dff6545-2026-04-30.md`, loaded prior repro files, and confirmed local checkout is `dff6545`.
+  implication: Latest evidence should be preserved separately from prior `2360feb` and `adb035c` findings.
+
+- timestamp: 2026-04-30T21:46:00Z
+  checked: OMEN deployed state, status, logs, Web UI thread API, and direct SQLite copy after the user's post-`dff6545` report.
+  found: OMEN checkout is `dff6545`; `/webrtc/status` is ready with `active_sessions=0`. The latest persisted call is `call_0daee780dd904a08a8fb69b4d8a68ca2` / `rtc_43b7b92a1b844471979bf0fed4adc8c3` on `thread_3be859853d7a4726a5151ca50b6e7940`. It starts at `2026-04-30T20:03:22.542447Z`, stores the long user speech at `2026-04-30T20:04:58.822295Z`, and ends at `2026-04-30T20:05:08.949981Z`. No later persisted thread message or call log was found.
+  implication: The latest retrieved call is the failed repro being reported; there is no newer hidden call/thread to inspect after it.
+
+- timestamp: 2026-04-30T21:46:00Z
+  checked: Persisted transcript through Web UI API and direct SQLite.
+  found: The latest long user speech row is 376 characters: `Of course, and now I will tell your story. The horrible conclusion which had been gradually uprooting itself upon my confused and reluctant mind was now an awful certainty. I was lost completely, hopelessly lost in the vast and at a very thin recesses of the mammoth cave. Turnus, I have frequently rid of the wild, frances into which were thrown the victims of the Thank you.`
+  implication: The full expected Mammoth Cave passage is not hidden in persistence. Web UI API, SQLite, backend `stt.result transcript_len=376`, and `event.sent type=user_final` all agree.
+
+- timestamp: 2026-04-30T21:46:00Z
+  checked: Browser reconnect backfill logs for latest call.
+  found: Browser logged `mic.reconnect_backfill.start` with backfill ID `call_0daee780dd904a08a8fb69b4d8a68ca2-1777579476539-uy2z19qt`, then no `.sent`; it logged `mic.reconnect_backfill.failed ... durationMs=5631 samples=90090 ... RayMe API request failed: 502 Bad Gateway`. Browser local mic diagnostics still showed live mic audio during reconnect, including RMS about `0.0418` at elapsed `2508ms`, `0.0775` at `6522ms`, and `0.0309` at `7023ms`.
+  implication: The browser attempted backfill but perceived it as failed. The user was still producing local mic audio during the reconnect/backfill wait.
+
+- timestamp: 2026-04-30T21:46:00Z
+  checked: Backend reconnect backfill and VAD logs for latest call.
+  found: Backend applied the same backfill ID despite the browser-side 502: `reconnect_audio.backfill.applied ... frames=282 duration_ms=5630 bytes=180180 rms=1079.3 peak=8269.0 turn_frames=1353 speech_seen=True silence_ms=0`. Replacement-track grace then started, but sampled replacement frames had near-zero current energy (`rms=0.1 peak=1.0`) while `speech_now=True` came from the recent VAD window containing the backfilled speech. VAD finalized at `turn_frames=1477 silence_ms=2334`; STT began with only those frames and returned `transcript_len=376`.
+  implication: Backfill is partially working, but the active turn still misses audio after the selected backfill batch and before live replacement audio resumes. The first loss remains before STT.
+
+- timestamp: 2026-04-30T21:46:00Z
+  checked: Reconnect/backfill code path in `web-ui/client/src/routes/call/[threadId]/+page.svelte` and Web UI AI backend client.
+  found: `connectBrowserMedia()` awaits `beforeRemoteDescription`, and reconnect passes `flushReconnectAudioBackfill()` there. `flushReconnectAudioBackfill()` selects the PCM once, posts it, and clears the backfill window in `finally`, before `setRemoteDescription`. `AiBackendClient.backfill_call_audio()` uses the generic 5 second timeout rather than the WebRTC/control timeout.
+  implication: Audio captured while the backfill POST is in flight can be excluded from the already-selected batch and cannot travel via replacement WebRTC until after remote description is applied. The 5 second proxy timeout likely explains the browser `502` despite backend application.
+
+- timestamp: 2026-04-30T21:50:49Z
+  checked: Local fix and regression verification for the post-`dff6545` partial-backfill loss.
+  found: Implemented ordered reconnect backfill batches. The browser now sends an initial batch before replacement answer application, then sends a final tail batch for PCM captured while the first request was in flight; the backend holds replacement-track live frames until the final marker so live silence cannot finalize ahead of the tail. The Web UI proxy now uses the WebRTC timeout for reconnect backfill. Added focused backend, proxy, and Playwright regression coverage. Verification passed: focused Python tests, `npm run build`, `npm run test:e2e -- call-start.spec.ts` (22 passed), full `ai-backend` tests (94 passed), full `web-ui/server` tests (152 passed), and `git diff --check`.
+  implication: Local evidence supports the debugger's root cause and fix. Live verification still requires canonical OMEN deployment and another user repro.
+
+- timestamp: 2026-04-30T21:22:55Z
+  checked: User live verification after deploying reconnect-gap backfill (`dff6545`, code fix in `adb035c`).
+  found: User repeated the same long-passage repro and RayMe still did not transcribe the whole content. The last turn read by the user was the same Mammoth Cave passage saved in `.planning/debug/phone-call-transcript-comparison.md`: it begins `Of course, and now I will tell you a story. The horrible conclusion which had been gradually obtruding itself...` and ends `...as soon as I clearly realised the loss of my bearings.`
+  implication: The debug session is reopened. The next debugger must inspect the latest live evidence with fresh eyes, including `mic.reconnect_backfill.*`, `reconnect_audio.backfill.*`, `vad.reconnect_grace.*`, `stt.begin/result`, Web UI thread API, and OMEN database state. If a call transcript is not visible in one source, that is not acceptable as a stopping point; query the other persistence/log sources.
 
 - timestamp: 2026-04-30T17:20:13Z
   checked: Start of fresh post-`2360feb` debugger pass.

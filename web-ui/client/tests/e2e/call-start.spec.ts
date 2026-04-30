@@ -15,6 +15,10 @@ type ReconnectRouteCounters = {
   debugEvents: Array<{ event: string; detail: Record<string, unknown>; session_id?: string }>;
 };
 
+type ReconnectRouteOptions = {
+  backfillDelayMs?: number;
+};
+
 type MockCallMediaSnapshot = {
   peers: Array<{
     id: number;
@@ -161,12 +165,50 @@ test('re-offers with a new peer instead of ending when browser peer connection f
   expect(debugEventCount(counters, 'datachannel.attach')).toBe(2);
   expect(debugEventCount(counters, 'datachannel.close')).toBe(1);
   expect(debugEventCount(counters, 'remote_audio.attach')).toBe(2);
+  await expect.poll(
+    () =>
+      counters.debugEvents.filter(
+        (entry) => entry.event === 'mic.reconnect_diag' && entry.detail.phase === 'ok'
+      ).length
+  ).toBeGreaterThan(0);
   const micReconnectDiagPhases = counters.debugEvents
     .filter((entry) => entry.event === 'mic.reconnect_diag')
     .map((entry) => entry.detail.phase);
   expect(micReconnectDiagPhases).toContain('scheduled');
   expect(micReconnectDiagPhases).toContain('start');
   expect(micReconnectDiagPhases).toContain('ok');
+  assertNoBrowserErrors();
+});
+
+test('sends reconnect backfill tail before applying the replacement answer when the first batch is slow', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  const counters = await installReconnectCallRoutes(page, { backfillDelayMs: 400 });
+
+  await startReconnectCall(page, counters);
+  await page.waitForTimeout(700);
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+
+  await expect.poll(() => counters.offerCount).toBe(2);
+  await expect.poll(() => counters.backfillCount).toBeGreaterThanOrEqual(2);
+
+  expect(counters.backfills[0]).toMatchObject({ batch_index: 1, final: false });
+  expect(counters.backfills[1]).toMatchObject({ batch_index: 2, final: true });
+  expect(Number(counters.backfills[1].duration_ms ?? 0)).toBeGreaterThan(0);
+
+  const finalSendingIndex = counters.debugEvents.findIndex(
+    (entry) =>
+      entry.event === 'mic.reconnect_backfill.sending' &&
+      entry.detail.batchIndex === 2 &&
+      entry.detail.final === true
+  );
+  expect(finalSendingIndex).toBeGreaterThanOrEqual(0);
+  const remoteDescriptionIndex = counters.debugEvents.findIndex(
+    (entry, index) => index > finalSendingIndex && entry.event === 'pc.setRemoteDescription.done'
+  );
+  expect(remoteDescriptionIndex).toBeGreaterThanOrEqual(0);
   assertNoBrowserErrors();
 });
 
@@ -463,7 +505,10 @@ async function installTurnErrorCallRoutes(page: Page) {
   });
 }
 
-async function installReconnectCallRoutes(page: Page) {
+async function installReconnectCallRoutes(
+  page: Page,
+  options: ReconnectRouteOptions = {}
+) {
   const counters: ReconnectRouteCounters = {
     offerCount: 0,
     backfillCount: 0,
@@ -525,6 +570,9 @@ async function installReconnectCallRoutes(page: Page) {
   await page.route('**/api/calls/*/reconnect-audio', async (route) => {
     counters.backfillCount += 1;
     counters.backfills.push(route.request().postDataJSON() as Record<string, unknown>);
+    if (options.backfillDelayMs && counters.backfillCount === 1) {
+      await new Promise((resolve) => setTimeout(resolve, options.backfillDelayMs));
+    }
     await fulfillJson(route, {
       call_id: 'call-reconnect-01',
       session_id: 'rtc-call-reconnect-01',
