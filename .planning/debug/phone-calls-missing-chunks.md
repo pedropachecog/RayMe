@@ -1,7 +1,7 @@
 ---
 status: investigating
 created: 2026-04-29T19:18:06Z
-updated: 2026-04-30T16:10:20Z
+updated: 2026-04-30T16:12:22Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -12,7 +12,7 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 hypothesis: Strongest current hypothesis: after Android/browser WebRTC media reconnect, the replacement outbound microphone path sends silence or no VAD-positive audio for the ongoing user speech. Backend grace now works, but it expires because no voiced frames arrive before finalization.
 test: Add a targeted instrumentation experiment, not a functional fix: log browser local microphone RMS/track state around reconnect and backend per-frame RMS for replacement-track frames while grace is active, then repeat the same long passage.
 expecting: Browser local RMS high + backend replacement RMS low means the loss is in WebRTC send/receive. Browser local RMS low means capture/noise processing muted speech. Backend replacement RMS high + VAD silence means VAD logic is rejecting real speech.
-next_action: Commit and deploy the instrumentation-only patch via `scripts/deploy-omen.sh`, then ask the user to repeat the same long-passage repro so the new browser/backend audio diagnostics can identify the next boundary.
+next_action: User should repeat the same long-passage phone-call repro on deployed commit `3ce53c7`; then the debugger should inspect `mic.reconnect_diag` and `vad.reconnect_grace.audio` logs to identify the next loss boundary.
 
 ## Symptoms
 
@@ -69,6 +69,11 @@ evidence_files:
   checked: Regression tests for instrumentation patch.
   found: `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` passed: 32 passed. `uv run --project ai-backend pytest ai-backend/tests -q` passed: 90 passed, 1 warning. `npm run build` passed. `npm run test:e2e -- call-start.spec.ts` passed: 20 passed. `git diff --check` passed.
   implication: The instrumentation patch is safe to commit and deploy for the next diagnostic call.
+
+- timestamp: 2026-04-30T16:12:22Z
+  checked: Instrumentation deployment to OMEN.
+  found: Committed and pushed `3ce53c7` (`chore(call): instrument reconnect audio diagnostics`), then deployed with `scripts/deploy-omen.sh`. OMEN checkout is at `3ce53c7`; `/webrtc/status` reports `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, and `active_sessions=0`. Generic `/health` remains `degraded` because only F5-TTS is implemented/resident while other listed engines are unavailable.
+  implication: The next phone-call repro should produce the targeted browser/backend diagnostics needed for the next debugger pass.
 
 - timestamp: 2026-04-30T13:31:00Z
   checked: Fresh OMEN runtime state after the user's post-`e4b93d9` repro.
