@@ -1056,7 +1056,6 @@ class CallSessionManager:
             ):
                 previous_peer = existing.peer_connection
                 existing.peer_connection = peer_connection
-                existing.mark_media_reconnect_pending()
                 if (
                     existing.state == "failed"
                     and existing.end_reason == "connection_failed"
@@ -1064,6 +1063,7 @@ class CallSessionManager:
                     existing.state = "listening"
                     existing.end_reason = None
                     existing.ended_at = None
+                existing.mark_media_reconnect_pending()
                 close = getattr(previous_peer, "close", None)
                 if callable(close):
                     result = close()

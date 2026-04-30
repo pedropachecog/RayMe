@@ -296,6 +296,41 @@ def test_existing_session_reoffer_marks_in_progress_turn_for_reconnect_grace() -
     assert session._media_reconnect_grace_pending is True
 
 
+def test_existing_failed_session_reoffer_marks_in_progress_turn_for_reconnect_grace() -> None:
+    manager = CallSessionManager()
+    first_peer = ScriptedPeerConnection()
+    second_peer = ScriptedPeerConnection()
+    session = _run(
+        manager.create_session(
+            session_id="call-session-reconnect-failed-in-progress",
+            peer_connection=first_peer,
+        )
+    )
+    session._turn_frames.append(
+        PcmAudioFrame(
+            pcm=np.full(320, 2000, dtype=np.int16).tobytes(),
+            sample_rate=16000,
+            channels=1,
+        )
+    )
+    session._speech_seen = True
+    first_peer.connectionState = "failed"
+    _run(session.handle_connection_state_change())
+
+    same_session = _run(
+        manager.create_session(
+            session_id="call-session-reconnect-failed-in-progress",
+            peer_connection=second_peer,
+        )
+    )
+
+    assert same_session is session
+    assert session.state == "listening"
+    assert session.end_reason is None
+    assert session.ended_at is None
+    assert session._media_reconnect_grace_pending is True
+
+
 def test_mute_stops_server_consumption() -> None:
     session, _ = _new_session()
 
