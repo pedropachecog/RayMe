@@ -105,6 +105,19 @@ class CallTurnRequest(BaseModel):
     source: Literal["user_final"]
 
 
+class CallReconnectAudioRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1, max_length=128)
+    pcm_b64: str = Field(min_length=1, max_length=2_000_000)
+    sample_rate: int = Field(default=16000, ge=8000, le=48000)
+    channels: int = Field(default=1, ge=1, le=2)
+    backfill_id: str | None = Field(default=None, max_length=160)
+    reason: str | None = Field(default=None, max_length=80)
+    attempt: int | None = Field(default=None, ge=0, le=10)
+    duration_ms: int | None = Field(default=None, ge=0, le=30000)
+
+
 class CallDebugEventRequest(BaseModel):
     """Browser-side diagnostic event mirrored to the server log.
 
@@ -478,6 +491,40 @@ async def create_call_turn(
     return StreamingResponse(events(), media_type="text/event-stream")
 
 
+@router.post("/{call_id}/reconnect-audio", dependencies=[Depends(enforce_same_origin_for_calls)])
+async def backfill_call_reconnect_audio(
+    call_id: str,
+    payload: CallReconnectAudioRequest,
+    session: AsyncSession = Depends(get_call_session),
+    runtime_settings: Settings = Depends(get_call_runtime_settings),
+    backend: Any = Depends(get_call_backend_client),
+) -> dict[str, Any]:
+    service = CallService(session)
+    try:
+        session_id = service.session_for_call(call_id)
+        _reject_mismatched_session(session_id, payload.session_id)
+        endpoint_settings = await SettingsService(session, runtime_settings).read()
+        result = await _backfill_call_audio(
+            backend,
+            endpoint_settings.ai_backend_url,
+            session_id,
+            {
+                "pcm_b64": payload.pcm_b64,
+                "sample_rate": payload.sample_rate,
+                "channels": payload.channels,
+                "backfill_id": payload.backfill_id,
+                "reason": payload.reason,
+                "attempt": payload.attempt,
+                "duration_ms": payload.duration_ms,
+            },
+        )
+        return {"call_id": call_id, "session_id": session_id, **result}
+    except CallServiceError as exc:
+        raise _call_error(exc) from exc
+    except AiBackendClientError as exc:
+        raise _backend_error(exc) from exc
+
+
 @router.post("/{call_id}/end", dependencies=[Depends(enforce_same_origin_for_calls)])
 async def end_call(
     call_id: str,
@@ -595,6 +642,17 @@ async def _speak_call(
     if not hasattr(backend, "speak_call"):
         raise _missing_backend_method("speak_call")
     return dict(await backend.speak_call(base_url, session_id, payload))
+
+
+async def _backfill_call_audio(
+    backend: Any,
+    base_url: str,
+    session_id: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not hasattr(backend, "backfill_call_audio"):
+        raise _missing_backend_method("backfill_call_audio")
+    return dict(await backend.backfill_call_audio(base_url, session_id, payload))
 
 
 async def _speak_call_sync(

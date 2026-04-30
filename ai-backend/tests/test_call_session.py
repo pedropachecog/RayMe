@@ -538,6 +538,74 @@ def test_call_vad_reconnect_grace_preserves_turn_until_speech_resumes(
     assert session._silence_ms == 0
 
 
+def test_reconnect_audio_backfill_is_inserted_before_replacement_track_frames() -> None:
+    vad = ScriptedVadAdapter()
+    stt = ScriptedSttAdapter()
+    session, _ = _new_session(vad_adapter=vad, stt_adapter=stt)
+
+    pre_pcm = np.full(320, 1000, dtype=np.int16).tobytes()
+    gap_samples = np.concatenate(
+        [
+            np.full(320, 2000, dtype=np.int16),
+            np.full(320, 3000, dtype=np.int16),
+        ]
+    )
+    gap_pcm = gap_samples.tobytes()
+    post_pcm = np.full(320, 4000, dtype=np.int16).tobytes()
+
+    first = _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(pre_pcm)))
+    session.mark_media_reconnect_pending()
+    backfill = _run(
+        session.backfill_reconnect_audio(
+            pcm=gap_pcm,
+            sample_rate=16000,
+            channels=1,
+            backfill_id="gap-1",
+            reason="failed",
+            attempt=1,
+        )
+    )
+    final = _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(post_pcm)))
+
+    assert first is None
+    assert backfill["status"] == "accepted"
+    assert backfill["frames"] == 2
+    assert final["type"] == "user_final"
+    assert stt.calls == [[
+        pre_pcm,
+        gap_samples[:320].tobytes(),
+        gap_samples[320:].tobytes(),
+        post_pcm,
+    ]]
+
+
+def test_reconnect_audio_backfill_ignores_duplicate_ids() -> None:
+    vad = ScriptedVadAdapter()
+    session, _ = _new_session(vad_adapter=vad)
+    gap_pcm = np.full(320, 2000, dtype=np.int16).tobytes()
+
+    first = _run(
+        session.backfill_reconnect_audio(
+            pcm=gap_pcm,
+            sample_rate=16000,
+            channels=1,
+            backfill_id="gap-duplicate",
+        )
+    )
+    second = _run(
+        session.backfill_reconnect_audio(
+            pcm=gap_pcm,
+            sample_rate=16000,
+            channels=1,
+            backfill_id="gap-duplicate",
+        )
+    )
+
+    assert first["status"] == "accepted"
+    assert second["status"] == "duplicate"
+    assert len(session._turn_frames) == 1
+
+
 def test_inbound_audio_normalizer_scales_integer_channels_before_mixing() -> None:
     """Regression: PyAV-style channel arrays must not clip int16 PCM to +/-1."""
 

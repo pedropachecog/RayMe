@@ -103,6 +103,7 @@ class CallSession:
         self._media_reconnect_grace_until = 0.0
         self._media_reconnect_grace_logged = False
         self._media_reconnect_grace_audio_diag_count = 0
+        self._reconnect_audio_backfill_ids: set[str] = set()
 
     @property
     def active_ai_turn(self) -> Any | None:
@@ -213,6 +214,138 @@ class CallSession:
             self.session_id,
             grace_ms,
         )
+
+    async def backfill_reconnect_audio(
+        self,
+        *,
+        pcm: bytes,
+        sample_rate: int = 16000,
+        channels: int = 1,
+        backfill_id: str | None = None,
+        reason: str | None = None,
+        attempt: int | None = None,
+    ) -> dict[str, Any]:
+        if backfill_id and backfill_id in self._reconnect_audio_backfill_ids:
+            logger.info(
+                "[rayme-call] reconnect_audio.backfill.duplicate session=%s "
+                "backfill_id=%s",
+                self.session_id,
+                backfill_id,
+            )
+            return {
+                "status": "duplicate",
+                "frames": 0,
+                "duration_ms": 0,
+                "state": self.state,
+            }
+        if self.muted or self.state in {"ended", "speaking", "understanding", "thinking"}:
+            logger.info(
+                "[rayme-call] reconnect_audio.backfill.skip session=%s "
+                "state=%s muted=%s bytes=%d reason=%s attempt=%s",
+                self.session_id,
+                self.state,
+                self.muted,
+                len(pcm),
+                reason or "",
+                attempt if attempt is not None else "",
+            )
+            return {
+                "status": "skipped",
+                "frames": 0,
+                "duration_ms": 0,
+                "state": self.state,
+            }
+        if (
+            self.state == "failed"
+            and self.end_reason == "connection_failed"
+            and (self._turn_frames or pcm)
+        ):
+            self.state = "listening"
+            self.end_reason = None
+            self.ended_at = None
+
+        frames = self._pcm_backfill_frames(
+            pcm,
+            sample_rate=sample_rate,
+            channels=channels,
+        )
+        if not frames:
+            return {
+                "status": "empty",
+                "frames": 0,
+                "duration_ms": 0,
+                "state": self.state,
+            }
+        if self.state != "listening":
+            logger.info(
+                "[rayme-call] reconnect_audio.backfill.skip session=%s "
+                "state=%s frames=%d reason=%s attempt=%s",
+                self.session_id,
+                self.state,
+                len(frames),
+                reason or "",
+                attempt if attempt is not None else "",
+            )
+            return {
+                "status": "skipped",
+                "frames": 0,
+                "duration_ms": 0,
+                "state": self.state,
+            }
+
+        if backfill_id:
+            self._reconnect_audio_backfill_ids.add(backfill_id)
+        was_pending = self._media_reconnect_grace_pending
+        started_turn = self._turn_started_at is None
+        for frame in frames:
+            self._turn_frames.append(frame)
+            if self._turn_started_at is None:
+                self._turn_started_at = utc_timestamp()
+                logger.info(
+                    "[rayme-call] turn.started session=%s frame_count=%d "
+                    "sample_rate=%d pcm_bytes=%d source=reconnect_backfill",
+                    self.session_id,
+                    self.incoming_audio_frames,
+                    frame.sample_rate,
+                    len(frame.pcm),
+                )
+            self._accept_vad_frame(frame)
+        # Keep the grace armed for the first replacement-track frame. The
+        # backfill inserts missing audio but does not prove the new transport is
+        # stable yet, and a short post-reconnect silence should not finalize
+        # before the browser's replacement track has a chance to resume.
+        self._media_reconnect_grace_pending = was_pending or self._media_reconnect_grace_pending
+
+        duration_ms = sum(
+            int((len(frame.pcm) // 2) * 1000 / max(frame.sample_rate, 1))
+            for frame in frames
+        )
+        audio_stats = self._turn_audio_stats(frames)
+        logger.info(
+            "[rayme-call] reconnect_audio.backfill.applied session=%s "
+            "backfill_id=%s frames=%d duration_ms=%d bytes=%d rms=%s peak=%s "
+            "turn_frames=%d speech_seen=%s silence_ms=%d reason=%s attempt=%s "
+            "started_turn=%s",
+            self.session_id,
+            backfill_id or "",
+            len(frames),
+            duration_ms,
+            len(pcm),
+            f"{audio_stats['rms']:.1f}" if audio_stats is not None else "unknown",
+            f"{audio_stats['peak']:.1f}" if audio_stats is not None else "unknown",
+            len(self._turn_frames),
+            self._speech_seen,
+            self._silence_ms,
+            reason or "",
+            attempt if attempt is not None else "",
+            started_turn,
+        )
+        return {
+            "status": "accepted",
+            "frames": len(frames),
+            "duration_ms": duration_ms,
+            "state": self.state,
+        }
 
     async def finalize_user_turn(self) -> dict[str, Any] | None:
         if not self._turn_frames:
@@ -878,6 +1011,71 @@ class CallSession:
             "rms": float(np.sqrt(np.mean(np.square(samples)))),
             "peak": float(np.max(np.abs(samples))),
         }
+
+    def _pcm_backfill_frames(
+        self,
+        pcm: bytes,
+        *,
+        sample_rate: int,
+        channels: int,
+    ) -> list[PcmAudioFrame]:
+        if not pcm:
+            return []
+        if len(pcm) % 2 != 0:
+            raise ValueError("PCM backfill must contain 16-bit samples")
+        if sample_rate <= 0:
+            raise ValueError("PCM backfill sample_rate must be positive")
+        if channels <= 0:
+            raise ValueError("PCM backfill channels must be positive")
+
+        samples = np.frombuffer(pcm, dtype=np.int16)
+        if channels > 1:
+            usable = (samples.size // channels) * channels
+            samples = samples[:usable]
+            if samples.size == 0:
+                return []
+            samples_float = samples.reshape(-1, channels).astype(np.float32).mean(axis=1)
+        else:
+            samples_float = samples.astype(np.float32)
+
+        target_rate = int(self._normalizer.target_sample_rate)
+        if sample_rate != target_rate:
+            samples_float = self._resample_backfill_samples(
+                samples_float,
+                source_rate=sample_rate,
+                target_rate=target_rate,
+            )
+        samples_int16 = np.clip(
+            np.rint(samples_float),
+            np.iinfo(np.int16).min,
+            np.iinfo(np.int16).max,
+        ).astype(np.int16)
+
+        frame_samples = max(int(target_rate * 20 / 1000), 1)
+        return [
+            PcmAudioFrame(
+                pcm=samples_int16[offset : offset + frame_samples].tobytes(),
+                sample_rate=target_rate,
+                channels=1,
+            )
+            for offset in range(0, samples_int16.size, frame_samples)
+            if samples_int16[offset : offset + frame_samples].size
+        ]
+
+    def _resample_backfill_samples(
+        self,
+        samples: np.ndarray,
+        *,
+        source_rate: int,
+        target_rate: int,
+    ) -> np.ndarray:
+        if samples.size == 0:
+            return samples.astype(np.float32, copy=False)
+        duration = samples.size / max(source_rate, 1)
+        target_length = max(int(round(duration * target_rate)), 1)
+        source_positions = np.linspace(0.0, duration, num=samples.size, endpoint=False)
+        target_positions = np.linspace(0.0, duration, num=target_length, endpoint=False)
+        return np.interp(target_positions, source_positions, samples).astype(np.float32)
 
     def _outbound_audio_stats(self) -> dict[str, float | int] | None:
         stats = getattr(self.outbound_audio_track, "last_enqueue_stats", None)

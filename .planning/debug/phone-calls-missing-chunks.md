@@ -1,7 +1,7 @@
 ---
-status: investigating
+status: fixing
 created: 2026-04-29T19:18:06Z
-updated: 2026-04-30T16:12:22Z
+updated: 2026-04-30T17:38:16Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -9,10 +9,10 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 
 ## Current Focus
 
-hypothesis: Strongest current hypothesis: after Android/browser WebRTC media reconnect, the replacement outbound microphone path sends silence or no VAD-positive audio for the ongoing user speech. Backend grace now works, but it expires because no voiced frames arrive before finalization.
-test: Add a targeted instrumentation experiment, not a functional fix: log browser local microphone RMS/track state around reconnect and backend per-frame RMS for replacement-track frames while grace is active, then repeat the same long passage.
-expecting: Browser local RMS high + backend replacement RMS low means the loss is in WebRTC send/receive. Browser local RMS low means capture/noise processing muted speech. Backend replacement RMS high + VAD silence means VAD logic is rejecting real speech.
-next_action: User should repeat the same long-passage phone-call repro on deployed commit `3ce53c7`; then the debugger should inspect `mic.reconnect_diag` and `vad.reconnect_grace.audio` logs to identify the next loss boundary.
+hypothesis: Post-`2360feb` diagnostics show the first lost speech is the multi-second browser/WebRTC outage during media reconnect, not browser mic mute and not backend VAD rejection. The browser captures speech while the peer connection is failed/reconnecting; the backend receives no frames until the reoffer completes, then receives VAD-positive speech again.
+test: Implement browser-side reconnect-gap PCM buffering and backend active-turn backfill, preserving ordering by posting the buffered gap after the backend accepts the reoffer but before the browser applies the answer and starts replacement-track media.
+expecting: STT should receive one ordered turn containing pre-reconnect frames, buffered reconnect-gap PCM, and replacement-track frames. Reconnect diagnostics should show `mic.reconnect_backfill.sent` and backend `reconnect_audio.backfill.applied`.
+next_action: Commit, push, deploy with `scripts/deploy-omen.sh`, then ask user to repeat the long-passage repro.
 
 ## Symptoms
 
@@ -29,6 +29,56 @@ evidence_files:
   - .planning/debug/phone-call-repro-1239588-2026-04-30.md
 
 ## Investigation Evidence
+
+- timestamp: 2026-04-30T17:20:13Z
+  checked: Start of fresh post-`2360feb` debugger pass.
+  found: Session focus reset to compare the newly deployed reconnect audio diagnostics against the latest user repro after `2026-04-30T17:19:00Z`.
+  implication: The next finding must be based on current browser/backend diagnostics rather than assuming the previous replacement-track-silence hypothesis.
+
+- timestamp: 2026-04-30T17:21:05Z
+  checked: Linked repro evidence files and project skill discovery.
+  found: Prior repro files show the recurring loss happened before persistence and before STT; the post-`1239588` file specifically left the boundary unresolved between browser capture, WebRTC send/receive silence, and backend VAD rejection. No project-local `.claude/skills` or `.agents/skills` were present.
+  implication: The post-`2360feb` pass should focus on the newly added RMS/peak and VAD diagnostic events, not downstream transcript handling.
+
+- timestamp: 2026-04-30T17:23:47Z
+  checked: Latest OMEN checkout, logs, `/webrtc/status`, and thread API after the user's post-`2360feb` repro.
+  found: Local and OMEN checkouts both report `2360feb` (`docs(debug): record reconnect diagnostics deployment`) with clean remote worktree. `/webrtc/status` is ready. The newest substantive call in persisted data is `call_398dbd33e47c4cd9bad0e9196e060c11` / `rtc_312a33e4d8a243aeb0fc521da21e8473` on `thread_3be859853d7a4726a5151ca50b6e7940`; it starts at `2026-04-30T17:15:41Z`, stores the long user speech at `2026-04-30T17:17:23Z`, and ends at `2026-04-30T17:17:34Z`. No OMEN log/thread writes were observed after `2026-04-30T17:19:00Z`.
+  implication: The latest available repro evidence is the post-`2360feb` call ending at `17:17:34Z`, immediately before the debug note was recorded; there is no later persisted call to inspect.
+
+- timestamp: 2026-04-30T17:23:47Z
+  checked: Persisted Web UI thread data for latest call `call_398dbd33e47c4cd9bad0e9196e060c11`.
+  found: The long user speech row is 414 characters: `Of course, and now I will tell your story...but stood quiet as soon as I clearly realized the loss of my my bearings.`
+  implication: Persistence still stores the same partial transcript produced by STT; the new loss boundary remains before or at live audio capture/transport/VAD, not UI storage.
+
+- timestamp: 2026-04-30T17:23:47Z
+  checked: Browser `mic.reconnect_diag` events for latest call.
+  found: During reconnect, the local audio track stayed live, unmuted, and enabled. Local mic raw RMS/peak were nonzero before reconnect and high during the outage, including `elapsedMs=1504 localMicRawRms=0.120 peak=0.358`, `elapsedMs=2005 rms=0.118 peak=0.304`, `elapsedMs=3008 rms=0.083 peak=0.185`, and `elapsedMs=4010 rms=0.215 peak=0.538` while `mediaReconnecting=true`.
+  implication: The browser microphone was capturing speech during the failed/reconnecting interval; this rules out local mic mute/capture silence as the first loss boundary.
+
+- timestamp: 2026-04-30T17:23:47Z
+  checked: Backend `vad.reconnect_grace.audio` events for latest call.
+  found: The old track fails at backend frame 1659, same-session reoffer starts reconnect grace at turn frame 1046, and the replacement track receives real VAD-positive audio: diagnostic frames 2-10 have RMS roughly 1487-3161 and `speech_now=True`; later samples at diag frames 25/50/75/100/125 also have `speech_now=True`. After grace, audio becomes VAD-silent for `silence_ms=1822`, then `stt.begin frames=1612` and `stt.result transcript_len=414`.
+  implication: Once the replacement WebRTC path exists, backend receive and Silero VAD both accept speech. The missing middle spans were spoken while no backend track was receiving frames during the reconnect gap; they are not backend VAD rejection of real received audio.
+
+- timestamp: 2026-04-30T17:24:30Z
+  checked: Latest repro evidence preservation.
+  found: Saved `.planning/debug/phone-call-repro-2360feb-2026-04-30.md` with deployed commit, call/session/thread IDs, persisted user speech, browser/backend reconnect diagnostics, first-loss boundary, and focused fix/test recommendation.
+  implication: The post-`2360feb` diagnostic pass can be reloaded without re-querying OMEN logs.
+
+- timestamp: 2026-04-30T17:38:16Z
+  checked: Reconnect-gap audio backfill fix.
+  found: Added browser rolling 16 kHz PCM buffering from the local mic graph, started reconnect-gap selection when browser media reconnect is scheduled/started, and posted the selected gap to the Web UI before applying the replacement peer answer. Added Web UI and AI backend routes to forward/apply reconnect audio backfill. `CallSession.backfill_reconnect_audio()` splits PCM into 20 ms frames, appends them to the active turn, runs VAD bookkeeping, preserves reconnect grace for the first replacement-track frame, and deduplicates by backfill ID.
+  implication: Speech captured by the browser during the WebRTC reconnect outage is no longer intentionally discarded; the live verification target is whether the new browser route emits `mic.reconnect_backfill.sent` and backend logs `reconnect_audio.backfill.applied` during the same long-passage repro.
+
+- timestamp: 2026-04-30T17:38:16Z
+  checked: Regression tests for reconnect-gap audio backfill.
+  found: `uv run --project ai-backend pytest ai-backend/tests -q` passed: 93 passed, 3 warnings. `uv run --project web-ui/server pytest web-ui/server/tests -q` passed: 151 passed. `npm run build` passed. `npm run test:e2e -- call-start.spec.ts` passed: 20 passed. `git diff --check` passed.
+  implication: The fix is covered at backend call-session, AI backend signaling route, Web UI facade route, and existing call reconnect E2E levels.
+
+- timestamp: 2026-04-30T17:19:00Z
+  checked: User live verification after deploying reconnect audio diagnostics (`2360feb`, instrumentation from `3ce53c7`).
+  found: User repeated the same phone-call repro as before. RayMe still did not transcribe the whole long text.
+  implication: The next debugger pass should inspect the newly added `mic.reconnect_diag` browser events and `vad.reconnect_grace.audio` backend events from the latest call, without assuming the prior hypothesis is correct.
 
 - timestamp: 2026-04-30T15:56:08Z
   checked: User live verification after deploying commit `1239588`.
@@ -173,8 +223,8 @@ evidence_files:
 
 ## Resolution
 
-root_cause: Phone call transcription loses chunks before STT. Prior confirmed root causes were overly aggressive live-call VAD finalization, a 30s hard max-turn cap, and failed-state reoffers that did not arm reconnect grace. As of deployed commit `1239588`, those fixes are active, but the latest failure still occurs before STT: after browser media reconnect, backend reconnect grace arms and the replacement track reaches the receive loop, yet no VAD-positive speech arrives before grace expires and the partial turn finalizes. The remaining root cause is not fully isolated between browser microphone capture, WebRTC sending/receiving silent audio, and backend VAD rejecting post-reconnect speech.
-fix: Added call-specific VAD settings (`call_vad_end_silence_ms=1800`, `call_vad_max_turn_ms=120000`), updated `CallSession` to use them for live-call turn finalization/windowing, and added regression tests for false Silero silence during continuous speech and continuous speech beyond 30 seconds. Follow-up fix: added `call_media_reconnect_grace_ms=5000`; when a browser reoffer replaces the peer connection during an active spoken turn, `CallSession` arms a short grace window and starts it on the first frame of the new track so reconnect startup silence does not finalize the turn before speech resumes. Post-`e4b93d9` follow-up: recover `failed/connection_failed` sessions before marking reconnect grace so failed-then-reoffered mid-turn calls actually arm the grace window. No new functional fix is confirmed for the post-`1239588` failure; the next change should be instrumentation to distinguish browser capture from backend received-audio/VAD.
+root_cause: Phone call transcription loses chunks before STT. Prior confirmed root causes were overly aggressive live-call VAD finalization, a 30s hard max-turn cap, and failed-state reoffers that did not arm reconnect grace. As of deployed commit `2360feb`, the latest diagnostics isolate the remaining loss: browser media reconnect creates a multi-second WebRTC outage during continuous speech. The browser local mic remains live and captures nonzero/high RMS while `mediaReconnecting=true`, but the backend old track has failed and the replacement track has not started receiving frames yet. When the replacement track starts, backend RMS is nonzero and Silero reports `speech_now=True`, so backend VAD is not rejecting real post-reconnect audio. Speech spoken during the outage is never delivered or replayed.
+fix: Added call-specific VAD settings (`call_vad_end_silence_ms=1800`, `call_vad_max_turn_ms=120000`), updated `CallSession` to use them for live-call turn finalization/windowing, and added regression tests for false Silero silence during continuous speech and continuous speech beyond 30 seconds. Follow-up fix: added `call_media_reconnect_grace_ms=5000`; when a browser reoffer replaces the peer connection during an active spoken turn, `CallSession` arms a short grace window and starts it on the first frame of the new track so reconnect startup silence does not finalize the turn before speech resumes. Post-`e4b93d9` follow-up: recover `failed/connection_failed` sessions before marking reconnect grace so failed-then-reoffered mid-turn calls actually arm the grace window. Post-`2360feb` follow-up: add browser-side rolling 16 kHz PCM buffering and active-turn backend backfill for media reconnect gaps, sent after backend reoffer acceptance but before replacement peer answer application so STT sees pre-reconnect + gap + post-reconnect audio in order.
 verification:
   - `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` failed: 28 passed, 1 failed. Failure was `test_silero_silence_gap_finalizes_turn_even_with_loud_ambient_noise`, because the test implicitly expected the old 700 ms call threshold; it now needs to set `call_vad_end_silence_ms=700` explicitly to preserve that regression scenario.
   - `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` passed: 29 passed in 8.28s.
@@ -191,10 +241,24 @@ verification:
   - `git diff --check` passed after the post-`e4b93d9` fix.
   - Live verification still requires deploying via `scripts/deploy-omen.sh` only, then repeating the phone-call passage.
   - Post-deploy user repro on 2026-04-30 still failed under commit `1239588`; persisted user speech rows and boundary logs saved in `.planning/debug/phone-call-repro-1239588-2026-04-30.md`.
+  - Post-deploy user repro on 2026-04-30 still failed under commit `2360feb`; persisted user speech rows and browser/backend reconnect diagnostics saved in `.planning/debug/phone-call-repro-2360feb-2026-04-30.md`. Diagnostics isolate browser/WebRTC reconnect outage as the first-loss boundary.
+  - `uv run --project ai-backend pytest ai-backend/tests -q` passed after reconnect-gap backfill: 93 passed, 3 warnings in 30.81s.
+  - `uv run --project web-ui/server pytest web-ui/server/tests -q` passed after reconnect-gap backfill: 151 passed in 29.79s.
+  - `npm run build` passed after reconnect-gap backfill.
+  - `npm run test:e2e -- call-start.spec.ts` passed after reconnect-gap backfill: 20 passed.
+  - `git diff --check` passed after reconnect-gap backfill.
 files_changed:
   - ai-backend/app/config.py
   - ai-backend/app/call/session.py
   - ai-backend/app/api/webrtc.py
   - ai-backend/tests/test_call_session.py
+  - ai-backend/tests/test_webrtc_signaling.py
+  - web-ui/client/src/lib/api/calls.ts
+  - web-ui/client/src/routes/call/[threadId]/+page.svelte
+  - web-ui/client/tests/e2e/call-start.spec.ts
+  - web-ui/server/app/api/calls.py
+  - web-ui/server/app/domain/ai_backend_client.py
+  - web-ui/server/tests/test_calls.py
   - .planning/debug/phone-call-repro-e4b93d9-2026-04-30.md
   - .planning/debug/phone-call-repro-1239588-2026-04-30.md
+  - .planning/debug/phone-call-repro-2360feb-2026-04-30.md

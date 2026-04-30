@@ -46,6 +46,7 @@ class ScriptedCallBackend:
         self.fail_offer = False
         self.created_sessions: list[dict[str, Any]] = []
         self.offer_calls: list[dict[str, Any]] = []
+        self.backfill_calls: list[dict[str, Any]] = []
         self.speak_calls: list[dict[str, Any]] = []
         self.interrupt_calls: list[dict[str, Any]] = []
 
@@ -90,6 +91,17 @@ class ScriptedCallBackend:
             {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
         )
         return {"session_id": session_id, "event": {"type": "ai_done"}}
+
+    async def backfill_call_audio(
+        self,
+        base_url: str,
+        session_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.backfill_calls.append(
+            {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
+        )
+        return {"session_id": session_id, "status": "accepted", "frames": 2}
 
     async def interrupt_call(self, base_url: str, session_id: str) -> dict[str, Any]:
         self.interrupt_calls.append({"base_url": base_url, "session_id": session_id})
@@ -229,6 +241,48 @@ def test_turns_reject_mismatched_session_for_existing_call(call_fixture: CallFix
     assert _public_error_code(response) == "call_session_not_found"
 
 
+def test_reconnect_audio_backfill_forwards_to_backend_without_persistence(
+    call_fixture: CallFixture,
+) -> None:
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/reconnect-audio",
+        json={
+            "session_id": started["session_id"],
+            "pcm_b64": "AAECAw==",
+            "sample_rate": 16000,
+            "channels": 1,
+            "backfill_id": "gap-1",
+            "reason": "failed",
+            "attempt": 1,
+            "duration_ms": 40,
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+    assert call_fixture.backend.backfill_calls == [
+        {
+            "base_url": "https://127.0.0.1:9443",
+            "session_id": started["session_id"],
+            "payload": {
+                "pcm_b64": "AAECAw==",
+                "sample_rate": 16000,
+                "channels": 1,
+                "backfill_id": "gap-1",
+                "reason": "failed",
+                "attempt": 1,
+                "duration_ms": 40,
+            },
+        }
+    ]
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert rows[-1] == ("call_start", "event", "Call started")
+    assert not any(row[0] in {"user_speech", "ai_speech"} for row in rows)
+
+
 def test_mute_interrupt_and_end_reject_mismatched_session_for_existing_call(
     call_fixture: CallFixture,
 ) -> None:
@@ -355,6 +409,11 @@ def test_offer_rejects_missing_backend_method_instead_of_returning_empty_answer(
         ("_interrupt_call", ("session_live",), "interrupt_call"),
         ("_end_call", ("session_live", "hangup"), "end_call"),
         ("_speak_call", ("session_live", {"turn_id": "turn_1", "text": "Hi"}), "speak_call"),
+        (
+            "_backfill_call_audio",
+            ("session_live", {"pcm_b64": "AA==", "sample_rate": 16000, "channels": 1}),
+            "backfill_call_audio",
+        ),
     ],
 )
 def test_call_control_helpers_reject_missing_backend_methods_instead_of_local_success(

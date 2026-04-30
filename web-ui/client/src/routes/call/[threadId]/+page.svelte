@@ -6,6 +6,7 @@
 
   import {
     CallApiError,
+    backfillCallReconnectAudio,
     endCall,
     interruptCall,
     sendCallOffer,
@@ -53,6 +54,21 @@
     peak?: number;
   }
 
+  interface LocalMicPcmChunk {
+    startMs: number;
+    endMs: number;
+    samples: Int16Array;
+  }
+
+  interface LocalMicPcmSelection {
+    startMs: number;
+    endMs: number;
+    samples: Int16Array;
+    durationMs: number;
+    rms: number;
+    peak: number;
+  }
+
   type CallTurnStreamEvent =
     | { type: 'ai_token'; turn_id?: string; text?: string }
     | { type: 'ai_audio_started'; turn_id?: string; session_id?: string; audio?: CallAudioStats | null }
@@ -85,6 +101,12 @@
   let localAudioContext: AudioContext | null = null;
   let localMicSource: MediaStreamAudioSourceNode | null = null;
   let localMicAnalyser: AnalyserNode | null = null;
+  let localMicRecorderProcessor: ScriptProcessorNode | null = null;
+  let localMicRecorderGain: GainNode | null = null;
+  let localMicPcmBuffer: LocalMicPcmChunk[] = [];
+  let reconnectAudioBackfillStartMs = 0;
+  let reconnectAudioBackfillId = '';
+  let reconnectAudioBackfillReason: MediaReconnectReason | null = null;
   let localMicMeterFrame = 0;
   let localMicRawRms: number | null = null;
   let localMicRawPeak: number | null = null;
@@ -104,6 +126,10 @@
   const MEDIA_RECONNECT_MAX_ATTEMPTS = 2;
   const MEDIA_RECONNECT_MIC_DIAG_MS = 7000;
   const MEDIA_RECONNECT_MIC_DIAG_INTERVAL_MS = 500;
+  const MIC_BACKFILL_SAMPLE_RATE = 16000;
+  const MIC_BACKFILL_ROLLING_MS = 15000;
+  const MIC_BACKFILL_RECONNECT_PREROLL_MS = 250;
+  const MIC_BACKFILL_MAX_MS = 12000;
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'RayMe');
@@ -183,7 +209,10 @@
     }
   }
 
-  async function connectBrowserMedia(started: { call_id: string; session_id?: string | null }) {
+  async function connectBrowserMedia(
+    started: { call_id: string; session_id?: string | null },
+    options: { beforeRemoteDescription?: () => Promise<void> } = {}
+  ) {
     if (!localMediaStream) {
       return;
     }
@@ -249,6 +278,9 @@
       has_answer: Boolean(response.answer),
       answer_sdp_len: response.answer?.sdp?.length ?? 0
     });
+    if (options.beforeRemoteDescription) {
+      await options.beforeRemoteDescription();
+    }
     if (response.answer) {
       await connection.setRemoteDescription(response.answer);
       emitDebugEvent(started.call_id, 'pc.setRemoteDescription.done', {
@@ -275,6 +307,7 @@
       if ((iceConnectionState === 'connected' || iceConnectionState === 'completed') && isBrowserMediaConnected(connection)) {
         clearMediaReconnectTimer();
         mediaReconnectAttempts = 0;
+        clearReconnectAudioBackfill();
         emitLocalMicReconnectDiagnostic(debugCallId, {
           phase: 'recovered',
           reason: 'disconnected',
@@ -303,6 +336,7 @@
       if (connection.connectionState === 'connected' && isBrowserMediaConnected(connection)) {
         clearMediaReconnectTimer();
         mediaReconnectAttempts = 0;
+        clearReconnectAudioBackfill();
         emitLocalMicReconnectDiagnostic(debugCallId, {
           phase: 'recovered',
           reason: 'failed',
@@ -404,6 +438,7 @@
       delayMs,
       attempts: mediaReconnectAttempts
     });
+    startReconnectAudioBackfill(debugCallId, reason);
     emitLocalMicReconnectDiagnostic(debugCallId, {
       phase: 'scheduled',
       reason,
@@ -414,6 +449,7 @@
     mediaReconnectTimer = window.setTimeout(() => {
       mediaReconnectTimer = 0;
       if (isBrowserMediaConnected(connection)) {
+        clearReconnectAudioBackfill();
         emitLocalMicReconnectDiagnostic(debugCallId, {
           phase: 'schedule_cancelled_connected',
           reason,
@@ -453,14 +489,16 @@
 
     mediaReconnecting = true;
     mediaReconnectAttempts += 1;
+    const reconnectAttempt = mediaReconnectAttempts;
+    startReconnectAudioBackfill(debugCallId, reason);
     emitDebugEvent(debugCallId, 'pc.media_reconnect.start', {
       reason,
-      attempt: mediaReconnectAttempts
+      attempt: reconnectAttempt
     });
     emitLocalMicReconnectDiagnostic(debugCallId, {
       phase: 'start',
       reason,
-      attempt: mediaReconnectAttempts
+      attempt: reconnectAttempt
     });
 
     try {
@@ -472,26 +510,32 @@
         peerConnection = null;
       }
 
-      await connectBrowserMedia({ call_id: callId, session_id: sessionId });
+      await connectBrowserMedia(
+        { call_id: callId, session_id: sessionId },
+        {
+          beforeRemoteDescription: () =>
+            flushReconnectAudioBackfill(debugCallId, reason, reconnectAttempt)
+        }
+      );
       applyCallState('listening');
       emitDebugEvent(debugCallId, 'pc.media_reconnect.ok', {
-        attempt: mediaReconnectAttempts
+        attempt: reconnectAttempt
       });
       emitLocalMicReconnectDiagnostic(debugCallId, {
         phase: 'ok',
         reason,
-        attempt: mediaReconnectAttempts
+        attempt: reconnectAttempt
       });
     } catch (error) {
       emitDebugEvent(debugCallId, 'pc.media_reconnect.failed', {
-        attempt: mediaReconnectAttempts,
+        attempt: reconnectAttempt,
         name: (error as DOMException)?.name ?? 'unknown',
         message: (error as Error)?.message ?? ''
       });
       emitLocalMicReconnectDiagnostic(debugCallId, {
         phase: 'failed',
         reason,
-        attempt: mediaReconnectAttempts,
+        attempt: reconnectAttempt,
         name: (error as DOMException)?.name ?? 'unknown'
       });
       if (mediaReconnectAttempts >= MEDIA_RECONNECT_MAX_ATTEMPTS) {
@@ -583,6 +627,122 @@
     }
     localMicReconnectDiagStartedAt = 0;
     localMicReconnectDiagTick = 0;
+  }
+
+  function startReconnectAudioBackfill(debugCallId: string, reason: MediaReconnectReason) {
+    if (reconnectAudioBackfillStartMs > 0) {
+      return;
+    }
+    const nowMs = performance.now();
+    reconnectAudioBackfillStartMs = Math.max(0, nowMs - MIC_BACKFILL_RECONNECT_PREROLL_MS);
+    reconnectAudioBackfillId = `${debugCallId || 'call'}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    reconnectAudioBackfillReason = reason;
+    emitDebugEvent(debugCallId, 'mic.reconnect_backfill.start', {
+      reason,
+      backfillId: reconnectAudioBackfillId,
+      startOffsetMs: Math.round(nowMs - reconnectAudioBackfillStartMs),
+      bufferedChunks: localMicPcmBuffer.length
+    });
+  }
+
+  function clearReconnectAudioBackfill() {
+    reconnectAudioBackfillStartMs = 0;
+    reconnectAudioBackfillId = '';
+    reconnectAudioBackfillReason = null;
+  }
+
+  async function flushReconnectAudioBackfill(
+    debugCallId: string,
+    reason: MediaReconnectReason,
+    attempt: number
+  ) {
+    if (!callId || !sessionId || reconnectAudioBackfillStartMs <= 0) {
+      return;
+    }
+    const selection = selectReconnectAudioBackfill(performance.now());
+    if (!selection) {
+      emitDebugEvent(debugCallId, 'mic.reconnect_backfill.skip', {
+        reason,
+        attempt,
+        backfillId: reconnectAudioBackfillId,
+        cause: 'empty',
+        bufferedChunks: localMicPcmBuffer.length
+      });
+      clearReconnectAudioBackfill();
+      return;
+    }
+
+    const backfillId = reconnectAudioBackfillId;
+    try {
+      const response = await backfillCallReconnectAudio(callId, {
+        session_id: sessionId,
+        pcm_b64: int16SamplesToBase64(selection.samples),
+        sample_rate: MIC_BACKFILL_SAMPLE_RATE,
+        channels: 1,
+        backfill_id: backfillId,
+        reason: reconnectAudioBackfillReason ?? reason,
+        attempt,
+        duration_ms: selection.durationMs
+      });
+      emitDebugEvent(debugCallId, 'mic.reconnect_backfill.sent', {
+        reason,
+        attempt,
+        backfillId,
+        durationMs: selection.durationMs,
+        samples: selection.samples.length,
+        rms: selection.rms,
+        peak: selection.peak,
+        status: response.status,
+        frames: response.frames ?? null,
+        responseDurationMs: response.duration_ms ?? null
+      });
+    } catch (error) {
+      emitDebugEvent(debugCallId, 'mic.reconnect_backfill.failed', {
+        reason,
+        attempt,
+        backfillId,
+        durationMs: selection.durationMs,
+        samples: selection.samples.length,
+        name: (error as Error)?.name ?? 'unknown',
+        message: (error as Error)?.message ?? ''
+      });
+    } finally {
+      clearReconnectAudioBackfill();
+    }
+  }
+
+  function selectReconnectAudioBackfill(endMs: number): LocalMicPcmSelection | null {
+    const startMs = Math.max(
+      reconnectAudioBackfillStartMs,
+      endMs - MIC_BACKFILL_MAX_MS
+    );
+    const chunks = localMicPcmBuffer.filter((chunk) => chunk.endMs > startMs && chunk.startMs < endMs);
+    const sampleCount = chunks.reduce((total, chunk) => total + chunk.samples.length, 0);
+    if (sampleCount <= 0) {
+      return null;
+    }
+    const samples = new Int16Array(sampleCount);
+    let offset = 0;
+    let sumSquares = 0;
+    let peak = 0;
+    for (const chunk of chunks) {
+      samples.set(chunk.samples, offset);
+      offset += chunk.samples.length;
+      for (const sample of chunk.samples) {
+        const abs = Math.abs(sample);
+        peak = Math.max(peak, abs);
+        sumSquares += sample * sample;
+      }
+    }
+    const durationMs = Math.round(samples.length * 1000 / MIC_BACKFILL_SAMPLE_RATE);
+    return {
+      startMs: chunks[0]?.startMs ?? startMs,
+      endMs: chunks[chunks.length - 1]?.endMs ?? endMs,
+      samples,
+      durationMs,
+      rms: Math.sqrt(sumSquares / samples.length),
+      peak
+    };
   }
 
   function emitLocalMicReconnectDiagnostic(
@@ -760,6 +920,10 @@
       const analyser = context.createAnalyser();
       analyser.fftSize = 512;
       source.connect(analyser);
+      attachLocalMicPcmRecorder(context, source);
+      if (context.state === 'suspended') {
+        void context.resume().catch(() => undefined);
+      }
       localAudioContext = context;
       localMicSource = source;
       localMicAnalyser = analyser;
@@ -789,19 +953,128 @@
     }
   }
 
+  function attachLocalMicPcmRecorder(
+    context: AudioContext,
+    source: MediaStreamAudioSourceNode
+  ) {
+    if (typeof context.createScriptProcessor !== 'function') {
+      return;
+    }
+    try {
+      const processor = context.createScriptProcessor(4096, 1, 1);
+      const silentSink = context.createGain();
+      silentSink.gain.value = 0;
+      processor.onaudioprocess = (event) => {
+        const input = event.inputBuffer.getChannelData(0);
+        const sourceRate = event.inputBuffer.sampleRate || context.sampleRate;
+        const sourceDurationMs = input.length * 1000 / Math.max(sourceRate, 1);
+        const endMs = performance.now();
+        const samples = downsampleFloatToInt16(
+          input,
+          sourceRate,
+          MIC_BACKFILL_SAMPLE_RATE
+        );
+        appendLocalMicPcmChunk({
+          startMs: endMs - sourceDurationMs,
+          endMs,
+          samples
+        });
+      };
+      source.connect(processor);
+      processor.connect(silentSink);
+      silentSink.connect(context.destination);
+      localMicRecorderProcessor = processor;
+      localMicRecorderGain = silentSink;
+    } catch {
+      localMicRecorderProcessor = null;
+      localMicRecorderGain = null;
+    }
+  }
+
+  function appendLocalMicPcmChunk(chunk: LocalMicPcmChunk) {
+    if (!chunk.samples.length) {
+      return;
+    }
+    localMicPcmBuffer.push(chunk);
+    trimLocalMicPcmBuffer(performance.now() - MIC_BACKFILL_ROLLING_MS);
+  }
+
+  function trimLocalMicPcmBuffer(minEndMs: number) {
+    while (localMicPcmBuffer.length > 0 && localMicPcmBuffer[0].endMs < minEndMs) {
+      localMicPcmBuffer.shift();
+    }
+  }
+
+  function downsampleFloatToInt16(
+    input: Float32Array,
+    sourceRate: number,
+    targetRate: number
+  ) {
+    if (!input.length || sourceRate <= 0 || targetRate <= 0) {
+      return new Int16Array();
+    }
+    if (sourceRate === targetRate) {
+      const output = new Int16Array(input.length);
+      for (let index = 0; index < input.length; index += 1) {
+        output[index] = floatSampleToInt16(input[index]);
+      }
+      return output;
+    }
+
+    const ratio = sourceRate / targetRate;
+    const outputLength = Math.max(1, Math.floor(input.length / ratio));
+    const output = new Int16Array(outputLength);
+    for (let index = 0; index < outputLength; index += 1) {
+      const position = index * ratio;
+      const leftIndex = Math.floor(position);
+      const rightIndex = Math.min(leftIndex + 1, input.length - 1);
+      const fraction = position - leftIndex;
+      const sample = input[leftIndex] * (1 - fraction) + input[rightIndex] * fraction;
+      output[index] = floatSampleToInt16(sample);
+    }
+    return output;
+  }
+
+  function floatSampleToInt16(sample: number) {
+    const clamped = Math.max(-1, Math.min(1, sample));
+    return clamped < 0
+      ? Math.round(clamped * 32768)
+      : Math.round(clamped * 32767);
+  }
+
+  function int16SamplesToBase64(samples: Int16Array) {
+    const bytes = new Uint8Array(samples.buffer, samples.byteOffset, samples.byteLength);
+    let binary = '';
+    const chunkSize = 0x8000;
+    for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+      const chunk = bytes.subarray(offset, offset + chunkSize);
+      binary += String.fromCharCode(...chunk);
+    }
+    return btoa(binary);
+  }
+
   function stopLocalMicMeter() {
     if (localMicMeterFrame) {
       cancelAnimationFrame(localMicMeterFrame);
       localMicMeterFrame = 0;
+    }
+    localMicRecorderProcessor?.disconnect();
+    localMicRecorderGain?.disconnect();
+    if (localMicRecorderProcessor) {
+      localMicRecorderProcessor.onaudioprocess = null;
     }
     localMicSource?.disconnect();
     localMicAnalyser?.disconnect();
     localAudioContext?.close().catch(() => undefined);
     localMicSource = null;
     localMicAnalyser = null;
+    localMicRecorderProcessor = null;
+    localMicRecorderGain = null;
     localAudioContext = null;
     localMicRawRms = null;
     localMicRawPeak = null;
+    localMicPcmBuffer = [];
+    clearReconnectAudioBackfill();
   }
 
   function waitForIceGathering(connection: RTCPeerConnection): Promise<void> {

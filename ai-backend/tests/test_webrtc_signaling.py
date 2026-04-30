@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 from io import BytesIO
 from typing import Any
 
@@ -15,6 +16,7 @@ MUTE_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/mute"
 INTERRUPT_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/interrupt"
 END_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/end"
 SPEAK_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/speak"
+RECONNECT_AUDIO_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/reconnect-audio"
 
 
 def _scripted_wav_bytes() -> bytes:
@@ -270,6 +272,33 @@ def test_webrtc_end_control_returns_session_state(stub_webrtc: None) -> None:
     assert payload["session_id"] == session_id
     assert payload["state"] == "ended"
     assert payload["reason"] == "hangup"
+
+
+def test_webrtc_reconnect_audio_backfill_appends_to_call_session(stub_webrtc: None) -> None:
+    client = _client()
+    session_id = "call-session-1"
+    client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+    pcm = np.full(640, 2000, dtype=np.int16).tobytes()
+
+    response = client.post(
+        RECONNECT_AUDIO_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={
+            "pcm_b64": base64.b64encode(pcm).decode("ascii"),
+            "sample_rate": 16000,
+            "channels": 1,
+            "backfill_id": "gap-route-1",
+            "reason": "failed",
+            "attempt": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session_id"] == session_id
+    assert payload["status"] == "accepted"
+    assert payload["frames"] == 2
+    session = client.app.state.call_session_manager.get_session(session_id)
+    assert len(session._turn_frames) == 2
 
 
 def test_webrtc_offer_malformed_payload_returns_sanitized_validation_error() -> None:

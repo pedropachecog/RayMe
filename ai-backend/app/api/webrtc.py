@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
 import time
 from typing import Any, Literal
@@ -77,6 +79,18 @@ class SpeakRequest(BaseModel):
     )
     reference_transcript: str | None = Field(default=None, max_length=10000)
     reference_audio_content_type: str | None = Field(default=None, max_length=120)
+
+
+class ReconnectAudioBackfillRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pcm_b64: str = Field(min_length=1, max_length=2_000_000)
+    sample_rate: int = Field(default=16000, ge=8000, le=48000)
+    channels: int = Field(default=1, ge=1, le=2)
+    backfill_id: str | None = Field(default=None, max_length=160)
+    reason: str | None = Field(default=None, max_length=80)
+    attempt: int | None = Field(default=None, ge=0, le=10)
+    duration_ms: int | None = Field(default=None, ge=0, le=30000)
 
 
 class CallControlResponse(BaseModel):
@@ -270,6 +284,46 @@ async def speak_session(
         "turn_id": payload.turn_id,
         "state": session.state,
         "event": event,
+    }
+
+
+@router.post("/sessions/{session_id}/reconnect-audio")
+async def backfill_session_reconnect_audio(
+    request: Request,
+    session_id: str,
+    payload: ReconnectAudioBackfillRequest,
+) -> dict[str, Any]:
+    session = _session_or_404(request, session_id)
+    try:
+        pcm = base64.b64decode(payload.pcm_b64, validate=True)
+        result = await session.backfill_reconnect_audio(
+            pcm=pcm,
+            sample_rate=payload.sample_rate,
+            channels=payload.channels,
+            backfill_id=payload.backfill_id,
+            reason=payload.reason,
+            attempt=payload.attempt,
+        )
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "call_reconnect_audio_invalid",
+                "message": "Reconnect audio backfill was invalid",
+            },
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "call_reconnect_audio_failed",
+                "message": "Reconnect audio backfill failed",
+            },
+        ) from exc
+
+    return {
+        "session_id": session.session_id,
+        **result,
     }
 
 

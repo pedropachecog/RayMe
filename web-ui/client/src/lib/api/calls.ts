@@ -7,6 +7,17 @@ import type {
   CallTurnRequest
 } from './types';
 
+export interface CallReconnectAudioBackfillRequest {
+  session_id: string;
+  pcm_b64: string;
+  sample_rate: number;
+  channels: number;
+  backfill_id?: string;
+  reason?: string;
+  attempt?: number;
+  duration_ms?: number;
+}
+
 export class CallApiError extends Error {
   code?: CallErrorCode;
   status: number;
@@ -90,6 +101,16 @@ export function submitCallTurn(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     signal: options.signal,
+    body: JSON.stringify(payload)
+  });
+}
+
+export function backfillCallReconnectAudio(
+  callId: string,
+  payload: CallReconnectAudioBackfillRequest
+): Promise<{ call_id: string; session_id: string; status: string; frames?: number; duration_ms?: number }> {
+  return apiFetch(`/calls/${encodeURIComponent(callId)}/reconnect-audio`, {
+    method: 'POST',
     body: JSON.stringify(payload)
   });
 }

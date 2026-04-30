@@ -217,6 +217,25 @@ class AiBackendClient:
             raise _invalid_response()
         return dict(response_payload)
 
+    async def backfill_call_audio(
+        self,
+        base_url: str,
+        session_id: str,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        response = await self._request(
+            "POST",
+            _join_endpoint(base_url, f"/webrtc/sessions/{session_id}/reconnect-audio"),
+            json=dict(payload),
+            processing_message=WEBRTC_FAILED_MESSAGE,
+            processing_code="call_reconnect_audio_failed",
+            timeout=self._timeout,
+        )
+        response_payload = _json_payload(response)
+        if not isinstance(response_payload, dict):
+            raise _invalid_response()
+        return dict(response_payload)
+
     async def end_call(self, base_url: str, session_id: str, reason: str) -> dict[str, Any]:
         response = await self._request(
             "POST",

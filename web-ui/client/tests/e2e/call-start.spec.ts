@@ -8,8 +8,10 @@ const threadId = 'call-start-thread';
 
 type ReconnectRouteCounters = {
   offerCount: number;
+  backfillCount: number;
   endCount: number;
   offers: Array<{ peerId: number | null; sdp: string }>;
+  backfills: Array<Record<string, unknown>>;
   debugEvents: Array<{ event: string; detail: Record<string, unknown>; session_id?: string }>;
 };
 
@@ -464,8 +466,10 @@ async function installTurnErrorCallRoutes(page: Page) {
 async function installReconnectCallRoutes(page: Page) {
   const counters: ReconnectRouteCounters = {
     offerCount: 0,
+    backfillCount: 0,
     endCount: 0,
     offers: [],
+    backfills: [],
     debugEvents: []
   };
   const thread = makeThreadDetail({
@@ -516,6 +520,17 @@ async function installReconnectCallRoutes(page: Page) {
       session_id: 'rtc-call-reconnect-01',
       answer: { type: 'answer', sdp: 'v=0\r\n' },
       event_channel: 'rayme-events'
+    });
+  });
+  await page.route('**/api/calls/*/reconnect-audio', async (route) => {
+    counters.backfillCount += 1;
+    counters.backfills.push(route.request().postDataJSON() as Record<string, unknown>);
+    await fulfillJson(route, {
+      call_id: 'call-reconnect-01',
+      session_id: 'rtc-call-reconnect-01',
+      status: 'accepted',
+      frames: 1,
+      duration_ms: 20
     });
   });
   await page.route('**/api/calls/*/end', async (route) => {
