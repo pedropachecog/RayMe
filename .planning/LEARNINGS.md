@@ -99,6 +99,40 @@ Before telling the user a workflow is ready, report the exact evidence:
 If that evidence does not exist yet, keep working instead of asking the user to
 find the next failure.
 
+## 2026-05-01: Post-Snapshot Reconnect Patch Stack Regressed Phone Calls
+
+### What Went Wrong
+
+- After selected snapshot `6607214`, the post-snapshot runtime fixes
+  `6f63de0` and `a0d5d17` tried to patch reconnect final markers, held-frame
+  release, data-channel replay, and hangup-time reconnect backfill.
+- Those changes passed unit tests and mocked Playwright reconnect tests, but
+  real phone-call verification still froze or dropped user turns longer than
+  roughly 5 to 10 seconds.
+- The fixes were too incremental over an unstable reconnect lifecycle. They
+  moved turn finalization and event delivery into reconnect cleanup paths
+  without proving the real phone/WebRTC transport was stable.
+
+### False Assumptions
+
+- Isolated reconnect unit tests were treated as enough confidence for live call
+  behavior.
+- Mocked browser reconnect ordering was treated as equivalent to Android/phone
+  WebRTC behavior on OMEN.
+- A patch over final markers and data-channel replay was treated as safer than
+  returning to the last user-selected recovery snapshot.
+
+### Guards Added
+
+- `.planning/debug/phone-calls-post-snapshot-audit.md` records the post-
+  `6607214` commit ledger, hypotheses, failed fixes, and explicit do-not-retry
+  guard.
+- Do not re-apply the exact `6f63de0` plus `a0d5d17` fix combination as a small
+  patch stack. Reconnect architecture can only be revisited under a new plan
+  with live OMEN/phone verification evidence.
+- Rollbacks for this incident restore only call runtime files. Keep `AGENTS.md`
+  and the debug-agent sequencing rules.
+
 ## 2026-04-25: Phase 3 Call Startup Did Not Request Microphone Or Create Backend Session
 
 ### What Went Wrong

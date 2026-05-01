@@ -16,6 +16,36 @@ That snapshot was not proven to fully solve long-text transcription. It is the
 user-selected operational return point because it was tested immediately before
 the later "terrible regression" state.
 
+## Do-Not-Retry Guard
+
+Do not re-apply the post-`6607214` reconnect/final-marker/data-channel replay
+combination as a small fix or patch stack.
+
+Specifically, do not reintroduce this combination:
+
+- reconnect final markers that can actively force turn finalization from the
+  held-frame release path,
+- browser `batch`/`final` reconnect marker namespacing added to support that
+  finalization path,
+- backend pending `user_final` data-channel replay added as a patch over the
+  above behavior,
+- browser hangup-time reconnect backfill draining added as a patch over the same
+  failure state.
+
+Those changes were implemented as `6f63de0` plus `a0d5d17` after the selected
+snapshot. They passed isolated backend and mocked browser tests, but user
+verification still reported the same frozen/no-response call behavior, and the
+state was worse than the selected snapshot.
+
+Future work may revisit reconnect architecture only as a new design with fresh
+requirements, an explicit live phone-call verification plan, and saved evidence
+from the real OMEN/phone workflow. Do not resurrect this exact post-snapshot fix
+stack.
+
+`AGENTS.md` must be kept. The rollback intentionally restores call runtime files
+only and does not remove the debug-agent sequencing rules added after the
+snapshot.
+
 ## Baseline At Snapshot
 
 Runtime code at the snapshot was `faba4cc` (`fix(call): drain reconnect backfill tail`).
@@ -209,9 +239,15 @@ Runtime files to restore to the snapshot state:
 - `web-ui/client/src/routes/call/[threadId]/+page.svelte`
 - `web-ui/client/tests/e2e/call-start.spec.ts`
 
+Files intentionally not restored to the snapshot state:
+
+- `AGENTS.md`
+- `.planning/debug/phone-calls-post-snapshot-audit.md`
+- `.planning/debug/phone-calls-missing-chunks.md`
+- `.planning/LEARNINGS.md`
+
 Expected post-rollback state:
 
 - Runtime code matches `faba4cc` for the changed files.
 - Documentation notes remain available for future debugging.
 - OMEN is deployed through the canonical script from the rollback commit.
-

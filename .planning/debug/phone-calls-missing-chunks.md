@@ -1,7 +1,7 @@
 ---
 status: rollback_requested
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-01T15:46:17Z
+updated: 2026-05-01T15:51:43Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -372,6 +372,11 @@ evidence_files:
   checked: User verification after `a0d5d17` and post-snapshot audit request.
   found: User reports `a0d5d17` does not work at all: calls remain frozen and messages longer than about 5 to 10 seconds do not go through. User requested returning OMEN to selected snapshot `6607214`, but first recording every post-snapshot change, hypothesis, and attempted solution, with special attention to the immediate post-snapshot change that likely made the calls worse. Created `.planning/debug/phone-calls-post-snapshot-audit.md`.
   implication: Stop fix-forward work. Restore runtime files to the selected snapshot state and deploy through `scripts/deploy-omen.sh` only.
+
+- timestamp: 2026-05-01T15:51:43Z
+  checked: Durable prevention guard before deployment.
+  found: Updated `.planning/debug/phone-calls-post-snapshot-audit.md` and `.planning/LEARNINGS.md` with an explicit guard not to retry the exact post-`6607214` `6f63de0` plus `a0d5d17` reconnect/final-marker/data-channel replay patch stack. Also recorded that `AGENTS.md` must be kept and is intentionally outside the runtime rollback.
+  implication: Future debugging should not resurrect that patch combination as a small fix. Reconnect architecture requires a fresh plan and live OMEN/phone evidence.
 
 ## Eliminated
 
