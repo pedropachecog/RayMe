@@ -110,6 +110,8 @@
   let reconnectAudioBackfillBatchIndex = 0;
   let reconnectAudioBackfillId = '';
   let reconnectAudioBackfillReason: MediaReconnectReason | null = null;
+  let reconnectAudioBackfillFlushPromise: Promise<void> | null = null;
+  let reconnectAudioBackfillFinalPromise: Promise<void> | null = null;
   let localMicMeterFrame = 0;
   let localMicRawRms: number | null = null;
   let localMicRawPeak: number | null = null;
@@ -660,12 +662,38 @@
     reconnectAudioBackfillBatchIndex = 0;
     reconnectAudioBackfillId = '';
     reconnectAudioBackfillReason = null;
+    reconnectAudioBackfillFlushPromise = null;
+    reconnectAudioBackfillFinalPromise = null;
   }
 
   async function flushReconnectAudioBackfill(
     debugCallId: string,
     reason: MediaReconnectReason,
-    attempt: number
+    attempt: number,
+    options: { awaitFinal?: boolean } = {}
+  ) {
+    if (reconnectAudioBackfillFlushPromise) {
+      await reconnectAudioBackfillFlushPromise;
+      if (options.awaitFinal && reconnectAudioBackfillFinalPromise) {
+        await reconnectAudioBackfillFinalPromise;
+      }
+      return;
+    }
+    const flushPromise = flushReconnectAudioBackfillOnce(debugCallId, reason, attempt, options);
+    const trackedFlushPromise = flushPromise.finally(() => {
+      if (reconnectAudioBackfillFlushPromise === trackedFlushPromise) {
+        reconnectAudioBackfillFlushPromise = null;
+      }
+    });
+    reconnectAudioBackfillFlushPromise = trackedFlushPromise;
+    await trackedFlushPromise;
+  }
+
+  async function flushReconnectAudioBackfillOnce(
+    debugCallId: string,
+    reason: MediaReconnectReason,
+    attempt: number,
+    options: { awaitFinal?: boolean } = {}
   ) {
     if (!callId || !sessionId || reconnectAudioBackfillStartMs <= 0) {
       return;
@@ -685,7 +713,7 @@
         bufferedChunks: localMicPcmBuffer.length
       });
       reconnectAudioBackfillBatchIndex += 1;
-      void sendReconnectAudioBackfillBatch({
+      const finalPromise = trackReconnectAudioBackfillFinalPromise(sendReconnectAudioBackfillBatch({
         debugCallId,
         requestCallId,
         requestSessionId,
@@ -696,7 +724,12 @@
         batchIndex: reconnectAudioBackfillBatchIndex,
         final: true,
         selection: null
-      }).finally(() => clearReconnectAudioBackfill(baseBackfillId));
+      }).finally(() => clearReconnectAudioBackfill(baseBackfillId)));
+      if (options.awaitFinal) {
+        await finalPromise;
+      } else {
+        void finalPromise;
+      }
       return;
     }
 
@@ -722,7 +755,7 @@
     );
     reconnectAudioBackfillBatchIndex += 1;
     const finalBatchIndex = reconnectAudioBackfillBatchIndex;
-    void sendReconnectAudioBackfillBatch({
+    const finalPromise = trackReconnectAudioBackfillFinalPromise(sendReconnectAudioBackfillBatch({
       debugCallId,
       requestCallId,
       requestSessionId,
@@ -733,7 +766,22 @@
       batchIndex: finalBatchIndex,
       final: true,
       selection: tailSelection
-    }).finally(() => clearReconnectAudioBackfill(baseBackfillId));
+    }).finally(() => clearReconnectAudioBackfill(baseBackfillId)));
+    if (options.awaitFinal) {
+      await finalPromise;
+    } else {
+      void finalPromise;
+    }
+  }
+
+  function trackReconnectAudioBackfillFinalPromise(promise: Promise<void>) {
+    const trackedPromise = promise.finally(() => {
+      if (reconnectAudioBackfillFinalPromise === trackedPromise) {
+        reconnectAudioBackfillFinalPromise = null;
+      }
+    });
+    reconnectAudioBackfillFinalPromise = trackedPromise;
+    return trackedPromise;
   }
 
   async function sendReconnectAudioBackfillBatch({
@@ -1624,6 +1672,7 @@
 
     try {
       if (callId && sessionId) {
+        await drainReconnectAudioBackfillBeforeHangup();
         await endCall(callId, sessionId);
       }
       stopBrowserMedia();
@@ -1638,6 +1687,21 @@
     } finally {
       ending = false;
     }
+  }
+
+  async function drainReconnectAudioBackfillBeforeHangup() {
+    if (!callId || !sessionId || reconnectAudioBackfillStartMs <= 0) {
+      return;
+    }
+    const reason = reconnectAudioBackfillReason ?? 'disconnected';
+    const attempt = Math.max(mediaReconnectAttempts, 1);
+    emitDebugEvent(callId, 'mic.reconnect_backfill.hangup_flush', {
+      reason,
+      attempt,
+      backfillId: reconnectAudioBackfillId,
+      bufferedChunks: localMicPcmBuffer.length
+    });
+    await flushReconnectAudioBackfill(callId, reason, attempt, { awaitFinal: true });
   }
 
   async function returnToThread() {

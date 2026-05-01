@@ -1,7 +1,7 @@
 ---
-status: investigating
+status: fixing
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-01T23:17:17Z
+updated: 2026-05-01T23:53:44Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -9,9 +9,15 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 
 ## Current Focus
 
-hypothesis: Latest valid repro freezes because reconnect backfill appends the missing speech to the active turn but does not finalize the turn; if no later live frame reaches `handle_inbound_audio_frame`, STT/user_final never runs.
-test: Add a regression where a final reconnect backfill batch reaches VAD end-of-turn without any replacement live frame, then verify the backend finalizes and the browser can consume a fallback `user_final` carried by the reconnect-audio HTTP response.
-expecting: The first turn should reach `stt.begin`/`user_final` from final backfill even if the replacement data channel is unavailable or the replacement media path keeps churning.
+reasoning_checkpoint:
+  hypothesis: "The latest post-`c769afb` freeze loses the recovered first turn because `hangup()` can call `/end` and clear browser media while a reconnect offer/backfill is still pending; the backend may later produce `user_final`, but the data channel and HTTP fallback path are already closed."
+  confirming_evidence:
+    - "OMEN `call_2fb9a7b8841b47e4b2abaff8148ad933` / `rtc_d4c2b23f435c4d4fa431e60de0ab9082` shows `reconnect_audio.backfill.finalize`, `stt.begin`, and `stt.result transcript_len=461`, followed by `event.skip_channel_not_open type=user_final readyState=closed`."
+    - "Browser logs for the same call contain no `datachannel.message ... user_final`; the final `/reconnect-audio` surfaced to the browser as 502 after `/end`, while the AI backend logged the underlying request as 200 after STT."
+    - "New Playwright regression failed on current code in both desktop and mobile: after clicking End during reconnect, `backfillCount` stayed 0 while `/end` completed."
+  falsification_test: "After the fix, the same regression must show a final reconnect-audio backfill sent before `/end`; if `/end` still occurs first or no backfill is sent, the hypothesis is wrong."
+  fix_rationale: "Drain the pending reconnect-audio backfill before ending the call so the final HTTP response can carry and handle any recovered `user_final` before the browser asks the backend to close the session. If a reconnect flush is already running, hangup must await that existing flush instead of starting a duplicate drain over the same PCM window."
+  blind_spots: "This does not prove the broader WebRTC churn is solved; it addresses the first durable loss observed in the post-`c769afb` repro and still requires live phone verification before deployment."
 next_action: Commit, push, deploy through `scripts/deploy-omen.sh`, then rerun the same first-turn poem repro.
 
 ## Rollback Anchor
@@ -54,6 +60,36 @@ evidence_files:
   checked: User clarified that the prior inspected call was not a structured repro, then performed two new first-turn poem calls. The second/latest call is the valid repro because the user waited about one minute before ending it.
   found: Latest valid repro is `call_e8464de2aeea413ebe3feb83247f0a33` / `rtc_20158f17ebad4f34b37d8c371135b76b` on `thread_c23ed9dfdcd64f23b007f7f8e75045dc`. It detected speech (`vad.speech_start turn_frames=125`) but the peer failed at frame 994 before `vad.end_of_turn`. Reconnect backfill applied real speech (`batch-1 rms=1316 peak=10767`, `batch-2 rms=1440 peak=19508`) and later long mostly-silent tail batches, but no `vad.end_of_turn`, `stt.begin`, or `user_final` was emitted. The thread persisted only call start/end events.
   implication: Root cause is now code-level and narrower than the failed post-snapshot stack: `backfill_reconnect_audio()` calls `_append_turn_frame()` but ignores the returned VAD `end_of_turn`, so final backfill cannot finish the user turn if no later live frame arrives. Implemented a backend finalization path for final reconnect backfill/held frames plus a browser fallback that handles a `user_final` event returned by the reconnect-audio HTTP response, with duplicate turn-id protection.
+
+- timestamp: 2026-05-01T23:32:57Z
+  checked: Newest OMEN evidence after `c769afb` deployment and the repeated first-turn poem repro.
+  found: OMEN is on `c769afb` (`fix(call): finalize reconnect backfill turns`), `/webrtc/status` reports `active_sessions=0`, and the latest post-deploy call is `call_2fb9a7b8841b47e4b2abaff8148ad933` / `rtc_d4c2b23f435c4d4fa431e60de0ab9082` on `thread_c23ed9dfdcd64f23b007f7f8e75045dc`. Backend logs show the previous loss boundary is no longer first: `reconnect_audio.backfill.finalize` appears after final batch 2, then `event.sent type=state`, `stt.begin ... turn=user-turn-1 frames=3035`, and `stt.result ... transcript_len=461`. The browser log contains no `datachannel.message ... event_type="user_final"` for this call; Web UI thread API stores only `call_start` and `call_end` rows for the call at `2026-05-01T23:26:03.826011` and `2026-05-01T23:28:43.541569`.
+  implication: `c769afb` fixed the missing `reconnect_audio.backfill.finalize`/STT boundary. The first durable loss is now after STT result generation: `event.skip_channel_not_open type=user_final readyState=closed` prevented delivery/persistence, and the browser did not receive a user_final over the data channel.
+
+- timestamp: 2026-05-01T23:32:57Z
+  checked: Browser/Web UI reconnect response evidence for `call_2fb9a7b8841b47e4b2abaff8148ad933`.
+  found: Browser sent real reconnect backfill batches before the finalization (`batch-1 rms=1445.3 peak=14062`, `batch-2 rms=2189.3 peak=20365`) and received accepted responses for the first reconnect. During a later reconnect, backend accepted a mostly silent batch 1 and then final batch 2 triggered STT, but the browser issued `/api/calls/call_2fb9.../end` while a replacement `/offer` and final `/reconnect-audio` request were still in flight. The replacement offer returned `502 Bad Gateway`; the final reconnect-audio request also surfaced to the browser as `mic.reconnect_backfill.failed ... RayMe API request failed: 502 Bad Gateway`, despite the AI backend eventually logging the corresponding `/webrtc/sessions/rtc_d4.../reconnect-audio` as `200 OK` after `stt.result`.
+  implication: The browser did not handle a successful reconnect-audio HTTP response carrying the fallback `user_final`; it saw the facade request as failed after `/end` closed the call. The remaining mechanism to inspect is end/reconnect ordering and whether the facade/client abandons the final STT response.
+
+- timestamp: 2026-05-01T23:38:01Z
+  checked: RED regression for ending while reconnect backfill is pending.
+  found: Added `drains pending reconnect backfill before ending during reconnect` in `web-ui/client/tests/e2e/call-start.spec.ts`. On current `c769afb`, `npm run test:e2e -- call-start.spec.ts -g "drains pending reconnect backfill before ending during reconnect"` failed in both desktop and mobile Chromium because `counters.backfillCount` remained `0` after clicking End during a delayed reconnect offer.
+  implication: This directly reproduces the browser-side ordering bug: current `hangup()` can call `/end` before the final reconnect-audio backfill is sent/drained, matching the newest OMEN loss boundary.
+
+- timestamp: 2026-05-01T23:40:06Z
+  checked: Local client fix for the post-`c769afb` browser hangup/backfill ordering bug.
+  found: Updated `web-ui/client/src/routes/call/[threadId]/+page.svelte` so `flushReconnectAudioBackfill()` can await its final batch, and `hangup()` now calls `drainReconnectAudioBackfillBeforeHangup()` before `/api/calls/{call_id}/end` or media cleanup. The RED regression now passes in both desktop and mobile Chromium.
+  implication: Local evidence supports the narrow fix for the newest first-loss boundary. Broader call E2E/build verification is still required before this can be offered for deployment.
+
+- timestamp: 2026-05-01T23:46:36Z
+  checked: Local verification for the post-`c769afb` browser hangup/backfill ordering fix.
+  found: `npm run test:e2e -- call-start.spec.ts -g "drains pending reconnect backfill before ending during reconnect"` passed after the fix in desktop and mobile Chromium. Full `npm run test:e2e -- call-start.spec.ts` initially had one desktop timing failure in an existing reconnect snapshot assertion, that exact failed test passed on immediate targeted rerun, and a full-file rerun then passed: 24 passed. `npm run build` passed. `git diff --check` passed.
+  implication: The fix is locally verified. OMEN has not been deployed, so real phone-call verification is still pending and must use `scripts/deploy-omen.sh` if/when deployment is requested.
+
+- timestamp: 2026-05-01T23:53:44Z
+  checked: Parent review of the local browser hangup/backfill fix.
+  found: Tightened the fix so hangup awaits any already-running reconnect backfill flush instead of starting a duplicate drain. Added `awaits in-flight reconnect backfill before ending without duplicate drain`, covering a slow first backfill batch followed by End Call. Focused Playwright tests for both hangup/reconnect cases passed in desktop and mobile Chromium. Full `npm run test:e2e -- call-start.spec.ts` passed: 26 passed. `npm run build` passed. `git diff --check` passed.
+  implication: The local patch now covers both observed hangup-before-backfill and in-flight-backfill variants before OMEN deployment.
 
 - timestamp: 2026-04-30T21:24:13Z
   checked: Fresh post-`dff6545` investigation setup.
@@ -408,13 +444,10 @@ evidence_files:
 
 ## Resolution
 
-root_cause: The post-`21bc46e` freeze/missing-turn failures were two reconnect lifecycle races. First, backend STT could finish with a valid `user_final` while the WebRTC data channel was closed, and `CallSession.emit_event()` dropped it instead of replaying it after the replacement data channel opened. Second, browser hangup during an in-flight reconnect offer could run `/end` and local media cleanup before `flushReconnectAudioBackfill()` posted pending PCM, so the backend never received the delayed second-turn audio.
-fix: Added a bounded pending data-channel event queue for durable `user_final` events and flush it when replacement data channels open. Added browser hangup-time reconnect backfill drain that awaits the final batch before `/api/calls/{call_id}/end` and before local media cleanup clears the PCM buffer.
-verification: Local tests passed and commit `a0d5d17` was deployed to OMEN, but user verification failed. This fix is superseded by the rollback request.
+root_cause: The post-`c769afb` first-turn poem repro no longer loses audio before STT: backend logs show `reconnect_audio.backfill.finalize`, `stt.begin`, and `stt.result transcript_len=461`. The remaining first durable loss is browser call-end/reconnect ordering: `hangup()` can call `/end` and clear/close media while the final reconnect-audio request is still pending, so the data channel is closed before backend emits `user_final`, and the HTTP fallback response is reported to the browser as a failed reconnect-audio request instead of being handled.
+fix: Updated the browser call page so hangup drains the final reconnect-audio backfill before `/api/calls/{call_id}/end`; `flushReconnectAudioBackfill()` can now await the final batch when used for hangup cleanup and avoids duplicate drains by awaiting an already-running flush.
+verification: Focused Playwright regressions failed before the first fix and passed after the refined fix in desktop and mobile Chromium. Full `call-start.spec.ts` passed (26 passed), `npm run build` passed, and `git diff --check` passed. OMEN deployment pending.
 files_changed:
-  - ai-backend/app/api/webrtc.py
-  - ai-backend/app/call/session.py
-  - ai-backend/tests/test_call_session.py
   - web-ui/client/src/routes/call/[threadId]/+page.svelte
   - web-ui/client/tests/e2e/call-start.spec.ts
 
