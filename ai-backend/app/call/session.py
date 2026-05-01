@@ -42,8 +42,6 @@ EventSink = Callable[[dict[str, Any]], Awaitable[None] | None]
 CALL_TTS_AUDIO_PREROLL_SECONDS = 0.25
 CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS = 0.75
 CALL_RECONNECT_BACKFILL_HOLD_SECONDS = 12.0
-MAX_PENDING_DATA_CHANNEL_EVENTS = 8
-PENDING_DATA_CHANNEL_EVENT_TYPES = {"user_final"}
 
 
 class NullPeerConnection:
@@ -110,7 +108,6 @@ class CallSession:
         self._reconnect_live_frame_hold_until = 0.0
         self._reconnect_live_frame_hold_logged = False
         self._reconnect_live_frame_hold_frames: list[PcmAudioFrame] = []
-        self._pending_data_channel_events: list[dict[str, Any]] = []
 
     @property
     def active_ai_turn(self) -> Any | None:
@@ -146,8 +143,7 @@ class CallSession:
             self.dropped_audio_frames += 1
             return False if was_raw_bytes else None
 
-        if self._release_reconnect_live_frames_if_expired():
-            return await self._finalize_reconnect_released_turn()
+        self._release_reconnect_live_frames_if_expired()
 
         normalized = normalize_inbound_audio_frame(frame)
         if self._hold_reconnect_live_frame_if_needed(normalized):
@@ -234,9 +230,7 @@ class CallSession:
         batch_index: int | None = None,
         final: bool = True,
     ) -> dict[str, Any]:
-        is_duplicate = bool(backfill_id and backfill_id in self._reconnect_audio_backfill_ids)
-        is_empty_final_marker = final and not pcm
-        if is_duplicate and not is_empty_final_marker:
+        if backfill_id and backfill_id in self._reconnect_audio_backfill_ids:
             logger.info(
                 "[rayme-call] reconnect_audio.backfill.duplicate session=%s "
                 "backfill_id=%s",
@@ -284,21 +278,8 @@ class CallSession:
             channels=channels,
         )
         if not frames:
-            if backfill_id and not is_duplicate:
-                self._reconnect_audio_backfill_ids.add(backfill_id)
             if final:
-                if is_duplicate:
-                    logger.info(
-                        "[rayme-call] reconnect_audio.backfill.duplicate_final "
-                        "session=%s backfill_id=%s",
-                        self.session_id,
-                        backfill_id or "",
-                    )
-                end_of_turn = self._release_reconnect_live_frames(
-                    reason="final_empty_backfill"
-                )
-                if end_of_turn:
-                    await self._finalize_reconnect_released_turn()
+                self._release_reconnect_live_frames(reason="final_empty_backfill")
             return {
                 "status": "empty",
                 "frames": 0,
@@ -335,11 +316,8 @@ class CallSession:
         # stable yet, and a short post-reconnect silence should not finalize
         # before the browser's replacement track has a chance to resume.
         self._media_reconnect_grace_pending = was_pending or self._media_reconnect_grace_pending
-        release_end_of_turn = False
         if final:
-            release_end_of_turn = self._release_reconnect_live_frames(
-                reason="final_backfill"
-            )
+            self._release_reconnect_live_frames(reason="final_backfill")
 
         duration_ms = sum(
             int((len(frame.pcm) // 2) * 1000 / max(frame.sample_rate, 1))
@@ -368,8 +346,6 @@ class CallSession:
             len(self._reconnect_live_frame_hold_frames),
             started_turn,
         )
-        if release_end_of_turn:
-            await self._finalize_reconnect_released_turn()
         return {
             "status": "accepted",
             "frames": len(frames),
@@ -400,13 +376,12 @@ class CallSession:
             self._speech_seen = True
         return vad_result
 
-    def _release_reconnect_live_frames_if_expired(self) -> bool:
+    def _release_reconnect_live_frames_if_expired(self) -> None:
         until = self._reconnect_live_frame_hold_until
         if until <= 0:
-            return False
+            return
         if time.monotonic() >= until:
-            return self._release_reconnect_live_frames(reason="timeout")
-        return False
+            self._release_reconnect_live_frames(reason="timeout")
 
     def _hold_reconnect_live_frame_if_needed(self, frame: PcmAudioFrame) -> bool:
         until = self._reconnect_live_frame_hold_until
@@ -431,7 +406,7 @@ class CallSession:
             )
         return True
 
-    def _release_reconnect_live_frames(self, *, reason: str) -> bool:
+    def _release_reconnect_live_frames(self, *, reason: str) -> None:
         frames = list(self._reconnect_live_frame_hold_frames)
         self._reconnect_live_frame_hold_frames.clear()
         self._reconnect_live_frame_hold_until = 0.0
@@ -443,7 +418,7 @@ class CallSession:
                 self.session_id,
                 reason,
             )
-            return False
+            return
 
         logger.info(
             "[rayme-call] reconnect_audio.live_hold.release session=%s "
@@ -452,21 +427,8 @@ class CallSession:
             reason,
             len(frames),
         )
-        end_of_turn = False
         for frame in frames:
-            vad_result = self._append_turn_frame(frame, source="reconnect_live_hold")
-            end_of_turn = end_of_turn or vad_result.get("end_of_turn", False)
-        return end_of_turn
-
-    async def _finalize_reconnect_released_turn(self) -> dict[str, Any] | None:
-        logger.info(
-            "[rayme-call] vad.end_of_turn session=%s turn_frames=%d "
-            "silence_ms=%d source=reconnect_live_hold",
-            self.session_id,
-            len(self._turn_frames),
-            self._silence_ms,
-        )
-        return await self.finalize_user_turn()
+            self._append_turn_frame(frame, source="reconnect_live_hold")
 
     async def finalize_user_turn(self) -> dict[str, Any] | None:
         if not self._turn_frames:
@@ -593,40 +555,6 @@ class CallSession:
             if inspect.isawaitable(result):
                 await result
 
-        sent = self._send_data_channel_event(event)
-        if not sent and self._should_queue_data_channel_event(event):
-            self._queue_pending_data_channel_event(event)
-        return event
-
-    def attach_data_channel(self, channel: Any) -> None:
-        self.data_channel = channel
-        if getattr(channel, "readyState", "open") != "open":
-            return
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            return
-        loop.create_task(self.flush_pending_data_channel_events())
-
-    async def flush_pending_data_channel_events(self) -> None:
-        if not self._pending_data_channel_events:
-            return
-
-        pending = list(self._pending_data_channel_events)
-        self._pending_data_channel_events = []
-        for index, event in enumerate(pending):
-            if self._send_data_channel_event(event, pending=True):
-                continue
-            self._pending_data_channel_events = pending[index:] + self._pending_data_channel_events
-            self._trim_pending_data_channel_events()
-            return
-
-    def _send_data_channel_event(
-        self,
-        event: dict[str, Any],
-        *,
-        pending: bool = False,
-    ) -> bool:
         channel = self.data_channel
         ready_state = getattr(channel, "readyState", None) if channel is not None else None
         event_type = event.get("type")
@@ -644,64 +572,25 @@ class CallSession:
                 event_type,
                 ready_state,
             )
-        if channel is None or getattr(channel, "readyState", "open") != "open":
-            return False
-
-        send = getattr(channel, "send", None)
-        if not callable(send):
-            logger.info(
-                "[rayme-call] event.skip_channel_no_send session=%s type=%s",
-                self.session_id,
-                event_type,
-            )
-            return False
-
-        try:
-            send(json.dumps(event, separators=(",", ":")))
-            logger.info(
-                "[rayme-call] event.%s session=%s type=%s readyState=%s",
-                "sent_pending" if pending else "sent",
-                self.session_id,
-                event_type,
-                ready_state or "open",
-            )
-            return True
-        except Exception as exc:
-            logger.exception(
-                "[rayme-call] event.send_failed session=%s type=%s exc=%s",
-                self.session_id,
-                event_type,
-                exc.__class__.__name__,
-            )
-            return False
-
-    def _should_queue_data_channel_event(self, event: dict[str, Any]) -> bool:
-        return str(event.get("type") or "") in PENDING_DATA_CHANNEL_EVENT_TYPES
-
-    def _queue_pending_data_channel_event(self, event: dict[str, Any]) -> None:
-        event_type = event.get("type")
-        turn_id = event.get("turn_id")
-        queued_event = dict(event)
-        for index, existing in enumerate(self._pending_data_channel_events):
-            if existing.get("type") == event_type and existing.get("turn_id") == turn_id:
-                self._pending_data_channel_events[index] = queued_event
-                break
-        else:
-            self._pending_data_channel_events.append(queued_event)
-        self._trim_pending_data_channel_events()
-        logger.info(
-            "[rayme-call] event.queued_pending session=%s type=%s turn=%s pending=%d",
-            self.session_id,
-            event_type,
-            turn_id,
-            len(self._pending_data_channel_events),
-        )
-
-    def _trim_pending_data_channel_events(self) -> None:
-        if len(self._pending_data_channel_events) > MAX_PENDING_DATA_CHANNEL_EVENTS:
-            self._pending_data_channel_events = self._pending_data_channel_events[
-                -MAX_PENDING_DATA_CHANNEL_EVENTS:
-            ]
+        if channel is not None and getattr(channel, "readyState", "open") == "open":
+            send = getattr(channel, "send", None)
+            if callable(send):
+                try:
+                    send(json.dumps(event, separators=(",", ":")))
+                    logger.info(
+                        "[rayme-call] event.sent session=%s type=%s readyState=%s",
+                        self.session_id,
+                        event_type,
+                        ready_state or "open",
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "[rayme-call] event.send_failed session=%s type=%s exc=%s",
+                        self.session_id,
+                        event_type,
+                        exc.__class__.__name__,
+                    )
+        return event
 
     async def set_muted(self, muted: bool) -> dict[str, Any]:
         self.muted = muted
@@ -1537,7 +1426,7 @@ class CallSessionManager:
                     if inspect.isawaitable(result):
                         await result
             if data_channel is not None:
-                existing.attach_data_channel(data_channel)
+                existing.data_channel = data_channel
             if event_sink is not None:
                 existing.event_sink = event_sink
             if vad_adapter is not None:

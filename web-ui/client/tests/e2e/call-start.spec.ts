@@ -12,13 +12,11 @@ type ReconnectRouteCounters = {
   endCount: number;
   offers: Array<{ peerId: number | null; sdp: string }>;
   backfills: Array<Record<string, unknown>>;
-  requestOrder: string[];
   debugEvents: Array<{ event: string; detail: Record<string, unknown>; session_id?: string }>;
 };
 
 type ReconnectRouteOptions = {
   backfillDelayMs?: number;
-  offerDelayMs?: number;
 };
 
 type MockCallMediaSnapshot = {
@@ -135,10 +133,6 @@ test('re-offers with a new peer instead of ending when browser peer connection f
   await expect.poll(() => counters.offerCount).toBe(2);
   expect(counters.endCount).toBe(0);
   await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
-  await expect.poll(async () => {
-    const snapshot = await getMockCallMediaSnapshot(page);
-    return snapshot.peers.at(-1)?.remoteDescriptionType ?? null;
-  }).toBe('answer');
 
   const afterReconnect = await getMockCallMediaSnapshot(page);
   expect(afterReconnect.peers).toHaveLength(2);
@@ -215,28 +209,6 @@ test('sends reconnect backfill tail before applying the replacement answer when 
     (entry, index) => index > finalSendingIndex && entry.event === 'pc.setRemoteDescription.done'
   );
   expect(remoteDescriptionIndex).toBeGreaterThanOrEqual(0);
-  assertNoBrowserErrors();
-});
-
-test('drains pending reconnect backfill before ending during reconnect', async ({ page }) => {
-  const assertNoBrowserErrors = installBrowserErrorGuard(page);
-  await installMockCallMedia(page);
-  const counters = await installReconnectCallRoutes(page, { offerDelayMs: 600 });
-
-  await startReconnectCall(page, counters);
-  await page.waitForTimeout(700);
-  await setCurrentMockPeerState(page, 'failed', 'disconnected');
-
-  await expect.poll(() => counters.offerCount).toBe(2);
-  await page.getByRole('button', { name: 'End Call' }).click();
-
-  await expect.poll(() => counters.backfillCount).toBeGreaterThanOrEqual(1);
-  await expect.poll(() => counters.endCount).toBe(1);
-  expect(counters.backfills.at(-1)).toMatchObject({ final: true });
-  expect(counters.requestOrder.indexOf('backfill')).toBeGreaterThanOrEqual(0);
-  expect(counters.requestOrder.indexOf('backfill')).toBeLessThan(
-    counters.requestOrder.indexOf('end')
-  );
   assertNoBrowserErrors();
 });
 
@@ -543,7 +515,6 @@ async function installReconnectCallRoutes(
     endCount: 0,
     offers: [],
     backfills: [],
-    requestOrder: [],
     debugEvents: []
   };
   const thread = makeThreadDetail({
@@ -583,16 +554,12 @@ async function installReconnectCallRoutes(
   });
   await page.route('**/api/calls/*/offer', async (route) => {
     counters.offerCount += 1;
-    counters.requestOrder.push('offer');
     const payload = route.request().postDataJSON() as { offer?: { sdp?: string } };
     const sdp = payload.offer?.sdp ?? '';
     counters.offers.push({
       peerId: readMockPeerIdFromSdp(sdp),
       sdp
     });
-    if (options.offerDelayMs && counters.offerCount > 1) {
-      await new Promise((resolve) => setTimeout(resolve, options.offerDelayMs));
-    }
     await fulfillJson(route, {
       call_id: 'call-reconnect-01',
       session_id: 'rtc-call-reconnect-01',
@@ -602,7 +569,6 @@ async function installReconnectCallRoutes(
   });
   await page.route('**/api/calls/*/reconnect-audio', async (route) => {
     counters.backfillCount += 1;
-    counters.requestOrder.push('backfill');
     counters.backfills.push(route.request().postDataJSON() as Record<string, unknown>);
     if (options.backfillDelayMs && counters.backfillCount === 1) {
       await new Promise((resolve) => setTimeout(resolve, options.backfillDelayMs));
@@ -617,7 +583,6 @@ async function installReconnectCallRoutes(
   });
   await page.route('**/api/calls/*/end', async (route) => {
     counters.endCount += 1;
-    counters.requestOrder.push('end');
     await fulfillJson(route, { call_id: 'call-reconnect-01', session_id: 'rtc-call-reconnect-01', reason: 'hangup' });
   });
 

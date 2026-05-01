@@ -85,16 +85,6 @@ evidence_files:
   found: Committed and pushed `faba4cc` (`fix(call): drain reconnect backfill tail`). `scripts/deploy-omen.sh` fast-forwarded OMEN to `faba4cc4f62e3f0c8ffd4b57b30f02aec934c1f0`, rebuilt the web client, recreated the canonical scheduled tasks, restarted both services, and reported `OMEN deploy complete`. `GET https://192.168.1.199:9443/webrtc/status` returned `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, `active_sessions=0`.
   implication: The reconnect tail fix is live on OMEN and ready for another user repro.
 
-- timestamp: 2026-05-01T00:48:36Z
-  checked: User regression report after `6607214` deployment.
-  found: User reports a severe regression: RayMe is "back to it not transcribing any long texts" and "not always responding" when the user waits about 10 seconds before speaking. User notes that frozen calls after delayed speech were debugged in earlier long sessions.
-  implication: Reopen the session with fresh evidence collection. The debugger must inspect both current logs and prior frozen-call sessions, and must not assume the last reconnect-tail hypothesis is still correct.
-
-- timestamp: 2026-05-01T00:51:22Z
-  checked: Local and OMEN runtime state before latest log inspection.
-  found: Local checkout is `6607214` on `main` with only this debug file dirty. SSH works as `omen-pc\\rayme-ssh` and `omen-pc\\pmpg`. OMEN checkout is clean at `6607214de3f65a7855e6d6ad4132bc7d66f3b479`; `/webrtc/status` reports `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, and `active_sessions=2`. Active logs are `ai-backend.run.log` and `web-ui.run.log`, last written around `2026-05-01T00:46:33Z` and `2026-05-01T00:46:37Z`. Copied logs and SQLite to `/tmp/rayme-phone-debug-6607214-2026-05-01/`.
-  implication: The regression report can be investigated against the intended deployed commit. `active_sessions=2` means there may be currently open/stale call sessions and the latest logs need session-level filtering rather than assuming the last persisted thread row is complete.
-
 - timestamp: 2026-04-30T21:22:55Z
   checked: User live verification after deploying reconnect-gap backfill (`dff6545`, code fix in `adb035c`).
   found: User repeated the same long-passage repro and RayMe still did not transcribe the whole content. The last turn read by the user was the same Mammoth Cave passage saved in `.planning/debug/phone-call-transcript-comparison.md`: it begins `Of course, and now I will tell you a story. The horrible conclusion which had been gradually obtruding itself...` and ends `...as soon as I clearly realised the loss of my bearings.`
@@ -401,18 +391,6 @@ evidence_files:
   evidence: Latest backend logs show `stt.begin` received only `frames=1645` for the long turn and `stt.result transcript_len=448`; the Web UI thread API stores the same 448-character user speech row.
   timestamp: 2026-04-30T16:01:50Z
 
-- hypothesis: The post-`6607214` delayed-speech failures are caused by no audio being captured in the browser after the user waits before speaking.
-  evidence: Affected calls `call_3294...` and `call_f0fb...` logged nonzero local mic RMS during reconnect while the backend also accepted non-silent backfill PCM and recorded VAD speech starts before the missing response.
-  timestamp: 2026-05-01T00:56:35Z
-
-- hypothesis: The post-`6607214` delayed-speech failures are caused by VAD/STT being generally unable to handle speech after a 10+ second wait.
-  evidence: Control call `call_de275...` had delayed speech start at `turn_frames=847` and finalized normally with `stt.result transcript_len=45` and a persisted user_speech row.
-  timestamp: 2026-05-01T00:56:35Z
-
-- hypothesis: The post-`6607214` no-response turns are lost in STT, Web UI persistence, or display after backend finalization.
-  evidence: The missing second turns in `call_3294...` and `call_f0fb...` never reached `stt.begin`, never emitted `event.sent type=user_final`, and are absent from SQLite; the first loss happens before STT and persistence.
-  timestamp: 2026-05-01T00:56:35Z
-
 ## Resolution
 
 root_cause: The post-`21bc46e` freeze/missing-turn failures were two reconnect lifecycle races. First, backend STT could finish with a valid `user_final` while the WebRTC data channel was closed, and `CallSession.emit_event()` dropped it instead of replaying it after the replacement data channel opened. Second, browser hangup during an in-flight reconnect offer could run `/end` and local media cleanup before `flushReconnectAudioBackfill()` posted pending PCM, so the backend never received the delayed second-turn audio.
@@ -474,4 +452,3 @@ prior_files_changed:
   - .planning/debug/phone-call-repro-e4b93d9-2026-04-30.md
   - .planning/debug/phone-call-repro-1239588-2026-04-30.md
   - .planning/debug/phone-call-repro-2360feb-2026-04-30.md
-  - web-ui/client/tests/e2e/call-start.spec.ts

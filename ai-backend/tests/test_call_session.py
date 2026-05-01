@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from io import BytesIO
 from typing import Any
 
@@ -44,15 +43,6 @@ class ScriptedPeerConnection:
 
     async def close(self) -> None:
         self.close_calls += 1
-
-
-class ScriptedDataChannel:
-    def __init__(self, ready_state: str = "open") -> None:
-        self.readyState = ready_state
-        self.sent_messages: list[str] = []
-
-    def send(self, message: str) -> None:
-        self.sent_messages.append(message)
 
 
 class ScriptedAiTurn:
@@ -387,36 +377,6 @@ def test_inbound_audio_emits_user_final_after_vad_end() -> None:
     assert session.stats()["dropped_audio_frames"] == 0
 
 
-def test_user_final_waits_for_replacement_data_channel_when_closed() -> None:
-    vad = ScriptedVadAdapter()
-    stt = ScriptedSttAdapter()
-    source = ScriptedInboundAudioFrameSource(b"pcm-frame-1", b"pcm-frame-2")
-    closed_channel = ScriptedDataChannel("closed")
-    replacement_channel = ScriptedDataChannel("open")
-    session, _ = _new_session(vad_adapter=vad, stt_adapter=stt)
-    session.attach_data_channel(closed_channel)
-
-    _run(session.handle_inbound_audio_frame(source.frames[0]))
-    final_event = _run(session.handle_inbound_audio_frame(source.frames[1]))
-
-    assert final_event["type"] == "user_final"
-    assert closed_channel.sent_messages == []
-
-    session.attach_data_channel(replacement_channel)
-    _run(session.flush_pending_data_channel_events())
-
-    assert len(replacement_channel.sent_messages) == 1
-    delivered_event = json.loads(replacement_channel.sent_messages[0])
-    assert delivered_event == {
-        "type": "user_final",
-        "session_id": "call-session-1",
-        "turn_id": "user-turn-1",
-        "text": "hello from mic",
-        "started_at": delivered_event["started_at"],
-        "ended_at": delivered_event["ended_at"],
-    }
-
-
 def test_near_silent_finalized_turn_does_not_reach_stt() -> None:
     vad = ScriptedVadAdapter()
     stt = ScriptedSttAdapter()
@@ -714,89 +674,6 @@ def test_reconnect_audio_backfill_releases_held_replacement_track_after_final_ba
         live_pcm,
     ]
     assert session._reconnect_live_frame_hold_frames == []
-
-
-def test_reconnect_audio_duplicate_empty_final_marker_releases_held_frames(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    now = 0.0
-    monkeypatch.setattr(session_module.time, "monotonic", lambda: now)
-
-    vad = NeverEndingVadAdapter()
-    settings = AiBackendSettings(call_media_reconnect_grace_ms=5000)
-    session, _ = _new_session(vad_adapter=vad, settings=settings)
-
-    pre_pcm = np.full(320, 1000, dtype=np.int16).tobytes()
-    gap_pcm = np.full(320, 2000, dtype=np.int16).tobytes()
-    live_pcm = np.full(320, 3000, dtype=np.int16).tobytes()
-
-    assert _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(pre_pcm))) is None
-    session.mark_media_reconnect_pending()
-    session.start_media_reconnect_grace_if_pending()
-    assert _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(live_pcm))) is None
-
-    first_batch = _run(
-        session.backfill_reconnect_audio(
-            pcm=gap_pcm,
-            sample_rate=16000,
-            channels=1,
-            backfill_id="gap-batch-duplicate",
-            batch_index=1,
-            final=False,
-        )
-    )
-    final_marker = _run(
-        session.backfill_reconnect_audio(
-            pcm=b"",
-            sample_rate=16000,
-            channels=1,
-            backfill_id="gap-batch-duplicate",
-            batch_index=1,
-            final=True,
-        )
-    )
-
-    assert first_batch["status"] == "accepted"
-    assert final_marker["status"] == "empty"
-    assert [frame.pcm for frame in session._turn_frames] == [pre_pcm, gap_pcm, live_pcm]
-    assert session._reconnect_live_frame_hold_frames == []
-
-
-def test_reconnect_live_frame_release_can_finalize_turn(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    now = 0.0
-    monkeypatch.setattr(session_module.time, "monotonic", lambda: now)
-
-    vad = ScriptedVadAdapter()
-    stt = ScriptedSttAdapter()
-    settings = AiBackendSettings(call_media_reconnect_grace_ms=5000)
-    session, _ = _new_session(vad_adapter=vad, stt_adapter=stt, settings=settings)
-
-    pre_pcm = np.full(320, 1000, dtype=np.int16).tobytes()
-    live_pcm = np.full(320, 2000, dtype=np.int16).tobytes()
-
-    assert _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(pre_pcm))) is None
-    session.mark_media_reconnect_pending()
-    session.start_media_reconnect_grace_if_pending()
-    assert _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(live_pcm))) is None
-
-    final_marker = _run(
-        session.backfill_reconnect_audio(
-            pcm=b"",
-            sample_rate=16000,
-            channels=1,
-            backfill_id="gap-final-marker",
-            batch_index=2,
-            final=True,
-        )
-    )
-
-    assert final_marker["status"] == "empty"
-    assert stt.calls == [[pre_pcm, live_pcm]]
-    assert session._reconnect_live_frame_hold_frames == []
-    assert session._turn_frames == []
-    assert session.state == "thinking"
 
 
 def test_inbound_audio_normalizer_scales_integer_channels_before_mixing() -> None:

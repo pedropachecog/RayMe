@@ -477,7 +477,7 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
             ready,
         )
         if label == RAYME_EVENTS_CHANNEL:
-            session.attach_data_channel(channel)
+            session.data_channel = channel
 
             def start_keepalive() -> None:
                 nonlocal keepalive_task
@@ -495,7 +495,6 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
                         session.session_id,
                         label,
                     )
-                    asyncio.create_task(session.flush_pending_data_channel_events())
                     start_keepalive()
 
                 @channel.on("close")
@@ -525,7 +524,6 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
                     session.session_id,
                     label,
                 )
-                asyncio.create_task(session.flush_pending_data_channel_events())
                 start_keepalive()
 
     @peer_connection.on("track")
