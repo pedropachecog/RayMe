@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from io import BytesIO
 from typing import Any
 
@@ -43,6 +44,15 @@ class ScriptedPeerConnection:
 
     async def close(self) -> None:
         self.close_calls += 1
+
+
+class ScriptedDataChannel:
+    def __init__(self, ready_state: str = "open") -> None:
+        self.readyState = ready_state
+        self.sent_messages: list[str] = []
+
+    def send(self, message: str) -> None:
+        self.sent_messages.append(message)
 
 
 class ScriptedAiTurn:
@@ -375,6 +385,36 @@ def test_inbound_audio_emits_user_final_after_vad_end() -> None:
     }
     assert session.stats()["incoming_audio_frames"] == 2
     assert session.stats()["dropped_audio_frames"] == 0
+
+
+def test_user_final_waits_for_replacement_data_channel_when_closed() -> None:
+    vad = ScriptedVadAdapter()
+    stt = ScriptedSttAdapter()
+    source = ScriptedInboundAudioFrameSource(b"pcm-frame-1", b"pcm-frame-2")
+    closed_channel = ScriptedDataChannel("closed")
+    replacement_channel = ScriptedDataChannel("open")
+    session, _ = _new_session(vad_adapter=vad, stt_adapter=stt)
+    session.attach_data_channel(closed_channel)
+
+    _run(session.handle_inbound_audio_frame(source.frames[0]))
+    final_event = _run(session.handle_inbound_audio_frame(source.frames[1]))
+
+    assert final_event["type"] == "user_final"
+    assert closed_channel.sent_messages == []
+
+    session.attach_data_channel(replacement_channel)
+    _run(session.flush_pending_data_channel_events())
+
+    assert len(replacement_channel.sent_messages) == 1
+    delivered_event = json.loads(replacement_channel.sent_messages[0])
+    assert delivered_event == {
+        "type": "user_final",
+        "session_id": "call-session-1",
+        "turn_id": "user-turn-1",
+        "text": "hello from mic",
+        "started_at": delivered_event["started_at"],
+        "ended_at": delivered_event["ended_at"],
+    }
 
 
 def test_near_silent_finalized_turn_does_not_reach_stt() -> None:
