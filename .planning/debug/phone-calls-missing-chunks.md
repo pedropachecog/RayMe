@@ -1,7 +1,7 @@
 ---
-status: diagnosed
+status: investigating
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-01T02:17:55Z
+updated: 2026-05-01T02:39:19Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -9,17 +9,17 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 
 ## Current Focus
 
-hypothesis: Post-`21bc46e` diagnosis is complete, and the user-selected rollback anchor is `6607214`, the exact commit tested immediately before the "terrible regression" report.
-test: Preserve `6607214` as the operational rollback anchor while retaining the debugger's older `1db1e93` recommendation as historical evidence only.
-expecting: Future rollback discussions should default to `6607214` unless the user asks to revisit the older pre-series baseline.
-next_action: If rollback is requested, return to `6607214de3f65a7855e6d6ad4132bc7d66f3b479` using normal git workflow and deploy only via `scripts/deploy-omen.sh`.
+hypothesis: Active fix-forward investigation: post-`21bc46e` calls fail when the WebRTC/data channel closes during or before the user's second turn, after the first short turn succeeds.
+test: Continue from the two started failing calls, especially `call_5152493ffa72481ab60f1fc5b16eba9c` / `rtc_2892320a439f4ef59830af9df3cdd296` and `call_e3e46602b0e340f098b2549aa04a3765` / `rtc_fd075194886f46569ba1ba921440e62f`.
+expecting: Identify why the peer/data channel closes around the second user turn, then produce a focused fix that prevents freeze/lost `user_final` without rolling back unless rollback becomes the best explicit operational choice.
+next_action: Continue the debugger loop on the two-call evidence: poem call reached STT but skipped `user_final` because the channel was closed; delayed-speech call never reached backend VAD/STT/backfill before transport close.
 
 ## Rollback Anchor
 
 selected_commit: `6607214de3f65a7855e6d6ad4132bc7d66f3b479` (`docs(debug): record reconnect tail deployment`)
 runtime_code_commit: `faba4cc4f62e3f0c8ffd4b57b30f02aec934c1f0` (`fix(call): drain reconnect backfill tail`)
 selection_basis: User selected `6607214` because it was the commit tested immediately before the "terrible regression" report and is the desired operational return point.
-caveat: `6607214` is not proven to fully fix long-text transcription; it is the selected anchor for returning to the last pre-regression tested state.
+caveat: Insurance only. Do not make rollback the primary debug objective unless the user explicitly requests it or new evidence shows rollback is the best operational action.
 
 ## Symptoms
 
@@ -344,6 +344,16 @@ evidence_files:
   checked: User-selected rollback anchor after clarification.
   found: User clarified they want `6607214` selected as the anchor, because it is the exact commit tested immediately before the "terrible regression" report. `6607214` is a docs commit over runtime code commit `faba4cc`.
   implication: Future rollback work should treat `6607214de3f65a7855e6d6ad4132bc7d66f3b479` as the selected operational anchor. The previous `1db1e93` debugger recommendation remains historical context only, not the selected anchor.
+
+- timestamp: 2026-05-01T02:35:46Z
+  checked: Local git rollback anchor verification before returning checkpoint.
+  found: Current local `main`/`origin/main` is `81f8f7f4d173be184408d4303b5a4f33aa49913f` (`docs(agents): name canonical debug manager file`). The selected rollback anchor `6607214de3f65a7855e6d6ad4132bc7d66f3b479` resolves to `docs(debug): record reconnect tail deployment`, is an ancestor of current `HEAD`, and only changed `.planning/debug/phone-calls-missing-chunks.md`. Its runtime code commit remains `faba4cc4f62e3f0c8ffd4b57b30f02aec934c1f0` (`fix(call): drain reconnect backfill tail`). The only local dirty file is this debug session file.
+  implication: This verifies the insurance anchor only. It must not replace the active fix-forward investigation into `call_515...` and `call_e3...`.
+
+- timestamp: 2026-05-01T02:39:19Z
+  checked: Debug-session focus correction after user reported the debugger fixated on rollback.
+  found: The previous Current Focus incorrectly framed rollback as the only operational decision. The active evidence to investigate is the two started calls: `call_515...`, where the long turn reached STT but `user_final` was skipped because the data channel was closed, and `call_e3...`, where the delayed second speech never reached backend VAD/STT/backfill before transport close.
+  implication: Next debugger pass should ignore rollback except as insurance and should continue root-cause/fix work on the transport/data-channel closure around the second user turn.
 
 ## Eliminated
 
