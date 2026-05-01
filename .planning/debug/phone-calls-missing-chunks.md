@@ -1,7 +1,7 @@
 ---
-status: investigating
+status: rollback_requested
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-01T02:43:31Z
+updated: 2026-05-01T15:46:17Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -9,24 +9,24 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 
 ## Current Focus
 
-hypothesis: Active fix-forward investigation: post-`21bc46e` calls fail when the WebRTC/data channel closes during or before the user's second turn, after the first short turn succeeds.
-test: Continue from the two started failing calls, especially `call_5152493ffa72481ab60f1fc5b16eba9c` / `rtc_2892320a439f4ef59830af9df3cdd296` and `call_e3e46602b0e340f098b2549aa04a3765` / `rtc_fd075194886f46569ba1ba921440e62f`.
-expecting: Identify why the peer/data channel closes around the second user turn, then produce a focused fix that prevents freeze/lost `user_final` without rolling back unless rollback becomes the best explicit operational choice.
-next_action: Continue the debugger loop on the two-call evidence: poem call reached STT but skipped `user_final` because the channel was closed; delayed-speech call never reached backend VAD/STT/backfill before transport close.
+hypothesis: User verification failed after `a0d5d17`; post-snapshot fixes did not solve the frozen-call regression.
+test: Audit all commits, hypotheses, and fixes after selected snapshot `6607214` before reverting runtime code to the snapshot state.
+expecting: Preserve a durable note of what changed after the snapshot, especially the immediate post-snapshot `6f63de0` change, then deploy the rollback through `scripts/deploy-omen.sh`.
+next_action: Restore runtime files to the selected snapshot state using a normal git commit, push, and deploy through the canonical OMEN script.
 
 ## Rollback Anchor
 
 selected_commit: `6607214de3f65a7855e6d6ad4132bc7d66f3b479` (`docs(debug): record reconnect tail deployment`)
 runtime_code_commit: `faba4cc4f62e3f0c8ffd4b57b30f02aec934c1f0` (`fix(call): drain reconnect backfill tail`)
 selection_basis: User selected `6607214` because it was the commit tested immediately before the "terrible regression" report and is the desired operational return point.
-caveat: Insurance only. Do not make rollback the primary debug objective unless the user explicitly requests it or new evidence shows rollback is the best operational action.
+caveat: Rollback is now explicitly requested. Preserve post-snapshot analysis before restoring runtime code to this anchor.
 
 ## Current Unresolved Failure
 
-primary_target: Fix forward from current `main`, not rollback.
+primary_target: Superseded by explicit rollback request after `a0d5d17` failed user verification.
 poem_freeze_call: `call_5152493ffa72481ab60f1fc5b16eba9c` / `rtc_2892320a439f4ef59830af9df3cdd296` reached STT for the second long turn, but `user_final` was skipped because the data channel was already closed.
 delayed_speech_freeze_call: `call_e3e46602b0e340f098b2549aa04a3765` / `rtc_fd075194886f46569ba1ba921440e62f` accepted the first short turn, then the second delayed turn never reached backend VAD/STT/backfill before transport close.
-debugger_instruction: Investigate why the peer/data channel closes around the second user turn and propose a focused fix. Treat rollback as insurance only.
+debugger_instruction: Historical post-`21bc46e` fix-forward target. Superseded by explicit rollback request after `a0d5d17` failed user verification.
 
 ## Symptoms
 
@@ -41,6 +41,7 @@ evidence_files:
   - .planning/debug/phone-call-transcript-comparison.md
   - .planning/debug/phone-call-repro-e4b93d9-2026-04-30.md
   - .planning/debug/phone-call-repro-1239588-2026-04-30.md
+  - .planning/debug/phone-calls-post-snapshot-audit.md
 
 ## Investigation Evidence
 
@@ -362,6 +363,26 @@ evidence_files:
   found: The previous Current Focus incorrectly framed rollback as the only operational decision. The active evidence to investigate is the two started calls: `call_515...`, where the long turn reached STT but `user_final` was skipped because the data channel was closed, and `call_e3...`, where the delayed second speech never reached backend VAD/STT/backfill before transport close.
   implication: Next debugger pass should ignore rollback except as insurance and should continue root-cause/fix work on the transport/data-channel closure around the second user turn.
 
+- timestamp: 2026-05-01T02:51:22Z
+  checked: Fresh OMEN log filtering for post-`21bc46e` calls `call_5152493ffa72481ab60f1fc5b16eba9c` / `rtc_2892320a439f4ef59830af9df3cdd296` and `call_e3e46602b0e340f098b2549aa04a3765` / `rtc_fd075194886f46569ba1ba921440e62f`.
+  found: In the poem call, backend accepted reconnect backfills and reached `stt.result ... turn=user-turn-2 transcript_len=446`, but the current data channel had closed during a later reconnect (`datachannel.close` before STT finished), so `event.skip_channel_not_open type=user_final readyState=closed` dropped the turn. In the delayed-speech call, the browser started reconnect backfill (`mic.reconnect_backfill.start`) and created a replacement offer, but `/api/calls/.../end` ran before the answer was applied; `pc.media_reconnect.failed` then reported `setRemoteDescription` on a closed peer connection, and there was no `mic.reconnect_backfill.sending`/backend `reconnect_audio.backfill.applied` for that session.
+  implication: The current failure is not explained by STT, VAD, or persistence truncation. It is a reconnect lifecycle bug: successful backend STT has no durable/queued delivery path when the data channel is temporarily closed, and browser hangup/reconnect cleanup can discard pending local PCM before the backend receives it.
+
+- timestamp: 2026-05-01T03:00:26Z
+  checked: Red regression attempts for the two confirmed mechanisms.
+  found: Added `test_user_final_waits_for_replacement_data_channel_when_closed`; it fails on current code with `AttributeError: 'CallSession' object has no attribute 'attach_data_channel'`, confirming no pending data-channel replay API exists. Added browser E2E coverage for ending during an in-flight reconnect offer; the targeted single-test Playwright command timed out starting its configured web server before reaching the test body.
+  implication: Backend regression reproduces the missing pending-event delivery directly. Browser regression is written but needs post-implementation execution through the stable Playwright command path.
+
+- timestamp: 2026-05-01T03:13:24Z
+  checked: Fix implementation, regression verification, commit, and OMEN deployment.
+  found: Implemented pending backend data-channel replay for durable `user_final` events, wired replacement data channels to flush pending events, and made browser hangup await a final reconnect-audio drain before `/end` and media cleanup. Verification passed: backend red regression now passes; browser ordering regression passes and asserts reconnect audio POST precedes `/end`; `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py ai-backend/tests/test_webrtc_signaling.py -q` passed (52 passed, 3 warnings); `uv run --project ai-backend pytest ai-backend/tests -q` passed (97 passed, 3 warnings); `npm run build` passed; `npm run test:e2e -- call-start.spec.ts` passed (24 passed); `git diff --check` passed. Committed and pushed `a0d5d17` (`fix(call): preserve turn artifacts across reconnect`). `scripts/deploy-omen.sh` deployed `a0d5d17` to OMEN and `/webrtc/status` returned `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, `active_sessions=0`.
+  implication: The two confirmed log mechanisms are fixed in code and live on OMEN. Final resolution still requires the user to verify the real phone-call workflow.
+
+- timestamp: 2026-05-01T15:46:17Z
+  checked: User verification after `a0d5d17` and post-snapshot audit request.
+  found: User reports `a0d5d17` does not work at all: calls remain frozen and messages longer than about 5 to 10 seconds do not go through. User requested returning OMEN to selected snapshot `6607214`, but first recording every post-snapshot change, hypothesis, and attempted solution, with special attention to the immediate post-snapshot change that likely made the calls worse. Created `.planning/debug/phone-calls-post-snapshot-audit.md`.
+  implication: Stop fix-forward work. Restore runtime files to the selected snapshot state and deploy through `scripts/deploy-omen.sh` only.
+
 ## Eliminated
 
 - hypothesis: Downstream forwarding, persistence, or UI display truncates a full STT transcript.
@@ -391,6 +412,18 @@ evidence_files:
 - hypothesis: The post-`6607214` no-response turns are lost in STT, Web UI persistence, or display after backend finalization.
   evidence: The missing second turns in `call_3294...` and `call_f0fb...` never reached `stt.begin`, never emitted `event.sent type=user_final`, and are absent from SQLite; the first loss happens before STT and persistence.
   timestamp: 2026-05-01T00:56:35Z
+
+## Resolution
+
+root_cause: The post-`21bc46e` freeze/missing-turn failures were two reconnect lifecycle races. First, backend STT could finish with a valid `user_final` while the WebRTC data channel was closed, and `CallSession.emit_event()` dropped it instead of replaying it after the replacement data channel opened. Second, browser hangup during an in-flight reconnect offer could run `/end` and local media cleanup before `flushReconnectAudioBackfill()` posted pending PCM, so the backend never received the delayed second-turn audio.
+fix: Added a bounded pending data-channel event queue for durable `user_final` events and flush it when replacement data channels open. Added browser hangup-time reconnect backfill drain that awaits the final batch before `/api/calls/{call_id}/end` and before local media cleanup clears the PCM buffer.
+verification: Local tests passed and commit `a0d5d17` was deployed to OMEN, but user verification failed. This fix is superseded by the rollback request.
+files_changed:
+  - ai-backend/app/api/webrtc.py
+  - ai-backend/app/call/session.py
+  - ai-backend/tests/test_call_session.py
+  - web-ui/client/src/routes/call/[threadId]/+page.svelte
+  - web-ui/client/tests/e2e/call-start.spec.ts
 
 ## Prior Fix History
 
