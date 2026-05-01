@@ -1,7 +1,7 @@
 ---
-status: fix_verified_local
+status: deployed_awaiting_repro
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-01T01:06:26Z
+updated: 2026-05-01T01:09:37Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -12,7 +12,7 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 hypothesis: Confirmed locally. Post-`6607214` no-response regression was caused by reconnect backfill final markers being ignored when they reused an earlier batch ID, leaving held live frames unreleased and active spoken turns unfinalized.
 test: Verify the backend treats empty `final:true` markers as release signals even when duplicate, verify held-frame release can finalize a turn, and verify browser final marker IDs cannot collide with non-final batch IDs.
 expecting: Regression tests pass; reconnect final markers release held frames and VAD `end_of_turn` from released frames reaches STT/user_final.
-next_action: Commit, push, deploy through `scripts/deploy-omen.sh`, then ask the user to repeat both delayed-start and long-text phone-call repros.
+next_action: Ask the user to repeat both delayed-start and long-text phone-call repros; if still broken, inspect logs for post-`6f63de0` calls.
 
 ## Symptoms
 
@@ -293,6 +293,11 @@ evidence_files:
   found: Updated `CallSession.backfill_reconnect_audio()` so empty `final:true` reconnect markers can release held live frames even if their `backfill_id` duplicates a prior non-final batch. Updated reconnect held-frame release to return VAD `end_of_turn` and finalize the user turn immediately when released frames cross the turn boundary. Updated browser reconnect backfill IDs to use `batch` vs `final` namespaces so final markers cannot collide with non-final batch IDs even if a reconnect path reuses a batch index. Added backend regressions for duplicate empty final markers releasing held frames and held-frame release reaching STT. Tightened an existing Playwright reconnect assertion to wait for the replacement answer before snapshotting the new peer.
   implication: The no-response mechanism found in post-`6607214` logs is fixed locally and covered by tests.
 
+- timestamp: 2026-05-01T01:09:37Z
+  checked: Canonical OMEN deployment after post-`6607214` fix.
+  found: Committed and pushed `6f63de0` (`fix(call): release reconnect final markers`). `scripts/deploy-omen.sh` fast-forwarded OMEN to `6f63de035989a53c0a20e5e85002a5e115fede26`, rebuilt the web client, recreated the canonical scheduled tasks, restarted both services, and reported `OMEN deploy complete`. `GET https://192.168.1.199:9443/webrtc/status` returned `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, `active_sessions=0`.
+  implication: The final-marker release fix is live on OMEN and ready for user repro.
+
 ## Eliminated
 
 - hypothesis: Downstream forwarding, persistence, or UI display truncates a full STT transcript.
@@ -356,6 +361,7 @@ verification:
   - `uv run --project web-ui/server pytest web-ui/server/tests -q` passed after the post-`6607214` fix: 152 passed in 27.62s.
   - `npm run build` passed after the post-`6607214` fix.
   - `git diff --check` passed after the post-`6607214` fix.
+  - `scripts/deploy-omen.sh` deployed post-`6607214` fix commit `6f63de0`; post-deploy `/webrtc/status` was ready with `active_sessions=0`.
 files_changed:
   - ai-backend/app/config.py
   - ai-backend/app/call/session.py
