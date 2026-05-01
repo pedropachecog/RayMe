@@ -1,7 +1,7 @@
 ---
-status: fixing
+status: awaiting_human_verify
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-01T23:53:44Z
+updated: 2026-05-01T23:56:36Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -18,7 +18,7 @@ reasoning_checkpoint:
   falsification_test: "After the fix, the same regression must show a final reconnect-audio backfill sent before `/end`; if `/end` still occurs first or no backfill is sent, the hypothesis is wrong."
   fix_rationale: "Drain the pending reconnect-audio backfill before ending the call so the final HTTP response can carry and handle any recovered `user_final` before the browser asks the backend to close the session. If a reconnect flush is already running, hangup must await that existing flush instead of starting a duplicate drain over the same PCM window."
   blind_spots: "This does not prove the broader WebRTC churn is solved; it addresses the first durable loss observed in the post-`c769afb` repro and still requires live phone verification before deployment."
-next_action: Commit, push, deploy through `scripts/deploy-omen.sh`, then rerun the same first-turn poem repro.
+next_action: User reruns the same first-turn poem repro on OMEN after the hangup/backfill ordering fix deployment.
 
 ## Rollback Anchor
 
@@ -90,6 +90,11 @@ evidence_files:
   checked: Parent review of the local browser hangup/backfill fix.
   found: Tightened the fix so hangup awaits any already-running reconnect backfill flush instead of starting a duplicate drain. Added `awaits in-flight reconnect backfill before ending without duplicate drain`, covering a slow first backfill batch followed by End Call. Focused Playwright tests for both hangup/reconnect cases passed in desktop and mobile Chromium. Full `npm run test:e2e -- call-start.spec.ts` passed: 26 passed. `npm run build` passed. `git diff --check` passed.
   implication: The local patch now covers both observed hangup-before-backfill and in-flight-backfill variants before OMEN deployment.
+
+- timestamp: 2026-05-01T23:56:36Z
+  checked: Canonical OMEN deployment and post-deploy readiness for the hangup/backfill ordering fix.
+  found: Committed and pushed `d7c8d4d` (`fix(call): drain reconnect backfill before hangup`), then deployed with `scripts/deploy-omen.sh`. OMEN fast-forwarded to `d7c8d4df3a54219f6e110a3d70c93fda458ba6f3`, rebuilt the web client, restarted canonical scheduled tasks, and reported `OMEN deploy complete`. `GET https://192.168.1.199:9443/webrtc/status` returned `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, and `active_sessions=0`. Scheduled tasks point to `C:\Users\pmpg\rayme\start-ai-backend.cmd` and `C:\Users\pmpg\rayme\start-web-ui.cmd`. SQLite remained present at `C:\Users\pmpg\rayme\RayMe\web-ui\server\data\rayme.sqlite3`, length `856064`.
+  implication: The fix is live on OMEN. The next evidence needed is the user's repeated first-turn poem repro.
 
 - timestamp: 2026-04-30T21:24:13Z
   checked: Fresh post-`dff6545` investigation setup.
@@ -446,7 +451,7 @@ evidence_files:
 
 root_cause: The post-`c769afb` first-turn poem repro no longer loses audio before STT: backend logs show `reconnect_audio.backfill.finalize`, `stt.begin`, and `stt.result transcript_len=461`. The remaining first durable loss is browser call-end/reconnect ordering: `hangup()` can call `/end` and clear/close media while the final reconnect-audio request is still pending, so the data channel is closed before backend emits `user_final`, and the HTTP fallback response is reported to the browser as a failed reconnect-audio request instead of being handled.
 fix: Updated the browser call page so hangup drains the final reconnect-audio backfill before `/api/calls/{call_id}/end`; `flushReconnectAudioBackfill()` can now await the final batch when used for hangup cleanup and avoids duplicate drains by awaiting an already-running flush.
-verification: Focused Playwright regressions failed before the first fix and passed after the refined fix in desktop and mobile Chromium. Full `call-start.spec.ts` passed (26 passed), `npm run build` passed, and `git diff --check` passed. OMEN deployment pending.
+verification: Focused Playwright regressions failed before the first fix and passed after the refined fix in desktop and mobile Chromium. Full `call-start.spec.ts` passed (26 passed), `npm run build` passed, `git diff --check` passed, and OMEN deployed `d7c8d4d` with `/webrtc/status` ready and `active_sessions=0`.
 files_changed:
   - web-ui/client/src/routes/call/[threadId]/+page.svelte
   - web-ui/client/tests/e2e/call-start.spec.ts
