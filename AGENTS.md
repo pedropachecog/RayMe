@@ -29,32 +29,25 @@ that same task until the subagent returns.
 - Subagents must never launch `codex`, `claude`, or another agent CLI from the
   shell as a workaround for missing nested-subagent capability.
 - Codex debug workflows must not delegate to a debug-session-manager that then
-  tries to spawn its own agents. Instead, the main agent must run the session
-  manager workflow inline:
+  tries to spawn its own agents. Instead, the main agent must run the current
+  session-manager workflow inline:
   - First follow the normal `gsd-debug` skill setup: parse subcommands/flags,
     initialize GSD context, check/list/resume active sessions, gather symptoms
     for new sessions, and create/update the `.planning/debug/{slug}.md` file.
   - At the point where `gsd-debug` would spawn `gsd-debug-session-manager`, read
     the entire `/home/agent/.codex/agents/gsd-debug-session-manager.md`
     instruction file. If available, also read its TOML config for role metadata.
-  - Execute that session-manager process inline. The debug file is the primary
-    context: read it first, extract status/current focus/evidence count, resolve
-    the `gsd-debugger` model, spawn `gsd-debugger` directly with the debug file
-    path as required reading, and immediately wait for it.
+    Treat those files as the canonical workflow. If they change, follow the
+    updated workflow rather than the older summary in this file.
+  - Execute the canonical session-manager process inline. The debug file remains
+    the primary context; `gsd-debugger` must be spawned directly with the debug
+    file path as required reading, and the parent must immediately wait for it.
   - While the debugger is running, do not investigate, edit, verify, or deploy
     the same task locally.
-  - Parse the debugger's structured return header and continue the same loop
-    inline:
-    - `ROOT CAUSE FOUND`: record/review the root cause, run any applicable
-      specialist review directly if available, then explicitly choose or ask
-      whether to fix now, plan, or stop.
-    - `TDD CHECKPOINT`: surface the failing test and continue only after the red
-      state is accepted or otherwise handled.
-    - `CHECKPOINT REACHED`: collect the missing user/runtime evidence, wrap it
-      as data, and spawn the next `gsd-debugger` continuation.
-    - `INVESTIGATION INCONCLUSIVE`: choose or ask whether to continue, add
-      context, or stop; do not silently end the debug loop.
-    - `DEBUG COMPLETE`: read the final debug file and return a compact summary.
+  - Parse the debugger's structured return header and continue the session
+    manager loop inline according to the current manager instructions. Do not
+    silently stop after one debugger pass unless the canonical workflow says the
+    session is complete or the user explicitly stops it.
   - Handle checkpoints, fixes, verification, commits, deployments, and follow-up
     debugger continuations in the parent context, preserving the session-manager
     state-machine semantics even though no `gsd-debug-session-manager` agent is
