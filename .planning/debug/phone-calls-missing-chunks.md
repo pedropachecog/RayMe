@@ -1,7 +1,7 @@
 ---
 status: diagnosed
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-01T02:11:44Z
+updated: 2026-05-01T02:17:55Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -9,10 +9,17 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 
 ## Current Focus
 
-hypothesis: Post-`21bc46e` diagnosis is complete: the two started calls failed before durable user-turn persistence, while the user-reported completely failed start produced no durable call/session evidence in the copied logs or SQLite.
-test: Correlated copied OMEN Web UI logs, AI backend logs, and SQLite rows after the `21bc46e` deployment/restart.
-expecting: Started calls should map to call/session/thread IDs and first-loss boundaries; failed starts without `/api/calls/start` evidence cannot have call/session IDs.
-next_action: Return diagnose-only summary and recommended rollback anchor; do not modify source code or deploy.
+hypothesis: Post-`21bc46e` diagnosis is complete, and the user-selected rollback anchor is `6607214`, the exact commit tested immediately before the "terrible regression" report.
+test: Preserve `6607214` as the operational rollback anchor while retaining the debugger's older `1db1e93` recommendation as historical evidence only.
+expecting: Future rollback discussions should default to `6607214` unless the user asks to revisit the older pre-series baseline.
+next_action: If rollback is requested, return to `6607214de3f65a7855e6d6ad4132bc7d66f3b479` using normal git workflow and deploy only via `scripts/deploy-omen.sh`.
+
+## Rollback Anchor
+
+selected_commit: `6607214de3f65a7855e6d6ad4132bc7d66f3b479` (`docs(debug): record reconnect tail deployment`)
+runtime_code_commit: `faba4cc4f62e3f0c8ffd4b57b30f02aec934c1f0` (`fix(call): drain reconnect backfill tail`)
+selection_basis: User selected `6607214` because it was the commit tested immediately before the "terrible regression" report and is the desired operational return point.
+caveat: `6607214` is not proven to fully fix long-text transcription; it is the selected anchor for returning to the last pre-regression tested state.
 
 ## Symptoms
 
@@ -332,6 +339,11 @@ evidence_files:
   checked: Rollback-anchor evidence across resolved/prior debug history and git history.
   found: No objectively confirmed-good commit exists for complete long-poem transcription; the first missing-chunks investigation already started from OMEN at `1db1e93`. The best supported rollback anchor is `1db1e93` (`fix(call): reconnect on ice-only media loss`), because prior debug history records the earlier >5s delayed-speech freeze as solved there, and every runtime call-code commit after it in this series (`ba6057c`, `e4b93d9`, `1239588`, `adb035c`, `faba4cc`, `6f63de0` with doc commits through `21bc46e`) has live repro evidence of continued truncation, freeze, or no-response regression. `2a04957` is a docs/archive commit immediately after `1db1e93`; `66cc248` is non-runtime agent-hook config.
   implication: Record `1db1e93` as the safest rollback candidate with medium confidence for restoring the last user-reported working call behavior, but low confidence for fully correct long-text transcription because logs/docs do not prove that ever worked after the 5s-freeze fix.
+
+- timestamp: 2026-05-01T02:17:55Z
+  checked: User-selected rollback anchor after clarification.
+  found: User clarified they want `6607214` selected as the anchor, because it is the exact commit tested immediately before the "terrible regression" report. `6607214` is a docs commit over runtime code commit `faba4cc`.
+  implication: Future rollback work should treat `6607214de3f65a7855e6d6ad4132bc7d66f3b479` as the selected operational anchor. The previous `1db1e93` debugger recommendation remains historical context only, not the selected anchor.
 
 ## Eliminated
 
