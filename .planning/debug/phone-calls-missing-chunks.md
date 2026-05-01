@@ -1,7 +1,7 @@
 ---
-status: deployed_awaiting_repro
+status: diagnosed
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-01T01:09:37Z
+updated: 2026-05-01T02:11:44Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -9,10 +9,10 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 
 ## Current Focus
 
-hypothesis: Confirmed locally. Post-`6607214` no-response regression was caused by reconnect backfill final markers being ignored when they reused an earlier batch ID, leaving held live frames unreleased and active spoken turns unfinalized.
-test: Verify the backend treats empty `final:true` markers as release signals even when duplicate, verify held-frame release can finalize a turn, and verify browser final marker IDs cannot collide with non-final batch IDs.
-expecting: Regression tests pass; reconnect final markers release held frames and VAD `end_of_turn` from released frames reaches STT/user_final.
-next_action: Ask the user to repeat both delayed-start and long-text phone-call repros; if still broken, inspect logs for post-`6f63de0` calls.
+hypothesis: Post-`21bc46e` diagnosis is complete: the two started calls failed before durable user-turn persistence, while the user-reported completely failed start produced no durable call/session evidence in the copied logs or SQLite.
+test: Correlated copied OMEN Web UI logs, AI backend logs, and SQLite rows after the `21bc46e` deployment/restart.
+expecting: Started calls should map to call/session/thread IDs and first-loss boundaries; failed starts without `/api/calls/start` evidence cannot have call/session IDs.
+next_action: Return diagnose-only summary and recommended rollback anchor; do not modify source code or deploy.
 
 ## Symptoms
 
@@ -297,6 +297,41 @@ evidence_files:
   checked: Canonical OMEN deployment after post-`6607214` fix.
   found: Committed and pushed `6f63de0` (`fix(call): release reconnect final markers`). `scripts/deploy-omen.sh` fast-forwarded OMEN to `6f63de035989a53c0a20e5e85002a5e115fede26`, rebuilt the web client, recreated the canonical scheduled tasks, restarted both services, and reported `OMEN deploy complete`. `GET https://192.168.1.199:9443/webrtc/status` returned `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, `active_sessions=0`.
   implication: The final-marker release fix is live on OMEN and ready for user repro.
+
+- timestamp: 2026-05-01T02:02:32Z
+  checked: User post-`21bc46e` repro report and rollback-anchor request.
+  found: User reports three latest calls failed after the latest deployment. Oldest of the three: user sent a short first message and RayMe responded, then user read a long poem and the call froze. Middle call: the call could not start and showed call failed. Latest call: user sent a short first message and RayMe responded, then waited more than 10 seconds and spoke; the call froze. User asks to record the commit that last worked so the project can return to it if needed.
+  implication: Reopen the session. The debugger should inspect the last three calls with fresh evidence, and should separately identify a rollback anchor. Do not apply fixes before the call-start/freeze boundaries and rollback candidate are recorded.
+
+- timestamp: 2026-05-01T02:05:13Z
+  checked: Project-local skills, debug knowledge base, local/OMEN commit, canonical runtime, and readiness before the post-`21bc46e` log pass.
+  found: No `.claude/skills`, `.agents/skills`, or `.planning/debug/knowledge-base.md` exists. Local `main` and OMEN are both at `21bc46e0a3095fec8c9f8fc00e44fbd4a4493a19` (`docs(debug): record final-marker deployment`). OMEN scheduled tasks `RayMePhase1AI` and `RayMePhase1Web` are running and point only to `C:\Users\pmpg\rayme\start-ai-backend.cmd` and `C:\Users\pmpg\rayme\start-web-ui.cmd`. The launchers point at `C:\Users\pmpg\rayme\RayMe`; the Web UI launcher uses `sqlite+aiosqlite:///C:/Users/pmpg/rayme/RayMe/web-ui/server/data/rayme.sqlite3`. `/webrtc/status` returned ready with `live_call_ready=true`, `media_transport_ready=true`, and `active_sessions=1`; `/api/settings` reached the AI backend with STT/VAD ready and resident F5, while generic endpoint status remained degraded only because non-F5 engines are unavailable. Copied active logs and SQLite to `/tmp/rayme-phone-debug-21bc46e-2026-05-01/`.
+  implication: The repro window is on the intended deployed commit and canonical OMEN launch path. Further analysis can use the copied logs/database without changing source or deployment state.
+
+- timestamp: 2026-05-01T02:11:44Z
+  checked: SQLite messages and Web UI `/api/calls/start` events after the `21bc46e` deployment.
+  found: The latest post-deploy thread is `thread_3be859853d7a4726a5151ca50b6e7940`. Persisted/logged 201-created calls after `01:50Z` are `call_22a4f02eddda4624847d57bdf1a0cb6a`/`rtc_837425d25e51420e82659d46c8a81390` at about `01:54:32Z`, `call_5152493ffa72481ab60f1fc5b16eba9c`/`rtc_2892320a439f4ef59830af9df3cdd296` at about `01:55:21Z`, and `call_e3e46602b0e340f098b2549aa04a3765`/`rtc_fd075194886f46569ba1ba921440e62f` at about `01:58:07Z`. SQLite stores only short user turns for those calls: `Hey there.`, `Always there, Mike.`, and `I use the air.` plus AI replies for the latter two. A separate `/api/calls/start` returned 500 between `call_515...` and `call_e3...`.
+  implication: The two user-described calls that started then froze are `call_515...` and `call_e3...`; the long/delayed second turns are absent from SQLite/API persistence. `call_22a4...` is an additional logged short call, not the failed long-turn repro.
+
+- timestamp: 2026-05-01T02:11:44Z
+  checked: User correction about the failed-to-start attempt.
+  found: User clarified that the observed `AiBackendUnavailable` 500 was another failed start they did not mention, and that the call that failed completely in their report does not appear to be logged. The copied Web UI access log has no additional `/api/calls/start` failure after the 500 and no durable call/session row for another failed attempt.
+  implication: The user-reported failed-to-start call has no recoverable `call_id` or `rtc_session_id` in these server-side artifacts. Its first loss boundary is before durable Web UI call/session creation, possibly before the start request reached the server or before browser debug telemetry was posted.
+
+- timestamp: 2026-05-01T02:11:44Z
+  checked: Poem/freeze call `call_5152493ffa72481ab60f1fc5b16eba9c` / `rtc_2892320a439f4ef59830af9df3cdd296`.
+  found: The first short turn persisted normally: backend `vad.speech_start`, `stt.begin`, `stt.result transcript_len=19`, and `event.sent type=user_final`; Web UI stored `Always there, Mike.` and an AI reply. The second long turn began (`vad.speech_start turn_frames=206`) but the peer closed mid-turn at backend `track.recv.error frames=1508`. Reconnect/backfill applied multiple batches, including non-silent final PCM, and backend eventually ran `stt.begin user-turn-2 frames=3004` then `stt.result transcript_len=446`, but `event.skip_channel_not_open type=user_final readyState=closed` prevented delivery to the browser/Web UI. SQLite has no long-turn row.
+  implication: For the poem call, the first instability boundary is WebRTC/datachannel closure during the second turn; the first durable persistence loss boundary is skipped `user_final` after STT because the data channel was already closed.
+
+- timestamp: 2026-05-01T02:11:44Z
+  checked: Latest delayed-speech freeze call `call_e3e46602b0e340f098b2549aa04a3765` / `rtc_fd075194886f46569ba1ba921440e62f`.
+  found: The first short turn persisted normally: backend `stt.result transcript_len=14` and `event.sent type=user_final`; Web UI stored `I use the air.` and the AI response. After AI playback, the second listening turn started at backend frame `953`, but no second-turn `vad.speech_start`, `stt.begin`, or `user_final` occurred. Backend closed at `track.recv.error frames=1923`; browser logged `pc.iceconnectionstatechange disconnected`, `pc.connectionstatechange failed`, `mic.reconnect_backfill.start`, then user/end raced with reconnect and `setRemoteDescription` failed because the peer connection was already closed. No `reconnect_audio.backfill.applied` was observed for this session.
+  implication: For the latest delayed-speech call, the user's second speech did not reach backend VAD/STT before the transport closed, and no reconnect backfill reached the backend before call end.
+
+- timestamp: 2026-05-01T02:11:44Z
+  checked: Rollback-anchor evidence across resolved/prior debug history and git history.
+  found: No objectively confirmed-good commit exists for complete long-poem transcription; the first missing-chunks investigation already started from OMEN at `1db1e93`. The best supported rollback anchor is `1db1e93` (`fix(call): reconnect on ice-only media loss`), because prior debug history records the earlier >5s delayed-speech freeze as solved there, and every runtime call-code commit after it in this series (`ba6057c`, `e4b93d9`, `1239588`, `adb035c`, `faba4cc`, `6f63de0` with doc commits through `21bc46e`) has live repro evidence of continued truncation, freeze, or no-response regression. `2a04957` is a docs/archive commit immediately after `1db1e93`; `66cc248` is non-runtime agent-hook config.
+  implication: Record `1db1e93` as the safest rollback candidate with medium confidence for restoring the last user-reported working call behavior, but low confidence for fully correct long-text transcription because logs/docs do not prove that ever worked after the 5s-freeze fix.
 
 ## Eliminated
 
