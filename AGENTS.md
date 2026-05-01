@@ -39,9 +39,11 @@ that same task until the subagent returns.
     instruction file. If available, also read its TOML config for role metadata.
     Treat those files as the canonical workflow. If they change, follow the
     updated workflow rather than the older summary in this file.
-  - Execute the canonical session-manager process inline. The debug file remains
-    the primary context; `gsd-debugger` must be spawned directly with the debug
-    file path as required reading, and the parent must immediately wait for it.
+  - Execute the canonical session-manager process from
+    `/home/agent/.codex/agents/gsd-debug-session-manager.md` inline. The debug
+    file remains the primary context; `gsd-debugger` must be spawned directly
+    with the debug file path as required reading, and the parent must
+    immediately wait for it.
   - While the debugger is running, do not investigate, edit, verify, or deploy
     the same task locally.
   - Parse the debugger's structured return header and continue the session
