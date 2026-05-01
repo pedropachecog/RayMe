@@ -90,6 +90,7 @@
   let blockingPanel = $state<BlockingPanel | null>(null);
   let ending = $state(false);
   let timers: number[] = [];
+  const handledUserFinalTurnIds = new Set<string>();
   let activeTurnAbort: AbortController | null = null;
   let activeTurnReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   let localMediaStream: MediaStream | null = null;
@@ -190,6 +191,7 @@
   async function beginCall() {
     callState = 'connecting';
     clearEventTimers();
+    handledUserFinalTurnIds.clear();
 
     try {
       localMediaStream = await requestCallMicrophone();
@@ -806,6 +808,9 @@
         frames: response.frames ?? null,
         responseDurationMs: response.duration_ms ?? null
       });
+      if (response.event) {
+        await handleCallDataEvent(response.event);
+      }
     } catch (error) {
       emitDebugEvent(debugCallId, 'mic.reconnect_backfill.failed', {
         reason,
@@ -1321,6 +1326,10 @@
 
   async function handleCallDataEvent(event: CallEvent) {
     if (event.type === 'user_final') {
+      if (handledUserFinalTurnIds.has(event.turn_id)) {
+        return;
+      }
+      handledUserFinalTurnIds.add(event.turn_id);
       appendUserFinal(event.text, event.turn_id);
       await submitUserTurn(event);
       return;

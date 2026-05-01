@@ -575,6 +575,7 @@ def test_reconnect_audio_backfill_is_inserted_before_replacement_track_frames() 
             backfill_id="gap-1",
             reason="failed",
             attempt=1,
+            final=False,
         )
     )
     final = _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(post_pcm)))
@@ -589,6 +590,42 @@ def test_reconnect_audio_backfill_is_inserted_before_replacement_track_frames() 
         gap_samples[320:].tobytes(),
         post_pcm,
     ]]
+
+
+def test_final_reconnect_backfill_can_finalize_turn_without_replacement_frame() -> None:
+    events: list[dict[str, Any]] = []
+    vad = ScriptedVadAdapter()
+    stt = ScriptedSttAdapter()
+    session, _ = _new_session(
+        vad_adapter=vad,
+        stt_adapter=stt,
+        event_sink=events.append,
+    )
+
+    pre_pcm = np.full(320, 1000, dtype=np.int16).tobytes()
+    gap_pcm = np.full(320, 2000, dtype=np.int16).tobytes()
+
+    first = _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(pre_pcm)))
+    session.mark_media_reconnect_pending()
+    backfill = _run(
+        session.backfill_reconnect_audio(
+            pcm=gap_pcm,
+            sample_rate=16000,
+            channels=1,
+            backfill_id="gap-final",
+            reason="failed",
+            attempt=1,
+            final=True,
+        )
+    )
+
+    assert first is None
+    assert backfill["status"] == "accepted"
+    assert backfill["event"]["type"] == "user_final"
+    assert backfill["event"]["text"] == "hello from mic"
+    assert [event["type"] for event in events] == ["state", "user_final"]
+    assert stt.calls == [[pre_pcm, gap_pcm]]
+    assert session.state == "thinking"
 
 
 def test_reconnect_audio_backfill_ignores_duplicate_ids() -> None:

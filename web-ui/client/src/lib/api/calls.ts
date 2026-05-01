@@ -1,6 +1,7 @@
 import { apiFetch, toApiPath } from './client';
 import type {
   CallErrorCode,
+  CallEvent,
   CallOfferResponse,
   CallStartRequest,
   CallStartResponse,
@@ -110,7 +111,14 @@ export function submitCallTurn(
 export function backfillCallReconnectAudio(
   callId: string,
   payload: CallReconnectAudioBackfillRequest
-): Promise<{ call_id: string; session_id: string; status: string; frames?: number; duration_ms?: number }> {
+): Promise<{
+  call_id: string;
+  session_id: string;
+  status: string;
+  frames?: number;
+  duration_ms?: number;
+  event?: CallEvent;
+}> {
   return apiFetch(`/calls/${encodeURIComponent(callId)}/reconnect-audio`, {
     method: 'POST',
     body: JSON.stringify(payload)

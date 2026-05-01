@@ -1,7 +1,7 @@
 ---
-status: rollback_requested
+status: investigating
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-01T15:51:43Z
+updated: 2026-05-01T23:17:17Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -9,10 +9,10 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 
 ## Current Focus
 
-hypothesis: User verification failed after `a0d5d17`; post-snapshot fixes did not solve the frozen-call regression.
-test: Audit all commits, hypotheses, and fixes after selected snapshot `6607214` before reverting runtime code to the snapshot state.
-expecting: Preserve a durable note of what changed after the snapshot, especially the immediate post-snapshot `6f63de0` change, then deploy the rollback through `scripts/deploy-omen.sh`.
-next_action: Restore runtime files to the selected snapshot state using a normal git commit, push, and deploy through the canonical OMEN script.
+hypothesis: Latest valid repro freezes because reconnect backfill appends the missing speech to the active turn but does not finalize the turn; if no later live frame reaches `handle_inbound_audio_frame`, STT/user_final never runs.
+test: Add a regression where a final reconnect backfill batch reaches VAD end-of-turn without any replacement live frame, then verify the backend finalizes and the browser can consume a fallback `user_final` carried by the reconnect-audio HTTP response.
+expecting: The first turn should reach `stt.begin`/`user_final` from final backfill even if the replacement data channel is unavailable or the replacement media path keeps churning.
+next_action: Commit, push, deploy through `scripts/deploy-omen.sh`, then rerun the same first-turn poem repro.
 
 ## Rollback Anchor
 
@@ -44,6 +44,16 @@ evidence_files:
   - .planning/debug/phone-calls-post-snapshot-audit.md
 
 ## Investigation Evidence
+
+- timestamp: 2026-05-01T22:51:03Z
+  checked: Post-redeploy OMEN state and latest call after user reported redeploy did not fix the problem.
+  found: OMEN remained on `6cbc48782f8c9ed4f20270ed7b9d1661928f6d0c` with WebRTC ready and `active_sessions=0` after restart. The latest call `call_836cbfd6abf84c2ca47282e35b830be6` / `rtc_7d3353a02035475985a0d7c60b8674cb` reached `user_final` for `user-turn-3` (`stt.result transcript_len=149`), LLM completed (`llm.done chars=430`), and TTS started a long playback (`duration_ms=26420`). Backend then logged repeated `inbound.dropped ... state=speaking`; later the speak request was cancelled when the call ended, returning a `Speech playback cancelled` processing error.
+  implication: The verified restored snapshot is running. This fresh trace does not look like the post-`6607214` no-throughput regression; it points to the known snapshot behavior where the server rejects inbound user audio while AI playback is active. The next action should be a controlled repro to separate "long user speech while listening" from "user speaks while AI is still speaking" before applying another fix.
+
+- timestamp: 2026-05-01T23:17:17Z
+  checked: User clarified that the prior inspected call was not a structured repro, then performed two new first-turn poem calls. The second/latest call is the valid repro because the user waited about one minute before ending it.
+  found: Latest valid repro is `call_e8464de2aeea413ebe3feb83247f0a33` / `rtc_20158f17ebad4f34b37d8c371135b76b` on `thread_c23ed9dfdcd64f23b007f7f8e75045dc`. It detected speech (`vad.speech_start turn_frames=125`) but the peer failed at frame 994 before `vad.end_of_turn`. Reconnect backfill applied real speech (`batch-1 rms=1316 peak=10767`, `batch-2 rms=1440 peak=19508`) and later long mostly-silent tail batches, but no `vad.end_of_turn`, `stt.begin`, or `user_final` was emitted. The thread persisted only call start/end events.
+  implication: Root cause is now code-level and narrower than the failed post-snapshot stack: `backfill_reconnect_audio()` calls `_append_turn_frame()` but ignores the returned VAD `end_of_turn`, so final backfill cannot finish the user turn if no later live frame arrives. Implemented a backend finalization path for final reconnect backfill/held frames plus a browser fallback that handles a `user_final` event returned by the reconnect-audio HTTP response, with duplicate turn-id protection.
 
 - timestamp: 2026-04-30T21:24:13Z
   checked: Fresh post-`dff6545` investigation setup.

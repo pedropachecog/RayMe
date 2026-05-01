@@ -278,14 +278,20 @@ class CallSession:
             channels=channels,
         )
         if not frames:
+            event = None
             if final:
-                self._release_reconnect_live_frames(reason="final_empty_backfill")
-            return {
+                released_end = self._release_reconnect_live_frames(reason="final_empty_backfill")
+                if self._should_finalize_after_reconnect_backfill(released_end, final=final):
+                    event = await self.finalize_user_turn()
+            response = {
                 "status": "empty",
                 "frames": 0,
                 "duration_ms": 0,
                 "state": self.state,
             }
+            if event is not None:
+                response["event"] = event
+            return response
         if self.state != "listening":
             logger.info(
                 "[rayme-call] reconnect_audio.backfill.skip session=%s "
@@ -309,15 +315,18 @@ class CallSession:
             self._reconnect_audio_backfill_ids.add(backfill_id)
         was_pending = self._media_reconnect_grace_pending
         started_turn = self._turn_started_at is None
+        end_of_turn = False
         for frame in frames:
-            self._append_turn_frame(frame, source="reconnect_backfill")
+            vad_result = self._append_turn_frame(frame, source="reconnect_backfill")
+            end_of_turn = end_of_turn or bool(vad_result.get("end_of_turn"))
         # Keep the grace armed for the first replacement-track frame. The
         # backfill inserts missing audio but does not prove the new transport is
         # stable yet, and a short post-reconnect silence should not finalize
         # before the browser's replacement track has a chance to resume.
         self._media_reconnect_grace_pending = was_pending or self._media_reconnect_grace_pending
         if final:
-            self._release_reconnect_live_frames(reason="final_backfill")
+            released_end = self._release_reconnect_live_frames(reason="final_backfill")
+            end_of_turn = end_of_turn or released_end
 
         duration_ms = sum(
             int((len(frame.pcm) // 2) * 1000 / max(frame.sample_rate, 1))
@@ -346,12 +355,30 @@ class CallSession:
             len(self._reconnect_live_frame_hold_frames),
             started_turn,
         )
-        return {
+        event = None
+        if self._should_finalize_after_reconnect_backfill(end_of_turn, final=final):
+            logger.info(
+                "[rayme-call] reconnect_audio.backfill.finalize session=%s "
+                "turn_frames=%d silence_ms=%d reason=%s attempt=%s "
+                "batch=%s",
+                self.session_id,
+                len(self._turn_frames),
+                self._silence_ms,
+                reason or "",
+                attempt if attempt is not None else "",
+                batch_index if batch_index is not None else "",
+            )
+            event = await self.finalize_user_turn()
+
+        response = {
             "status": "accepted",
             "frames": len(frames),
             "duration_ms": duration_ms,
             "state": self.state,
         }
+        if event is not None:
+            response["event"] = event
+        return response
 
     def _append_turn_frame(
         self,
@@ -406,7 +433,7 @@ class CallSession:
             )
         return True
 
-    def _release_reconnect_live_frames(self, *, reason: str) -> None:
+    def _release_reconnect_live_frames(self, *, reason: str) -> bool:
         frames = list(self._reconnect_live_frame_hold_frames)
         self._reconnect_live_frame_hold_frames.clear()
         self._reconnect_live_frame_hold_until = 0.0
@@ -418,7 +445,7 @@ class CallSession:
                 self.session_id,
                 reason,
             )
-            return
+            return False
 
         logger.info(
             "[rayme-call] reconnect_audio.live_hold.release session=%s "
@@ -427,8 +454,23 @@ class CallSession:
             reason,
             len(frames),
         )
+        end_of_turn = False
         for frame in frames:
-            self._append_turn_frame(frame, source="reconnect_live_hold")
+            vad_result = self._append_turn_frame(frame, source="reconnect_live_hold")
+            end_of_turn = end_of_turn or bool(vad_result.get("end_of_turn"))
+        return end_of_turn
+
+    def _should_finalize_after_reconnect_backfill(
+        self,
+        end_of_turn: bool,
+        *,
+        final: bool,
+    ) -> bool:
+        if not final or not self._turn_frames:
+            return False
+        if end_of_turn:
+            return True
+        return self._speech_seen and self._silence_ms >= self._call_end_silence_ms()
 
     async def finalize_user_turn(self) -> dict[str, Any] | None:
         if not self._turn_frames:
