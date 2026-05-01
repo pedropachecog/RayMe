@@ -1,7 +1,7 @@
 ---
 status: investigating
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-01T02:39:19Z
+updated: 2026-05-01T02:43:31Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -20,6 +20,13 @@ selected_commit: `6607214de3f65a7855e6d6ad4132bc7d66f3b479` (`docs(debug): recor
 runtime_code_commit: `faba4cc4f62e3f0c8ffd4b57b30f02aec934c1f0` (`fix(call): drain reconnect backfill tail`)
 selection_basis: User selected `6607214` because it was the commit tested immediately before the "terrible regression" report and is the desired operational return point.
 caveat: Insurance only. Do not make rollback the primary debug objective unless the user explicitly requests it or new evidence shows rollback is the best operational action.
+
+## Current Unresolved Failure
+
+primary_target: Fix forward from current `main`, not rollback.
+poem_freeze_call: `call_5152493ffa72481ab60f1fc5b16eba9c` / `rtc_2892320a439f4ef59830af9df3cdd296` reached STT for the second long turn, but `user_final` was skipped because the data channel was already closed.
+delayed_speech_freeze_call: `call_e3e46602b0e340f098b2549aa04a3765` / `rtc_fd075194886f46569ba1ba921440e62f` accepted the first short turn, then the second delayed turn never reached backend VAD/STT/backfill before transport close.
+debugger_instruction: Investigate why the peer/data channel closes around the second user turn and propose a focused fix. Treat rollback as insurance only.
 
 ## Symptoms
 
@@ -336,9 +343,9 @@ evidence_files:
   implication: For the latest delayed-speech call, the user's second speech did not reach backend VAD/STT before the transport closed, and no reconnect backfill reached the backend before call end.
 
 - timestamp: 2026-05-01T02:11:44Z
-  checked: Rollback-anchor evidence across resolved/prior debug history and git history.
-  found: No objectively confirmed-good commit exists for complete long-poem transcription; the first missing-chunks investigation already started from OMEN at `1db1e93`. The best supported rollback anchor is `1db1e93` (`fix(call): reconnect on ice-only media loss`), because prior debug history records the earlier >5s delayed-speech freeze as solved there, and every runtime call-code commit after it in this series (`ba6057c`, `e4b93d9`, `1239588`, `adb035c`, `faba4cc`, `6f63de0` with doc commits through `21bc46e`) has live repro evidence of continued truncation, freeze, or no-response regression. `2a04957` is a docs/archive commit immediately after `1db1e93`; `66cc248` is non-runtime agent-hook config.
-  implication: Record `1db1e93` as the safest rollback candidate with medium confidence for restoring the last user-reported working call behavior, but low confidence for fully correct long-text transcription because logs/docs do not prove that ever worked after the 5s-freeze fix.
+  checked: Superseded rollback-anchor evidence across resolved/prior debug history and git history.
+  found: A debugger originally suggested `1db1e93` (`fix(call): reconnect on ice-only media loss`) as a possible older rollback candidate, but this was superseded by the user's explicit selection of `6607214`. No objectively confirmed-good commit exists for complete long-poem transcription.
+  implication: Historical context only. Do not treat `1db1e93` as the active anchor, and do not let rollback analysis distract from the current fix-forward target.
 
 - timestamp: 2026-05-01T02:17:55Z
   checked: User-selected rollback anchor after clarification.
@@ -385,11 +392,11 @@ evidence_files:
   evidence: The missing second turns in `call_3294...` and `call_f0fb...` never reached `stt.begin`, never emitted `event.sent type=user_final`, and are absent from SQLite; the first loss happens before STT and persistence.
   timestamp: 2026-05-01T00:56:35Z
 
-## Resolution
+## Prior Fix History
 
-root_cause: Phone call transcription loses chunks before STT. Prior confirmed root causes were overly aggressive live-call VAD finalization, a 30s hard max-turn cap, failed-state reoffers that did not arm reconnect grace, and reconnect outages that needed browser PCM backfill. As of deployed commit `6607214`, the current no-response regression is in reconnect backfill finalization: duplicate `backfill_id` handling ran before empty `final:true` marker handling, so an empty final marker that reused a previous non-final batch ID was discarded and could not release held replacement-track live frames. The held-frame release path also ignored `_append_turn_frame()` returning `end_of_turn`, so even a release that crossed VAD's silence threshold could not immediately emit `user_final`. The affected turns contained browser-captured audio, backend VAD speech, and non-silent accepted backfill, but never reached `stt.begin`.
-fix: Added call-specific VAD settings (`call_vad_end_silence_ms=1800`, `call_vad_max_turn_ms=120000`), updated `CallSession` to use them for live-call turn finalization/windowing, and added regression tests for false Silero silence during continuous speech and continuous speech beyond 30 seconds. Follow-up fix: added `call_media_reconnect_grace_ms=5000`; when a browser reoffer replaces the peer connection during an active spoken turn, `CallSession` arms a short grace window and starts it on the first frame of the new track so reconnect startup silence does not finalize the turn before speech resumes. Post-`e4b93d9` follow-up: recover `failed/connection_failed` sessions before marking reconnect grace so failed-then-reoffered mid-turn calls actually arm the grace window. Post-`2360feb` follow-up: add browser-side rolling 16 kHz PCM buffering and active-turn backend backfill for media reconnect gaps, sent after backend reoffer acceptance but before replacement peer answer application so STT sees pre-reconnect + gap + post-reconnect audio in order. Post-`6607214` fix: make empty `final:true` markers idempotent and able to release held frames even when their `backfill_id` duplicates a previous non-final batch; make held-frame release finalize the turn when replayed frames produce `end_of_turn`; and namespace browser reconnect backfill IDs as `batch` vs `final` so final markers cannot collide with non-final batches.
-verification:
+prior_root_causes: Earlier confirmed causes included overly aggressive live-call VAD finalization, a 30s hard max-turn cap, failed-state reoffers that did not arm reconnect grace, reconnect outages that needed browser PCM backfill, and post-`6607214` reconnect final markers/held frames that prevented some turns from reaching STT. These are historical fixes, not the current unresolved failure.
+prior_fixes: Added call-specific VAD settings (`call_vad_end_silence_ms=1800`, `call_vad_max_turn_ms=120000`), added reconnect grace, recovered failed sessions before marking reconnect grace, added browser PCM backfill for media reconnect gaps, drained ordered reconnect backfill tails, made empty `final:true` markers idempotent, and allowed held-frame release to finalize turns.
+prior_verification:
   - `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` failed: 28 passed, 1 failed. Failure was `test_silero_silence_gap_finalizes_turn_even_with_loud_ambient_noise`, because the test implicitly expected the old 700 ms call threshold; it now needs to set `call_vad_end_silence_ms=700` explicitly to preserve that regression scenario.
   - `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` passed: 29 passed in 8.28s.
   - `uv run --project ai-backend pytest ai-backend/tests -q` passed: 87 passed, 1 warning in 34.92s.
@@ -419,7 +426,7 @@ verification:
   - `npm run build` passed after the post-`6607214` fix.
   - `git diff --check` passed after the post-`6607214` fix.
   - `scripts/deploy-omen.sh` deployed post-`6607214` fix commit `6f63de0`; post-deploy `/webrtc/status` was ready with `active_sessions=0`.
-files_changed:
+prior_files_changed:
   - ai-backend/app/config.py
   - ai-backend/app/call/session.py
   - ai-backend/app/api/webrtc.py
