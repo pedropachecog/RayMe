@@ -676,6 +676,89 @@ def test_reconnect_audio_backfill_releases_held_replacement_track_after_final_ba
     assert session._reconnect_live_frame_hold_frames == []
 
 
+def test_reconnect_audio_duplicate_empty_final_marker_releases_held_frames(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 0.0
+    monkeypatch.setattr(session_module.time, "monotonic", lambda: now)
+
+    vad = NeverEndingVadAdapter()
+    settings = AiBackendSettings(call_media_reconnect_grace_ms=5000)
+    session, _ = _new_session(vad_adapter=vad, settings=settings)
+
+    pre_pcm = np.full(320, 1000, dtype=np.int16).tobytes()
+    gap_pcm = np.full(320, 2000, dtype=np.int16).tobytes()
+    live_pcm = np.full(320, 3000, dtype=np.int16).tobytes()
+
+    assert _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(pre_pcm))) is None
+    session.mark_media_reconnect_pending()
+    session.start_media_reconnect_grace_if_pending()
+    assert _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(live_pcm))) is None
+
+    first_batch = _run(
+        session.backfill_reconnect_audio(
+            pcm=gap_pcm,
+            sample_rate=16000,
+            channels=1,
+            backfill_id="gap-batch-duplicate",
+            batch_index=1,
+            final=False,
+        )
+    )
+    final_marker = _run(
+        session.backfill_reconnect_audio(
+            pcm=b"",
+            sample_rate=16000,
+            channels=1,
+            backfill_id="gap-batch-duplicate",
+            batch_index=1,
+            final=True,
+        )
+    )
+
+    assert first_batch["status"] == "accepted"
+    assert final_marker["status"] == "empty"
+    assert [frame.pcm for frame in session._turn_frames] == [pre_pcm, gap_pcm, live_pcm]
+    assert session._reconnect_live_frame_hold_frames == []
+
+
+def test_reconnect_live_frame_release_can_finalize_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 0.0
+    monkeypatch.setattr(session_module.time, "monotonic", lambda: now)
+
+    vad = ScriptedVadAdapter()
+    stt = ScriptedSttAdapter()
+    settings = AiBackendSettings(call_media_reconnect_grace_ms=5000)
+    session, _ = _new_session(vad_adapter=vad, stt_adapter=stt, settings=settings)
+
+    pre_pcm = np.full(320, 1000, dtype=np.int16).tobytes()
+    live_pcm = np.full(320, 2000, dtype=np.int16).tobytes()
+
+    assert _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(pre_pcm))) is None
+    session.mark_media_reconnect_pending()
+    session.start_media_reconnect_grace_if_pending()
+    assert _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(live_pcm))) is None
+
+    final_marker = _run(
+        session.backfill_reconnect_audio(
+            pcm=b"",
+            sample_rate=16000,
+            channels=1,
+            backfill_id="gap-final-marker",
+            batch_index=2,
+            final=True,
+        )
+    )
+
+    assert final_marker["status"] == "empty"
+    assert stt.calls == [[pre_pcm, live_pcm]]
+    assert session._reconnect_live_frame_hold_frames == []
+    assert session._turn_frames == []
+    assert session.state == "thinking"
+
+
 def test_inbound_audio_normalizer_scales_integer_channels_before_mixing() -> None:
     """Regression: PyAV-style channel arrays must not clip int16 PCM to +/-1."""
 

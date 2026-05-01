@@ -757,7 +757,8 @@
     final: boolean;
     selection: LocalMicPcmSelection | null;
   }) {
-    const batchBackfillId = `${baseBackfillId}-batch-${batchIndex}`;
+    const batchKind = final ? 'final' : 'batch';
+    const batchBackfillId = `${baseBackfillId}-${batchKind}-${batchIndex}`;
     const selectedStartOffsetMs =
       selection ? Math.round(selection.startMs - reconnectStartMs) : null;
     const selectedEndOffsetMs =

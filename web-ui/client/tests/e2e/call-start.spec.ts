@@ -133,6 +133,10 @@ test('re-offers with a new peer instead of ending when browser peer connection f
   await expect.poll(() => counters.offerCount).toBe(2);
   expect(counters.endCount).toBe(0);
   await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  await expect.poll(async () => {
+    const snapshot = await getMockCallMediaSnapshot(page);
+    return snapshot.peers.at(-1)?.remoteDescriptionType ?? null;
+  }).toBe('answer');
 
   const afterReconnect = await getMockCallMediaSnapshot(page);
   expect(afterReconnect.peers).toHaveLength(2);

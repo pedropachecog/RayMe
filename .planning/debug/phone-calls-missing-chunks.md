@@ -1,7 +1,7 @@
 ---
-status: deployed_awaiting_repro
+status: fix_verified_local
 created: 2026-04-29T19:18:06Z
-updated: 2026-04-30T21:53:27Z
+updated: 2026-05-01T01:06:26Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -9,10 +9,10 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 
 ## Current Focus
 
-hypothesis: The latest post-`dff6545` loss is a partial reconnect-backfill/order gap, not absence of backfill. The browser selected one PCM backfill batch before applying the replacement peer answer, but the Web UI proxy returned `502`; the AI backend nevertheless applied 5.63 seconds of PCM, and later mic audio captured while the browser was still waiting was not inserted into the active turn before replacement-track silence finalized it.
-test: Compare latest Web UI API/SQLite transcript, browser `mic.reconnect_backfill.*` and `mic.reconnect_diag`, backend `reconnect_audio.backfill.*`, `vad.reconnect_grace.*`, `stt.begin/result`, and `event.sent type=user_final` for `call_0daee780dd904a08a8fb69b4d8a68ca2` / `rtc_43b7b92a1b844471979bf0fed4adc8c3`.
-expecting: The persisted transcript should match backend STT, backfill should show partial application/failure semantics, and the first-loss boundary should sit before STT at the browser-backfill/replacement-track transition.
-next_action: Ask the user to repeat the Mammoth Cave call repro and inspect logs if it still cuts off.
+hypothesis: Confirmed locally. Post-`6607214` no-response regression was caused by reconnect backfill final markers being ignored when they reused an earlier batch ID, leaving held live frames unreleased and active spoken turns unfinalized.
+test: Verify the backend treats empty `final:true` markers as release signals even when duplicate, verify held-frame release can finalize a turn, and verify browser final marker IDs cannot collide with non-final batch IDs.
+expecting: Regression tests pass; reconnect final markers release held frames and VAD `end_of_turn` from released frames reaches STT/user_final.
+next_action: Commit, push, deploy through `scripts/deploy-omen.sh`, then ask the user to repeat both delayed-start and long-text phone-call repros.
 
 ## Symptoms
 
@@ -69,6 +69,16 @@ evidence_files:
   checked: Canonical OMEN deployment and post-deploy WebRTC readiness.
   found: Committed and pushed `faba4cc` (`fix(call): drain reconnect backfill tail`). `scripts/deploy-omen.sh` fast-forwarded OMEN to `faba4cc4f62e3f0c8ffd4b57b30f02aec934c1f0`, rebuilt the web client, recreated the canonical scheduled tasks, restarted both services, and reported `OMEN deploy complete`. `GET https://192.168.1.199:9443/webrtc/status` returned `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, `active_sessions=0`.
   implication: The reconnect tail fix is live on OMEN and ready for another user repro.
+
+- timestamp: 2026-05-01T00:48:36Z
+  checked: User regression report after `6607214` deployment.
+  found: User reports a severe regression: RayMe is "back to it not transcribing any long texts" and "not always responding" when the user waits about 10 seconds before speaking. User notes that frozen calls after delayed speech were debugged in earlier long sessions.
+  implication: Reopen the session with fresh evidence collection. The debugger must inspect both current logs and prior frozen-call sessions, and must not assume the last reconnect-tail hypothesis is still correct.
+
+- timestamp: 2026-05-01T00:51:22Z
+  checked: Local and OMEN runtime state before latest log inspection.
+  found: Local checkout is `6607214` on `main` with only this debug file dirty. SSH works as `omen-pc\\rayme-ssh` and `omen-pc\\pmpg`. OMEN checkout is clean at `6607214de3f65a7855e6d6ad4132bc7d66f3b479`; `/webrtc/status` reports `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, and `active_sessions=2`. Active logs are `ai-backend.run.log` and `web-ui.run.log`, last written around `2026-05-01T00:46:33Z` and `2026-05-01T00:46:37Z`. Copied logs and SQLite to `/tmp/rayme-phone-debug-6607214-2026-05-01/`.
+  implication: The regression report can be investigated against the intended deployed commit. `active_sessions=2` means there may be currently open/stale call sessions and the latest logs need session-level filtering rather than assuming the last persisted thread row is complete.
 
 - timestamp: 2026-04-30T21:22:55Z
   checked: User live verification after deploying reconnect-gap backfill (`dff6545`, code fix in `adb035c`).
@@ -253,6 +263,36 @@ evidence_files:
   found: Both long turns had browser media reconnects mid-turn. After the reoffer, the backend saw new-track silence and finalized on `silence_ms=1822`, producing already-short STT inputs (`user-turn-3` frames=1211, transcript_len=343; `user-turn-4` frames=1620, transcript_len=490).
   source: OMEN `ai-backend.run.log`; OMEN `web-ui.run.log`
 
+- timestamp: 2026-05-01T00:56:35Z
+  checked: Post-`6607214` persisted Web UI/SQLite transcript rows copied from OMEN.
+  found: The latest post-deploy thread is `thread_3be859853d7a4726a5151ca50b6e7940`. Persisted calls after `2026-05-01T00:37:00Z` are `call_3294c6a6ccd94631b1fbc85f04142c17`/`rtc_25ab1948e65c4e0eb58269b8a78a38da`, `call_f0fb95ca621f4fdb95978b47c4e8f5bd`/`rtc_328930b782da4e1396538f02aa4a4425`, and `call_de275daf80454bc4b7395cac6a338cda`/`rtc_f584bd114a5b4b7799468b0667d80b66`. SQLite stored only short user turns: `Hi, how are you doing?`, `How are you today? Hi.`, `Hi, how are you today?`, and `I'm doing well, thank you. How are you doing?`, with matching AI replies and call_end rows. No post-`6607214` long Mammoth Cave passage was visible in SQLite, Web UI logs, or AI backend logs.
+  implication: Persistence is not hiding a later full long transcript. The latest data directly confirms delayed-speech/no-response failures on short calls; it does not yet contain a fresh long-text repro after `6607214`.
+
+- timestamp: 2026-05-01T00:56:35Z
+  checked: Backend/browser boundary for affected call `call_3294c6a6ccd94631b1fbc85f04142c17` / `rtc_25ab1948e65c4e0eb58269b8a78a38da`.
+  found: The first short turn finalized normally (`stt.begin frames=525`, `stt.result transcript_len=22`, `event.sent type=user_final`). During the next spoken turn, backend VAD saw speech (`vad.speech_start turn_frames=157`), then the track failed at frame 2615 while the browser still logged local mic RMS around `0.063` to `0.094` during `mediaReconnecting=true`. Backend accepted backfill batches with real audio, including `frames=278 rms=1930.4 peak=17481` and `frames=546 rms=798.7 peak=13249`, then a second reconnect started. One replacement live frame was held, a later backfill added `frames=602 rms=472.0 peak=10318`, and the browser sent an empty `final:true` marker using the same batch ID as the prior non-final batch. Backend logged `reconnect_audio.backfill.duplicate` for that final marker; no `reconnect_audio.live_release`, `stt.begin`, or `user_final` followed for the second spoken turn.
+  implication: The first loss is after browser capture and backend VAD/backfill acceptance, but before STT. The active turn remains unfinalized because the final empty marker is deduped before it can release held live frames.
+
+- timestamp: 2026-05-01T00:56:35Z
+  checked: Backend/browser boundary for affected call `call_f0fb95ca621f4fdb95978b47c4e8f5bd` / `rtc_328930b782da4e1396538f02aa4a4425`.
+  found: The first turn finalized normally (`stt.begin frames=539`, `stt.result transcript_len=22`). During the next turn, backend VAD saw speech (`vad.speech_start turn_frames=104`) and the track failed at frame 2112. Backfill then appended real audio (`frames=278 rms=1306.5 peak=8933`, then `frames=542 rms=1381.2 peak=13965`). A second reconnect held one live frame, appended another non-final backfill (`frames=598 rms=542.9 peak=11179`), then logged `reconnect_audio.backfill.duplicate` for the empty final marker with the same batch ID. No later `stt.begin`/`user_final` occurred for that turn.
+  implication: This independently repeats the same first-loss boundary as `call_3294...`: capture and VAD are present, but duplicate final-marker handling prevents release/finalization.
+
+- timestamp: 2026-05-01T00:56:35Z
+  checked: Control call `call_de275daf80454bc4b7395cac6a338cda` / `rtc_f584bd114a5b4b7799468b0667d80b66`.
+  found: Two user turns finalized and persisted, including a delayed second turn where speech started at `turn_frames=847` and produced `stt.result transcript_len=45`. A later reconnect happened mostly while idle/listening; that session ended through `/webrtc/sessions/rtc_f584bd114a5b4b7799468b0667d80b66/end` and a final empty backfill after end returned 404.
+  implication: Waiting before speech is not generally broken in VAD or STT. The regression appears when delayed or continued speech intersects a reconnect/backfill hold/final-marker sequence.
+
+- timestamp: 2026-05-01T00:56:35Z
+  checked: Current reconnect backfill code in `ai-backend/app/call/session.py` and browser backfill emission in `web-ui/client/src/routes/call/[threadId]/+page.svelte`.
+  found: `CallSession.backfill_reconnect_audio()` returns early for duplicate `backfill_id` before it handles an empty `final:true` marker, so a duplicate final marker cannot call `_release_reconnect_live_frames(reason="final_empty_backfill")`. `_release_reconnect_live_frames()` replays held frames via `_append_turn_frame()` but ignores the returned `end_of_turn`, so a released held frame that crosses the silence threshold cannot itself trigger `finalize_user_turn()` unless another live frame later arrives. Browser logs show the empty final marker can reuse a previous non-final batch ID during aborted/end-call reconnect paths.
+  implication: The log pattern has a code-level mechanism. The final marker side effect is not idempotent, and the hold-release path has no immediate finalization path.
+
+- timestamp: 2026-05-01T01:06:26Z
+  checked: Local post-`6607214` regression fix.
+  found: Updated `CallSession.backfill_reconnect_audio()` so empty `final:true` reconnect markers can release held live frames even if their `backfill_id` duplicates a prior non-final batch. Updated reconnect held-frame release to return VAD `end_of_turn` and finalize the user turn immediately when released frames cross the turn boundary. Updated browser reconnect backfill IDs to use `batch` vs `final` namespaces so final markers cannot collide with non-final batch IDs even if a reconnect path reuses a batch index. Added backend regressions for duplicate empty final markers releasing held frames and held-frame release reaching STT. Tightened an existing Playwright reconnect assertion to wait for the replacement answer before snapshotting the new peer.
+  implication: The no-response mechanism found in post-`6607214` logs is fixed locally and covered by tests.
+
 ## Eliminated
 
 - hypothesis: Downstream forwarding, persistence, or UI display truncates a full STT transcript.
@@ -271,10 +311,22 @@ evidence_files:
   evidence: Latest backend logs show `stt.begin` received only `frames=1645` for the long turn and `stt.result transcript_len=448`; the Web UI thread API stores the same 448-character user speech row.
   timestamp: 2026-04-30T16:01:50Z
 
+- hypothesis: The post-`6607214` delayed-speech failures are caused by no audio being captured in the browser after the user waits before speaking.
+  evidence: Affected calls `call_3294...` and `call_f0fb...` logged nonzero local mic RMS during reconnect while the backend also accepted non-silent backfill PCM and recorded VAD speech starts before the missing response.
+  timestamp: 2026-05-01T00:56:35Z
+
+- hypothesis: The post-`6607214` delayed-speech failures are caused by VAD/STT being generally unable to handle speech after a 10+ second wait.
+  evidence: Control call `call_de275...` had delayed speech start at `turn_frames=847` and finalized normally with `stt.result transcript_len=45` and a persisted user_speech row.
+  timestamp: 2026-05-01T00:56:35Z
+
+- hypothesis: The post-`6607214` no-response turns are lost in STT, Web UI persistence, or display after backend finalization.
+  evidence: The missing second turns in `call_3294...` and `call_f0fb...` never reached `stt.begin`, never emitted `event.sent type=user_final`, and are absent from SQLite; the first loss happens before STT and persistence.
+  timestamp: 2026-05-01T00:56:35Z
+
 ## Resolution
 
-root_cause: Phone call transcription loses chunks before STT. Prior confirmed root causes were overly aggressive live-call VAD finalization, a 30s hard max-turn cap, and failed-state reoffers that did not arm reconnect grace. As of deployed commit `2360feb`, the latest diagnostics isolate the remaining loss: browser media reconnect creates a multi-second WebRTC outage during continuous speech. The browser local mic remains live and captures nonzero/high RMS while `mediaReconnecting=true`, but the backend old track has failed and the replacement track has not started receiving frames yet. When the replacement track starts, backend RMS is nonzero and Silero reports `speech_now=True`, so backend VAD is not rejecting real post-reconnect audio. Speech spoken during the outage is never delivered or replayed.
-fix: Added call-specific VAD settings (`call_vad_end_silence_ms=1800`, `call_vad_max_turn_ms=120000`), updated `CallSession` to use them for live-call turn finalization/windowing, and added regression tests for false Silero silence during continuous speech and continuous speech beyond 30 seconds. Follow-up fix: added `call_media_reconnect_grace_ms=5000`; when a browser reoffer replaces the peer connection during an active spoken turn, `CallSession` arms a short grace window and starts it on the first frame of the new track so reconnect startup silence does not finalize the turn before speech resumes. Post-`e4b93d9` follow-up: recover `failed/connection_failed` sessions before marking reconnect grace so failed-then-reoffered mid-turn calls actually arm the grace window. Post-`2360feb` follow-up: add browser-side rolling 16 kHz PCM buffering and active-turn backend backfill for media reconnect gaps, sent after backend reoffer acceptance but before replacement peer answer application so STT sees pre-reconnect + gap + post-reconnect audio in order.
+root_cause: Phone call transcription loses chunks before STT. Prior confirmed root causes were overly aggressive live-call VAD finalization, a 30s hard max-turn cap, failed-state reoffers that did not arm reconnect grace, and reconnect outages that needed browser PCM backfill. As of deployed commit `6607214`, the current no-response regression is in reconnect backfill finalization: duplicate `backfill_id` handling ran before empty `final:true` marker handling, so an empty final marker that reused a previous non-final batch ID was discarded and could not release held replacement-track live frames. The held-frame release path also ignored `_append_turn_frame()` returning `end_of_turn`, so even a release that crossed VAD's silence threshold could not immediately emit `user_final`. The affected turns contained browser-captured audio, backend VAD speech, and non-silent accepted backfill, but never reached `stt.begin`.
+fix: Added call-specific VAD settings (`call_vad_end_silence_ms=1800`, `call_vad_max_turn_ms=120000`), updated `CallSession` to use them for live-call turn finalization/windowing, and added regression tests for false Silero silence during continuous speech and continuous speech beyond 30 seconds. Follow-up fix: added `call_media_reconnect_grace_ms=5000`; when a browser reoffer replaces the peer connection during an active spoken turn, `CallSession` arms a short grace window and starts it on the first frame of the new track so reconnect startup silence does not finalize the turn before speech resumes. Post-`e4b93d9` follow-up: recover `failed/connection_failed` sessions before marking reconnect grace so failed-then-reoffered mid-turn calls actually arm the grace window. Post-`2360feb` follow-up: add browser-side rolling 16 kHz PCM buffering and active-turn backend backfill for media reconnect gaps, sent after backend reoffer acceptance but before replacement peer answer application so STT sees pre-reconnect + gap + post-reconnect audio in order. Post-`6607214` fix: make empty `final:true` markers idempotent and able to release held frames even when their `backfill_id` duplicates a previous non-final batch; make held-frame release finalize the turn when replayed frames produce `end_of_turn`; and namespace browser reconnect backfill IDs as `batch` vs `final` so final markers cannot collide with non-final batches.
 verification:
   - `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` failed: 28 passed, 1 failed. Failure was `test_silero_silence_gap_finalizes_turn_even_with_loud_ambient_noise`, because the test implicitly expected the old 700 ms call threshold; it now needs to set `call_vad_end_silence_ms=700` explicitly to preserve that regression scenario.
   - `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` passed: 29 passed in 8.28s.
@@ -298,6 +350,12 @@ verification:
   - `npm run test:e2e -- call-start.spec.ts` passed after reconnect-gap backfill: 20 passed.
   - `git diff --check` passed after reconnect-gap backfill.
   - `scripts/deploy-omen.sh` deployed reconnect-gap backfill commit `adb035c`; post-deploy `/webrtc/status` was ready.
+  - `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q -k 'reconnect_audio_backfill or reconnect_live_frame_release or reconnect_grace'` passed after the post-`6607214` fix: 7 passed, 30 deselected in 3.32s.
+  - `npm run test:e2e -- call-start.spec.ts` passed after the post-`6607214` fix: 22 passed.
+  - `uv run --project ai-backend pytest ai-backend/tests -q` passed after the post-`6607214` fix: 96 passed, 3 warnings in 40.90s.
+  - `uv run --project web-ui/server pytest web-ui/server/tests -q` passed after the post-`6607214` fix: 152 passed in 27.62s.
+  - `npm run build` passed after the post-`6607214` fix.
+  - `git diff --check` passed after the post-`6607214` fix.
 files_changed:
   - ai-backend/app/config.py
   - ai-backend/app/call/session.py
@@ -313,3 +371,4 @@ files_changed:
   - .planning/debug/phone-call-repro-e4b93d9-2026-04-30.md
   - .planning/debug/phone-call-repro-1239588-2026-04-30.md
   - .planning/debug/phone-call-repro-2360feb-2026-04-30.md
+  - web-ui/client/tests/e2e/call-start.spec.ts
