@@ -23,6 +23,11 @@
     requestCallMicrophone,
     unlockCallAudioContext
   } from '$lib/call/audio';
+  import {
+    selectReconnectAudioBackfill as selectReconnectAudioBackfillFromChunks,
+    type LocalMicPcmChunk,
+    type LocalMicPcmSelection
+  } from '$lib/call/reconnectBackfill';
   import CallToolbar from '$lib/components/call/CallToolbar.svelte';
   import CallTranscript from '$lib/components/call/CallTranscript.svelte';
   import VoiceVisualizer from '$lib/components/call/VoiceVisualizer.svelte';
@@ -53,21 +58,6 @@
     samples?: number;
     rms?: number;
     peak?: number;
-  }
-
-  interface LocalMicPcmChunk {
-    startMs: number;
-    endMs: number;
-    samples: Int16Array;
-  }
-
-  interface LocalMicPcmSelection {
-    startMs: number;
-    endMs: number;
-    samples: Int16Array;
-    durationMs: number;
-    rms: number;
-    peak: number;
   }
 
   type CallTurnStreamEvent =
@@ -134,7 +124,7 @@
   const MEDIA_RECONNECT_MIC_DIAG_MS = 7000;
   const MEDIA_RECONNECT_MIC_DIAG_INTERVAL_MS = 500;
   const MIC_BACKFILL_SAMPLE_RATE = 16000;
-  const MIC_BACKFILL_ROLLING_MS = 35000;
+  const MIC_BACKFILL_ROLLING_MS = 180000;
   const MIC_BACKFILL_RECONNECT_PREROLL_MS = 30000;
   const MIC_BACKFILL_MAX_MS = 30000;
   const MIC_BACKFILL_BATCH_MAX_MS = 10000;
@@ -793,7 +783,8 @@
 
     const tailSelection = selectReconnectAudioBackfill(
       performance.now(),
-      reconnectAudioBackfillLastEndMs
+      reconnectAudioBackfillLastEndMs,
+      { limitToMaxWindow: false }
     );
     const tailChunks = tailSelection ? splitReconnectAudioBackfillSelection(tailSelection) : [];
     const finalPromise = trackReconnectAudioBackfillFinalPromise((async () => {
@@ -975,39 +966,16 @@
 
   function selectReconnectAudioBackfill(
     endMs: number,
-    startMsOverride = reconnectAudioBackfillStartMs
+    startMsOverride = reconnectAudioBackfillStartMs,
+    options: { limitToMaxWindow?: boolean } = {}
   ): LocalMicPcmSelection | null {
-    const startMs = Math.max(
-      startMsOverride,
-      endMs - MIC_BACKFILL_MAX_MS
-    );
-    const chunks = localMicPcmBuffer.filter((chunk) => chunk.endMs > startMs && chunk.startMs < endMs);
-    const sampleCount = chunks.reduce((total, chunk) => total + chunk.samples.length, 0);
-    if (sampleCount <= 0) {
-      return null;
-    }
-    const samples = new Int16Array(sampleCount);
-    let offset = 0;
-    let sumSquares = 0;
-    let peak = 0;
-    for (const chunk of chunks) {
-      samples.set(chunk.samples, offset);
-      offset += chunk.samples.length;
-      for (const sample of chunk.samples) {
-        const abs = Math.abs(sample);
-        peak = Math.max(peak, abs);
-        sumSquares += sample * sample;
-      }
-    }
-    const durationMs = Math.round(samples.length * 1000 / MIC_BACKFILL_SAMPLE_RATE);
-    return {
-      startMs: chunks[0]?.startMs ?? startMs,
-      endMs: chunks[chunks.length - 1]?.endMs ?? endMs,
-      samples,
-      durationMs,
-      rms: Math.sqrt(sumSquares / samples.length),
-      peak
-    };
+    return selectReconnectAudioBackfillFromChunks(localMicPcmBuffer, {
+      endMs,
+      startMs: startMsOverride,
+      maxDurationMs: MIC_BACKFILL_MAX_MS,
+      sampleRate: MIC_BACKFILL_SAMPLE_RATE,
+      limitToMaxWindow: options.limitToMaxWindow ?? true
+    });
   }
 
   function splitReconnectAudioBackfillSelection(
