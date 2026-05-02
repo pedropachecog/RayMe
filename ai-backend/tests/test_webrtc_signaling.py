@@ -170,6 +170,75 @@ def test_webrtc_offer_creates_session_answer_and_events_channel(stub_webrtc: Non
     assert session.outbound_audio_track.kind == "audio"
 
 
+def test_failed_reconnect_offer_preserves_existing_session_media(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    peers: list[Any] = []
+    tracks: list[Any] = []
+
+    class TrackingPeerConnection(StubPeerConnection):
+        def __init__(self) -> None:
+            super().__init__()
+            self.close_calls = 0
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    class TrackingAudioTrack:
+        kind = "audio"
+
+        def __init__(self) -> None:
+            self.chunks: list[bytes] = []
+
+        async def enqueue(self, chunk: bytes, *, preroll_seconds: float = 0.0) -> float:
+            self.chunks.append(chunk)
+            return 0.1
+
+    def create_peer_connection(_offer: Any) -> TrackingPeerConnection:
+        peer = TrackingPeerConnection()
+        peers.append(peer)
+        return peer
+
+    def attach_outbound_audio_track(peer_connection: TrackingPeerConnection) -> TrackingAudioTrack:
+        track = TrackingAudioTrack()
+        tracks.append(track)
+        peer_connection.addTrack(track)
+        return track
+
+    negotiate_calls = 0
+
+    async def negotiate_answer(_peer_connection: Any, _offer: Any) -> dict[str, str]:
+        nonlocal negotiate_calls
+        negotiate_calls += 1
+        if negotiate_calls == 2:
+            raise RuntimeError("simulated reconnect negotiation failure")
+        return {
+            "type": "answer",
+            "sdp": "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=RayMe test answer\r\nt=0 0\r\n",
+        }
+
+    monkeypatch.setattr(webrtc_module, "_create_peer_connection", create_peer_connection)
+    monkeypatch.setattr(webrtc_module, "_attach_outbound_audio_track", attach_outbound_audio_track)
+    monkeypatch.setattr(webrtc_module, "_negotiate_answer", negotiate_answer)
+
+    client = _client()
+    session_id = "reconnect-preserve-session"
+    first = client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+    assert first.status_code == 200
+    session = client.app.state.call_session_manager.get_session(session_id)
+    original_peer = session.peer_connection
+    original_track = session.outbound_audio_track
+
+    second = client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+
+    assert second.status_code == 502
+    assert len(peers) == 2
+    assert len(tracks) == 2
+    assert session.peer_connection is original_peer
+    assert session.outbound_audio_track is original_track
+    assert original_peer.close_calls == 0
+
+
 def test_webrtc_mute_control_returns_session_state(stub_webrtc: None) -> None:
     client = _client()
     session_id = "call-session-1"

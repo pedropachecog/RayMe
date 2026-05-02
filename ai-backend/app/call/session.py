@@ -1621,6 +1621,7 @@ class CallSessionManager:
         stt_adapter: Any | None = None,
         tts_adapter: Any | None = None,
         outbound_audio_track: Any | None = None,
+        close_previous_peer: bool = True,
     ) -> CallSession:
         self._expire_retained_sessions()
         existing = self._sessions.get(session_id)
@@ -1639,11 +1640,12 @@ class CallSessionManager:
                     existing.end_reason = None
                     existing.ended_at = None
                 existing.mark_media_reconnect_pending()
-                close = getattr(previous_peer, "close", None)
-                if callable(close):
-                    result = close()
-                    if inspect.isawaitable(result):
-                        await result
+                if close_previous_peer:
+                    close = getattr(previous_peer, "close", None)
+                    if callable(close):
+                        result = close()
+                        if inspect.isawaitable(result):
+                            await result
             if data_channel is not None:
                 existing.data_channel = data_channel
             if event_sink is not None:

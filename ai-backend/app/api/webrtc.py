@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import binascii
+import inspect
 import logging
 import time
 from typing import Any, Literal
@@ -122,6 +123,18 @@ async def create_webrtc_offer_answer(
     payload: CallOfferRequest,
 ) -> dict[str, Any]:
     manager = _manager_from_app(request)
+    existing_session = manager.get_session(payload.session_id)
+    previous_peer_connection = (
+        existing_session.peer_connection if existing_session is not None else None
+    )
+    previous_outbound_audio_track = (
+        existing_session.outbound_audio_track if existing_session is not None else None
+    )
+    previous_state = existing_session.state if existing_session is not None else None
+    previous_end_reason = (
+        existing_session.end_reason if existing_session is not None else None
+    )
+    previous_ended_at = existing_session.ended_at if existing_session is not None else None
     offer_sdp = payload.offer.sdp
     logger.info(
         "[rayme-call] offer.received session=%s thread=%s sdp_len=%d "
@@ -148,10 +161,30 @@ async def create_webrtc_offer_answer(
             vad_adapter=_vad_adapter(request),
             stt_adapter=_stt_adapter(request),
             outbound_audio_track=outbound_audio_track,
+            close_previous_peer=False,
         )
         _attach_peer_handlers(peer_connection, session)
         answer = await _negotiate_answer(peer_connection, payload.offer)
+        if (
+            existing_session is not None
+            and previous_peer_connection is not None
+            and previous_peer_connection is not peer_connection
+        ):
+            await _close_peer_connection(previous_peer_connection)
     except HTTPException:
+        if existing_session is not None:
+            _restore_failed_offer_session(
+                existing_session,
+                peer_connection,
+                previous_peer_connection,
+                previous_outbound_audio_track,
+                previous_state,
+                previous_end_reason,
+                previous_ended_at,
+            )
+        else:
+            await manager.remove_session(payload.session_id)
+        await _close_peer_connection(peer_connection)
         logger.exception(
             "[rayme-call] offer.failed session=%s elapsed_ms=%d",
             payload.session_id,
@@ -159,6 +192,19 @@ async def create_webrtc_offer_answer(
         )
         raise
     except Exception as exc:
+        if existing_session is not None:
+            _restore_failed_offer_session(
+                existing_session,
+                peer_connection,
+                previous_peer_connection,
+                previous_outbound_audio_track,
+                previous_state,
+                previous_end_reason,
+                previous_ended_at,
+            )
+        else:
+            await manager.remove_session(payload.session_id)
+        await _close_peer_connection(peer_connection)
         logger.exception(
             "[rayme-call] offer.unhandled session=%s elapsed_ms=%d exc=%s",
             payload.session_id,
@@ -434,6 +480,34 @@ def _tts_adapter(request: Request, engine_id: str) -> Any:
                 "engine_id": engine_id,
             },
         ) from exc
+
+
+async def _close_peer_connection(peer_connection: Any) -> None:
+    close = getattr(peer_connection, "close", None)
+    if not callable(close):
+        return
+    result = close()
+    if inspect.isawaitable(result):
+        await result
+
+
+def _restore_failed_offer_session(
+    session: CallSession,
+    failed_peer_connection: Any,
+    previous_peer_connection: Any,
+    previous_outbound_audio_track: Any,
+    previous_state: str | None,
+    previous_end_reason: str | None,
+    previous_ended_at: Any,
+) -> None:
+    if session.peer_connection is failed_peer_connection:
+        session.peer_connection = previous_peer_connection
+    if previous_outbound_audio_track is not None:
+        session.outbound_audio_track = previous_outbound_audio_track
+    if previous_state is not None:
+        session.state = previous_state
+    session.end_reason = previous_end_reason
+    session.ended_at = previous_ended_at
 
 
 def _create_peer_connection(offer: SessionDescription) -> Any:
