@@ -1,7 +1,7 @@
 ---
-status: ready_for_deploy
+status: deployed_awaiting_repro
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-02T00:39:38Z
+updated: 2026-05-02T00:42:33Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -20,7 +20,7 @@ reasoning_checkpoint:
   blind_spots: "The user observed close to one minute of processing delay, so slow STT/HTTP fallback timing may still be separate from transcript completeness."
 test: "Local verification passed for backend overlap/tail trimming, full AI backend tests, full Web UI server tests, client build, and full call-start browser E2E."
 expecting: "The next OMEN repro should preserve the poem middle when reconnect happens after backend receive has already stopped, without duplicating the opening or appending long silence."
-next_action: "Commit, push, deploy through `scripts/deploy-omen.sh`, then ask for another first-turn poem repro."
+next_action: "Ask for another first-turn poem repro against deployed `9e50387`."
 
 ## Rollback Anchor
 
@@ -63,6 +63,11 @@ evidence_files:
   checked: Local regression and integration verification for the wider reconnect backfill fix.
   found: `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` passed: 38 passed. `uv run --project web-ui/server pytest web-ui/server/tests -q` passed: 152 passed. `uv run --project ai-backend pytest ai-backend/tests -q` passed: 97 passed, 3 warnings. `npm run build` passed. Focused reconnect Playwright passed: 8 passed. Full `npm run test:e2e -- call-start.spec.ts` passed: 26 passed. `git diff --check` passed.
   implication: The local patch is ready for commit/deployment. Live verification still requires OMEN deployment through the canonical script and another structured poem repro.
+
+- timestamp: 2026-05-02T00:42:33Z
+  checked: Canonical OMEN deployment and post-deploy readiness for `9e50387`.
+  found: Committed and pushed `9e50387` (`fix(call): widen reconnect speech backfill`), then deployed with `scripts/deploy-omen.sh`. OMEN fast-forwarded to `9e50387af584f0e1f284230fdfa8ffac6dedf6c8`, rebuilt the web client, rewrote the canonical launchers, recreated/started scheduled tasks `RayMePhase1AI` and `RayMePhase1Web`, and reported `OMEN deploy complete`. `GET https://192.168.1.199:9443/webrtc/status` returned `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, and `active_sessions=0`. Scheduled tasks point to `C:\Users\pmpg\rayme\start-ai-backend.cmd` and `C:\Users\pmpg\rayme\start-web-ui.cmd`. SQLite remained present at `C:\Users\pmpg\rayme\RayMe\web-ui\server\data\rayme.sqlite3`, length `856064`.
+  implication: The wider reconnect backfill fix is live on OMEN. The next evidence needed is the user's repeated first-turn poem repro.
 
 - timestamp: 2026-05-02T00:19:40Z
   checked: OMEN deployed state and readiness after user tested deployed `47f41c7`.
