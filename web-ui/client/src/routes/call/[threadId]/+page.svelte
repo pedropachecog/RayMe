@@ -105,7 +105,7 @@
   let localMicRecorderProcessor: ScriptProcessorNode | null = null;
   let localMicRecorderGain: GainNode | null = null;
   let localMicPcmBuffer: LocalMicPcmChunk[] = [];
-  let reconnectAudioBackfillStartMs = 0;
+  let reconnectAudioBackfillStartMs = -1;
   let reconnectAudioBackfillLastEndMs = 0;
   let reconnectAudioBackfillBatchIndex = 0;
   let reconnectAudioBackfillId = '';
@@ -132,9 +132,9 @@
   const MEDIA_RECONNECT_MIC_DIAG_MS = 7000;
   const MEDIA_RECONNECT_MIC_DIAG_INTERVAL_MS = 500;
   const MIC_BACKFILL_SAMPLE_RATE = 16000;
-  const MIC_BACKFILL_ROLLING_MS = 15000;
-  const MIC_BACKFILL_RECONNECT_PREROLL_MS = 250;
-  const MIC_BACKFILL_MAX_MS = 12000;
+  const MIC_BACKFILL_ROLLING_MS = 35000;
+  const MIC_BACKFILL_RECONNECT_PREROLL_MS = 30000;
+  const MIC_BACKFILL_MAX_MS = 30000;
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'RayMe');
@@ -636,7 +636,7 @@
   }
 
   function startReconnectAudioBackfill(debugCallId: string, reason: MediaReconnectReason) {
-    if (reconnectAudioBackfillStartMs > 0) {
+    if (reconnectAudioBackfillStartMs >= 0) {
       return;
     }
     const nowMs = performance.now();
@@ -657,7 +657,7 @@
     if (backfillId && reconnectAudioBackfillId && reconnectAudioBackfillId !== backfillId) {
       return;
     }
-    reconnectAudioBackfillStartMs = 0;
+    reconnectAudioBackfillStartMs = -1;
     reconnectAudioBackfillLastEndMs = 0;
     reconnectAudioBackfillBatchIndex = 0;
     reconnectAudioBackfillId = '';
@@ -695,7 +695,7 @@
     attempt: number,
     options: { awaitFinal?: boolean } = {}
   ) {
-    if (!callId || !sessionId || reconnectAudioBackfillStartMs <= 0) {
+    if (!callId || !sessionId || reconnectAudioBackfillStartMs < 0) {
       return;
     }
     const requestCallId = callId;
@@ -1690,7 +1690,7 @@
   }
 
   async function drainReconnectAudioBackfillBeforeHangup() {
-    if (!callId || !sessionId || reconnectAudioBackfillStartMs <= 0) {
+    if (!callId || !sessionId || reconnectAudioBackfillStartMs < 0) {
       return;
     }
     const reason = reconnectAudioBackfillReason ?? 'disconnected';

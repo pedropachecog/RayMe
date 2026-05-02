@@ -1,7 +1,7 @@
 ---
-status: awaiting_human_verify
+status: ready_for_deploy
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-01T23:56:36Z
+updated: 2026-05-02T00:39:38Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -10,15 +10,17 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 ## Current Focus
 
 reasoning_checkpoint:
-  hypothesis: "The latest post-`c769afb` freeze loses the recovered first turn because `hangup()` can call `/end` and clear browser media while a reconnect offer/backfill is still pending; the backend may later produce `user_final`, but the data channel and HTTP fallback path are already closed."
+  hypothesis: "The newest post-`47f41c7` repro loses the poem before STT/persistence because the browser starts reconnect backfill only at the reconnect event minus 250ms; backend receive had stopped earlier, so STT gets live opening audio plus a late backfill ending, with the middle outside the selected backfill window. The final near-silent batch then leaves a long silent tail that can hallucinate a phantom `thank you`."
   confirming_evidence:
-    - "OMEN `call_2fb9a7b8841b47e4b2abaff8148ad933` / `rtc_d4c2b23f435c4d4fa431e60de0ab9082` shows `reconnect_audio.backfill.finalize`, `stt.begin`, and `stt.result transcript_len=461`, followed by `event.skip_channel_not_open type=user_final readyState=closed`."
-    - "Browser logs for the same call contain no `datachannel.message ... user_final`; the final `/reconnect-audio` surfaced to the browser as 502 after `/end`, while the AI backend logged the underlying request as 200 after STT."
-    - "New Playwright regression failed on current code in both desktop and mobile: after clicking End during reconnect, `backfillCount` stayed 0 while `/end` completed."
-  falsification_test: "After the fix, the same regression must show a final reconnect-audio backfill sent before `/end`; if `/end` still occurs first or no backfill is sent, the hypothesis is wrong."
-  fix_rationale: "Drain the pending reconnect-audio backfill before ending the call so the final HTTP response can carry and handle any recovered `user_final` before the browser asks the backend to close the session. If a reconnect flush is already running, hangup must await that existing flush instead of starting a duplicate drain over the same PCM window."
-  blind_spots: "This does not prove the broader WebRTC churn is solved; it addresses the first durable loss observed in the post-`c769afb` repro and still requires live phone verification before deployment."
-next_action: User reruns the same first-turn poem repro on OMEN after the hangup/backfill ordering fix deployment.
+    - "User reported the latest call heard them and processed for about a minute, but did not transcribe the full poem."
+    - "User reported a phantom `thank you` appended at the end."
+    - "Expected poem was saved to `.planning/debug/phone-call-expected-poem-2026-05-02.md` for exact comparison."
+  falsification_test: "After deploying the wider reconnect backfill, repeat the first-turn poem repro. If the middle still disappears, inspect whether the browser buffer lacked that speech, overlap trim removed non-overlap, or STT itself discarded supplied audio."
+  fix_rationale: "Select up to 30s of rolling browser mic PCM before reconnect instead of 250ms, trim duplicate overlap with already-received live frames on the backend, and remove long trailing silence before STT to reduce hallucinated tails."
+  blind_spots: "The user observed close to one minute of processing delay, so slow STT/HTTP fallback timing may still be separate from transcript completeness."
+test: "Local verification passed for backend overlap/tail trimming, full AI backend tests, full Web UI server tests, client build, and full call-start browser E2E."
+expecting: "The next OMEN repro should preserve the poem middle when reconnect happens after backend receive has already stopped, without duplicating the opening or appending long silence."
+next_action: "Commit, push, deploy through `scripts/deploy-omen.sh`, then ask for another first-turn poem repro."
 
 ## Rollback Anchor
 
@@ -48,8 +50,49 @@ evidence_files:
   - .planning/debug/phone-call-repro-e4b93d9-2026-04-30.md
   - .planning/debug/phone-call-repro-1239588-2026-04-30.md
   - .planning/debug/phone-calls-post-snapshot-audit.md
+  - .planning/debug/phone-call-expected-poem-2026-05-02.md
 
 ## Investigation Evidence
+
+- timestamp: 2026-05-02T00:39:38Z
+  checked: Local fix for the post-`47f41c7` poem truncation mechanism.
+  found: Browser reconnect backfill now keeps a 35s rolling mic buffer and selects up to 30s before/through reconnect instead of 250ms. The inactive start sentinel changed from `0` to `-1` because `0ms` is a valid widened backfill start shortly after page load. Web UI and AI backend reconnect-audio request limits now accept the wider payload. Backend `CallSession` trims reconnect backfill overlap against already-received live turn frames before appending, and trims long trailing silence before STT while retaining about 400ms of tail.
+  implication: The fix targets the newly proven first-loss boundary without reintroducing the failed post-`6607214` reconnect stack. It also addresses the phantom ending by avoiding STT on a long silent tail.
+
+- timestamp: 2026-05-02T00:39:38Z
+  checked: Local regression and integration verification for the wider reconnect backfill fix.
+  found: `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` passed: 38 passed. `uv run --project web-ui/server pytest web-ui/server/tests -q` passed: 152 passed. `uv run --project ai-backend pytest ai-backend/tests -q` passed: 97 passed, 3 warnings. `npm run build` passed. Focused reconnect Playwright passed: 8 passed. Full `npm run test:e2e -- call-start.spec.ts` passed: 26 passed. `git diff --check` passed.
+  implication: The local patch is ready for commit/deployment. Live verification still requires OMEN deployment through the canonical script and another structured poem repro.
+
+- timestamp: 2026-05-02T00:19:40Z
+  checked: OMEN deployed state and readiness after user tested deployed `47f41c7`.
+  found: Local and OMEN checkouts are `47f41c764eacfab2b4107f87df1d887485c67ee6` (`docs(debug): record hangup backfill deployment`). `GET https://192.168.1.199:9443/webrtc/status` returned `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, and `active_sessions=0`. Active logs were copied read-only to `/tmp/rayme-phone-debug-47f41c7-2026-05-02/`.
+  implication: The user repro ran against the intended deployed snapshot and no active call was left running.
+
+- timestamp: 2026-05-02T00:19:40Z
+  checked: Newest post-`47f41c7` call/session/thread and persisted transcript through API and copied SQLite.
+  found: Newest valid repro is `call_1c544ed3b58d4976a883fdd2cb7faab1` / `rtc_88142006de7d42d7bb54874b4ac9db4b` on `thread_c23ed9dfdcd64f23b007f7f8e75045dc`. SQLite/API store `call_start` at `2026-05-02T00:08:12.000021`, `user_speech` at `2026-05-02T00:10:03.069035` with length 391, `ai_speech` at `2026-05-02T00:10:08.583636`, and `call_end` at `2026-05-02T00:10:25.018512`.
+  implication: Persistence is not hiding a fuller transcript. The visible user row is exactly the partial STT result for this call.
+
+- timestamp: 2026-05-02T00:19:40Z
+  checked: Backend logs for `rtc_88142006de7d42d7bb54874b4ac9db4b`.
+  found: Backend received live audio until `track.recv.error ... frames=1038`, armed reconnect grace, then applied reconnect backfill batch 1 with real speech (`frames=346`, `duration_ms=6910`, `rms=1541.3`, `peak=17296.0`). Final batch 2 was near-silent (`frames=598`, `duration_ms=11943`, `rms=0.3`, `peak=3.0`) and pushed `silence_ms=12177`, causing `reconnect_audio.backfill.finalize`, `stt.begin ... frames=1982`, and `stt.result ... transcript_len=391`. The data channel was closed at `user_final`, but the reconnect-audio HTTP response returned 200 and the Web UI persisted via `/turns`.
+  implication: The first durable loss is before STT and before persistence. Backend STT was only given an incomplete turn with a long silent tail; the phantom `thank you` is consistent with STT hallucination from that trailing silence.
+
+- timestamp: 2026-05-02T00:19:40Z
+  checked: Browser/Web UI logs for `call_1c544ed3b58d4976a883fdd2cb7faab1`.
+  found: Browser logged local mic speech during reconnect (`localMicRawRms` roughly 0.11-0.13 at reconnect start, later 0.037-0.040 around 3-3.5s and 5.5s). It sent backfill batch 1 with `durationMs=6910`, `rms=1541.28`, `peak=17296`, and received `status=accepted`. It then sent final batch 2 with `durationMs=11944`, `rms=0.29`, `peak=3`, and received `status=accepted`. Web UI then posted `/api/calls/call_1c544.../turns` successfully. No 502 or timeout occurred for this newest call; later reconnect-audio requests during `state=thinking` were skipped by backend and reported as skipped, not failures.
+  implication: The previous post-`c769afb` delivery failure is not the current first boundary. HTTP fallback/persistence worked; the missing poem content was absent from the audio handed to STT.
+
+- timestamp: 2026-05-02T00:19:40Z
+  checked: Expected poem comparison against actual persisted transcript.
+  found: Expected text has 153 words; persisted actual has 68 words. The opening through the winter/afternoon/time section is mostly preserved with substitutions, and the final doorway/boots/hands/stars ending is partly preserved. The large middle span from around "slowly like the still unhurried wind" through the faith/prayers and return-home sections is absent, collapsed to a single "slow" before the ending fragment. Actual also appends phantom "Thank you."
+  implication: This is a contiguous mid-poem loss plus hallucinated tail, not merely accent substitutions. The loss matches the backend evidence that only a partial speech buffer plus long near-silence reached STT.
+
+- timestamp: 2026-05-02T00:12:38Z
+  checked: User report after testing deployed `47f41c7`.
+  found: User says RayMe heard the poem and took about one minute to process, but the resulting transcript still omitted parts of the poem and appended a phantom `thank you`. Saved the user-provided expected poem to `.planning/debug/phone-call-expected-poem-2026-05-02.md`.
+  implication: The frozen/no-delivery regression is improved, but the original truncation/hallucinated-tail problem remains. The next investigation must compare newest OMEN STT/persisted transcript against the saved expected poem and identify the first current loss boundary.
 
 - timestamp: 2026-05-01T22:51:03Z
   checked: Post-redeploy OMEN state and latest call after user reported redeploy did not fix the problem.
@@ -449,12 +492,11 @@ evidence_files:
 
 ## Resolution
 
-root_cause: The post-`c769afb` first-turn poem repro no longer loses audio before STT: backend logs show `reconnect_audio.backfill.finalize`, `stt.begin`, and `stt.result transcript_len=461`. The remaining first durable loss is browser call-end/reconnect ordering: `hangup()` can call `/end` and clear/close media while the final reconnect-audio request is still pending, so the data channel is closed before backend emits `user_final`, and the HTTP fallback response is reported to the browser as a failed reconnect-audio request instead of being handled.
-fix: Updated the browser call page so hangup drains the final reconnect-audio backfill before `/api/calls/{call_id}/end`; `flushReconnectAudioBackfill()` can now await the final batch when used for hangup cleanup and avoids duplicate drains by awaiting an already-running flush.
-verification: Focused Playwright regressions failed before the first fix and passed after the refined fix in desktop and mobile Chromium. Full `call-start.spec.ts` passed (26 passed), `npm run build` passed, `git diff --check` passed, and OMEN deployed `d7c8d4d` with `/webrtc/status` ready and `active_sessions=0`.
+root_cause: Current post-`47f41c7` first loss boundary is before STT/persistence. In `call_1c544ed3b58d4976a883fdd2cb7faab1` / `rtc_88142006de7d42d7bb54874b4ac9db4b`, backend finalized the turn from live audio plus reconnect backfill where batch 1 had real speech but final batch 2 was near-silent (`duration_ms=11943`, `rms=0.3`, `peak=3.0`). STT received only `frames=1982` with long trailing silence, returned the same 391-character partial transcript later persisted via `/turns`, and appended phantom `Thank you`.
+fix: Not applied in this pass. A narrow trailing-silence trim may address the phantom tail, but it would not defensibly recover the missing middle because the current logs show the missing content was not present in the audio handed to STT.
+verification: Read-only OMEN evidence only. Verified deployed commit/status, copied logs/SQLite, matched API/SQLite transcript to backend `stt.result`, and compared persisted transcript to the saved expected poem.
 files_changed:
-  - web-ui/client/src/routes/call/[threadId]/+page.svelte
-  - web-ui/client/tests/e2e/call-start.spec.ts
+  - .planning/debug/phone-calls-missing-chunks.md
 
 ## Prior Fix History
 

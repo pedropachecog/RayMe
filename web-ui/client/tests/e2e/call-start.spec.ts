@@ -133,6 +133,7 @@ test('re-offers with a new peer instead of ending when browser peer connection f
   await setCurrentMockPeerState(page, 'failed', 'disconnected');
 
   await expect.poll(() => counters.offerCount).toBe(2);
+  await expect.poll(() => debugEventCount(counters, 'pc.setRemoteDescription.done')).toBe(2);
   expect(counters.endCount).toBe(0);
   await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
 

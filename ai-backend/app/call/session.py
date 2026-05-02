@@ -42,6 +42,11 @@ EventSink = Callable[[dict[str, Any]], Awaitable[None] | None]
 CALL_TTS_AUDIO_PREROLL_SECONDS = 0.25
 CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS = 0.75
 CALL_RECONNECT_BACKFILL_HOLD_SECONDS = 12.0
+CALL_RECONNECT_BACKFILL_MAX_OVERLAP_SECONDS = 30.0
+CALL_RECONNECT_BACKFILL_MIN_OVERLAP_FRAMES = 25
+CALL_RECONNECT_BACKFILL_OVERLAP_CORRELATION = 0.92
+CALL_RECONNECT_BACKFILL_OVERLAP_MEAN_RATIO = 0.60
+CALL_STT_TRAILING_SILENCE_KEEP_MS = 400
 
 
 class NullPeerConnection:
@@ -311,6 +316,38 @@ class CallSession:
                 "state": self.state,
             }
 
+        overlap_trimmed_frames = 0
+        frames, overlap_trimmed_frames = self._trim_reconnect_backfill_overlap(frames)
+        if not frames:
+            if backfill_id:
+                self._reconnect_audio_backfill_ids.add(backfill_id)
+            event = None
+            if final:
+                released_end = self._release_reconnect_live_frames(reason="final_overlap_backfill")
+                if self._should_finalize_after_reconnect_backfill(released_end, final=final):
+                    event = await self.finalize_user_turn()
+            logger.info(
+                "[rayme-call] reconnect_audio.backfill.overlap_only session=%s "
+                "backfill_id=%s overlap_trimmed_frames=%d reason=%s attempt=%s "
+                "batch=%s final=%s",
+                self.session_id,
+                backfill_id or "",
+                overlap_trimmed_frames,
+                reason or "",
+                attempt if attempt is not None else "",
+                batch_index if batch_index is not None else "",
+                final,
+            )
+            response = {
+                "status": "accepted",
+                "frames": 0,
+                "duration_ms": 0,
+                "state": self.state,
+            }
+            if event is not None:
+                response["event"] = event
+            return response
+
         if backfill_id:
             self._reconnect_audio_backfill_ids.add(backfill_id)
         was_pending = self._media_reconnect_grace_pending
@@ -337,7 +374,8 @@ class CallSession:
             "[rayme-call] reconnect_audio.backfill.applied session=%s "
             "backfill_id=%s frames=%d duration_ms=%d bytes=%d rms=%s peak=%s "
             "turn_frames=%d speech_seen=%s silence_ms=%d reason=%s attempt=%s "
-            "batch=%s final=%s held_frames=%d started_turn=%s",
+            "batch=%s final=%s held_frames=%d started_turn=%s "
+            "overlap_trimmed_frames=%d",
             self.session_id,
             backfill_id or "",
             len(frames),
@@ -354,6 +392,7 @@ class CallSession:
             final,
             len(self._reconnect_live_frame_hold_frames),
             started_turn,
+            overlap_trimmed_frames,
         )
         event = None
         if self._should_finalize_after_reconnect_backfill(end_of_turn, final=final):
@@ -477,7 +516,7 @@ class CallSession:
             return None
 
         turn_id = f"user-turn-{self._turn_index + 1}"
-        frames = list(self._turn_frames)
+        frames = self._trim_trailing_silence_for_stt(list(self._turn_frames))
         started_at = self._turn_started_at or utc_timestamp()
         ended_at = utc_timestamp()
         total_pcm_bytes = sum(len(f.pcm) for f in frames)
@@ -1120,6 +1159,103 @@ class CallSession:
         if hasattr(result, "model_dump"):
             return dict(result.model_dump())
         return dict(result)
+
+    def _trim_trailing_silence_for_stt(
+        self,
+        frames: list[PcmAudioFrame],
+    ) -> list[PcmAudioFrame]:
+        if not frames:
+            return frames
+
+        silence_threshold = max(float(self.settings.call_min_turn_rms), 1.0)
+        trailing_silence_frames = 0
+        for frame in reversed(frames):
+            rms, _ = self._pcm_frame_rms_peak(frame)
+            if rms >= silence_threshold:
+                break
+            trailing_silence_frames += 1
+
+        if trailing_silence_frames <= 0:
+            return frames
+
+        frame_ms = int((len(frames[-1].pcm) // 2) * 1000 / max(frames[-1].sample_rate, 1))
+        frame_ms = max(frame_ms, 1)
+        keep_silence_frames = max(int(CALL_STT_TRAILING_SILENCE_KEEP_MS / frame_ms), 1)
+        trim_frames = max(trailing_silence_frames - keep_silence_frames, 0)
+        if trim_frames <= 0 or trim_frames >= len(frames):
+            return frames
+
+        logger.info(
+            "[rayme-call] stt.trailing_silence_trim session=%s "
+            "trimmed_frames=%d kept_silence_frames=%d",
+            self.session_id,
+            trim_frames,
+            keep_silence_frames,
+        )
+        return frames[:-trim_frames]
+
+    def _trim_reconnect_backfill_overlap(
+        self,
+        frames: list[PcmAudioFrame],
+    ) -> tuple[list[PcmAudioFrame], int]:
+        if not self._turn_frames or not frames:
+            return frames, 0
+
+        target_rate = int(self._normalizer.target_sample_rate)
+        max_overlap_frames = int(CALL_RECONNECT_BACKFILL_MAX_OVERLAP_SECONDS * target_rate / 320)
+        max_overlap = min(len(self._turn_frames), len(frames), max_overlap_frames)
+        if max_overlap < CALL_RECONNECT_BACKFILL_MIN_OVERLAP_FRAMES:
+            return frames, 0
+
+        live_rms = self._frame_rms_series(self._turn_frames[-max_overlap:])
+        backfill_rms = self._frame_rms_series(frames[:max_overlap])
+        best_overlap = 0
+        for overlap in range(max_overlap, CALL_RECONNECT_BACKFILL_MIN_OVERLAP_FRAMES - 1, -1):
+            if self._rms_windows_match(live_rms[-overlap:], backfill_rms[:overlap]):
+                best_overlap = overlap
+                break
+
+        if best_overlap <= 0:
+            return frames, 0
+
+        logger.info(
+            "[rayme-call] reconnect_audio.backfill.overlap_trim session=%s "
+            "trimmed_frames=%d incoming_frames=%d existing_turn_frames=%d",
+            self.session_id,
+            best_overlap,
+            len(frames),
+            len(self._turn_frames),
+        )
+        return frames[best_overlap:], best_overlap
+
+    def _frame_rms_series(self, frames: list[PcmAudioFrame]) -> np.ndarray:
+        values = [self._pcm_frame_rms_peak(frame)[0] for frame in frames]
+        return np.asarray(values, dtype=np.float32)
+
+    def _rms_windows_match(self, live: np.ndarray, backfill: np.ndarray) -> bool:
+        if live.size != backfill.size or live.size == 0:
+            return False
+        if float(max(np.max(live), np.max(backfill))) < float(self.settings.call_min_turn_rms):
+            return False
+
+        live_mean = float(np.mean(live))
+        backfill_mean = float(np.mean(backfill))
+        mean_denominator = max(live_mean, backfill_mean, 1.0)
+        mean_ratio = abs(live_mean - backfill_mean) / mean_denominator
+        if mean_ratio > CALL_RECONNECT_BACKFILL_OVERLAP_MEAN_RATIO:
+            return False
+        max_error_ratio = float(np.max(np.abs(live - backfill))) / mean_denominator
+        if max_error_ratio > 0.20:
+            return False
+
+        live_centered = live - live_mean
+        backfill_centered = backfill - backfill_mean
+        denominator = float(np.linalg.norm(live_centered) * np.linalg.norm(backfill_centered))
+        if denominator <= 1e-6:
+            return bool(np.allclose(live, backfill, rtol=0.08, atol=80.0))
+
+        correlation = float(np.dot(live_centered, backfill_centered) / denominator)
+        return correlation >= CALL_RECONNECT_BACKFILL_OVERLAP_CORRELATION
 
     def _turn_audio_stats(self, frames: list[PcmAudioFrame]) -> dict[str, float] | None:
         chunks: list[np.ndarray] = []

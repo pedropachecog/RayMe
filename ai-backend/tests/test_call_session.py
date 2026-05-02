@@ -713,6 +713,67 @@ def test_reconnect_audio_backfill_releases_held_replacement_track_after_final_ba
     assert session._reconnect_live_frame_hold_frames == []
 
 
+def test_reconnect_audio_backfill_trims_overlap_before_appending() -> None:
+    vad = NeverEndingVadAdapter()
+    session, _ = _new_session(vad_adapter=vad)
+
+    live_prefix = [
+        np.full(320, 1000 + index * 25, dtype=np.int16).tobytes()
+        for index in range(40)
+    ]
+    overlap = [
+        np.full(320, 2000 + index * 35, dtype=np.int16).tobytes()
+        for index in range(35)
+    ]
+    gap = [
+        np.full(320, 4200 + index * 40, dtype=np.int16).tobytes()
+        for index in range(6)
+    ]
+
+    for pcm in live_prefix + overlap:
+        assert _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(pcm))) is None
+
+    backfill = _run(
+        session.backfill_reconnect_audio(
+            pcm=b"".join(overlap + gap),
+            sample_rate=16000,
+            channels=1,
+            backfill_id="overlap-gap",
+            reason="failed",
+            attempt=1,
+            final=False,
+        )
+    )
+
+    assert backfill["status"] == "accepted"
+    assert backfill["frames"] == len(gap)
+    assert [frame.pcm for frame in session._turn_frames] == live_prefix + overlap + gap
+
+
+def test_finalize_user_turn_trims_long_trailing_silence_before_stt() -> None:
+    stt = ScriptedSttAdapter()
+    session, _ = _new_session(stt_adapter=stt)
+    speech = np.full(320, 2500, dtype=np.int16).tobytes()
+    silence = np.zeros(320, dtype=np.int16).tobytes()
+
+    session._turn_started_at = "2026-05-02T00:00:00Z"
+    session._speech_seen = True
+    session._turn_frames = [
+        PcmAudioFrame(pcm=speech, sample_rate=16000, channels=1),
+        *[
+            PcmAudioFrame(pcm=silence, sample_rate=16000, channels=1)
+            for _ in range(80)
+        ],
+    ]
+
+    event = _run(session.finalize_user_turn())
+
+    assert event["type"] == "user_final"
+    assert len(stt.calls) == 1
+    assert stt.calls[0].count(silence) == 20
+    assert stt.calls[0][0] == speech
+
+
 def test_inbound_audio_normalizer_scales_integer_channels_before_mixing() -> None:
     """Regression: PyAV-style channel arrays must not clip int16 PCM to +/-1."""
 
