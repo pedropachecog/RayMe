@@ -342,6 +342,52 @@ def test_webrtc_events_drain_returns_undelivered_user_final(stub_webrtc: None) -
     assert client.post(EVENTS_DRAIN_ROUTE_TEMPLATE.format(session_id=session_id)).json()["events"] == []
 
 
+def test_webrtc_events_drain_returns_late_user_final_after_end(stub_webrtc: None) -> None:
+    client = _client()
+    session_id = "call-session-late-end"
+    client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+    session = client.app.state.call_session_manager.get_session(session_id)
+    session.data_channel = type(
+        "ClosedDataChannel",
+        (),
+        {"readyState": "closed", "send": lambda self, data: None},
+    )()
+
+    end_response = client.post(
+        END_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={"reason": "connection_failed"},
+    )
+    assert end_response.status_code == 200
+    assert client.app.state.call_session_manager.stats()["active_sessions"] == 0
+
+    import asyncio
+
+    asyncio.run(
+        session.emit_event(
+            {
+                "type": "user_final",
+                "session_id": session_id,
+                "turn_id": "user-turn-after-end",
+                "text": "Recovered text after end",
+            }
+        )
+    )
+
+    response = client.post(EVENTS_DRAIN_ROUTE_TEMPLATE.format(session_id=session_id))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session_id"] == session_id
+    assert payload["events"] == [
+        {
+            "type": "user_final",
+            "session_id": session_id,
+            "turn_id": "user-turn-after-end",
+            "text": "Recovered text after end",
+        }
+    ]
+
+
 def test_webrtc_offer_malformed_payload_returns_sanitized_validation_error() -> None:
     response = _client().post(
         "/webrtc/offer",

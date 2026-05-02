@@ -48,6 +48,7 @@ CALL_RECONNECT_BACKFILL_OVERLAP_CORRELATION = 0.92
 CALL_RECONNECT_BACKFILL_OVERLAP_MEAN_RATIO = 0.60
 CALL_STT_TRAILING_SILENCE_KEEP_MS = 400
 CALL_RECOVERABLE_EVENT_TYPES = {"user_final", "failed"}
+CALL_ENDED_EVENT_RECOVERY_GRACE_SECONDS = 60.0
 
 
 class NullPeerConnection:
@@ -543,14 +544,16 @@ class CallSession:
             self._silence_ms = 0
             self._speech_start_frame = None
             self._media_reconnect_grace_audio_diag_count = 0
-            self.state = "listening"
+            if self.ended_at is None:
+                self.state = "listening"
             return None
         self._turn_index += 1
         turn_id = f"user-turn-{self._turn_index}"
-        self.state = "understanding"
-        await self.emit_event(
-            simple_event("state", session_id=self.session_id, turn_id=turn_id, state="understanding")
-        )
+        if self.ended_at is None:
+            self.state = "understanding"
+            await self.emit_event(
+                simple_event("state", session_id=self.session_id, turn_id=turn_id, state="understanding")
+            )
         logger.info(
             "[rayme-call] stt.begin session=%s turn=%s frames=%d pcm_bytes=%d "
             "rms=%s peak=%s",
@@ -587,7 +590,8 @@ class CallSession:
                 retry_allowed=True,
             )
             await self.emit_event(event)
-            self.state = "listening"
+            if self.ended_at is None:
+                self.state = "listening"
             return event
 
         text = str(transcription.get("transcript") or "").strip()
@@ -610,7 +614,8 @@ class CallSession:
                 retry_allowed=True,
             )
             await self.emit_event(event)
-            self.state = "listening"
+            if self.ended_at is None:
+                self.state = "listening"
             return event
         event = user_final_event(
             session_id=self.session_id,
@@ -624,7 +629,8 @@ class CallSession:
         # Inbound audio during this window would be ambient noise that Whisper
         # hallucinates into phantom transcriptions ("thank you" from silence).
         # Dropped by the guard in handle_inbound_audio_frame.
-        self.state = "thinking"
+        if self.ended_at is None:
+            self.state = "thinking"
         return {
             "type": event["type"],
             "session_id": event["session_id"],
@@ -1588,6 +1594,17 @@ class CallSessionManager:
         self.vad_adapter = vad_adapter
         self.stt_adapter = stt_adapter
         self._sessions: dict[str, CallSession] = {}
+        self._ended_session_recovery_deadlines: dict[str, float] = {}
+
+    def _expire_retained_sessions(self) -> None:
+        now = time.monotonic()
+        for session_id, deadline in list(self._ended_session_recovery_deadlines.items()):
+            if deadline > now:
+                continue
+            self._ended_session_recovery_deadlines.pop(session_id, None)
+            session = self._sessions.get(session_id)
+            if session is not None and session.state in {"ended", "failed"}:
+                self._sessions.pop(session_id, None)
 
     async def create_session(
         self,
@@ -1605,6 +1622,7 @@ class CallSessionManager:
         tts_adapter: Any | None = None,
         outbound_audio_track: Any | None = None,
     ) -> CallSession:
+        self._expire_retained_sessions()
         existing = self._sessions.get(session_id)
         if existing is not None:
             if (
@@ -1659,15 +1677,44 @@ class CallSessionManager:
         return session
 
     def get_session(self, session_id: str) -> CallSession | None:
+        self._expire_retained_sessions()
         return self._sessions.get(session_id)
 
+    async def end_session(
+        self,
+        session_id: str,
+        *,
+        reason: str = "ended",
+        recovery_grace_seconds: float = CALL_ENDED_EVENT_RECOVERY_GRACE_SECONDS,
+    ) -> CallSession | None:
+        self._expire_retained_sessions()
+        session = self._sessions.get(session_id)
+        if session is None:
+            return None
+        await session.end(reason=reason)
+        if recovery_grace_seconds > 0:
+            self._ended_session_recovery_deadlines[session_id] = (
+                time.monotonic() + recovery_grace_seconds
+            )
+        else:
+            self._sessions.pop(session_id, None)
+            self._ended_session_recovery_deadlines.pop(session_id, None)
+        return session
+
     async def remove_session(self, session_id: str) -> None:
+        self._ended_session_recovery_deadlines.pop(session_id, None)
         session = self._sessions.pop(session_id, None)
         if session is not None and session.state not in {"ended", "failed"}:
             await session.end(reason="removed")
 
     def stats(self) -> dict[str, Any]:
+        self._expire_retained_sessions()
+        active_sessions = [
+            session
+            for session_id, session in self._sessions.items()
+            if session_id not in self._ended_session_recovery_deadlines
+        ]
         return {
-            "active_sessions": len(self._sessions),
-            "sessions": [session.stats() for session in self._sessions.values()],
+            "active_sessions": len(active_sessions),
+            "sessions": [session.stats() for session in active_sessions],
         }

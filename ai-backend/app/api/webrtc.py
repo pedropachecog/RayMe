@@ -353,8 +353,9 @@ async def end_session(
     session = _session_or_404(request, session_id)
     reason = payload.reason if payload is not None else "hangup"
     try:
-        await session.end(reason=reason)
-        manager._sessions.pop(session_id, None)
+        ended_session = await manager.end_session(session_id, reason=reason)
+        if ended_session is not None:
+            session = ended_session
         return CallControlResponse(
             session_id=session.session_id,
             state=session.state,
