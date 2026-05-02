@@ -17,6 +17,7 @@ INTERRUPT_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/interrupt"
 END_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/end"
 SPEAK_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/speak"
 RECONNECT_AUDIO_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/reconnect-audio"
+EVENTS_DRAIN_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/events/drain"
 
 
 def _scripted_wav_bytes() -> bytes:
@@ -299,6 +300,46 @@ def test_webrtc_reconnect_audio_backfill_appends_to_call_session(stub_webrtc: No
     assert payload["frames"] == 2
     session = client.app.state.call_session_manager.get_session(session_id)
     assert len(session._turn_frames) == 2
+
+
+def test_webrtc_events_drain_returns_undelivered_user_final(stub_webrtc: None) -> None:
+    client = _client()
+    session_id = "call-session-1"
+    client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+    session = client.app.state.call_session_manager.get_session(session_id)
+    session.data_channel = type(
+        "ClosedDataChannel",
+        (),
+        {"readyState": "closed", "send": lambda self, data: None},
+    )()
+
+    import asyncio
+
+    asyncio.run(
+        session.emit_event(
+            {
+                "type": "user_final",
+                "session_id": session_id,
+                "turn_id": "user-turn-1",
+                "text": "Recovered text",
+            }
+        )
+    )
+
+    response = client.post(EVENTS_DRAIN_ROUTE_TEMPLATE.format(session_id=session_id))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["session_id"] == session_id
+    assert payload["events"] == [
+        {
+            "type": "user_final",
+            "session_id": session_id,
+            "turn_id": "user-turn-1",
+            "text": "Recovered text",
+        }
+    ]
+    assert client.post(EVENTS_DRAIN_ROUTE_TEMPLATE.format(session_id=session_id)).json()["events"] == []
 
 
 def test_webrtc_offer_malformed_payload_returns_sanitized_validation_error() -> None:

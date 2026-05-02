@@ -9,15 +9,21 @@ const threadId = 'call-start-thread';
 type ReconnectRouteCounters = {
   offerCount: number;
   backfillCount: number;
+  recoverCount: number;
+  turnCount: number;
   endCount: number;
   offers: Array<{ peerId: number | null; sdp: string }>;
   backfills: Array<Record<string, unknown>>;
+  recoveredEvents: Array<Record<string, unknown>>;
+  turns: Array<Record<string, unknown>>;
   requestOrder: string[];
   debugEvents: Array<{ event: string; detail: Record<string, unknown>; session_id?: string }>;
 };
 
 type ReconnectRouteOptions = {
   backfillDelayMs?: number;
+  failBackfill?: boolean;
+  recoverEvents?: Array<Record<string, unknown>>;
   offerDelayMs?: number;
 };
 
@@ -256,6 +262,42 @@ test('awaits in-flight reconnect backfill before ending without duplicate drain'
   expect(counters.requestOrder.lastIndexOf('backfill')).toBeLessThan(
     counters.requestOrder.indexOf('end')
   );
+  assertNoBrowserErrors();
+});
+
+test('recovers user final when reconnect backfill response fails after data channel closes', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+    allowConsoleErrors: [/Failed to load resource: the server responded with a status of 502/]
+  });
+  await installMockCallMedia(page);
+  const counters = await installReconnectCallRoutes(page, {
+    failBackfill: true,
+    recoverEvents: [
+      {
+        type: 'user_final',
+        session_id: 'rtc-call-reconnect-01',
+        turn_id: 'user-turn-recovered',
+        text: 'Recovered speech from STT.'
+      }
+    ]
+  });
+
+  await startReconnectCall(page, counters);
+  await page.waitForTimeout(700);
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+
+  await expect.poll(() => counters.backfillCount).toBeGreaterThanOrEqual(1);
+  await expect.poll(() => counters.recoverCount).toBeGreaterThanOrEqual(1);
+  await expect.poll(() => counters.turnCount).toBe(1);
+  expect(counters.turns[0]).toMatchObject({
+    session_id: 'rtc-call-reconnect-01',
+    turn_id: 'user-turn-recovered',
+    text: 'Recovered speech from STT.',
+    source: 'user_final'
+  });
+  await expect(page.getByText('Recovered speech from STT.')).toBeVisible();
   assertNoBrowserErrors();
 });
 
@@ -559,9 +601,13 @@ async function installReconnectCallRoutes(
   const counters: ReconnectRouteCounters = {
     offerCount: 0,
     backfillCount: 0,
+    recoverCount: 0,
+    turnCount: 0,
     endCount: 0,
     offers: [],
     backfills: [],
+    recoveredEvents: [],
+    turns: [],
     requestOrder: [],
     debugEvents: []
   };
@@ -626,12 +672,42 @@ async function installReconnectCallRoutes(
     if (options.backfillDelayMs && counters.backfillCount === 1) {
       await new Promise((resolve) => setTimeout(resolve, options.backfillDelayMs));
     }
+    if (options.failBackfill) {
+      await fulfillJson(route, {
+        detail: {
+          code: 'call_reconnect_audio_failed',
+          message: 'Call control request failed'
+        }
+      }, 502);
+      return;
+    }
     await fulfillJson(route, {
       call_id: 'call-reconnect-01',
       session_id: 'rtc-call-reconnect-01',
       status: 'accepted',
       frames: 1,
       duration_ms: 20
+    });
+  });
+  await page.route('**/api/calls/*/events/recover', async (route) => {
+    counters.recoverCount += 1;
+    counters.requestOrder.push('recover');
+    const events = counters.recoverCount === 1 ? options.recoverEvents ?? [] : [];
+    counters.recoveredEvents.push(...events);
+    await fulfillJson(route, {
+      call_id: 'call-reconnect-01',
+      session_id: 'rtc-call-reconnect-01',
+      events
+    });
+  });
+  await page.route('**/api/calls/*/turns', async (route) => {
+    counters.turnCount += 1;
+    counters.requestOrder.push('turn');
+    counters.turns.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: [`data: ${JSON.stringify({ type: 'ai_done' })}`, '', ''].join('\n')
     });
   });
   await page.route('**/api/calls/*/end', async (route) => {
@@ -712,6 +788,13 @@ async function installCallStartRoutes(page: Page, options: { failOffer?: boolean
       event_channel: 'rayme-events'
     });
   });
+  await page.route('**/api/calls/*/events/recover', async (route) => {
+    await fulfillJson(route, {
+      call_id: 'call-start-01',
+      session_id: 'rtc-call-start-01',
+      events: []
+    });
+  });
   await page.route('**/api/calls/*/end', async (route) => {
     await fulfillJson(route, { call_id: 'call-start-01', session_id: 'rtc-call-start-01', reason: 'setup_failed' });
   });
@@ -786,6 +869,13 @@ async function installMultiTurnCallRoutes(page: Page) {
         '',
         ''
       ].join('\n')
+    });
+  });
+  await page.route('**/api/calls/*/events/recover', async (route) => {
+    await fulfillJson(route, {
+      call_id: 'call-start-01',
+      session_id: 'rtc-call-start-01',
+      events: []
     });
   });
   await page.route('**/api/calls/*/end', async (route) => {

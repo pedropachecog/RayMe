@@ -47,6 +47,7 @@ CALL_RECONNECT_BACKFILL_MIN_OVERLAP_FRAMES = 25
 CALL_RECONNECT_BACKFILL_OVERLAP_CORRELATION = 0.92
 CALL_RECONNECT_BACKFILL_OVERLAP_MEAN_RATIO = 0.60
 CALL_STT_TRAILING_SILENCE_KEEP_MS = 400
+CALL_RECOVERABLE_EVENT_TYPES = {"user_final", "failed"}
 
 
 class NullPeerConnection:
@@ -105,6 +106,7 @@ class CallSession:
         self._silence_ms = 0
         self._speech_start_frame: int | None = None
         self._cancelled_ai_turns: set[str] = set()
+        self._undelivered_events: list[dict[str, Any]] = []
         self._media_reconnect_grace_pending = False
         self._media_reconnect_grace_until = 0.0
         self._media_reconnect_grace_logged = False
@@ -639,6 +641,7 @@ class CallSession:
         channel = self.data_channel
         ready_state = getattr(channel, "readyState", None) if channel is not None else None
         event_type = event.get("type")
+        delivered = False
         if channel is None:
             logger.info(
                 "[rayme-call] event.skip_no_channel session=%s type=%s",
@@ -658,6 +661,7 @@ class CallSession:
             if callable(send):
                 try:
                     send(json.dumps(event, separators=(",", ":")))
+                    delivered = True
                     logger.info(
                         "[rayme-call] event.sent session=%s type=%s readyState=%s",
                         self.session_id,
@@ -671,7 +675,26 @@ class CallSession:
                         event_type,
                         exc.__class__.__name__,
                     )
+        if not delivered and event_type in CALL_RECOVERABLE_EVENT_TYPES:
+            self._undelivered_events.append(dict(event))
+            logger.info(
+                "[rayme-call] event.queued_undelivered session=%s type=%s pending=%d",
+                self.session_id,
+                event_type,
+                len(self._undelivered_events),
+            )
         return event
+
+    def drain_undelivered_events(self) -> list[dict[str, Any]]:
+        events = list(self._undelivered_events)
+        self._undelivered_events.clear()
+        if events:
+            logger.info(
+                "[rayme-call] event.drain_undelivered session=%s count=%d",
+                self.session_id,
+                len(events),
+            )
+        return events
 
     async def set_muted(self, muted: bool) -> dict[str, Any]:
         self.muted = muted

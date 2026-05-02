@@ -53,6 +53,15 @@ class ScriptedAiTurn:
         self.cancel_calls += 1
 
 
+class ScriptedDataChannel:
+    def __init__(self, *, ready_state: str = "open") -> None:
+        self.readyState = ready_state
+        self.sent: list[str] = []
+
+    def send(self, message: str) -> None:
+        self.sent.append(message)
+
+
 class ScriptedOutboundAudioTrack:
     def __init__(self) -> None:
         self.chunks: list[bytes] = []
@@ -195,6 +204,7 @@ def _new_session(
     stt_adapter: Any | None = None,
     tts_adapter: Any | None = None,
     outbound_audio_track: Any | None = None,
+    data_channel: Any | None = None,
     event_sink: Any | None = None,
     settings: AiBackendSettings | None = None,
 ) -> tuple[Any, ScriptedPeerConnection]:
@@ -206,6 +216,7 @@ def _new_session(
         stt_adapter=stt_adapter,
         tts_adapter=tts_adapter,
         outbound_audio_track=outbound_audio_track,
+        data_channel=data_channel,
         event_sink=event_sink,
         settings=settings,
     )
@@ -375,6 +386,29 @@ def test_inbound_audio_emits_user_final_after_vad_end() -> None:
     }
     assert session.stats()["incoming_audio_frames"] == 2
     assert session.stats()["dropped_audio_frames"] == 0
+
+
+def test_user_final_is_recoverable_when_data_channel_is_closed() -> None:
+    vad = ScriptedVadAdapter()
+    stt = ScriptedSttAdapter()
+    channel = ScriptedDataChannel(ready_state="closed")
+    source = ScriptedInboundAudioFrameSource(b"pcm-frame-1", b"pcm-frame-2")
+    session, _ = _new_session(vad_adapter=vad, stt_adapter=stt, data_channel=channel)
+
+    _run(session.handle_inbound_audio_frame(source.frames[0]))
+    final_event = _run(session.handle_inbound_audio_frame(source.frames[1]))
+
+    assert final_event["type"] == "user_final"
+    assert channel.sent == []
+    drained = session.drain_undelivered_events()
+    assert len(drained) == 1
+    assert drained[0]["type"] == "user_final"
+    assert drained[0]["session_id"] == "call-session-1"
+    assert drained[0]["turn_id"] == "user-turn-1"
+    assert drained[0]["text"] == "hello from mic"
+    assert drained[0]["started_at"]
+    assert drained[0]["ended_at"]
+    assert session.drain_undelivered_events() == []
 
 
 def test_near_silent_finalized_turn_does_not_reach_stt() -> None:

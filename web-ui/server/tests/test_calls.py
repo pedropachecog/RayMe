@@ -47,6 +47,7 @@ class ScriptedCallBackend:
         self.created_sessions: list[dict[str, Any]] = []
         self.offer_calls: list[dict[str, Any]] = []
         self.backfill_calls: list[dict[str, Any]] = []
+        self.drained_events: list[dict[str, Any]] = []
         self.speak_calls: list[dict[str, Any]] = []
         self.interrupt_calls: list[dict[str, Any]] = []
 
@@ -102,6 +103,9 @@ class ScriptedCallBackend:
             {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
         )
         return {"session_id": session_id, "status": "accepted", "frames": 2}
+
+    async def drain_call_events(self, base_url: str, session_id: str) -> dict[str, Any]:
+        return {"session_id": session_id, "events": list(self.drained_events)}
 
     async def interrupt_call(self, base_url: str, session_id: str) -> dict[str, Any]:
         self.interrupt_calls.append({"base_url": base_url, "session_id": session_id})
@@ -283,6 +287,33 @@ def test_reconnect_audio_backfill_forwards_to_backend_without_persistence(
     rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
     assert rows[-1] == ("call_start", "event", "Call started")
     assert not any(row[0] in {"user_speech", "ai_speech"} for row in rows)
+
+
+def test_recover_call_events_forwards_undelivered_user_final(
+    call_fixture: CallFixture,
+) -> None:
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    call_fixture.backend.drained_events = [
+        {
+            "type": "user_final",
+            "session_id": started["session_id"],
+            "turn_id": "user-turn-recovered",
+            "text": "Recovered speech.",
+        }
+    ]
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/events/recover",
+        json={"session_id": started["session_id"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "call_id": started["call_id"],
+        "session_id": started["session_id"],
+        "events": call_fixture.backend.drained_events,
+    }
 
 
 def test_mute_interrupt_and_end_reject_mismatched_session_for_existing_call(

@@ -125,6 +125,20 @@ export function backfillCallReconnectAudio(
   });
 }
 
+export function recoverCallEvents(
+  callId: string,
+  sessionId: string
+): Promise<{
+  call_id: string;
+  session_id: string;
+  events: CallEvent[];
+}> {
+  return apiFetch(`/calls/${encodeURIComponent(callId)}/events/recover`, {
+    method: 'POST',
+    body: JSON.stringify({ session_id: sessionId })
+  });
+}
+
 export function setCallMuted(
   callId: string,
   sessionId: string,

@@ -120,6 +120,12 @@ class CallReconnectAudioRequest(BaseModel):
     final: bool = True
 
 
+class CallRecoverEventsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1, max_length=128)
+
+
 class CallDebugEventRequest(BaseModel):
     """Browser-side diagnostic event mirrored to the server log.
 
@@ -529,6 +535,36 @@ async def backfill_call_reconnect_audio(
         raise _backend_error(exc) from exc
 
 
+@router.post("/{call_id}/events/recover", dependencies=[Depends(enforce_same_origin_for_calls)])
+async def recover_call_events(
+    call_id: str,
+    payload: CallRecoverEventsRequest,
+    session: AsyncSession = Depends(get_call_session),
+    runtime_settings: Settings = Depends(get_call_runtime_settings),
+    backend: Any = Depends(get_call_backend_client),
+) -> dict[str, Any]:
+    service = CallService(session)
+    try:
+        session_id = service.session_for_call(call_id)
+        _reject_mismatched_session(session_id, payload.session_id)
+        endpoint_settings = await SettingsService(session, runtime_settings).read()
+        result = await _drain_call_events(
+            backend,
+            endpoint_settings.ai_backend_url,
+            session_id,
+        )
+        events = result.get("events")
+        return {
+            "call_id": call_id,
+            "session_id": session_id,
+            "events": events if isinstance(events, list) else [],
+        }
+    except CallServiceError as exc:
+        raise _call_error(exc) from exc
+    except AiBackendClientError as exc:
+        raise _backend_error(exc) from exc
+
+
 @router.post("/{call_id}/end", dependencies=[Depends(enforce_same_origin_for_calls)])
 async def end_call(
     call_id: str,
@@ -657,6 +693,12 @@ async def _backfill_call_audio(
     if not hasattr(backend, "backfill_call_audio"):
         raise _missing_backend_method("backfill_call_audio")
     return dict(await backend.backfill_call_audio(base_url, session_id, payload))
+
+
+async def _drain_call_events(backend: Any, base_url: str, session_id: str) -> dict[str, Any]:
+    if not hasattr(backend, "drain_call_events"):
+        raise _missing_backend_method("drain_call_events")
+    return dict(await backend.drain_call_events(base_url, session_id))
 
 
 async def _speak_call_sync(

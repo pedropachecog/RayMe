@@ -331,6 +331,18 @@ async def backfill_session_reconnect_audio(
     }
 
 
+@router.post("/sessions/{session_id}/events/drain")
+async def drain_session_events(
+    request: Request,
+    session_id: str,
+) -> dict[str, Any]:
+    session = _session_or_404(request, session_id)
+    return {
+        "session_id": session.session_id,
+        "events": session.drain_undelivered_events(),
+    }
+
+
 @router.post("/sessions/{session_id}/end", response_model=CallControlResponse)
 async def end_session(
     request: Request,

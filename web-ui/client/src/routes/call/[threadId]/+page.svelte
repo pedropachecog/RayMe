@@ -9,6 +9,7 @@
     backfillCallReconnectAudio,
     endCall,
     interruptCall,
+    recoverCallEvents,
     sendCallOffer,
     setCallMuted,
     startCall,
@@ -135,6 +136,8 @@
   const MIC_BACKFILL_ROLLING_MS = 35000;
   const MIC_BACKFILL_RECONNECT_PREROLL_MS = 30000;
   const MIC_BACKFILL_MAX_MS = 30000;
+  const MIC_BACKFILL_BATCH_MAX_MS = 10000;
+  const MISSED_CALL_EVENTS_RECOVERY_RETRY_MS = 2000;
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'RayMe');
@@ -733,40 +736,64 @@
       return;
     }
 
-    reconnectAudioBackfillBatchIndex += 1;
-    const initialBatchIndex = reconnectAudioBackfillBatchIndex;
-    await sendReconnectAudioBackfillBatch({
-      debugCallId,
-      requestCallId,
-      requestSessionId,
-      baseBackfillId,
-      reconnectStartMs,
-      reason: backfillReason,
-      attempt,
-      batchIndex: initialBatchIndex,
-      final: false,
-      selection
-    });
-    reconnectAudioBackfillLastEndMs = selection.endMs;
+    for (const chunk of splitReconnectAudioBackfillSelection(selection)) {
+      reconnectAudioBackfillBatchIndex += 1;
+      await sendReconnectAudioBackfillBatch({
+        debugCallId,
+        requestCallId,
+        requestSessionId,
+        baseBackfillId,
+        reconnectStartMs,
+        reason: backfillReason,
+        attempt,
+        batchIndex: reconnectAudioBackfillBatchIndex,
+        final: false,
+        selection: chunk
+      });
+      reconnectAudioBackfillLastEndMs = chunk.endMs;
+    }
 
     const tailSelection = selectReconnectAudioBackfill(
       performance.now(),
       reconnectAudioBackfillLastEndMs
     );
-    reconnectAudioBackfillBatchIndex += 1;
-    const finalBatchIndex = reconnectAudioBackfillBatchIndex;
-    const finalPromise = trackReconnectAudioBackfillFinalPromise(sendReconnectAudioBackfillBatch({
-      debugCallId,
-      requestCallId,
-      requestSessionId,
-      baseBackfillId,
-      reconnectStartMs,
-      reason: backfillReason,
-      attempt,
-      batchIndex: finalBatchIndex,
-      final: true,
-      selection: tailSelection
-    }).finally(() => clearReconnectAudioBackfill(baseBackfillId)));
+    const tailChunks = tailSelection ? splitReconnectAudioBackfillSelection(tailSelection) : [];
+    const finalPromise = trackReconnectAudioBackfillFinalPromise((async () => {
+      if (tailChunks.length === 0) {
+        reconnectAudioBackfillBatchIndex += 1;
+        await sendReconnectAudioBackfillBatch({
+          debugCallId,
+          requestCallId,
+          requestSessionId,
+          baseBackfillId,
+          reconnectStartMs,
+          reason: backfillReason,
+          attempt,
+          batchIndex: reconnectAudioBackfillBatchIndex,
+          final: true,
+          selection: null
+        });
+        return;
+      }
+
+      for (let index = 0; index < tailChunks.length; index += 1) {
+        const chunk = tailChunks[index];
+        reconnectAudioBackfillBatchIndex += 1;
+        await sendReconnectAudioBackfillBatch({
+          debugCallId,
+          requestCallId,
+          requestSessionId,
+          baseBackfillId,
+          reconnectStartMs,
+          reason: backfillReason,
+          attempt,
+          batchIndex: reconnectAudioBackfillBatchIndex,
+          final: index === tailChunks.length - 1,
+          selection: chunk
+        });
+        reconnectAudioBackfillLastEndMs = chunk.endMs;
+      }
+    })().finally(() => clearReconnectAudioBackfill(baseBackfillId)));
     if (options.awaitFinal) {
       await finalPromise;
     } else {
@@ -874,7 +901,38 @@
         name: (error as Error)?.name ?? 'unknown',
         message: (error as Error)?.message ?? ''
       });
+      await recoverMissedCallEvents(debugCallId, 'reconnect_backfill_failed');
+      queueMissedCallEventsRecovery(debugCallId, 'reconnect_backfill_failed_retry');
     }
+  }
+
+  async function recoverMissedCallEvents(debugCallId: string, reason: string) {
+    if (!callId || !sessionId) {
+      return;
+    }
+    try {
+      const response = await recoverCallEvents(callId, sessionId);
+      emitDebugEvent(debugCallId, 'call.events_recover.done', {
+        reason,
+        events: response.events.length
+      });
+      for (const event of response.events) {
+        await handleCallDataEvent(event);
+      }
+    } catch (error) {
+      emitDebugEvent(debugCallId, 'call.events_recover.failed', {
+        reason,
+        name: (error as Error)?.name ?? 'unknown',
+        message: (error as Error)?.message ?? ''
+      });
+    }
+  }
+
+  function queueMissedCallEventsRecovery(debugCallId: string, reason: string) {
+    const timer = window.setTimeout(() => {
+      void recoverMissedCallEvents(debugCallId, reason);
+    }, MISSED_CALL_EVENTS_RECOVERY_RETRY_MS);
+    timers = [...timers, timer];
   }
 
   function selectReconnectAudioBackfill(
@@ -910,6 +968,45 @@
       samples,
       durationMs,
       rms: Math.sqrt(sumSquares / samples.length),
+      peak
+    };
+  }
+
+  function splitReconnectAudioBackfillSelection(
+    selection: LocalMicPcmSelection
+  ): LocalMicPcmSelection[] {
+    if (selection.durationMs <= MIC_BACKFILL_BATCH_MAX_MS) {
+      return [selection];
+    }
+
+    const maxSamples = Math.max(
+      1,
+      Math.floor(MIC_BACKFILL_SAMPLE_RATE * MIC_BACKFILL_BATCH_MAX_MS / 1000)
+    );
+    const chunks: LocalMicPcmSelection[] = [];
+    for (let offset = 0; offset < selection.samples.length; offset += maxSamples) {
+      const samples = selection.samples.slice(offset, offset + maxSamples);
+      const startMs = selection.startMs + offset * 1000 / MIC_BACKFILL_SAMPLE_RATE;
+      chunks.push(makeReconnectAudioSelection(samples, startMs));
+    }
+    return chunks;
+  }
+
+  function makeReconnectAudioSelection(samples: Int16Array, startMs: number): LocalMicPcmSelection {
+    let sumSquares = 0;
+    let peak = 0;
+    for (const sample of samples) {
+      const abs = Math.abs(sample);
+      peak = Math.max(peak, abs);
+      sumSquares += sample * sample;
+    }
+    const durationMs = Math.round(samples.length * 1000 / MIC_BACKFILL_SAMPLE_RATE);
+    return {
+      startMs,
+      endMs: startMs + durationMs,
+      samples,
+      durationMs,
+      rms: Math.sqrt(sumSquares / Math.max(samples.length, 1)),
       peak
     };
   }
@@ -1673,6 +1770,7 @@
     try {
       if (callId && sessionId) {
         await drainReconnectAudioBackfillBeforeHangup();
+        await recoverMissedCallEvents(callId, 'hangup');
         await endCall(callId, sessionId);
       }
       stopBrowserMedia();
@@ -1702,6 +1800,7 @@
       bufferedChunks: localMicPcmBuffer.length
     });
     await flushReconnectAudioBackfill(callId, reason, attempt, { awaitFinal: true });
+    await recoverMissedCallEvents(callId, 'hangup_flush');
   }
 
   async function returnToThread() {
