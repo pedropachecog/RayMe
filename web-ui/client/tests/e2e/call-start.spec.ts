@@ -25,6 +25,7 @@ type ReconnectRouteOptions = {
   failBackfill?: boolean;
   recoverEvents?: Array<Record<string, unknown>>;
   offerDelayMs?: number;
+  failOfferFrom?: number;
 };
 
 type MockCallMediaSnapshot = {
@@ -373,7 +374,7 @@ test('re-offers when ICE disconnects while aggregate peer state stays connected'
   assertNoBrowserErrors();
 });
 
-test('gives up after the reconnect attempt limit without calling end', async ({
+test('recovers and ends after the reconnect attempt limit gives up', async ({
   page
 }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
@@ -392,9 +393,52 @@ test('gives up after the reconnect attempt limit without calling end', async ({
 
   await expect(page.getByRole('alert').getByText('The call ended because the connection dropped.')).toBeVisible();
   expect(counters.offerCount).toBe(3);
-  expect(counters.endCount).toBe(0);
+  await expect.poll(() => counters.recoverCount).toBeGreaterThanOrEqual(1);
+  await expect.poll(() => counters.endCount).toBe(1);
   expect(debugEventCount(counters, 'pc.media_reconnect.give_up')).toBe(1);
   await expect(page.getByTestId('voice-visualizer')).toHaveCount(0);
+  assertNoBrowserErrors();
+});
+
+test('recovers queued turn and ends when terminal media reconnect fails', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+    allowConsoleErrors: [/Failed to load resource: the server responded with a status of 502/]
+  });
+  await installMockCallMedia(page);
+  const counters = await installReconnectCallRoutes(page, {
+    failOfferFrom: 3,
+    recoverEvents: [
+      {
+        type: 'user_final',
+        session_id: 'rtc-call-reconnect-01',
+        turn_id: 'user-turn-terminal-recover',
+        text: 'Recovered terminal reconnect speech.'
+      }
+    ]
+  });
+
+  await startReconnectCall(page, counters);
+
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await expect.poll(() => counters.offerCount).toBe(2);
+  await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.ok')).toBe(1);
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+
+  await expect.poll(() => counters.offerCount).toBe(3);
+  await expect.poll(() => counters.recoverCount).toBeGreaterThanOrEqual(1);
+  await expect.poll(() => counters.turnCount).toBe(1);
+  await expect.poll(() => counters.endCount).toBe(1);
+  expect(counters.turns[0]).toMatchObject({
+    session_id: 'rtc-call-reconnect-01',
+    turn_id: 'user-turn-terminal-recover',
+    text: 'Recovered terminal reconnect speech.',
+    source: 'user_final'
+  });
+  expect(counters.requestOrder.indexOf('recover')).toBeLessThan(
+    counters.requestOrder.indexOf('end')
+  );
   assertNoBrowserErrors();
 });
 
@@ -657,6 +701,15 @@ async function installReconnectCallRoutes(
     });
     if (options.offerDelayMs && counters.offerCount > 1) {
       await new Promise((resolve) => setTimeout(resolve, options.offerDelayMs));
+    }
+    if (options.failOfferFrom && counters.offerCount >= options.failOfferFrom) {
+      await fulfillJson(route, {
+        detail: {
+          code: 'webrtc_offer_failed',
+          message: 'WebRTC offer could not be accepted'
+        }
+      }, 502);
+      return;
     }
     await fulfillJson(route, {
       call_id: 'call-reconnect-01',

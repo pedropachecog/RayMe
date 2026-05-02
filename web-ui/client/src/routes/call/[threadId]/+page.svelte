@@ -113,6 +113,7 @@
   let reconnectAudioBackfillReason: MediaReconnectReason | null = null;
   let reconnectAudioBackfillFlushPromise: Promise<void> | null = null;
   let reconnectAudioBackfillFinalPromise: Promise<void> | null = null;
+  let terminalReconnectCleanupPromise: Promise<void> | null = null;
   let localMicMeterFrame = 0;
   let localMicRawRms: number | null = null;
   let localMicRawPeak: number | null = null;
@@ -432,12 +433,7 @@
         reason,
         attempts: mediaReconnectAttempts
       });
-      applyCallState('failed');
-      blockingPanel = {
-        body: 'The call ended because the connection dropped. Your transcript so far was saved.',
-        action: 'Return to Thread',
-        tone: 'danger'
-      };
+      void failTerminalMediaReconnect(debugCallId, 'media_reconnect_give_up');
       return;
     }
 
@@ -548,16 +544,54 @@
         name: (error as DOMException)?.name ?? 'unknown'
       });
       if (mediaReconnectAttempts >= MEDIA_RECONNECT_MAX_ATTEMPTS) {
-        applyCallState('failed');
-        blockingPanel = {
-          body: 'The call ended because the connection dropped. Your transcript so far was saved.',
-          action: 'Return to Thread',
-          tone: 'danger'
-        };
+        await failTerminalMediaReconnect(debugCallId, 'media_reconnect_failed');
       }
     } finally {
       mediaReconnecting = false;
     }
+  }
+
+  async function failTerminalMediaReconnect(debugCallId: string, reason: string) {
+    await cleanupTerminalFailedCall(debugCallId, reason);
+    applyCallState('failed');
+    blockingPanel = {
+      body: 'The call ended because the connection dropped. Your transcript so far was saved.',
+      action: 'Return to Thread',
+      tone: 'danger'
+    };
+  }
+
+  async function cleanupTerminalFailedCall(debugCallId: string, reason: string) {
+    if (!callId || !sessionId) {
+      return;
+    }
+    if (terminalReconnectCleanupPromise) {
+      await terminalReconnectCleanupPromise;
+      return;
+    }
+    const requestCallId = callId;
+    const requestSessionId = sessionId;
+    terminalReconnectCleanupPromise = (async () => {
+      try {
+        await flushReconnectAudioBackfill(
+          debugCallId,
+          reconnectAudioBackfillReason ?? 'failed',
+          Math.max(mediaReconnectAttempts, 1),
+          { awaitFinal: true }
+        );
+      } catch {
+        // Recovery below still has a chance to drain already-queued events.
+      }
+      await recoverMissedCallEvents(debugCallId, reason);
+      try {
+        await endCall(requestCallId, requestSessionId, 'connection_failed');
+      } catch {
+        // The failed panel remains visible; cleanup failures are diagnostic-only here.
+      }
+    })().finally(() => {
+      terminalReconnectCleanupPromise = null;
+    });
+    await terminalReconnectCleanupPromise;
   }
 
   function clearMediaReconnectTimer() {
@@ -680,6 +714,10 @@
       if (options.awaitFinal && reconnectAudioBackfillFinalPromise) {
         await reconnectAudioBackfillFinalPromise;
       }
+      return;
+    }
+    if (options.awaitFinal && reconnectAudioBackfillFinalPromise) {
+      await reconnectAudioBackfillFinalPromise;
       return;
     }
     const flushPromise = flushReconnectAudioBackfillOnce(debugCallId, reason, attempt, options);
