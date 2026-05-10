@@ -1,7 +1,7 @@
 # RayMe Roadmap
 
 **Version:** v1
-**Granularity:** Standard (7 phases)
+**Granularity:** Standard (8 integer phases plus inserted Phase 01.1)
 **Created:** 2026-04-17
 **Sources:** `PROJECT.md`, `REQUIREMENTS.md`, `research/SUMMARY.md`, `research/STACK.md`, `research/ARCHITECTURE.md`, `research/PITFALLS.md`
 
@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-RayMe ships in **seven phases**: one measurement spike (Phase 0) followed by six delivery phases that culminate in a full-duplex, barge-in-capable voice-call app usable from a mobile browser on LAN. The load-bearing core value — "call feel" — is validated **twice**: first as an MVP call in Phase 3 (flat, one-sentence reply, no streaming) and then as a tuned duplex experience in Phase 4 (sentence-streamed TTS, VAD barge-in with LLM cancel, live bidirectional captions). Everything after Phase 4 exists to broaden (up to three TTS engines — F5-TTS, XTTS v2, and Qwen3-TTS — with cold-swap UX, unified thread polish) and harden (mobile hardening, ship polish) what Phase 4 proves works.
+RayMe ships v1 through Phase 6: one measurement spike (Phase 0) followed by delivery phases that culminate in a full-duplex, barge-in-capable voice-call app usable from a mobile browser on LAN. The load-bearing core value — "call feel" — is validated **twice**: first as an MVP call in Phase 3 (flat, one-sentence reply, no streaming) and then as a tuned duplex experience in Phase 4 (sentence-streamed TTS, VAD barge-in with LLM cancel, live bidirectional captions). Everything after Phase 4 exists to broaden (up to three TTS engines — F5-TTS, XTTS v2, and Qwen3-TTS — with cold-swap UX, unified thread polish) and harden (mobile hardening, ship polish) what Phase 4 proves works; Phase 7 then evaluates VoxCPM2 as an additional roster candidate before any runtime promotion.
 
 ## v1 Milestone Definition
 
@@ -52,6 +52,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 - [ ] **Phase 4: Call Feel** — Sentence-chunked streaming TTS, VAD-driven barge-in with LIFO cancel and mid-stream LLM abort, live bidirectional captions over data channel, echo-loop mitigation, Voice Visualizer three-state. The core-value phase.
 - [ ] **Phase 5: Voice Breadth & Unified Thread Polish** — Both TTS engines with cold-swap UX, per-character default + per-chat override, saved-audio toggles + inline replay, unified thread visual treatment, full SillyTavern text-UX parity (Regenerate / Edit / Swipes / Continue / alternate greetings / virtualization).
 - [ ] **Phase 6: Mobile Hardening & Ship Polish** — Full Android Chrome pass (Bluetooth routing, Wake Lock, visibility change), PWA manifest + icons, storage housekeeping (orphan reaper, retention), full Settings surface, error states, soak-test acceptance. v1 ships.
+- [ ] **Phase 7: Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations** — Planned evaluation and integration gate for VoxCPM2 after the v1 ship path.
 
 ---
 
@@ -486,6 +487,16 @@ Roadmap-level decisions that remain open after Phase-0 resolves the empirical qu
 7. **Requirements traceability flagged no gaps between `PROJECT.md` Active bullets and `REQUIREMENTS.md` v1 set** — see the coverage table at the end of `REQUIREMENTS.md`. If any Phase-0 output (e.g., "XTTS is the v1 default") materially changes a `PROJECT.md` Key Decision row, the roadmapper-owned traceability must update `PROJECT.md` first, not this roadmap. **Owner: Phase-0 closeout; `/gsd-transition` at Phase-0 boundary.**
 
 8. **The 7-phase structure assumes no v1.x regressions creep back into v1.** If the SillyTavern text-UX surface (Regenerate / Edit / Swipes / Continue) proves more complex than budgeted in Phase 1, the overflow should go into Phase 1.1 via `/gsd-insert-phase` — not silently expand Phase 1 or compress Phase 2. This is a process note, not a commitment. **Owner: Phase 1 mid-phase checkpoint.**
+
+### Phase 7: Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 6
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 7 to break down)
 
 ---
 

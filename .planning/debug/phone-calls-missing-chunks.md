@@ -1,7 +1,7 @@
 ---
-status: fixing
+status: awaiting_human_verify
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-02T02:27:11Z
+updated: 2026-05-02T17:11:52Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -9,10 +9,20 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 
 ## Current Focus
 
-hypothesis: "Confirmed: the two newest post-`9e50387` calls reached backend STT, but the `user_final` result was skipped because the data channel was already closed; `9e50387` triggered this by widening reconnect backfill to large 30s uploads that produced browser/web 502s and reconnect churn."
-test: "Local fix now splits reconnect backfill into <=10s chunks and adds a recoverable missed-event drain for closed-channel `user_final`/failed events."
-expecting: "If a large reconnect upload fails or the data channel is closed, the browser can recover the missed `user_final` and submit `/turns`; smaller chunks should also avoid the 30s upload 502 pattern."
-next_action: "Commit, deploy with `scripts/deploy-omen.sh`, then request another structured first-turn poem repro."
+hypothesis: "Confirmed: delayed browser reconnect-tail selection reused the initial 30s latest-window cap, so the latest call dropped the unsent `35256-69467ms` microphone span before backend STT."
+test: "User repeats the same phone-call poem repro against OMEN commit `b71fcdd`."
+expecting: "Reconnect backfill debug events should no longer show a gap between consecutive selected offsets after the first backfill set; the recovered transcript should include the previously omitted final poem section, and recovery should not wait on a latest-window silent-only tail."
+next_action: "Await human verification: user should run one clean phone-call repro and report whether the transcript is complete, whether the failed banner appears, and how long transcription takes after they stop speaking."
+
+reasoning_checkpoint:
+  hypothesis: "Reconnect tail selection drops speech because it reuses the initial `MIC_BACKFILL_MAX_MS` latest-window cap after initial backfill upload/reoffer work has delayed `performance.now`; when `endMs - max` moves past `reconnectAudioBackfillLastEndMs`, the intervening microphone chunks are omitted before the backend sees them."
+  confirming_evidence:
+    - "Latest browser logs for `call_54dc73...` sent offsets `5226-35256ms`, then next sent `69467-99412ms`; no request covered `35256-69467ms`."
+    - "Backend logs for `rtc_db972...` received exactly those speech and silent batches, then STT produced the partial 607-character transcript from `frames=2509`."
+    - "RED unit regression `reconnect-backfill.test.ts` expected tail start `35000` but current selector returned `69000`, reproducing the gap."
+  falsification_test: "If the selector cap is not the mechanism, making tail selection contiguous from the previous end would not make the regression pass or would still leave browser debug offsets with a gap between consecutive reconnect backfill batches."
+  fix_rationale: "The first reconnect selection still needs a bounded pre-roll, but once backfill has started, tail selection must resume from `reconnectAudioBackfillLastEndMs` so every buffered microphone chunk is either sent or intentionally skipped by a later explicit rule. Increasing the rolling buffer keeps delayed tail chunks available until the final catch-up selection runs."
+  blind_spots: "This does not fix the underlying WebRTC transport drop or the no-receiver TTS path after terminal failure; it fixes the current first transcript-loss boundary and should reduce wasted silent recovery, but live latency still needs human verification."
 
 ## Rollback Anchor
 
@@ -50,6 +60,226 @@ evidence_files:
   - .planning/debug/phone-call-expected-poem-2026-05-02.md
 
 ## Investigation Evidence
+
+- timestamp: 2026-05-02T17:11:52Z
+  checked: Canonical OMEN deployment and post-deploy readiness for `b71fcdd`.
+  found: Pushed `main` from `74450da` to `b71fcdd`. `scripts/deploy-omen.sh` fast-forwarded OMEN to `b71fcddc59e787a7a117be49b25d4785b98b4e77`, verified the CUDA runtime, built the web client, recreated and started `RayMePhase1AI` / `RayMePhase1Web`, and reported `OMEN deploy complete`. OMEN checkout is `b71fcdd` with no reported repo dirt. `/webrtc/status` returns `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, and `active_sessions=0`. Scheduled tasks are running and point to `C:\Users\pmpg\rayme\start-ai-backend.cmd` / `C:\Users\pmpg\rayme\start-web-ui.cmd`.
+  implication: The delayed reconnect-tail fix is live through the only approved deployment path and ready for the user to rerun the clean phone-call repro.
+
+- timestamp: 2026-05-02T17:09:57Z
+  checked: Runtime fix commit.
+  found: Committed `b71fcdd` (`fix(call): preserve delayed reconnect backfill tail`) with `web-ui/client/src/lib/call/reconnectBackfill.ts`, `web-ui/client/src/routes/call/[threadId]/+page.svelte`, and `web-ui/client/tests/unit/reconnect-backfill.test.ts`.
+  implication: The verified code fix is ready to push and deploy through the canonical OMEN script.
+
+- timestamp: 2026-05-02T17:08:36Z
+  checked: Local fix and verification for delayed reconnect-tail selection.
+  found: Implemented a client reconnect-backfill selector helper. Initial reconnect selection still applies the 30s pre-roll cap, but tail selection now resumes from `reconnectAudioBackfillLastEndMs` without reapplying the latest-window cap. Increased the rolling local microphone PCM buffer to 180s so delayed tail selection can still access the contiguous unsent span. Verification passed: `npm run test:unit -- reconnect-backfill.test.ts` (2 passed), focused reconnect Playwright (10 passed), `npm run build`, full `npm run test:e2e -- call-start.spec.ts` (30 passed), full `npm run test:unit` (90 passed), and `git diff --check`.
+  implication: The reproduced selector boundary is fixed locally and adjacent call reconnect/end/recovery flows still pass.
+
+- timestamp: 2026-05-02T17:01:45Z
+  checked: RED client regression for delayed reconnect-tail selection.
+  found: Added focused Vitest coverage for reconnect backfill selection. `npm run test:unit -- reconnect-backfill.test.ts` failed as expected: the delayed tail test expected `selection.startMs` to be `35000`, but current code returned `69000`; the initial capped pre-roll test passed.
+  implication: The latest OMEN gap is reproduced locally at the selector boundary. The fix should change tail selection, not backend STT or Web UI persistence.
+
+- timestamp: 2026-05-02T16:58:49Z
+  checked: Latest OMEN runtime and artifact snapshot after failed human verification of `74450da`.
+  found: OMEN checkout is `74450da2c961e76f5cef0a5973a2e37833d62b5f` with no reported repo dirt. `/webrtc/status` is ready with `live_call_ready=true`, `media_transport_ready=true`, and `active_sessions=0`. Scheduled tasks are running and point to `C:\Users\pmpg\rayme\start-ai-backend.cmd` and `C:\Users\pmpg\rayme\start-web-ui.cmd`. Active logs and SQLite were copied to `/tmp/rayme-phone-debug-74450da-failed-2026-05-02/`.
+  implication: The failed repro ran against the intended deployed code and canonical OMEN task/launcher setup; deployment drift is not the current boundary.
+
+- timestamp: 2026-05-02T16:58:49Z
+  checked: Latest persisted call after `74450da`.
+  found: Newest repro is `call_54dc73bdeb1144549c77667b557ce2a6` / `rtc_db972418f201449c88667141c6fafda6` on `thread_c23ed9dfdcd64f23b007f7f8e75045dc`. SQLite stores `call_start` at `2026-05-02 16:47:20`, `user_speech` at `16:50:48` with length 607, `ai_speech` at `16:50:50`, and `call_end` at `16:51:08`. The user transcript stops after "faithful beyond all our expressions of faith" and omits the final expected poem section beginning "our deepest prayers."
+  implication: Persistence contains the same partial transcript the user saw. The missing ending was already absent before durable `/turns` storage.
+
+- timestamp: 2026-05-02T16:58:49Z
+  checked: Browser reconnect-backfill debug events for `call_54dc73...`.
+  found: The browser selected and sent reconnect backfill chunks covering offsets `5226-15226`, `15226-25226`, `25226-35226`, and `35226-35256` with speech-level RMS. Later, after reconnect work continued, it selected only offsets `69467-79467`, `79467-89467`, and `89467-99412`, all near silence. No browser request covered the contiguous `35256-69467` span.
+  implication: The first loss boundary is client-side reconnect backfill selection. A middle microphone-buffer span is dropped before the AI backend can append it or send it to STT.
+
+- timestamp: 2026-05-02T16:58:49Z
+  checked: AI backend logs for `rtc_db972...`.
+  found: Backend backfill application exactly matches the browser gap: speech batches 1-4, then near-silent batches 5-7. It finalized after the final silent batch, trimmed trailing silence, and ran STT on `frames=2509`, producing `transcript_len=607`. The data channel was closed, but `/events/drain` returned the queued `user_final`, and Web UI `/turns` persisted it.
+  implication: Backend STT, recoverable event drain, and Web UI persistence worked on the audio they received. They could not recover the omitted `35256-69467` microphone span.
+
+- timestamp: 2026-05-02T16:54:00Z
+  checked: Resume setup after failed human verification of `74450da`.
+  found: Required debug file and repo rules were read. No project-local skill directories or debug knowledge base are present. Common bug pattern scan points first to Async/Timing, State Management, and Data Shape/API Contract boundaries because the call fails before a delayed partial transcript is persisted and playback remains user-visible.
+  implication: Prior transactional reoffer diagnosis must be treated as eliminated for the live workflow. The next test must use fresh OMEN evidence and identify the current first failed boundary before any fix.
+
+- timestamp: 2026-05-02T16:52:16Z
+  checked: User live verification after OMEN deployment of `74450da2c961e76f5cef0a5973a2e37833d62b5f`.
+  found: User repeated the repro and reports it worked the same: the top of the call says it failed right before the transcription appears; the transcription is still partial; the transcription takes about two minutes, which is far too long.
+  implication: The transactional reoffer fix did not resolve the live failure. The active target is no longer just inaudible AI playback; the call still enters failed state before delayed/partial transcript recovery completes.
+
+- timestamp: 2026-05-02T16:34:05Z
+  checked: Resume baseline after latest human verification.
+  found: SSH works as `omen-pc\rayme-ssh` and `omen-pc\pmpg`. Local checkout is `028bb0ff4351c7ce2254cc97a93262af55b22d48` with only this debug file dirty.
+  implication: The continuation is on the deployed fix commit locally, and remote artifact collection can proceed without first repairing SSH or local checkout drift.
+
+- timestamp: 2026-05-02T16:36:04Z
+  checked: OMEN runtime state after the latest post-`028bb0f` repro.
+  found: OMEN checkout is `028bb0ff4351c7ce2254cc97a93262af55b22d48` with no repo dirt. `GET /webrtc/status` returns `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, and `active_sessions=0`. `RayMePhase1AI` and `RayMePhase1Web` are running and point to `C:\Users\pmpg\rayme\start-ai-backend.cmd` / `start-web-ui.cmd`; those launchers cd into `C:\Users\pmpg\rayme\RayMe` and run the repo scripts.
+  implication: The latest repro ran against the intended deployed code and canonical launcher/task setup; deployment drift is not the current first failed boundary.
+
+- timestamp: 2026-05-02T16:35:09Z
+  checked: Latest copied OMEN artifact snapshot at `/tmp/rayme-phone-debug-028bb0f-post-audio-fail/`.
+  found: Newest repro call is `call_5a5ea16d3e8345898b8a90f40d21fc70` / `rtc_25f8427bdfa74337a056a78e9783ec73` on `thread_c23ed9dfdcd64f23b007f7f8e75045dc`. SQLite persisted `call_start` at `2026-05-02 16:24:46`, a `user_speech` row at `16:28:10`, an `ai_speech` row at `16:28:12`, and `call_end` at `16:28:31`. Web UI logs show `/turns` returned 200 and emitted `call.ai_audio_started` with about 10.8s of audio, but `speakingRms=0`. AI backend logs show the media peer/data channel had already closed, `/speak` enqueued 11.055s of TTS audio to the track, `event.skip_channel_not_open type=ai_audio_started`, then `track.wait_until_idle.timeout recv_count=0 queue_size=1`, `tts.playback_wait.done completed=False`, and `event.skip_channel_not_open type=ai_done`.
+  implication: The first failed boundary has moved beyond transcript persistence and AI generation. The current failure is that TTS/audio playback is attempted after the WebRTC output path is already dead, so generated audio is accepted but not actually delivered audibly to the caller.
+
+- timestamp: 2026-05-02T16:38:22Z
+  checked: Focused failed-reoffer regression.
+  found: Added `test_failed_reconnect_offer_preserves_existing_session_media`. It failed on current code because a simulated second `/webrtc/offer` negotiation failure left `session.peer_connection` pointing at the new failed peer instead of the original peer. After the transactional reoffer fix, the same test passed: 1 passed, 16 deselected.
+  implication: The OMEN audio failure mechanism is now reproduced locally and fixed at the media-session mutation boundary.
+
+- timestamp: 2026-05-02T16:42:11Z
+  checked: Regression verification after transactional reoffer fix.
+  found: `uv run --project ai-backend pytest ai-backend/tests/test_webrtc_signaling.py -q` passed: 17 passed, 3 warnings. `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` passed: 39 passed. Full `uv run --project ai-backend pytest ai-backend/tests -q` passed: 101 passed, 3 warnings. Focused Web UI call facade checks passed: 22 passed, 6 deselected. `git diff --check` passed.
+  implication: The fix covers the reproduced boundary and does not regress adjacent backend call lifecycle, WebRTC signaling, TTS playout, event recovery, reconnect-audio, `/turns`, or `/end` behavior.
+
+- timestamp: 2026-05-02T16:43:18Z
+  checked: Code commit and push.
+  found: Committed `74450da` (`fix(call): preserve media on failed reconnect offer`) with `ai-backend/app/api/webrtc.py`, `ai-backend/app/call/session.py`, and `ai-backend/tests/test_webrtc_signaling.py`; pushed `main` from `028bb0f` to `74450da`. The debug session file remains the only expected local dirty file.
+  implication: The verified fix is available for OMEN deployment through the canonical script.
+
+- timestamp: 2026-05-02T16:45:06Z
+  checked: Canonical OMEN deployment and post-deploy readiness.
+  found: `scripts/deploy-omen.sh` fast-forwarded OMEN from `028bb0f` to `74450da2c961e76f5cef0a5973a2e37833d62b5f`, verified CUDA/GPU runtime, built the web client, recreated and started `RayMePhase1AI` / `RayMePhase1Web`, and reported `OMEN deploy complete`. OMEN checkout is `74450da` with no repo dirt. `/webrtc/status` returns `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, and `active_sessions=0`. Scheduled tasks are running and point to `C:\Users\pmpg\rayme\start-ai-backend.cmd` / `start-web-ui.cmd`; launchers cd into `C:\Users\pmpg\rayme\RayMe` and run the repo command lines.
+  implication: The transactional reoffer fix is live through the only approved deployment path and ready for a real phone-call repro.
+
+- timestamp: 2026-05-02T16:30:51Z
+  checked: User live verification after OMEN deployment of `028bb0ff4351c7ce2254cc97a93262af55b22d48`.
+  found: User repeated the repro. They are not sure whether the whole poem was transcribed, but they now see some transcript content. After about two minutes, the AI generated text, but the user could not hear it because it was not played in the call; then the call failed.
+  implication: The backend post-end retention fix likely improved transcript recovery, but the remaining first user-visible failure has moved downstream to assistant response delivery: durable AI text generation may be happening while TTS/audio playback or terminal media recovery still fails.
+
+- timestamp: 2026-05-02T12:56:21Z
+  checked: Local/OMEN baseline after latest checkpoint response.
+  found: Local and OMEN checkouts are both `330e0f216f505cc9ae9feb86da572bf672a349f3` (`fix(call): recover terminal reconnect failures`), with only this debug file dirty locally. SSH works as `omen-pc\rayme-ssh` and `omen-pc\pmpg`. Scheduled tasks `RayMePhase1AI` and `RayMePhase1Web` are running and point to canonical `C:\Users\pmpg\rayme\start-ai-backend.cmd` and `C:\Users\pmpg\rayme\start-web-ui.cmd`. The launchers run the repo scripts written by `scripts/deploy-omen.sh`. `/webrtc/status` is ready with `active_sessions=0`.
+  implication: Deployment drift, noncanonical launchers, and stale active backend sessions are not the first explanation for the latest post-`330e0f2` failure.
+
+- timestamp: 2026-05-02T12:57:39Z
+  checked: Copied OMEN DB/log snapshot at `/tmp/rayme-phone-debug-330e0f2-latest/` for the latest clean repro.
+  found: Newest post-`330e0f2` call is `call_39aa8c2ad9e34503b961444f224d567e` / `rtc_4708d47d025a430ca4eead1aea298c9a` on `thread_c23ed9dfdcd64f23b007f7f8e75045dc`. SQLite has `call_start` at `2026-05-02 12:47:16.032015` and `call_end` at `2026-05-02 12:50:44.299209`, with no `user_speech` or `ai_speech` rows for that call window. Backend accepted six reconnect backfill batches, finalized on batch 6, started STT with `frames=2553`, drained one queued `failed` event, then `/end` succeeded. After `/end`, STT completed with `transcript_len=504`, queued `user_final`, and the following `/events/drain` returned `404 Not Found`. Browser/Web UI logs match: final `/reconnect-audio` surfaced as 502, recovery drained one event (`failed`), second recovery drained zero events, `/end` returned 200, and retry recovery failed with 502. No `/turns` request occurred for the call.
+  implication: The previous fix moved the boundary forward but still races: terminal cleanup ends/removes the backend session while final backfill STT is still in flight, so the transcript is generated after the only successful recovery drains and after the session is no longer recoverable.
+
+- timestamp: 2026-05-02T13:00:36Z
+  checked: Full client/server/backend call cleanup and recovery paths.
+  found: The Svelte terminal cleanup awaits the final reconnect backfill promise, recovers missed events, then posts `/end`; when the final backfill request itself surfaces as 502, that await only confirms the Web UI facade request finished, not that backend STT has stopped running. Web UI `/events/recover` maps backend drain 404 to a browser-visible 502. AI backend `/webrtc/sessions/{id}/end` calls `session.end(...)` and immediately removes the session from `CallSessionManager._sessions`; `CallSession.finalize_user_turn()` can still finish afterward, queue recoverable `user_final`, and currently does not preserve terminal `ended` state if that completion happens after `/end`.
+  implication: The remaining first-loss boundary is backend session lifetime. The existing browser retry recovery would have had a chance to persist the transcript if the ended session remained drainable for a short grace window after `/end`.
+
+- timestamp: 2026-05-02T13:00:56Z
+  checked: RED backend route regression `test_webrtc_events_drain_returns_late_user_final_after_end`.
+  found: The test creates a call session, posts `/webrtc/sessions/{id}/end`, queues a recoverable `user_final` on the still-running session object, then posts `/events/drain`. Current code returns `404 Not Found` instead of the queued event.
+  implication: This directly reproduces the latest OMEN failure mechanism locally: `/end` makes late STT output unreachable even though the `CallSession` can still queue it.
+
+- timestamp: 2026-05-02T13:02:00Z
+  checked: Post-fix focused backend route regression.
+  found: `uv run --project ai-backend pytest ai-backend/tests/test_webrtc_signaling.py -q -k "late_user_final_after_end"` passed: 1 passed, 15 deselected.
+  implication: The ended session remains drainable for a late recoverable `user_final` while the manager still reports zero active sessions.
+
+- timestamp: 2026-05-02T13:02:43Z
+  checked: Focused AI backend lifecycle regression coverage.
+  found: `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` passed: 39 passed. `uv run --project ai-backend pytest ai-backend/tests/test_webrtc_signaling.py -q` passed: 16 passed, 3 warnings.
+  implication: The fix does not regress existing call-session state handling, WebRTC control routes, reconnect backfill, or event drain behavior.
+
+- timestamp: 2026-05-02T13:03:29Z
+  checked: Full AI backend regression suite and whitespace check.
+  found: `uv run --project ai-backend pytest ai-backend/tests -q` passed: 100 passed, 3 warnings. `git diff --check` passed.
+  implication: The backend retention fix is stable under the full AI backend test suite and introduces no whitespace errors.
+
+- timestamp: 2026-05-02T13:04:10Z
+  checked: Web UI server facade coverage and final diff inspection.
+  found: `uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py -q -k "recover or reconnect_audio or end"` passed: 18 passed, 10 deselected. Final code diff is limited to AI backend `/end` routing, `CallSessionManager` post-end retention/state preservation, and the new backend route regression.
+  implication: The Web UI call facade contract remains compatible; the patch is ready to commit and deploy via `scripts/deploy-omen.sh`.
+
+- timestamp: 2026-05-02T13:04:37Z
+  checked: Code commit and push.
+  found: Committed `028bb0f` (`fix(call): keep ended sessions recoverable briefly`) with `ai-backend/app/api/webrtc.py`, `ai-backend/app/call/session.py`, and `ai-backend/tests/test_webrtc_signaling.py`; pushed `main` from `330e0f2` to `028bb0f`. The active debug file remains uncommitted.
+  implication: The verified backend fix is available for the canonical OMEN deployment script to pull from `origin/main`.
+
+- timestamp: 2026-05-02T13:06:02Z
+  checked: Canonical OMEN deployment.
+  found: `scripts/deploy-omen.sh` fast-forwarded OMEN from `330e0f2` to `028bb0ff4351c7ce2254cc97a93262af55b22d48`, verified the GPU runtime, built the web client, recreated `RayMePhase1AI` and `RayMePhase1Web`, started listeners on `192.168.1.199:9443` and `192.168.1.199:8443`, and reported `OMEN deploy complete: 028bb0f...`. Generic `/health` reported `status=degraded`, so call-specific readiness still needs direct verification.
+  implication: The fix is deployed through the only approved script. A direct `/webrtc/status` check is needed before the human retest checkpoint.
+
+- timestamp: 2026-05-02T13:06:42Z
+  checked: OMEN post-deploy runtime verification.
+  found: OMEN checkout is `028bb0ff4351c7ce2254cc97a93262af55b22d48` with no reported repo dirt. Scheduled tasks `RayMePhase1AI` and `RayMePhase1Web` point to canonical `C:\Users\pmpg\rayme\start-ai-backend.cmd` and `C:\Users\pmpg\rayme\start-web-ui.cmd`; launcher contents are the canonical repo command lines written by `scripts/deploy-omen.sh`. `GET https://192.168.1.199:9443/webrtc/status` returned `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, and `active_sessions=0`. Local checkout is also `028bb0f`, with only this debug file dirty.
+  implication: The fix is live on OMEN and ready for the user to repeat the clean phone-call repro.
+
+- timestamp: 2026-05-02T12:53:47Z
+  checked: User live verification after OMEN deployment of `330e0f216f505cc9ae9feb86da572bf672a349f3`.
+  found: User repeated the same clean poem repro. The call still did not transcribe. About two minutes and a few seconds after the user stopped speaking, the call failed by itself. The visible thread log now shows both `call_start` and `call_end`.
+  implication: The deployed terminal reconnect cleanup changed the durable failure boundary: `/end` now reaches persistence, but the transcript still does not. The next investigation should focus on the remaining gap between backend STT/recoverable `user_final` production and Web UI `/turns` persistence during terminal failure cleanup.
+
+- timestamp: 2026-05-02T04:05:44Z
+  checked: Continuation baseline after the clean repro checkpoint.
+  found: SSH works as `omen-pc\rayme-ssh` and `omen-pc\pmpg`. Local and OMEN checkouts are both `d8c38d5800c8b57e3d71d1b09f4b4ca9ab0f1668` (`fix(call): recover user final after reconnect`), with only this debug file dirty locally. Scheduled tasks `RayMePhase1AI` and `RayMePhase1Web` are running and point to the canonical `C:\Users\pmpg\rayme\start-ai-backend.cmd` and `C:\Users\pmpg\rayme\start-web-ui.cmd`. `/webrtc/status` is ready and reports `active_sessions=2`.
+  implication: The clean repro ran against the intended deployed commit and canonical launchers. The two active backend sessions after the failed call are direct evidence that cleanup/end did not complete for all post-checkpoint sessions.
+
+- timestamp: 2026-05-02T04:08:48Z
+  checked: Clean repro Web UI SQLite, web logs, browser debug events, and AI backend logs copied to `/tmp/rayme-phone-debug-clean-2026-05-02/`.
+  found: The only new durable call after the ambiguous `03:09`/`03:10` sequence is `call_a5502db31dce4a879066617fce01e92c` / `rtc_f926d6a174b8484c98189ec251236453` on `thread_c23ed9dfdcd64f23b007f7f8e75045dc`, with SQLite `call_start` at `2026-05-02 03:56:40.209161` and no later `call_end`, `user_speech`, or `ai_speech`. Browser logs show no `/events/recover`, no `/turns`, and no `/end` for this call. Backend logs show live speech reached VAD, reconnect backfill batches reached the backend, final backfill triggered `stt.begin ... frames=3400`, `stt.result ... transcript_len=602`, then `event.skip_channel_not_open type=user_final readyState=closed` and `event.queued_undelivered ... pending=2`. Browser logs show reconnect attempt 2 failed with `/api/calls/call_a550.../offer` returning `502`, then `mic.keep_live prevState=listening nextState=failed`, data channel close, Return-to-Thread navigation, and final backfill fetch failure.
+  implication: STT and backend recovery queuing worked. The current first durable loss boundary is browser terminal reconnect failure: the client never drained the queued backend event and never ended the active call after giving up.
+
+- timestamp: 2026-05-02T04:11:17Z
+  checked: RED Playwright regression for terminal reconnect failure cleanup.
+  found: Added `recovers queued turn and ends when terminal media reconnect fails` to `web-ui/client/tests/e2e/call-start.spec.ts`, simulating a first successful reconnect, a second `/offer` 502, and a queued recoverable `user_final`. `npm run test:e2e -- call-start.spec.ts -g "recovers queued turn and ends when terminal media reconnect fails"` failed in both desktop and mobile Chromium because `counters.recoverCount` stayed `0`.
+  implication: This directly reproduces the clean repro boundary in the browser: terminal reconnect failure abandons queued recoverable events instead of calling `/events/recover`, and therefore cannot post `/turns` or `/end`.
+
+- timestamp: 2026-05-02T04:14:43Z
+  checked: Local fix for terminal media reconnect failure cleanup.
+  found: Updated the call page so terminal reconnect failure calls a shared cleanup path before showing the failed panel. Cleanup waits for any pending final reconnect backfill promise, drains `/events/recover`, lets recovered `user_final` events use the existing `/turns` path, and posts `/end` with reason `connection_failed`. Also updated the existing reconnect give-up test so it no longer encodes the broken no-end behavior. The RED test now passes in desktop and mobile Chromium: 2 passed.
+  implication: The exact browser-side loss boundary from `call_a550...` is covered locally. Broader reconnect and build verification is still required before deployment.
+
+- timestamp: 2026-05-02T04:16:22Z
+  checked: Focused reconnect cleanup regression coverage.
+  found: `npm run test:e2e -- call-start.spec.ts -g "recovers queued turn and ends when terminal media reconnect fails|recovers and ends after the reconnect attempt limit gives up"` passed in desktop and mobile Chromium: 4 passed.
+  implication: Both terminal reconnect paths now recover queued events and end the call in focused browser coverage.
+
+- timestamp: 2026-05-02T04:19:22Z
+  checked: Broader client verification after terminal reconnect cleanup fix.
+  found: Full `npm run test:e2e -- call-start.spec.ts` passed: 30 passed. `npm run build` passed. `git diff --check` passed.
+  implication: The focused fix does not regress existing call start/reconnect/end browser coverage, and the Svelte client still builds.
+
+- timestamp: 2026-05-02T04:21:18Z
+  checked: Commit, push, canonical OMEN deployment, and post-deploy readiness.
+  found: Committed `330e0f216f505cc9ae9feb86da572bf672a349f3` (`fix(call): recover terminal reconnect failures`) with only `web-ui/client/src/routes/call/[threadId]/+page.svelte` and `web-ui/client/tests/e2e/call-start.spec.ts`, pushed `main`, and deployed via `scripts/deploy-omen.sh`. OMEN fast-forwarded to `330e0f2`, rebuilt the web client, rewrote canonical scheduled task launchers, recreated/started `RayMePhase1AI` and `RayMePhase1Web`, and reported `OMEN deploy complete`. Post-deploy OMEN checkout is `330e0f2`; `/webrtc/status` is ready with `active_sessions=0`; scheduled tasks are running and point to `C:\Users\pmpg\rayme\start-ai-backend.cmd` and `C:\Users\pmpg\rayme\start-web-ui.cmd`.
+  implication: The fix is live on OMEN through the only approved deployment path and ready for user verification.
+
+- timestamp: 2026-05-02T03:18:56Z
+  checked: User report from another structured poem repro after the latest recovery work.
+  found: User reports the call failed again. It froze, then after almost two minutes the call failed by itself; the user did not need to end it manually. The poem was again not transcribed.
+  implication: The prior fix is not user-verified. The next investigation must treat this as fresh live evidence, verify the exact deployed/runtime commit first, and inspect the newest call/session/log artifacts before assuming the previous `event.skip_channel_not_open` mechanism is still the only boundary.
+
+- timestamp: 2026-05-02T03:20:09Z
+  checked: Local and SSH baseline before inspecting OMEN.
+  found: `ssh rayme-ssh whoami` returned `omen-pc\rayme-ssh`; `ssh rayme-pmpg whoami` returned `omen-pc\pmpg`. Local checkout is `d8c38d5800c8b57e3d71d1b09f4b4ca9ab0f1668`, with only `.planning/debug/phone-calls-missing-chunks.md` modified.
+  implication: OMEN is reachable for read-only inspection, and local source changes have not yet confounded runtime evidence.
+
+- timestamp: 2026-05-02T03:21:41Z
+  checked: OMEN checkout and scheduled task targets.
+  found: OMEN repo at `C:\Users\pmpg\rayme\RayMe` is `d8c38d5800c8b57e3d71d1b09f4b4ca9ab0f1668` (`fix(call): recover user final after reconnect`). Scheduled tasks `RayMePhase1AI` and `RayMePhase1Web` are running and their `Task To Run` values are the canonical `C:\Users\pmpg\rayme\start-ai-backend.cmd` and `C:\Users\pmpg\rayme\start-web-ui.cmd`.
+  implication: The latest user repro ran against the intended post-recovery commit and canonical launchers; deployment-target drift is not the first explanation.
+
+- timestamp: 2026-05-02T03:22:59Z
+  checked: OMEN runtime launchers and AI backend status.
+  found: Canonical launchers run AI backend via `ai-backend\scripts\run_https.py` bound to `192.168.1.199:9443` and Web UI via `web-ui\server\scripts\run_dev_https.py` bound to `192.168.1.199:8443`, appending to `C:\Users\pmpg\rayme\logs\ai-backend.run.log` and `C:\Users\pmpg\rayme\logs\web-ui.run.log`. `GET https://192.168.1.199:9443/webrtc/status` returned `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, and `active_sessions=1`.
+  implication: The newest failed repro likely left a live/stale backend session after the browser-visible call failure. The first current boundary may involve session failure/cleanup or reconnect-state hang, not only closed-channel `user_final` delivery.
+
+- timestamp: 2026-05-02T03:26:55Z
+  checked: User correction about latest repro sequence.
+  found: User clarified there was only one structured repro in the latest window. Before it, there was one failed call where the user reloaded the `Return to Thread` dialog; the call page always resumes/creates a new call after reload, and the user clicked Back. That earlier call should be treated as reload/back noise and likely stale-session source, not as a second structured repro.
+  implication: The structured repro under investigation is `call_6552125159374c8090432bd0d1e7daa2` / `rtc_b9c682d948384f3fbf8a4db34188c9cb`. Any active-session leak from the earlier 03:09 reload/back call is secondary unless logs show it interfered with this repro.
+
+- timestamp: 2026-05-02T03:29:20Z
+  checked: User clarification after reloading again.
+  found: User initially reported the last repro yielded no thread transcript, only `call started` and `call ended`, then reloaded again and saw that a transcript may have appeared despite the call UI saying the call failed and no audio being heard.
+  implication: This sequence is ambiguous: delayed event recovery can persist a `user_final`/AI response after the call UI has already entered a failed transport state. A clean repro with no reload/back during the call is needed to identify the current first boundary without conflating recovery timing, failed UI state, and thread persistence.
+
+- timestamp: 2026-05-02T04:02:53Z
+  checked: User clean repro response after debugger checkpoint.
+  found: User opened a fresh repro as requested. The same failure happened: the poem was not transcribed, and after about two minutes the call failed by itself. The visible log shows `call_start` but not `call_end`.
+  implication: This is the clean target window for the next investigation. Inspect only calls created after the checkpoint, and pay special attention to why `call_end` is absent after the UI self-failure.
 
 - timestamp: 2026-05-02T02:12:18Z
   checked: OMEN read-only state, Web UI API, and SQLite after `e201a67` / runtime `9e50387`.
@@ -506,6 +736,10 @@ evidence_files:
 
 ## Eliminated
 
+- hypothesis: The latest post-`74450da` partial transcript is caused by the failed reconnect offer replacing the active backend media track before negotiation succeeds.
+  evidence: In the latest `call_54dc73...` repro, the first missing-content boundary occurs earlier in the browser: reconnect backfill requests cover `5226-35256ms` and `69467-99412ms`, leaving `35256-69467ms` unsent. The backend then faithfully transcribes the partial audio it received and Web UI persists the recovered `user_final`.
+  timestamp: 2026-05-02T16:58:49Z
+
 - hypothesis: Downstream forwarding, persistence, or UI display truncates a full STT transcript.
   evidence: OMEN AI backend logs show affected turns reach `stt.begin` with already-short frame buffers and produce short `stt.result` lengths before `event.sent type=user_final`; the first loss point is before STT, not after `user_final`.
   timestamp: 2026-04-29T19:58:21Z
@@ -524,10 +758,13 @@ evidence_files:
 
 ## Resolution
 
-root_cause: In the two newest post-`9e50387` OMEN calls, STT did not fail. Backend reached `stt.begin` and `stt.result` for `user-turn-1` in both `call_4cf61efa73ee499ca2b58fe0333c7bf8` / `rtc_0782b6f8e8ca4ae080a5b60d794b0e84` and `call_dddb0772457d454f95692a9f9d26c5b2` / `rtc_1871897e998c4e8d8aae17757b7881ae`. The durable loss boundary is `event.skip_channel_not_open ... type=user_final readyState=closed`, so the browser never received `user_final`, never posted `/api/calls/{call_id}/turns`, and API/SQLite persisted only `call_start`/`call_end`. `9e50387` is implicated as the trigger because it widened reconnect backfill to 30s uploads; both calls sent large ~29.945s real-speech backfill batches that surfaced as browser/web 502s while backend applied only batch 1 and later skipped state=thinking batches.
-fix: Not applied; diagnose-only mode. Suggested direction is to shrink/chunk/decouple reconnect backfill so large HTTP uploads do not block reconnect flow, and add durable `user_final` persistence/replay or HTTP fallback when the data channel is closed.
-verification: Read-only OMEN inspection only. Verified deployed commit/status, Web UI API, SQLite rows, web logs/browser debug events, reconnect-audio request/response evidence, backend VAD/finalization logs, and `stt.begin`/`stt.result` markers for the exact two newest calls.
+root_cause: In the latest post-`74450da` repro `call_54dc73bdeb1144549c77667b557ce2a6` / `rtc_db972418f201449c88667141c6fafda6`, the browser reconnect-backfill selector dropped a contiguous middle microphone-buffer span before backend STT. Browser logs show backfill covered `5226-35256ms`, then later `69467-99412ms`; nothing covered `35256-69467ms`. This happened because delayed tail selection reused the initial `MIC_BACKFILL_MAX_MS` latest-window cap and the 35s rolling PCM buffer could no longer retain the older unsent middle span.
+fix: Factor reconnect backfill selection into a tested client helper. Keep the initial reconnect selection capped to the latest 30s pre-roll, but make tail selection contiguous from `reconnectAudioBackfillLastEndMs` without reapplying the latest-window cap. Increase the browser rolling microphone PCM buffer to 180s so delayed reconnect cleanup can still send the unsent span. Committed as `b71fcdd` and deployed to OMEN via `scripts/deploy-omen.sh`.
+verification: RED unit regression `reconnect-backfill.test.ts` failed before the fix because delayed tail selection returned start `69000` instead of `35000`; it passed after the fix. Focused reconnect Playwright passed: 10 passed. `npm run build` passed. Full `npm run test:e2e -- call-start.spec.ts` passed: 30 passed. Full `npm run test:unit` passed: 90 passed. `git diff --check` passed. Post-deploy `/webrtc/status` is ready with `active_sessions=0`, and OMEN scheduled tasks point to canonical launchers.
 files_changed:
+  - web-ui/client/src/lib/call/reconnectBackfill.ts
+  - web-ui/client/src/routes/call/[threadId]/+page.svelte
+  - web-ui/client/tests/unit/reconnect-backfill.test.ts
   - .planning/debug/phone-calls-missing-chunks.md
 
 ## Prior Fix History
