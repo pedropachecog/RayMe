@@ -718,6 +718,88 @@ def test_ai_backend_voice_processor_uses_asset_id_for_unsaved_preview_voice_id()
     assert [request.url.path for request in requests] == ["/base/tts/synthesize"]
 
 
+def test_synthesis_payload_forwards_voxcpm2_options_only_for_voxcpm2() -> None:
+    from app.api.voices import _synthesis_payload
+
+    voxcpm2_payload = _synthesis_payload(
+        "preview",
+        {
+            "asset_id": "voice_asset_payload_test",
+            "default_engine": "voxcpm2",
+            "preview_text": "Preview VoxCPM2 settings.",
+            "reference_transcript": "A transcript unlocks guided cloning.",
+            "content": b"stored-sample-bytes",
+            "content_type": "audio/wav",
+            "engine_settings": {"voxcpm2": dict(VOXCPM2_ENGINE_SETTINGS)},
+        },
+    )
+    f5_payload = _synthesis_payload(
+        "preview",
+        {
+            "asset_id": "voice_asset_payload_test",
+            "default_engine": "f5",
+            "preview_text": "Preview F5 settings.",
+            "reference_transcript": "F5 transcript.",
+            "content": b"stored-sample-bytes",
+            "content_type": "audio/wav",
+            "engine_settings": {"voxcpm2": dict(VOXCPM2_ENGINE_SETTINGS)},
+        },
+    )
+
+    assert {
+        "voxcpm2_cloning_mode": "reference_only",
+        "voxcpm2_style_prompt": VOXCPM2_ENGINE_SETTINGS["style_prompt"],
+        "voxcpm2_cfg_value": VOXCPM2_ENGINE_SETTINGS["cfg_value"],
+        "voxcpm2_inference_timesteps": VOXCPM2_ENGINE_SETTINGS["inference_timesteps"],
+        "voxcpm2_normalize": True,
+        "voxcpm2_denoise": False,
+    }.items() <= voxcpm2_payload.items()
+    assert not any(key.startswith("voxcpm2_") for key in f5_payload)
+
+
+def test_ai_backend_voice_processor_preserves_voxcpm2_backend_warnings() -> None:
+    from app.api.voices import AiBackendVoiceProcessor
+    from app.domain.ai_backend_client import AiBackendClient
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/base/tts/synthesize":
+            payload = json.loads(request.content)
+            assert payload["voxcpm2_cloning_mode"] == "reference_only"
+            return httpx.Response(
+                200,
+                json={
+                    "engine_id": "voxcpm2",
+                    "content_type": "audio/wav",
+                    "audio_base64": "UklGRg==",
+                    "duration_ms": 420,
+                    "warnings": ["voxcpm2_reference_only_without_transcript"],
+                },
+            )
+        return httpx.Response(404)
+
+    async def exercise() -> dict[str, Any]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+            processor = AiBackendVoiceProcessor(
+                AiBackendClient(http_client=http_client),
+                "https://ai.local:9443/base",
+            )
+            return await processor.synthesize_preview(
+                asset_id="voice_asset_warning_test",
+                content=b"stored-sample-bytes",
+                content_type="audio/wav",
+                reference_transcript="",
+                preview_text="Preview this voice.",
+                default_engine="voxcpm2",
+                use_default_engine=True,
+                engine_settings={"voxcpm2": {"cloning_mode": "reference_only"}},
+            )
+
+    result = asyncio.run(exercise())
+
+    assert result["status"] == "ok"
+    assert result["warnings"] == ["voxcpm2_reference_only_without_transcript"]
+
+
 def test_voice_library_detail_and_test_play_routes(
     voice_fixture: VoiceFixture,
 ) -> None:
