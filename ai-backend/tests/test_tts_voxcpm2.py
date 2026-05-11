@@ -164,6 +164,28 @@ def test_voxcpm2_returns_runtime_sample_rate_48000() -> None:
     assert result.wav_bytes.startswith(b"RIFF")
 
 
+def test_voxcpm2_installs_soundfile_librosa_load_shim(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    import soundfile as sf
+
+    voxcpm2_module = _voxcpm2_module()
+    fake_librosa = types.ModuleType("librosa")
+    monkeypatch.setitem(sys.modules, "librosa", fake_librosa)
+    input_path = tmp_path / "input.wav"
+    sf.write(input_path, np.column_stack([_tone(), _tone()]), 48_000)
+
+    voxcpm2_module._ensure_librosa_load()
+
+    assert callable(fake_librosa.load)
+    audio, sample_rate = fake_librosa.load(str(input_path), sr=24_000, mono=True)
+    assert sample_rate == 24_000
+    assert audio.ndim == 1
+    assert audio.dtype == np.float32
+    assert audio.size > 0
+
+
 def test_voxcpm2_style_and_control_fields_are_bounded() -> None:
     TtsSynthesisInput = getattr(_registry_module(), "TtsSynthesisInput")
 

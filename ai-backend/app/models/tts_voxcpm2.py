@@ -63,6 +63,7 @@ class VoxCpm2TtsAdapter(ImportGatedTtsAdapter):
                 reference_transcript=reference_transcript,
                 warning_codes=warning_codes,
             )
+            _ensure_librosa_load()
             generated = runtime.generate(**generate_kwargs)
 
         wav, sample_rate = _split_generate_result(generated, runtime)
@@ -142,6 +143,51 @@ def _split_generate_result(generated: Any, runtime: Any) -> tuple[Any, int]:
         return generated[0], int(generated[1])
     sample_rate = int(getattr(runtime, "sample_rate", 48_000))
     return generated, sample_rate
+
+
+def _ensure_librosa_load() -> None:
+    try:
+        import librosa  # type: ignore[import]
+    except Exception:
+        return
+    if callable(getattr(librosa, "load", None)):
+        return
+
+    def _soundfile_load(
+        path: str,
+        *,
+        sr: int | None = 22050,
+        mono: bool = True,
+        dtype: str = "float32",
+        **_: Any,
+    ) -> tuple[np.ndarray, int]:
+        audio, source_sr = sf.read(path, dtype=dtype, always_2d=False)
+        audio_array = np.asarray(audio, dtype=np.float32)
+        if mono and audio_array.ndim > 1:
+            audio_array = audio_array.mean(axis=1)
+        elif not mono and audio_array.ndim == 1:
+            audio_array = audio_array.reshape(-1, 1)
+        target_sr = int(sr) if sr else int(source_sr)
+        if target_sr != int(source_sr):
+            audio_array = _resample_linear(audio_array, int(source_sr), target_sr)
+        return audio_array, target_sr
+
+    librosa.load = _soundfile_load  # type: ignore[attr-defined]
+
+
+def _resample_linear(audio: np.ndarray, source_sr: int, target_sr: int) -> np.ndarray:
+    if source_sr <= 0 or target_sr <= 0 or audio.size == 0:
+        return audio.astype(np.float32, copy=False)
+    if audio.ndim == 1:
+        sample_count = max(int(round(audio.shape[0] * target_sr / source_sr)), 1)
+        source_x = np.linspace(0.0, 1.0, num=audio.shape[0], endpoint=False)
+        target_x = np.linspace(0.0, 1.0, num=sample_count, endpoint=False)
+        return np.interp(target_x, source_x, audio).astype(np.float32)
+    channels = [
+        _resample_linear(audio[:, channel], source_sr, target_sr)
+        for channel in range(audio.shape[1])
+    ]
+    return np.stack(channels, axis=1).astype(np.float32)
 
 
 def _audio_suffix(content_type: str | None) -> str:
