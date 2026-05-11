@@ -31,6 +31,15 @@ SUPPORTED_TTS_ENGINES = (
     "TADA 1B",
 )
 
+VOXCPM2_ENGINE_SETTINGS = {
+    "cloning_mode": "reference_only",
+    "style_prompt": "Warm, natural phone-call delivery with clear consonants.",
+    "cfg_value": 2.2,
+    "inference_timesteps": 12,
+    "normalize": True,
+    "denoise": False,
+}
+
 
 @dataclass(frozen=True, slots=True)
 class UploadedAudio:
@@ -325,6 +334,178 @@ def test_voice_save_succeeds_after_preview_returns_tts_failed(
     assert saved.json()["metadata"]["sample_asset_id"] == asset_id
     assert saved.json()["metadata"]["source"] == "voice_lab"
     assert saved.json()["metadata"]["preview_status"] == "tts_failed"
+
+
+def test_voxcpm2_voice_metadata_persists_mode_and_style(
+    voice_fixture: VoiceFixture,
+) -> None:
+    client = voice_fixture.client
+    uploaded = _upload_voice_asset(client, _wav_audio("voxcpm2-reference.wav"))
+    assert uploaded.status_code == 201
+
+    metadata = {"engine_settings": {"voxcpm2": dict(VOXCPM2_ENGINE_SETTINGS)}}
+    saved = client.post(
+        "/api/voices",
+        json={
+            **_voice_payload(
+                asset_id=uploaded.json()["asset_id"],
+                name="VoxCPM2 reference voice",
+                default_engine="voxcpm2",
+                reference_transcript="Transcript guided cloning should be available.",
+            ),
+            "metadata": metadata,
+        },
+    )
+
+    assert saved.status_code == 201, saved.text
+    body = saved.json()
+    assert body["metadata"]["engine_settings"]["voxcpm2"] == VOXCPM2_ENGINE_SETTINGS
+
+    updated_settings = {
+        **VOXCPM2_ENGINE_SETTINGS,
+        "cloning_mode": "transcript_guided",
+        "style_prompt": "Brighter narration, still conversational.",
+        "cfg_value": 1.0,
+        "inference_timesteps": 30,
+        "normalize": False,
+        "denoise": True,
+    }
+    updated = client.patch(
+        f"/api/voices/{body['voice_id']}",
+        json={
+            "metadata": {
+                "engine_settings": {
+                    "voxcpm2": updated_settings,
+                },
+            },
+        },
+    )
+    invalid_style = client.post(
+        "/api/voices",
+        json={
+            **_voice_payload(
+                asset_id=uploaded.json()["asset_id"],
+                name="Invalid VoxCPM2 style",
+                default_engine="voxcpm2",
+                reference_transcript="Bounds must be enforced before storage.",
+            ),
+            "metadata": {
+                "engine_settings": {
+                    "voxcpm2": {
+                        **VOXCPM2_ENGINE_SETTINGS,
+                        "style_prompt": "x" * 301,
+                    },
+                },
+            },
+        },
+    )
+    invalid_cfg = client.post(
+        "/api/voices",
+        json={
+            **_voice_payload(
+                asset_id=uploaded.json()["asset_id"],
+                name="Invalid VoxCPM2 cfg",
+                default_engine="voxcpm2",
+                reference_transcript="Bounds must be enforced before storage.",
+            ),
+            "metadata": {
+                "engine_settings": {
+                    "voxcpm2": {
+                        **VOXCPM2_ENGINE_SETTINGS,
+                        "cfg_value": 3.1,
+                        "inference_timesteps": 3,
+                    },
+                },
+            },
+        },
+    )
+
+    assert updated.status_code == 200, updated.text
+    assert updated.json()["metadata"]["engine_settings"]["voxcpm2"] == updated_settings
+    assert invalid_style.status_code == 422
+    assert invalid_cfg.status_code == 422
+
+
+def test_voxcpm2_preview_payload_uses_reference_only_warning_without_transcript(
+    voice_fixture: VoiceFixture,
+) -> None:
+    client = voice_fixture.client
+    uploaded = _upload_voice_asset(client, _wav_audio("voxcpm2-preview.wav"))
+    assert uploaded.status_code == 201
+
+    response = client.post(
+        "/api/voices/preview",
+        json={
+            "asset_id": uploaded.json()["asset_id"],
+            "name": "VoxCPM2 preview voice",
+            "default_engine": "voxcpm2",
+            "reference_transcript": "   ",
+            "preview_text": "Preview the reference-only VoxCPM2 fallback.",
+            "use_default_engine": True,
+            "speech_speed": 1.0,
+            "metadata": {
+                "engine_settings": {
+                    "voxcpm2": {
+                        **VOXCPM2_ENGINE_SETTINGS,
+                        "cloning_mode": "transcript_guided",
+                    },
+                },
+            },
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    call = voice_fixture.processor.calls[-1]
+    assert call["operation"] == "preview"
+    assert call["engine_id"] == "voxcpm2"
+    assert call["engine_settings"]["voxcpm2"]["cloning_mode"] == "reference_only"
+    assert call["engine_settings"]["voxcpm2"]["style_prompt"] == VOXCPM2_ENGINE_SETTINGS["style_prompt"]
+    assert call["engine_settings"]["voxcpm2"]["cfg_value"] == VOXCPM2_ENGINE_SETTINGS["cfg_value"]
+    assert call["engine_settings"]["voxcpm2"]["inference_timesteps"] == VOXCPM2_ENGINE_SETTINGS[
+        "inference_timesteps"
+    ]
+    assert call["engine_settings"]["voxcpm2"]["normalize"] is True
+    assert call["engine_settings"]["voxcpm2"]["denoise"] is False
+    assert call["warnings"] == ["voxcpm2_reference_only_without_transcript"]
+
+
+def test_voxcpm2_settings_are_ignored_for_non_voxcpm2_engine(
+    voice_fixture: VoiceFixture,
+) -> None:
+    client = voice_fixture.client
+    uploaded = _upload_voice_asset(client, _wav_audio("voxcpm2-ignored.wav"))
+    assert uploaded.status_code == 201
+    saved = client.post(
+        "/api/voices",
+        json={
+            **_voice_payload(
+                asset_id=uploaded.json()["asset_id"],
+                name="Engine switch voice",
+                default_engine="f5",
+                reference_transcript="Non-VoxCPM2 engines must ignore VoxCPM2-only metadata.",
+            ),
+            "metadata": {"engine_settings": {"voxcpm2": dict(VOXCPM2_ENGINE_SETTINGS)}},
+        },
+    )
+    assert saved.status_code == 201, saved.text
+    voice_id = saved.json()["voice_id"]
+
+    test_play = client.post(
+        f"/api/voices/{voice_id}/test-play",
+        json={
+            "text": "Play through a non-VoxCPM2 engine.",
+            "use_default_engine": False,
+            "engine": "f5",
+            "speech_speed": 0.9,
+        },
+    )
+
+    assert test_play.status_code == 200, test_play.text
+    call = voice_fixture.processor.calls[-1]
+    assert call["operation"] == "test_play"
+    assert call["engine"] == "f5"
+    assert call["engine_settings"].get("voxcpm2") is None
+    assert call["warnings"] == []
 
 
 def test_voice_id_is_stable_across_rename_and_character_reference(
