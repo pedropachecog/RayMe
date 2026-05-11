@@ -16,6 +16,7 @@ const liveFakeAudioFile = process.env.RAYME_LIVE_FAKE_AUDIO_FILE;
 const liveReferenceTranscript =
   process.env.RAYME_LIVE_REFERENCE_TRANSCRIPT ??
   'Some call me nature, others call me mother nature.';
+const liveStabilityMs = parsePositiveInt(process.env.RAYME_LIVE_STABILITY_MS);
 
 const localLlmUrl = process.env.RAYME_LIVE_LLM_URL ?? 'http://192.168.1.190:8001/v1';
 const localLlmModel = process.env.RAYME_LIVE_LLM_MODEL ?? 'unsloth/Qwen3.5-27B';
@@ -44,7 +45,7 @@ test('live OMEN-PC browser call completes two user to AI cycles without mocked c
   page,
   request: apiRequest
 }) => {
-  test.setTimeout(600_000);
+  test.setTimeout(600_000 + liveStabilityMs);
   expect(liveWebUrl).toBe(canonicalLiveWebUrl);
   expect(liveAiHealthUrl).toBe(canonicalLiveAiHealthUrl);
 
@@ -96,6 +97,19 @@ test('live OMEN-PC browser call completes two user to AI cycles without mocked c
 
   await expect.poll(() => transcriptTurnCount(page, 'user_speech'), { timeout: 240_000 }).toBeGreaterThanOrEqual(2);
   await expect.poll(() => transcriptTurnCount(page, 'ai_speech'), { timeout: 300_000 }).toBeGreaterThanOrEqual(2);
+
+  if (liveStabilityMs > 0) {
+    const beforeUserTurns = await transcriptTurnCount(page, 'user_speech');
+    const beforeAiTurns = await transcriptTurnCount(page, 'ai_speech');
+    await page.waitForTimeout(liveStabilityMs);
+    const afterUserTurns = await transcriptTurnCount(page, 'user_speech');
+    const afterAiTurns = await transcriptTurnCount(page, 'ai_speech');
+    console.log(
+      `[live-stability] duration_ms=${liveStabilityMs} before_user=${beforeUserTurns} before_ai=${beforeAiTurns} after_user=${afterUserTurns} after_ai=${afterAiTurns}`
+    );
+    expect(afterUserTurns).toBeGreaterThanOrEqual(beforeUserTurns);
+    expect(afterAiTurns).toBeGreaterThanOrEqual(beforeAiTurns);
+  }
 
   await page.getByRole('button', { name: 'End Call' }).click();
   await expect(page.getByRole('button', { name: 'Return to Thread' })).toBeVisible({ timeout: 60_000 });
@@ -222,4 +236,9 @@ async function threadRowCount(page: Page, kind: string) {
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function parsePositiveInt(value: string | undefined) {
+  const parsed = Number.parseInt(value ?? '0', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
