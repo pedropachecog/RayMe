@@ -60,9 +60,17 @@ class ScriptedVoxCpmRuntime:
         "reference_wav_path",
     }
 
-    def __init__(self, audio: np.ndarray | None = None) -> None:
+    def __init__(
+        self,
+        audio: np.ndarray | None = None,
+        streaming_chunks: list[Any] | None = None,
+    ) -> None:
         self.audio = _tone() if audio is None else audio
+        self.streaming_chunks = (
+            [self.audio] if streaming_chunks is None else streaming_chunks
+        )
         self.calls: list[dict[str, Any]] = []
+        self.streaming_calls: list[dict[str, Any]] = []
 
     def parameters(self) -> list[Any]:
         return [types.SimpleNamespace(device=types.SimpleNamespace(type="cuda"))]
@@ -73,6 +81,13 @@ class ScriptedVoxCpmRuntime:
             raise TypeError(f"unexpected generate kwargs: {sorted(unknown_kwargs)}")
         self.calls.append(kwargs)
         return self.audio, self.sample_rate
+
+    def generate_streaming(self, **kwargs: Any) -> Any:
+        unknown_kwargs = set(kwargs) - self.allowed_generate_kwargs
+        if unknown_kwargs:
+            raise TypeError(f"unexpected generate_streaming kwargs: {sorted(unknown_kwargs)}")
+        self.streaming_calls.append(kwargs)
+        yield from self.streaming_chunks
 
 
 def test_voxcpm2_adapter_uses_cuda_guard_and_runtime_loader(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -250,3 +265,77 @@ def test_voxcpm2_empty_audio_raises_sanitized_synthesis_failure() -> None:
     assert "synthesis failed" in rendered.lower()
     for forbidden in FORBIDDEN_PUBLIC_ERROR_TEXT:
         assert forbidden not in rendered
+
+
+def test_tts_streaming_contract_exports_chunk_types() -> None:
+    registry = _registry_module()
+
+    assert "TtsAudioChunk" in registry.__all__
+    assert "TtsStreamingAdapter" in registry.__all__
+
+    chunk = registry.TtsAudioChunk(
+        engine_id="voxcpm2",
+        chunk_index=0,
+        wav_bytes=b"RIFF....WAVE",
+        sample_rate=48_000,
+        duration_ms=12.5,
+        generated_at_ms=3.2,
+    )
+
+    assert chunk.engine_id == "voxcpm2"
+    assert chunk.chunk_index == 0
+    assert chunk.sample_rate == 48_000
+    assert chunk.warning_codes == []
+    assert hasattr(registry.TtsStreamingAdapter, "stream")
+
+
+def test_voxcpm2_stream_yields_wav_chunks_with_timing() -> None:
+    registry = _registry_module()
+    runtime = ScriptedVoxCpmRuntime(
+        streaming_chunks=[
+            (_tone(sample_rate=24_000, seconds=0.02), 24_000),
+            _tone(sample_rate=48_000, seconds=0.01),
+        ]
+    )
+    adapter = _voxcpm2_module().VoxCpm2TtsAdapter(runtime_factory=lambda: runtime)
+
+    chunks = list(
+        adapter.stream(
+            _request(
+                reference_transcript="",
+                voxcpm2_cloning_mode="auto",
+            )
+        )
+    )
+
+    assert [chunk.chunk_index for chunk in chunks] == [0, 1]
+    assert all(isinstance(chunk, registry.TtsAudioChunk) for chunk in chunks)
+    assert all(chunk.engine_id == "voxcpm2" for chunk in chunks)
+    assert chunks[0].sample_rate == 24_000
+    assert chunks[1].sample_rate == 48_000
+    assert all(chunk.wav_bytes.startswith(b"RIFF") for chunk in chunks)
+    assert all(chunk.duration_ms > 0 for chunk in chunks)
+    assert all(chunk.generated_at_ms >= 0 for chunk in chunks)
+    assert all(
+        "voxcpm2_reference_only_without_transcript" in chunk.warning_codes
+        for chunk in chunks
+    )
+    assert runtime.streaming_calls
+    assert runtime.calls == []
+
+
+def test_voxcpm2_stream_rejects_empty_chunks_without_generate_fallback() -> None:
+    runtime = ScriptedVoxCpmRuntime(
+        audio=_tone(),
+        streaming_chunks=[
+            np.asarray([], dtype=np.float32),
+            (np.asarray([], dtype=np.float32), 48_000),
+        ],
+    )
+    adapter = _voxcpm2_module().VoxCpm2TtsAdapter(runtime_factory=lambda: runtime)
+
+    with pytest.raises(ValueError, match="VoxCPM2 streaming synthesis failed"):
+        list(adapter.stream(_request()))
+
+    assert runtime.streaming_calls
+    assert runtime.calls == []

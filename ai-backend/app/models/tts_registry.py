@@ -78,6 +78,17 @@ class TtsSynthesisOutput(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class TtsAudioChunk(BaseModel):
+    engine_id: str
+    chunk_index: int = Field(ge=0)
+    wav_bytes: bytes
+    sample_rate: int = Field(gt=0)
+    duration_ms: float = Field(ge=0)
+    generated_at_ms: float = Field(ge=0)
+    warning_codes: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+
+
 class TtsAdapterUnavailable(RuntimeError):
     pass
 
@@ -96,6 +107,14 @@ class TtsAdapter(Protocol):
         ...
 
     def synthesize(self, request: TtsSynthesisInput) -> TtsSynthesisOutput:
+        ...
+
+
+@runtime_checkable
+class TtsStreamingAdapter(Protocol):
+    engine_id: str
+
+    def stream(self, request: TtsSynthesisInput) -> Iterable[TtsAudioChunk]:
         ...
 
 
@@ -338,10 +357,12 @@ __all__ = [
     "TTS_ENGINE_METADATA",
     "TtsAdapter",
     "TtsAdapterUnavailable",
+    "TtsAudioChunk",
     "TtsEngineAvailability",
     "TtsEngineMetadata",
     "TtsEngineRegistry",
     "TtsSynthesisInput",
     "TtsSynthesisOutput",
+    "TtsStreamingAdapter",
     "build_default_tts_adapters",
 ]
