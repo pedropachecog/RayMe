@@ -239,7 +239,9 @@ class ScriptedSynthesisAdapter:
     def synthesize(self, request: Any) -> Any:
         self.last_request = request
         if self.should_fail:
-            raise RuntimeError("C:\\models\\secret\\traceback CUDA out of memory")
+            raise RuntimeError(
+                "Traceback: /home/pmpg/.cache/openbmb/VoxCPM2 C:\\models\\secret\\CUDA out of memory"
+            )
         registry_module = importlib.import_module("app.models.tts_registry")
         output_type = getattr(registry_module, "TtsSynthesisOutput")
         return output_type(
@@ -262,6 +264,7 @@ class ScriptedSwitchingManager:
             "luxtts": adapter,
             "chatterbox_turbo": adapter,
             "tada_1b": adapter,
+            "voxcpm2": adapter,
         }
         self.switch_calls: list[str] = []
 
@@ -322,6 +325,49 @@ def test_tts_synthesize_accepts_web_ui_reference_audio_alias() -> None:
     assert adapter.last_request.speech_speed == 0.75
 
 
+def test_tts_synthesize_accepts_bounded_voxcpm2_options() -> None:
+    adapter = ScriptedSynthesisAdapter()
+    manager = ScriptedSwitchingManager(adapter)
+    app = create_app()
+    app.state.model_manager = manager
+    client = TestClient(app)
+
+    response = client.post(
+        "/tts/synthesize",
+        json=_synthesis_payload(
+            engine_id="voxcpm2",
+            voxcpm2_cloning_mode="transcript_guided",
+            voxcpm2_style_prompt="warm conversational phone audio",
+            voxcpm2_cfg_value=2.25,
+            voxcpm2_inference_timesteps=14,
+            voxcpm2_normalize=True,
+            voxcpm2_denoise=False,
+        ),
+    )
+
+    assert response.status_code == 200
+    assert manager.switch_calls == ["voxcpm2"]
+    assert adapter.last_request.voxcpm2_cloning_mode == "transcript_guided"
+    assert adapter.last_request.voxcpm2_style_prompt == "warm conversational phone audio"
+    assert adapter.last_request.voxcpm2_cfg_value == 2.25
+    assert adapter.last_request.voxcpm2_inference_timesteps == 14
+    assert adapter.last_request.voxcpm2_normalize is True
+    assert adapter.last_request.voxcpm2_denoise is False
+
+    invalid_payloads = (
+        {"voxcpm2_cloning_mode": "device_auto"},
+        {"voxcpm2_style_prompt": "x" * 601},
+        {"voxcpm2_cfg_value": 0.1},
+        {"voxcpm2_inference_timesteps": 0},
+    )
+    for invalid in invalid_payloads:
+        invalid_response = client.post(
+            "/tts/synthesize",
+            json=_synthesis_payload(engine_id="voxcpm2", **invalid),
+        )
+        assert invalid_response.status_code == 422
+
+
 def test_tts_synthesize_use_default_engine_switches_to_caller_default() -> None:
     adapter = ScriptedSynthesisAdapter()
     manager = ScriptedSwitchingManager(adapter)
@@ -359,6 +405,8 @@ def test_tts_synthesize_failure_returns_fixed_public_error() -> None:
     assert "RuntimeError" not in rendered
     assert "CUDA out of memory" not in rendered
     assert "C:\\" not in rendered
+    assert "/home/" not in rendered
+    assert "openbmb/VoxCPM2" not in rendered
 
 
 def test_f5_adapter_uses_runtime_infer_and_returns_wav_bytes() -> None:
