@@ -230,7 +230,17 @@ def _maybe_cuda_sync(torch_module: Any) -> None:
 def _install_f5_runtime_shims() -> None:
     """Avoid Windows-only F5 import crashes from training deps and librosa/numba."""
     import numpy as np
+    import soundfile as sf
+    import torch
+    import torchaudio
     import torchaudio.functional as audio_functional
+
+    def load_audio_with_soundfile(filepath: str | Path, *_args: Any, **_kwargs: Any) -> tuple[Any, int]:
+        audio, sample_rate = sf.read(filepath, always_2d=True, dtype="float32")
+        channels_first = np.asarray(audio, dtype=np.float32).T.copy()
+        return torch.from_numpy(channels_first), int(sample_rate)
+
+    torchaudio.load = load_audio_with_soundfile
 
     def mel_filter(
         *, sr: int, n_fft: int, n_mels: int, fmin: float = 0, fmax: float | None = None, **_: Any
