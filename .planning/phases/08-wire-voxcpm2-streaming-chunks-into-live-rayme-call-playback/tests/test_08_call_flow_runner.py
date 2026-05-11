@@ -149,6 +149,8 @@ class Phase8CallFlowRunnerTests(unittest.TestCase):
             self.assertEqual(payload["summary"]["f5_warm_call_ttfa_ms"], 1120.0)
             self.assertEqual(payload["summary"]["voxcpm2_warm_call_ttfa_ms"], 420.0)
             self.assertIs(payload["summary"]["voxcpm2_beats_f5"], True)
+            self.assertEqual(payload["runtime"]["reference_audio_source"], "reference.wav")
+            self.assertNotIn(str(reference_audio.parent), payload["runtime"]["reference_audio_source"])
 
 
 if __name__ == "__main__":

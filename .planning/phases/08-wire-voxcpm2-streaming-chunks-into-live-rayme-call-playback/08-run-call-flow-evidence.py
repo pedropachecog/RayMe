@@ -194,6 +194,16 @@ def _read_reference_audio(path: str) -> bytes:
     return content
 
 
+def _reference_audio_source_label(path: str) -> str:
+    reference_audio = Path(path)
+    try:
+        if reference_audio.resolve() == DEFAULT_REFERENCE_AUDIO.resolve():
+            return "phase00-short-ref-fixture"
+    except OSError:
+        pass
+    return str(path).replace("\\", "/").rstrip("/").rsplit("/", 1)[-1] or "configured-reference-audio"
+
+
 def _offer_payload(*, session_id: str, engine: str, voice_id: str, offer: dict[str, str]) -> dict[str, Any]:
     return {
         "session_id": session_id,
@@ -362,7 +372,7 @@ async def generate_evidence(args: argparse.Namespace) -> dict[str, Any]:
             "engine_order": list(ENGINE_ORDER),
             "warmup_samples_per_engine": 1,
             "measured_warm_samples_per_engine": warm_samples,
-            "reference_audio_source": str(args.reference_audio),
+            "reference_audio_source": _reference_audio_source_label(args.reference_audio),
         },
         "samples": samples,
         "summary": _summary(samples, warm_samples=warm_samples),
