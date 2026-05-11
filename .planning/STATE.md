@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 08-02-PLAN.md
-last_updated: "2026-05-11T15:11:21.227Z"
+stopped_at: Completed 08-03-PLAN.md
+last_updated: "2026-05-11T15:23:39.695Z"
 progress:
   total_phases: 10
   completed_phases: 5
   total_plans: 87
-  completed_plans: 82
-  percent: 94
+  completed_plans: 83
+  percent: 95
 ---
 
 ## Phase Status
@@ -65,6 +65,7 @@ progress:
 - Phase 08 planned on 2026-05-11: six verified plans now cover VoxCPM2 streaming adapter work, CallSession streamed playback, `/webrtc` and Web UI call semantics, repeated warm evidence tooling, OMEN dirty-checkout preflight plus canonical deployment evidence, and evidence-gated durable decision writeback.
 - Phase 08 plan 08-01 completed on 2026-05-11: the AI backend now exports an internal TTS streaming chunk contract, and VoxCPM2 can yield validated timed WAV chunks from `generate_streaming` without whole-generation fallback.
 - Phase 08 plan 08-02 completed on 2026-05-11: CallSession now consumes VoxCPM2 streamed chunks through the existing outbound track, emits immediate first-audio metrics separately from final playback proof fields, and preserves interrupt-safe single-turn completion.
+- Phase 08 plan 08-03 completed on 2026-05-11: Existing `/webrtc/speak` and Web UI call SSE surfaces now have tests proving immediate streaming metrics, final playback proof fields, sanitized failures, and one durable AI speech row without a VoxCPM2 public route.
 - Phase 08 plan 08-04 completed on 2026-05-11: Phase 8 evidence tooling now records repeated warm F5/VoxCPM2 call samples from immediate `ai_audio_started_event.tts_playback` metrics and rejects fallback, carrier-mixing, raw leaks, or slower-than-F5 medians before decision writeback.
 
 ## Current Decisions
@@ -79,6 +80,8 @@ progress:
 - Phase 08-02 call-session streaming policy: VoxCPM2 live call playback uses `adapter.stream()` only for `voxcpm2` adapters with a callable stream method.
 - Phase 08-02 playback metric policy: immediate `ai_audio_started_event.tts_playback` fields stay separate from final `tts_playback_final` proof fields.
 - Phase 08-02 interrupt policy: streamed chunks check cancellation before outbound enqueue while `interrupt()` keeps cancelling the active speech task and stopping the track.
+- Phase 08-03 public surface policy: `/webrtc/sessions/{session_id}/speak` and Web UI `/api/calls` keep forwarding streaming playback metrics through existing response/SSE carriers; no browser-visible VoxCPM2 runtime route is added.
+- Phase 08-03 durable turn policy: Web UI call turns forward exactly one nested `ai_audio_started` SSE event and persist one `ai_speech` row for the visible LLM response, not one row per audio chunk.
 - Phase 08-04 evidence timing policy: live call-flow TTFA is measured from `ai_audio_started_event.tts_playback.ai_audio_started_ms`, never HTTP request duration.
 - Phase 08-04 evidence carrier policy: immediate first-audio metrics and final playback proof fields must stay separate; final-only fields copied into `ai_audio_started_event.tts_playback` cannot satisfy Phase 8 evidence.
 - Phase 08-04 decision gate policy: decision-ready verification requires live call-flow evidence plus a separate `voxcpm2-decision.json` artifact.
@@ -203,8 +206,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-05-11T15:11:21.200Z
-Stopped at: Completed 08-02-PLAN.md
+Last session: 2026-05-11T15:23:39.669Z
+Stopped at: Completed 08-03-PLAN.md
 Resume file: None
 
 **Planned Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6 verified plans, ready to execute — 2026-05-11T14:13:40.567Z
