@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 07-08-PLAN.md
-last_updated: "2026-05-11T03:27:42.436Z"
+stopped_at: Completed 07-09-PLAN.md
+last_updated: "2026-05-11T03:38:03.296Z"
 progress:
   total_phases: 9
   completed_phases: 4
   total_plans: 81
-  completed_plans: 75
-  percent: 93
+  completed_plans: 76
+  percent: 94
 ---
 
 ## Phase Status
@@ -58,6 +58,7 @@ progress:
 - Phase 07 plan 07-06 completed on 2026-05-11: Web UI server voice metadata now normalizes and persists bounded VoxCPM2 mode/style settings, reuses saved settings for preview/test-play, and forwards flat `voxcpm2_*` synthesis payload fields only for the VoxCPM2 engine.
 - Phase 07 plan 07-07 completed on 2026-05-11: Client Voice Lab now exposes VoxCPM2 fallback roster copy, typed `metadata.engine_settings.voxcpm2` payloads, and conditional mode/style controls that preserve VoxCPM2 state while keeping non-VoxCPM2 preview payloads clean.
 - Phase 07 plan 07-08 completed on 2026-05-11: Saved VoxCPM2 cloning/style metadata now reaches real call playback through existing Web UI call and AI backend WebRTC speak APIs with bounded options and sanitized call TTS failures.
+- Phase 07 plan 07-09 completed on 2026-05-11: VoxCPM2 scenario matrix support now uses the shared chunk planner with generated sample paths, F5 promotion comparison fields, and stricter matrix/runtime/call-flow/decision-ready evidence verification.
 
 ## Current Decisions
 
@@ -153,6 +154,9 @@ progress:
 - Phase 07-08 call API policy: Real call playback reuses saved VoxCPM2 settings through the existing RayMe call API; no VoxCPM2-specific browser route is added.
 - Phase 07-08 validation policy: AI backend call speak validation uses the same VoxCPM2 bounds as transient synthesis and does not echo rejected input.
 - Phase 07-08 adapter policy: Legacy call-specific TTS adapters remain compatible unless they explicitly accept VoxCPM2 option kwargs.
+- Phase 07-09 scenario matrix policy: VoxCPM2 benchmark rows use the standard Python CUDA path with runtime-reported sample rates and the shared RayMe chunk planner.
+- Phase 07-09 streaming evidence policy: VoxCPM2 `generate_streaming` collection rows are benchmark-only until call playback consumes live chunks.
+- Phase 07-09 evidence readiness policy: decision-ready VoxCPM2 evidence requires matrix, runtime, call-flow, and manual quality checks.
 
 ## Evidence
 
@@ -179,8 +183,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-05-11T03:27:42.412Z
-Stopped at: Completed 07-08-PLAN.md
+Last session: 2026-05-11T03:37:48.436Z
+Stopped at: Completed 07-09-PLAN.md
 Resume file: None
 
 **Planned Phase:** 07 (Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations) — 12 plans — 2026-05-11T01:14:44.989Z
