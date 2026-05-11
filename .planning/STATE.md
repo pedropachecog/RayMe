@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 07-04-PLAN.md
-last_updated: "2026-05-11T02:37:32.221Z"
+stopped_at: Completed 07-05-PLAN.md
+last_updated: "2026-05-11T02:49:15.972Z"
 progress:
   total_phases: 9
   completed_phases: 4
   total_plans: 81
-  completed_plans: 71
-  percent: 88
+  completed_plans: 72
+  percent: 89
 ---
 
 ## Phase Status
@@ -54,6 +54,7 @@ progress:
 - Phase 07 plan 07-02 completed on 2026-05-11: RED Web UI server/client contracts now cover durable VoxCPM2 voice metadata, conditional Voice Lab controls, fallback roster copy, missing-transcript warning, and preview/test-play payload behavior.
 - Phase 07 plan 07-03 completed on 2026-05-11: RED call-flow contracts now cover saved VoxCPM2 metadata forwarding into real playback, bounded WebRTC speak options, sanitized `call_tts_failed`, and unchanged interrupt behavior.
 - Phase 07 plan 07-04 completed on 2026-05-11: RED scenario matrix contracts now require VoxCPM2 shared chunk planning, short/medium/long rows, `sample_path` evidence, F5-named promotion comparison, and deterministic Phase 07 evidence templates/verifier.
+- Phase 07 plan 07-05 completed on 2026-05-11: VoxCPM2 is now metadata-visible with optional `voxcpm==2.0.2`, a CUDA-only standard Python adapter, bounded `/tts/synthesize` options, warning propagation, and the D-17 runtime-path decision artifact.
 
 ## Current Decisions
 
@@ -138,6 +139,9 @@ progress:
 - Phase 07-03 validation policy: VoxCPM2 call option validation must be bounded and must not echo traceback, local path, or model-cache details.
 - Phase 07-04 evidence policy: VoxCPM2 promotion evidence uses `sample_path` as the future matrix/audio link field; the current `output_wav`-only harness behavior remains an intentional RED gap.
 - Phase 07-04 verifier policy: Phase 07 evidence verification starts with contract-only checks and reserves matrix, call-flow, and decision-ready modes for later live evidence plans.
+- Phase 07-05 runtime path policy: VoxCPM2 initial backend implementation uses the standard Python `generate` API behind the existing RayMe AI backend API; streaming and serving variants remain evidence-gated.
+- Phase 07-05 metadata policy: VoxCPM2 is visible as a candidate with RTX 3060 evidence pending, and F5 remains the only default engine.
+- Phase 07-05 runtime guard policy: VoxCPM2 loading requires CUDA through `require_torch_cuda_runtime("VoxCPM2")` and `device="cuda"`.
 
 ## Evidence
 
@@ -164,8 +168,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-05-11T02:37:32.196Z
-Stopped at: Completed 07-04-PLAN.md
+Last session: 2026-05-11T02:49:15.941Z
+Stopped at: Completed 07-05-PLAN.md
 Resume file: None
 
 **Planned Phase:** 07 (Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations) — 12 plans — 2026-05-11T01:14:44.989Z
