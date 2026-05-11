@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: Ready to plan
-stopped_at: Phase 08 context gathered
-last_updated: "2026-05-11T13:07:44.597Z"
+status: Ready to execute
+stopped_at: Phase 08 planned
+last_updated: "2026-05-11T14:13:22.718Z"
 progress:
   total_phases: 10
   completed_phases: 5
-  total_plans: 81
+  total_plans: 87
   completed_plans: 79
-  percent: 98
+  percent: 91
 ---
 
 ## Phase Status
@@ -62,6 +62,7 @@ progress:
 - Phase 07 plan 07-10 completed on 2026-05-11: Canonical OMEN deploy now captures live VoxCPM2 CUDA runtime smoke and VRAM evidence through `scripts/deploy-omen.sh`, with `voxcpm==2.0.2`, `openbmb/VoxCPM2`, 48 kHz output, CUDA torch, model cache path, and 6334 MB peak VRAM recorded.
 - Phase 07 plan 07-11 completed on 2026-05-11: Live VoxCPM2/F5 scenario matrix, generated WAV evidence, and real call-flow evidence were regenerated with BeauBrown-s2 (`voice_asset_531ca6a567db4f01a870cdfba8abae96.wav`) and passed matrix/call-flow verification.
 - Phase 07 plan 07-12 completed on 2026-05-11: VoxCPM2 final outcome is `selectable_with_caveats`; manual listening judged VoxCPM2 far superior to F5, while live RayMe call TTFA still favors F5 because calls do not yet consume VoxCPM2 streaming chunks.
+- Phase 08 planned on 2026-05-11: six verified plans now cover VoxCPM2 streaming adapter work, CallSession streamed playback, `/webrtc` and Web UI call semantics, repeated warm evidence tooling, OMEN dirty-checkout preflight plus canonical deployment evidence, and evidence-gated durable decision writeback.
 
 ## Current Decisions
 
@@ -191,8 +192,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-05-11T13:07:44.571Z
-Stopped at: Phase 08 context gathered
-Resume file: .planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/08-CONTEXT.md
+Last session: 2026-05-11T14:13:40.567Z
+Stopped at: Phase 08 planned
+Resume file: .planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/08-01-PLAN.md
 
-**Planned Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — not planned yet — 2026-05-11T12:38:00.000Z
+**Planned Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6 verified plans, ready to execute — 2026-05-11T14:13:40.567Z
