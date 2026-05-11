@@ -516,13 +516,20 @@ Plans:
 
 ### Phase 8: Wire VoxCPM2 streaming chunks into live RayMe call playback
 
-**Goal:** [To be planned]
-**Requirements**: TBD
+**Goal:** Live RayMe calls using VoxCPM2 start audible playback from VoxCPM2 streaming audio chunks and beat F5 warm first-audio time in the same live evidence run; if that passes, RayMe updates its durable call-engine decision toward VoxCPM2.
+**Requirements:** P8-R1, P8-R2, P8-R3, P8-R4, P8-R5.
 **Depends on:** Phase 7
-**Plans:** 0 plans
+**Plans:** 6 plans
+
+**Wave summary:** Wave 1 creates the internal streaming adapter contract and Phase 8 evidence tooling in parallel; Wave 2 streams VoxCPM2 chunks through `CallSession`; Wave 3 preserves `/webrtc` and Web UI call semantics; Wave 4 runs canonical OMEN deployment plus live repeated warm evidence; Wave 5 performs gated decision writeback.
 
 Plans:
-- [ ] TBD (run /gsd-plan-phase 8 to break down)
+- [ ] 08-01-PLAN.md - Internal AI-backend TTS streaming contract plus VoxCPM2 `generate_streaming` adapter (Wave 1)
+- [ ] 08-02-PLAN.md - CallSession streamed chunk playback, first-audio metrics, interrupt-safe cancellation, and single completion (Wave 2)
+- [ ] 08-03-PLAN.md - Existing `/webrtc` speak and Web UI call SSE semantics with streaming timing fields and one durable AI speech row (Wave 3)
+- [ ] 08-04-PLAN.md - Phase 8 repeated warm call-flow evidence runner and verifier that rejects fallback and slower-than-F5 medians (Wave 1)
+- [ ] 08-05-PLAN.md - Canonical OMEN deployment and live VoxCPM2-versus-F5 evidence artifacts (Wave 4)
+- [ ] 08-06-PLAN.md - Evidence-gated durable VoxCPM2 live-call default decision writeback (Wave 5)
 
 ---
 
