@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import tempfile
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Iterable
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ import soundfile as sf
 from app.models.gpu_runtime import require_torch_cuda_runtime
 from app.models.tts_registry import (
     ImportGatedTtsAdapter,
+    TtsAudioChunk,
     TtsSynthesisInput,
     TtsSynthesisOutput,
 )
@@ -82,6 +84,55 @@ class VoxCpm2TtsAdapter(ImportGatedTtsAdapter):
             warnings=warning_codes,
         )
 
+    def stream(self, request: TtsSynthesisInput) -> Iterable[TtsAudioChunk]:
+        if not self.loaded:
+            self.load()
+        runtime = self._runtime or self._build_runtime()
+        self._runtime = runtime
+        reference_transcript = (request.reference_transcript or "").strip()
+        warning_codes: list[str] = []
+        started_at = time.perf_counter()
+        chunk_index = 0
+
+        with tempfile.TemporaryDirectory(prefix="rayme-voxcpm2-") as tmp_dir:
+            reference_path = Path(tmp_dir) / f"reference{_audio_suffix(request.reference_audio_content_type)}"
+            reference_path.write_bytes(request.reference_audio)
+            generate_kwargs = _build_generate_kwargs(
+                request=request,
+                reference_path=reference_path,
+                reference_transcript=reference_transcript,
+                warning_codes=warning_codes,
+            )
+            _ensure_librosa_load()
+            generate_streaming = getattr(runtime, "generate_streaming", None)
+            if not callable(generate_streaming):
+                raise ValueError("VoxCPM2 streaming synthesis failed")
+
+            for generated in generate_streaming(**generate_kwargs):
+                split = _try_split_streaming_result(generated, runtime)
+                if split is None:
+                    continue
+                wav_array, sample_rate = split
+                if wav_array.size == 0 or sample_rate <= 0:
+                    continue
+
+                buffer = BytesIO()
+                sf.write(buffer, wav_array, sample_rate, format="WAV")
+                yield TtsAudioChunk(
+                    engine_id=self.engine_id,
+                    chunk_index=chunk_index,
+                    wav_bytes=buffer.getvalue(),
+                    sample_rate=sample_rate,
+                    duration_ms=round((wav_array.size / float(sample_rate)) * 1000, 1),
+                    generated_at_ms=round((time.perf_counter() - started_at) * 1000, 1),
+                    warning_codes=list(warning_codes),
+                    warnings=list(warning_codes),
+                )
+                chunk_index += 1
+
+        if chunk_index == 0:
+            raise ValueError("VoxCPM2 streaming synthesis failed")
+
     def _build_runtime(self) -> Any:
         if self._runtime_factory is not None:
             return self._runtime_factory()
@@ -146,6 +197,16 @@ def _split_generate_result(generated: Any, runtime: Any) -> tuple[Any, int]:
         return generated[0], int(generated[1])
     sample_rate = int(getattr(runtime, "sample_rate", 48_000))
     return generated, sample_rate
+
+
+def _try_split_streaming_result(generated: Any, runtime: Any) -> tuple[np.ndarray, int] | None:
+    try:
+        wav, sample_rate = _split_generate_result(generated, runtime)
+        sample_rate = int(sample_rate)
+        wav_array = np.asarray(wav, dtype=np.float32).flatten()
+    except (TypeError, ValueError):
+        return None
+    return wav_array, sample_rate
 
 
 def _ensure_librosa_load() -> None:
