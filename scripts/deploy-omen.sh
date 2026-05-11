@@ -99,12 +99,9 @@ function Invoke-RayMeVoxCpm2Verification {
   }
 
   $uv = [string](Get-RayMeUv | Select-Object -Last 1)
-  $python310 = "C:\Program Files\Python310\python.exe"
-  if (-not (Test-Path $python310)) {
-    throw "Missing required OMEN Python 3.10 runtime at $python310"
-  }
-  $env:UV_PYTHON = $python310
-  & $uv sync --project ai-backend --extra tts --python $python310
+  $pythonVersion = "3.11"
+  $env:UV_PYTHON = $pythonVersion
+  & $uv sync --project ai-backend --extra tts --python $pythonVersion
   if ($LASTEXITCODE -ne 0) { throw "uv sync --project ai-backend --extra tts failed" }
 
   $env:PATH = "$cudaRuntimeBin;$env:PATH"
