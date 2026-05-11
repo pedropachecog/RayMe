@@ -1,0 +1,18 @@
+{
+  "cpu_fallback_detected": false,
+  "gpu_name": "NVIDIA GeForce RTX 3060",
+  "iterations": 1,
+  "memory_free_min_mb": 5777,
+  "memory_total_mb": 12288,
+  "memory_used_peak_mb": 6334,
+  "passed_11gb_budget": true,
+  "peak_vram_mb": 6334,
+  "resident_engines": [
+    "voxcpm2_standalone_probe",
+    "live_ai_backend:f5"
+  ],
+  "stt_model": "distil-large-v3",
+  "vad_ready": true,
+  "vram_budget_mb": 11264,
+  "within_11gb_budget": true
+}
