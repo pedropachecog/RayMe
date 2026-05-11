@@ -93,6 +93,7 @@ def test_health_returns_phase_two_model_residency_contract() -> None:
         "luxtts",
         "chatterbox_turbo",
         "tada_1b",
+        "voxcpm2",
     }
     resident_engines = [
         engine.get("id") or engine.get("engine_id")
