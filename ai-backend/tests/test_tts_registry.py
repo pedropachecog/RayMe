@@ -230,10 +230,16 @@ def test_registry_switch_state_contract_is_idle_loading_resident_unavailable_reg
 
 
 class ScriptedSynthesisAdapter:
-    engine_id = "xtts_v2"
-
-    def __init__(self, *, should_fail: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        engine_id: str = "xtts_v2",
+        should_fail: bool = False,
+        warning_codes: list[str] | None = None,
+    ) -> None:
+        self.engine_id = engine_id
         self.should_fail = should_fail
+        self.warning_codes = warning_codes or []
         self.last_request: Any = None
 
     def synthesize(self, request: Any) -> Any:
@@ -249,6 +255,7 @@ class ScriptedSynthesisAdapter:
             wav_bytes=b"RIFFtest-wave",
             sample_rate=24000,
             duration_ms=125.0,
+            warning_codes=self.warning_codes,
         )
 
 
@@ -356,7 +363,7 @@ def test_tts_synthesize_accepts_bounded_voxcpm2_options() -> None:
 
     invalid_payloads = (
         {"voxcpm2_cloning_mode": "device_auto"},
-        {"voxcpm2_style_prompt": "x" * 601},
+        {"voxcpm2_style_prompt": "x" * 301},
         {"voxcpm2_cfg_value": 0.1},
         {"voxcpm2_inference_timesteps": 0},
     )
@@ -366,6 +373,25 @@ def test_tts_synthesize_accepts_bounded_voxcpm2_options() -> None:
             json=_synthesis_payload(engine_id="voxcpm2", **invalid),
         )
         assert invalid_response.status_code == 422
+
+
+def test_tts_synthesize_returns_voxcpm2_warning_codes() -> None:
+    adapter = ScriptedSynthesisAdapter(
+        engine_id="voxcpm2",
+        warning_codes=["voxcpm2_reference_only_without_transcript"],
+    )
+    manager = ScriptedSwitchingManager(adapter)
+    app = create_app()
+    app.state.model_manager = manager
+    client = TestClient(app)
+
+    response = client.post(
+        "/tts/synthesize",
+        json=_synthesis_payload(engine_id="voxcpm2", reference_transcript=""),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["warnings"] == ["voxcpm2_reference_only_without_transcript"]
 
 
 def test_tts_synthesize_use_default_engine_switches_to_caller_default() -> None:
