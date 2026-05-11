@@ -146,7 +146,8 @@
   let deleteState: 'idle' | 'deleting' = 'idle';
   let activeAudio: HTMLAudioElement | null = null;
 
-  $: transcriptRequired = selectedEngine !== 'voxcpm2';
+  $: selectedEngineMetadata = engines.find((engine) => engine.id === selectedEngine);
+  $: transcriptRequired = selectedEngineMetadata?.requires_transcript === true;
   $: hasRequiredTranscript = !transcriptRequired || Boolean(transcript.trim());
   $: canPreview = Boolean(asset && hasRequiredTranscript && selectedEngine && previewText.trim());
   $: canSave = Boolean(asset && voiceName.trim() && hasRequiredTranscript && selectedEngine);
