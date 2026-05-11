@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 08-03-PLAN.md
-last_updated: "2026-05-11T15:23:39.695Z"
+stopped_at: Completed 08-05-PLAN.md
+last_updated: "2026-05-11T19:07:10.085Z"
 progress:
   total_phases: 10
   completed_phases: 5
   total_plans: 87
-  completed_plans: 83
-  percent: 95
+  completed_plans: 84
+  percent: 97
 ---
 
 ## Phase Status
@@ -67,6 +67,7 @@ progress:
 - Phase 08 plan 08-02 completed on 2026-05-11: CallSession now consumes VoxCPM2 streamed chunks through the existing outbound track, emits immediate first-audio metrics separately from final playback proof fields, and preserves interrupt-safe single-turn completion.
 - Phase 08 plan 08-03 completed on 2026-05-11: Existing `/webrtc/speak` and Web UI call SSE surfaces now have tests proving immediate streaming metrics, final playback proof fields, sanitized failures, and one durable AI speech row without a VoxCPM2 public route.
 - Phase 08 plan 08-04 completed on 2026-05-11: Phase 8 evidence tooling now records repeated warm F5/VoxCPM2 call samples from immediate `ai_audio_started_event.tts_playback` metrics and rejects fallback, carrier-mixing, raw leaks, or slower-than-F5 medians before decision writeback.
+- Phase 08 plan 08-05 completed on 2026-05-11: OMEN dirty Phase 07 evidence changes were preserved on a dedicated branch before canonical deployment, CUDA VoxCPM2 runtime/VRAM evidence was regenerated at commit `6b69aeb98434678f4aa1853953a710f8b9b0f905`, and live repeated warm call-flow evidence proved VoxCPM2 median first-audio `762.7 ms` beat F5 `948.0 ms`.
 
 ## Current Decisions
 
@@ -85,6 +86,9 @@ progress:
 - Phase 08-04 evidence timing policy: live call-flow TTFA is measured from `ai_audio_started_event.tts_playback.ai_audio_started_ms`, never HTTP request duration.
 - Phase 08-04 evidence carrier policy: immediate first-audio metrics and final playback proof fields must stay separate; final-only fields copied into `ai_audio_started_event.tts_playback` cannot satisfy Phase 8 evidence.
 - Phase 08-04 decision gate policy: decision-ready verification requires live call-flow evidence plus a separate `voxcpm2-decision.json` artifact.
+- Phase 08-05 OMEN preservation policy: dirty OMEN checkout changes are preserved on a named branch and commit before deployment; the preserved Phase 07 evidence branch is `preserve/phase08-omen-dirty-20260511T183300Z` at `2077f8ddb7d50a6cca5f1d14ff26456a781f990a`.
+- Phase 08-05 live evidence result: on OMEN commit `6b69aeb98434678f4aa1853953a710f8b9b0f905`, VoxCPM2 warm live call TTFA median was `762.7 ms` versus F5 `948.0 ms`, with `voxcpm2_beats_f5: true`, streaming used, and whole-WAV fallback false.
+- Phase 08-05 evidence hygiene policy: live call-flow evidence must use sanitized reference source labels and must not include absolute local reference-audio paths.
 - TTS future implementation policy: keep all measured engine paths available, including `LuxTTS`, `Chatterbox Turbo`, and `TADA 1B`; use quality evaluations to choose defaults, labels, warnings, and retesting priorities.
 - TTS long-form implementation: shared engine-agnostic chunk planner is now implemented in the scenario harness; raw whole-generation fallback rows are no longer the only comparison.
 - TTS quality notes: Spike 003 is closed as `PASS_WITH_CAVEATS`. LuxTTS optimized is very fast but has current user-sample quality failures; Chatterbox Turbo baseline long-form is gibberish, while optimized long-form normal and seed 1337 are fine on the listened long samples; TADA Windows optimized long is acceptable while WSL is caution; XTTS/F5 long samples need sample/tuning caveats.
@@ -206,8 +210,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-05-11T15:23:39.669Z
-Stopped at: Completed 08-03-PLAN.md
+Last session: 2026-05-11T19:07:10.056Z
+Stopped at: Completed 08-05-PLAN.md
 Resume file: None
 
 **Planned Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6 verified plans, ready to execute — 2026-05-11T14:13:40.567Z
