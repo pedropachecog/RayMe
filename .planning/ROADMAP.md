@@ -508,7 +508,7 @@ Plans:
 - [x] 07-08-PLAN.md - Real call-flow integration through existing Web UI call and AI backend speak APIs (Wave 2)
 - [x] 07-09-PLAN.md - VoxCPM2 scenario matrix runner and promotion evidence schema enforcement (Wave 2)
 - [x] 07-10-PLAN.md - OMEN deployment/runtime smoke and VRAM soak evidence through `scripts/deploy-omen.sh` only (Wave 3)
-- [ ] 07-11-PLAN.md - Live scenario matrix, generated WAV, and real call-flow evidence artifacts (Wave 4)
+- [x] 07-11-PLAN.md - Live scenario matrix, generated WAV, and real call-flow evidence artifacts (Wave 4)
 - [ ] 07-12-PLAN.md - Manual listening quality gate and final promotion decision writeback (Wave 5)
 
 ---
