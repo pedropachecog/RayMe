@@ -18,6 +18,7 @@ const sourceFiles = [
   'src/lib/components/voice/AudioSampleDropzone.svelte',
   'src/lib/components/voice/TranscriptEditor.svelte',
   'src/lib/components/voice/TtsEnginePicker.svelte',
+  'src/lib/components/voice/VoxCpm2Controls.svelte',
   'src/lib/components/voice/SynthPreviewPanel.svelte',
   'src/lib/components/voice/VoiceLibraryList.svelte',
   'src/lib/components/voice/VoiceLibraryRow.svelte',
@@ -244,6 +245,7 @@ describe('Voice Lab Phase 2 source contract', () => {
         'src/lib/components/voice/AudioSampleDropzone.svelte',
         'src/lib/components/voice/TranscriptEditor.svelte',
         'src/lib/components/voice/TtsEnginePicker.svelte',
+        'src/lib/components/voice/VoxCpm2Controls.svelte',
         'src/lib/components/voice/SynthPreviewPanel.svelte',
         'src/lib/components/voice/VoiceLibraryList.svelte',
         'src/lib/components/voice/VoiceLibraryRow.svelte',
@@ -279,9 +281,9 @@ describe('Voice Lab Phase 2 source contract', () => {
 
     expect(routeSource).toContain("id: 'voxcpm2'");
     expect(routeSource).toMatch(/selectedEngine\s*={3}\s*['"]voxcpm2['"]/);
-    expect(routeSource).toMatch(/maxlength={?300}?|maxLength={?300}?|maxlength="300"/);
-    expect(routeSource).toMatch(/cfg_value[\s\S]*(?:min="?1(?:\.0)?"?)[\s\S]*(?:max="?3(?:\.0)?"?)/);
-    expect(routeSource).toMatch(
+    expect(voiceLabSources).toMatch(/maxlength={?300}?|maxLength={?300}?|maxlength="300"/);
+    expect(voiceLabSources).toMatch(/cfg_value[\s\S]*(?:min="?1(?:\.0)?"?)[\s\S]*(?:max="?3(?:\.0)?"?)/);
+    expect(voiceLabSources).toMatch(
       /inference_timesteps[\s\S]*(?:min="?4"?)[\s\S]*(?:max="?30"?)/,
     );
     expect(routeSource).not.toMatch(/Reference only[\s\S]*XTTS v2|Transcript guided[\s\S]*F5-TTS/);
