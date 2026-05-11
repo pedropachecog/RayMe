@@ -59,13 +59,15 @@ class ScriptedVoxCpmRuntime:
         return self.audio, self.sample_rate
 
 
-def test_voxcpm2_adapter_forces_cuda_device(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_voxcpm2_adapter_uses_cuda_guard_and_runtime_loader(monkeypatch: pytest.MonkeyPatch) -> None:
     voxcpm2_module = _voxcpm2_module()
     calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
+    cuda_guard_calls: list[str] = []
 
     class ScriptedVoxCPM:
         @classmethod
         def from_pretrained(cls, *args: Any, **kwargs: Any) -> ScriptedVoxCpmRuntime:
+            assert "device" not in kwargs
             calls.append((args, kwargs))
             return ScriptedVoxCpmRuntime()
 
@@ -80,17 +82,22 @@ def test_voxcpm2_adapter_forces_cuda_device(monkeypatch: pytest.MonkeyPatch) -> 
         return original_find_spec(name, *args, **kwargs)
 
     monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
-    monkeypatch.setattr(voxcpm2_module, "require_torch_cuda_runtime", lambda _component: None)
+    monkeypatch.setattr(
+        voxcpm2_module,
+        "require_torch_cuda_runtime",
+        lambda component: cuda_guard_calls.append(component),
+    )
 
     adapter = voxcpm2_module.VoxCpm2TtsAdapter()
     adapter.load()
 
     assert adapter.required_modules == ("voxcpm",)
     assert voxcpm2_module.REQUIRED_PACKAGE == "voxcpm==2.0.2"
+    assert voxcpm2_module.MODEL_ID == "openbmb/VoxCPM2"
+    assert cuda_guard_calls == ["VoxCPM2", "VoxCPM2"]
     assert calls
     assert calls[0][0] == ("openbmb/VoxCPM2",)
-    assert calls[0][1]["device"] == "cuda"
-    assert calls[0][1]["device"] != "auto"
+    assert calls[0][1]["load_denoiser"] is False
 
 
 def test_voxcpm2_reference_only_mode_when_transcript_missing() -> None:

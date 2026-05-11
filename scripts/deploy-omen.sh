@@ -163,7 +163,9 @@ if package != EXPECTED_PACKAGE:
 from voxcpm import VoxCPM
 
 started = time.perf_counter()
-model = VoxCPM.from_pretrained(MODEL_ID, device="cuda")
+# Runtime contract remains device="cuda"; voxcpm==2.0.2 selects CUDA internally
+# when CUDA PyTorch is installed, and the parameter-device check below rejects CPU.
+model = VoxCPM.from_pretrained(MODEL_ID, load_denoiser=False)
 load_ms = round((time.perf_counter() - started) * 1000, 1)
 
 tts_model = getattr(model, "tts_model", None)

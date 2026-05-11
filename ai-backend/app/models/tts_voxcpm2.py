@@ -18,6 +18,7 @@ from app.models.tts_registry import (
 
 
 REQUIRED_PACKAGE = "voxcpm==2.0.2"
+MODEL_ID = "openbmb/VoxCPM2"
 
 
 class VoxCpm2TtsAdapter(ImportGatedTtsAdapter):
@@ -86,7 +87,26 @@ class VoxCpm2TtsAdapter(ImportGatedTtsAdapter):
         require_torch_cuda_runtime("VoxCPM2")
         from voxcpm import VoxCPM
 
-        return VoxCPM.from_pretrained("openbmb/VoxCPM2", device="cuda")
+        runtime = VoxCPM.from_pretrained(MODEL_ID, load_denoiser=False)
+        _assert_runtime_uses_cuda(runtime)
+        return runtime
+
+
+def _assert_runtime_uses_cuda(runtime: Any) -> None:
+    device_types: set[str] = set()
+    for candidate in (runtime, getattr(runtime, "tts_model", None), getattr(runtime, "model", None)):
+        if candidate is None or not hasattr(candidate, "parameters"):
+            continue
+        try:
+            for parameter in candidate.parameters():
+                device = getattr(parameter, "device", None)
+                if device is not None:
+                    device_types.add(str(getattr(device, "type", device)))
+                break
+        except Exception:
+            continue
+    if device_types and "cuda" not in device_types:
+        raise RuntimeError("VoxCPM2 runtime did not load on CUDA")
 
 
 def _build_generate_kwargs(
