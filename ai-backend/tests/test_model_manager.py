@@ -16,6 +16,7 @@ EXPECTED_TTS_ENGINE_IDS = (
     "luxtts",
     "chatterbox_turbo",
     "tada_1b",
+    "voxcpm2",
 )
 EXPECTED_STATUS_VALUES = {"ok", "degraded", "starting", "error"}
 EXPECTED_SWITCH_STATES = {"idle", "loading", "resident", "unavailable"}
@@ -239,6 +240,37 @@ def test_failed_engine_self_test_degrades_only_that_engine_with_typed_reason() -
     assert statuses["f5"]["available"] is True
     assert statuses["qwen3_0_6b"]["available"] is True
     _assert_no_raw_exception_text(statuses["xtts_v2"]["unavailable_reason"])
+    _assert_no_raw_exception_text(health)
+
+
+def test_voxcpm2_load_failure_degrades_only_voxcpm2() -> None:
+    manager, _, events = _build_manager(load_failing_engine="voxcpm2")
+
+    _complete(manager.startup())
+    with pytest.raises(RuntimeError):
+        _complete(manager.switch_tts_engine("voxcpm2"))
+    health = _health_mapping(manager)
+    statuses = _engine_statuses(health)
+
+    assert health["status"] == "degraded"
+    assert health["resident_tts_engine"] is None
+    assert health["loading_engine"] is None
+    assert statuses["voxcpm2"]["available"] is False
+    assert statuses["voxcpm2"]["resident"] is False
+    assert statuses["voxcpm2"]["state"] == "unavailable"
+    assert statuses["voxcpm2"]["unavailable_reason"] == "engine load failed"
+    assert "voxcpm2:load" in events
+    for engine_id in (
+        "f5",
+        "xtts_v2",
+        "qwen3_0_6b",
+        "luxtts",
+        "chatterbox_turbo",
+        "tada_1b",
+    ):
+        assert engine_id in statuses
+        assert statuses[engine_id]["available"] is True
+    _assert_no_raw_exception_text(statuses["voxcpm2"]["unavailable_reason"])
     _assert_no_raw_exception_text(health)
 
 

@@ -22,6 +22,7 @@ EXPECTED_ENGINE_LABELS = {
     "luxtts": "LuxTTS",
     "chatterbox_turbo": "Chatterbox Turbo",
     "tada_1b": "TADA 1B",
+    "voxcpm2": "VoxCPM2",
 }
 REQUIRED_METADATA_FIELDS = {
     "id",
@@ -51,6 +52,12 @@ ENGINE_REQUIREMENTS = {
         "model_license": "Apache-2.0",
         "requires_transcript": False,
         "supports_streaming": False,
+    },
+    "voxcpm2": {
+        "code_license": "Apache-2.0",
+        "model_license": "Apache-2.0",
+        "requires_transcript": False,
+        "supports_streaming": True,
     },
 }
 SWITCH_STATES = {"idle", "loading", "resident", "unavailable"}
@@ -142,7 +149,7 @@ def test_registry_metadata_rejects_three_engine_only_roster_registry_metadata() 
 
     engine_ids = {entry.get("id") or entry.get("engine_id") for entry in entries}
 
-    assert len(entries) == 6
+    assert len(entries) == len(EXPECTED_ENGINE_LABELS)
     assert set(EXPECTED_ENGINE_LABELS) - engine_ids == set()
 
 
@@ -185,6 +192,23 @@ def test_registry_metadata_captures_engine_specific_contracts_registry_metadata(
     assert by_id["luxtts"]["runtime_evidence"]
     assert by_id["chatterbox_turbo"]["runtime_evidence"]
     assert by_id["tada_1b"]["runtime_evidence"]
+
+
+def test_registry_metadata_includes_voxcpm2_candidate_contract() -> None:
+    registry_module, _, entries = _registry_and_entries()
+    by_id = {entry.get("id") or entry.get("engine_id"): entry for entry in entries}
+
+    assert "voxcpm2" in getattr(registry_module, "EXPECTED_ENGINE_IDS")
+    assert by_id["voxcpm2"]["label"] == "VoxCPM2"
+    assert by_id["voxcpm2"]["code_license"] == "Apache-2.0"
+    assert by_id["voxcpm2"]["model_license"] == "Apache-2.0"
+    assert by_id["voxcpm2"]["requires_transcript"] is False
+    assert by_id["voxcpm2"]["supports_streaming"] is True
+    assert "RTX 3060 gate pending" in by_id["voxcpm2"]["caveat_chips"]
+    assert "optional" in by_id["voxcpm2"]["runtime_evidence"].lower()
+    assert "openbmb/VoxCPM2" in by_id["voxcpm2"]["runtime_evidence"]
+    assert "health" in by_id["voxcpm2"]["runtime_evidence"].lower()
+    assert "48 kHz" in by_id["voxcpm2"]["quality_notes"]
 
 
 def test_registry_metadata_rejects_missing_engine_registry_metadata() -> None:
