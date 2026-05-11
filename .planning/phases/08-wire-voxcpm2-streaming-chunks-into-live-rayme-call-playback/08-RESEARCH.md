@@ -415,17 +415,18 @@ The example schema is a recommended Phase 8 artifact shape, not an existing arti
 | A3 | Python thread cancellation for the VoxCPM generator is cooperative from this integration's perspective. | Common Pitfalls | Planner should design interrupt behavior around discard-after-cancel even if runtime calls finish late. |
 | A4 | The example evidence JSON schema is recommended, not an existing artifact. | Code Examples | Planner may choose another schema if it preserves verifier-enforced required fields. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Remote OMEN checkout cleanup before evidence**
    - What we know: The OMEN alias `rayme-pmpg` is reachable, the target GPU is an RTX 3060 with 12288 MiB VRAM and driver 560.94, and the remote RayMe checkout currently has modified Phase 7 artifacts plus untracked runtime files. [VERIFIED: ssh rayme-pmpg whoami + ssh rayme-pmpg nvidia-smi + ssh rayme-pmpg git status]
-   - What's unclear: Whether those remote changes are disposable generated evidence or user-preserved work. [ASSUMED]
-   - Recommendation: Add a preflight task that reports the remote dirty checkout and asks for cleanup/commit direction before `scripts/deploy-omen.sh` live evidence. [VERIFIED: scripts/deploy-omen.sh + AGENTS.md]
+   - RESOLVED: Do not commit, discard, reset, stash-drop, or otherwise mutate remote OMEN dirty changes autonomously. Add a `checkpoint:decision` preflight before canonical deployment that runs `ssh rayme-pmpg "powershell -NoProfile -Command \"cd C:\\Users\\pmpg\\rayme\\RayMe; git status --short\""`, records the exact output in `08-OMEN-EVIDENCE.md`, and stops for user direction if the checkout is dirty. [VERIFIED: chosen revision resolution + AGENTS.md]
+   - Recommendation: The canonical deploy task remains autonomous only after the preflight proves the OMEN checkout is clean or the user has resolved the checkpoint. All deployment still goes through `scripts/deploy-omen.sh`. [VERIFIED: chosen revision resolution + scripts/deploy-omen.sh + AGENTS.md]
 
 2. **Whether to expose first-audio metrics in backend speak response or data-channel events**
    - What we know: Web UI already forwards nested `ai_audio_started_event` if present, and the backend speak request must remain open until playback completion. [VERIFIED: web-ui/server/app/api/calls.py + 08-CONTEXT.md]
-   - What's unclear: The exact evidence transport is discretionary as long as fields are machine-readable and verifier-enforced. [VERIFIED: 08-CONTEXT.md]
-   - Recommendation: Prefer backend response metrics for minimal public-surface change, with data-channel collection only if existing evidence tooling already relies on live events. [ASSUMED]
+   - RESOLVED: Use `ai_audio_started_event.tts_playback` only as the immediate first-audio payload emitted at first successful chunk enqueue. It may include fields known at that moment: `streaming_used`, `fallback_used`, `whole_wav_fallback_used`, `first_chunk_generated_ms`, `first_chunk_enqueued_ms`, `ai_audio_started_ms`, `chunk_count_at_start` or equivalent, and `inter_chunk_gaps_ms` only as an empty or partial list when already known. [VERIFIED: chosen revision resolution + 08-CONTEXT.md]
+   - RESOLVED: Return final metrics after generation/playback completes on the final `/webrtc/speak` done or failure event as `tts_playback_final`, with `chunk_count`, `total_generation_ms`, `total_playback_ms`, `inter_chunk_gaps_ms`, `streaming_used`, `fallback_used`, and `whole_wav_fallback_used`. Phase 8 evidence runner and verifier must read first-audio TTFA from `event.ai_audio_started_event.tts_playback.ai_audio_started_ms` and final proof fields from `event.tts_playback_final`, not from the immediate first-audio event. [VERIFIED: chosen revision resolution]
+   - Recommendation: Prefer backend response metrics for minimal public-surface change; data-channel collection is unnecessary unless later implementation finds the existing evidence path cannot observe the final speak response. [ASSUMED]
 
 ## Environment Availability
 

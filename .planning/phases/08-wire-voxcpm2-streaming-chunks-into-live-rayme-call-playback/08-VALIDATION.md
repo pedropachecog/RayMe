@@ -38,11 +38,12 @@ created: 2026-05-11
 
 | Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
 |---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 08-01-01 | 01 | 1 | P8-R1 | T-08-01 | No empty or invalid chunk is queued; no raw VoxCPM2 errors are exposed | unit | `uv run --project ai-backend pytest ai-backend/tests/test_tts_voxcpm2.py -q` | yes | pending |
-| 08-02-01 | 02 | 1 | P8-R1 / P8-R3 / P8-R4 | T-08-02 | Cancelled turns cannot enqueue later chunks or emit duplicate completion | integration | `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` | yes | pending |
-| 08-03-01 | 03 | 1 | P8-R3 | T-08-03 | Streaming failures return sanitized call TTS failure behavior only | route integration | `uv run --project ai-backend pytest ai-backend/tests/test_webrtc_signaling.py -q` | yes | pending |
-| 08-04-01 | 04 | 2 | P8-R4 | T-08-04 | Web UI records one durable `ai_speech` row and keeps SSE alive during backend speak | server integration | `uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py -q` | yes | pending |
-| 08-05-01 | 05 | 3 | P8-R2 / P8-R5 | T-08-05 | Evidence cannot pass if streaming is absent, fallback is used, or VoxCPM2 median first-audio does not beat F5 | evidence | `python3 .planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/08-verify-evidence.py` | no - Wave 0 creates | pending |
+| 08-01-01 | 08-01 | 1 | P8-R1 | T-08-01 | No empty or invalid chunk is queued; no raw VoxCPM2 errors are exposed | unit | `uv run --project ai-backend pytest ai-backend/tests/test_tts_voxcpm2.py -q` | yes | pending |
+| 08-04-01 | 08-04 | 1 | P8-R2 / P8-R5 | T-08-04 | Evidence tooling reads TTFA from immediate `ai_audio_started_event.tts_playback` and final proof fields from `tts_playback_final` | evidence contract | `python3 .planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/08-verify-evidence.py --contract-only` | no - Wave 1 creates | pending |
+| 08-02-01 | 08-02 | 2 | P8-R1 / P8-R3 / P8-R4 | T-08-02 | Cancelled turns cannot enqueue later chunks or emit duplicate completion | integration | `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` | yes | pending |
+| 08-03-01 | 08-03 | 3 | P8-R3 / P8-R4 | T-08-03 | Streaming failures return sanitized call TTS failure behavior only, and public call surfaces preserve immediate/final metric carriers | route/server integration | `uv run --project ai-backend pytest ai-backend/tests/test_webrtc_signaling.py -q && uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py -q` | yes | pending |
+| 08-05-01 | 08-05 | 4 | P8-R2 / P8-R3 / P8-R4 | T-08-05 | OMEN dirty checkout handling is user-gated; evidence cannot pass if streaming is absent, fallback is used, or VoxCPM2 median first-audio does not beat F5 | live evidence | `python3 .planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/08-verify-evidence.py --call-flow-only` | no - Wave 4 creates | pending |
+| 08-06-01 | 08-06 | 5 | P8-R5 | T-08-06 | Durable decision writeback occurs only after decision-ready evidence passes | docs/evidence | `python3 .planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/08-verify-evidence.py --decision-ready` | no - Wave 5 creates | pending |
 
 *Status: pending / green / red / flaky*
 
