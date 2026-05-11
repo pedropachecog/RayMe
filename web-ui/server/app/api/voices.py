@@ -16,12 +16,14 @@ from app.config import Settings
 from app.domain.ai_backend_client import AiBackendClient, AiBackendClientError
 from app.domain.voice_assets import VoiceSampleValidationError
 from app.domain.voice_service import (
+    VOXCPM2_ENGINE_ID,
     VoiceAssetNotFoundError,
     VoiceMetadataValidationError,
     VoiceNotFoundError,
     VoiceReferencedError,
     VoiceService,
     VoiceSynthesisFailedError,
+    normalize_voxcpm2_engine_settings,
 )
 from app.storage.session import SERVER_ROOT, get_session
 
@@ -315,7 +317,7 @@ def _synthesis_payload(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
     content = payload.get("content")
     audio_base64 = base64.b64encode(content).decode("ascii") if isinstance(content, bytes) else None
     engine_id = payload.get("engine") or payload.get("default_engine")
-    return {
+    synthesis_payload = {
         "kind": kind,
         "text": payload.get("text") or payload.get("preview_text") or "",
         "engine_id": engine_id,
@@ -327,3 +329,20 @@ def _synthesis_payload(kind: str, payload: dict[str, Any]) -> dict[str, Any]:
         "asset_id": payload.get("asset_id"),
         "speech_speed": payload.get("speech_speed", 1.0),
     }
+    if engine_id == VOXCPM2_ENGINE_ID:
+        engine_settings = payload.get("engine_settings")
+        voxcpm2_settings = None
+        if isinstance(engine_settings, dict):
+            voxcpm2_settings = engine_settings.get(VOXCPM2_ENGINE_ID)
+        normalized_settings = normalize_voxcpm2_engine_settings(voxcpm2_settings)
+        synthesis_payload.update(
+            {
+                "voxcpm2_cloning_mode": normalized_settings["cloning_mode"],
+                "voxcpm2_style_prompt": normalized_settings["style_prompt"],
+                "voxcpm2_cfg_value": normalized_settings["cfg_value"],
+                "voxcpm2_inference_timesteps": normalized_settings["inference_timesteps"],
+                "voxcpm2_normalize": normalized_settings["normalize"],
+                "voxcpm2_denoise": normalized_settings["denoise"],
+            }
+        )
+    return synthesis_payload
