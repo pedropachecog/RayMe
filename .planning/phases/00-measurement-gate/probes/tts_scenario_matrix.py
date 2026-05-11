@@ -32,7 +32,7 @@ from tts_ttfa import (
 )
 
 ENGINE_ORDER = ("f5", "xtts", "luxtts", "chatterbox_turbo", "tada_1b", "qwen3", "voxcpm2")
-PROFILE_ORDER = ("baseline", "optimized", "optimized_seed_1337", "streaming_collected")
+PROFILE_ORDER = ("baseline", "optimized", "standard_python", "optimized_seed_1337", "streaming_collected")
 PHASE_DIR = Path(".planning/phases/00-measurement-gate")
 RESULT_PATH = PHASE_DIR / "results" / "tts_scenario_matrix_local.json"
 OUTPUT_SAMPLE_DIR = PHASE_DIR / "results" / "tts_scenario_audio"
@@ -1831,6 +1831,21 @@ def _voxcpm2_generate_kwargs(*, text: str, ref_audio: str, ref_text: str) -> dic
     return kwargs
 
 
+def _ensure_voxcpm2_cuda_residency(model: Any) -> None:
+    device_types: set[str] = set()
+    for candidate in (model, getattr(model, "tts_model", None), getattr(model, "model", None)):
+        if candidate is None or not hasattr(candidate, "parameters"):
+            continue
+        try:
+            for parameter in candidate.parameters():
+                device_types.add(parameter.device.type)
+                break
+        except Exception:
+            continue
+    if device_types == {"cpu"}:
+        raise RuntimeError("VoxCPM2 model parameters loaded on CPU")
+
+
 def _run_voxcpm2_engine(
     *,
     runtime: str,
@@ -1846,7 +1861,10 @@ def _run_voxcpm2_engine(
 
     torch.cuda.empty_cache()
     with Timer() as load_timer:
-        model = VoxCPM.from_pretrained(MODEL_ID_VOXCPM2, load_denoiser=False, device="cuda")
+        # voxcpm==2.0.2 rejects the documented device kwarg; CUDA residency is
+        # verified after load to keep the runtime contract truthful.
+        model = VoxCPM.from_pretrained(MODEL_ID_VOXCPM2, load_denoiser=False)
+    _ensure_voxcpm2_cuda_residency(model)
     sample_rate = _voxcpm2_model_sample_rate(model)
     warmup_cuda()
     with Timer() as warm_timer:
@@ -1971,7 +1989,7 @@ def _run_voxcpm2_engine(
                     engine="voxcpm2",
                     runtime=runtime,
                     host_account=host_account,
-                    profile="optimized",
+                    profile="standard_python",
                     scenario=scenario,
                     backend="standard_python_api",
                     mode="shared_chunked_playback",

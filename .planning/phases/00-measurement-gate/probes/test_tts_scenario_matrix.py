@@ -329,8 +329,10 @@ def test_voxcpm2_runner_contract_uses_standard_python_cuda_path() -> None:
     source = Path(__file__).with_name("tts_scenario_matrix.py").read_text(encoding="utf-8")
 
     assert MODEL_ID_VOXCPM2 == "openbmb/VoxCPM2"
-    assert 'from_pretrained(MODEL_ID_VOXCPM2, load_denoiser=False, device="cuda")' in source
+    assert 'from_pretrained(MODEL_ID_VOXCPM2, load_denoiser=False)' in source
+    assert "VoxCPM2 model parameters loaded on CPU" in source
     assert 'backend="standard_python_api"' in source
+    assert 'profile="standard_python"' in source
     assert 'mode="standard_python_streaming_collected"' in source
 
 
