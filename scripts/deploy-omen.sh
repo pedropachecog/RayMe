@@ -243,7 +243,7 @@ print("__RAYME_VOXCPM2_PROBE_JSON__" + json.dumps({
 }, sort_keys=True))
 '@
 
-  $probeOutput = $probe | & $uv run --project ai-backend python -
+  $probeOutput = $probe | & "$repo\ai-backend\.venv\Scripts\python.exe" -
   if ($LASTEXITCODE -ne 0) { throw "VoxCPM2 runtime verification failed" }
   $probeLine = $probeOutput | Where-Object { $_ -like "__RAYME_VOXCPM2_PROBE_JSON__*" } | Select-Object -Last 1
   if (-not $probeLine) { throw "VoxCPM2 runtime verification did not emit JSON evidence" }
