@@ -80,6 +80,12 @@ class SpeakRequest(BaseModel):
     )
     reference_transcript: str | None = Field(default=None, max_length=10000)
     reference_audio_content_type: str | None = Field(default=None, max_length=120)
+    voxcpm2_cloning_mode: Literal["auto", "reference_only", "transcript_guided"] = "auto"
+    voxcpm2_style_prompt: str | None = Field(default=None, max_length=300)
+    voxcpm2_cfg_value: float = Field(default=2.0, ge=1.0, le=3.0)
+    voxcpm2_inference_timesteps: int = Field(default=10, ge=4, le=30)
+    voxcpm2_normalize: bool = True
+    voxcpm2_denoise: bool = True
 
 
 class ReconnectAudioBackfillRequest(BaseModel):
@@ -288,6 +294,12 @@ async def speak_session(
             reference_audio_b64=payload.reference_audio_b64,
             reference_transcript=payload.reference_transcript,
             reference_audio_content_type=payload.reference_audio_content_type,
+            voxcpm2_cloning_mode=payload.voxcpm2_cloning_mode,
+            voxcpm2_style_prompt=payload.voxcpm2_style_prompt,
+            voxcpm2_cfg_value=payload.voxcpm2_cfg_value,
+            voxcpm2_inference_timesteps=payload.voxcpm2_inference_timesteps,
+            voxcpm2_normalize=payload.voxcpm2_normalize,
+            voxcpm2_denoise=payload.voxcpm2_denoise,
         )
     except asyncio.CancelledError:
         # The SSE generator on the web-ui side was cancelled (e.g., HTTP

@@ -4,6 +4,8 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 
 from app.api import tts, webrtc
 from app.api.health import router as health_router
@@ -28,6 +30,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="RayMe AI Backend", version="0.2.0", lifespan=lifespan)
+    app.add_exception_handler(RequestValidationError, _validation_error_response)
     settings = AiBackendSettings()
     app.state.model_manager = ModelManager(settings)
     app.state.call_session_manager = CallSessionManager(settings=settings)
@@ -36,3 +39,18 @@ def create_app() -> FastAPI:
     app.include_router(tts.router)
     app.include_router(webrtc.router)
     return app
+
+
+async def _validation_error_response(
+    _request: object,
+    _exc: RequestValidationError,
+) -> JSONResponse:
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": {
+                "code": "validation_failed",
+                "message": "Request validation failed",
+            }
+        },
+    )

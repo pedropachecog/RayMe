@@ -51,6 +51,31 @@ CALL_RECOVERABLE_EVENT_TYPES = {"user_final", "failed"}
 CALL_ENDED_EVENT_RECOVERY_GRACE_SECONDS = 60.0
 
 
+def _voxcpm2_options_for_engine(engine_id: str, options: dict[str, Any]) -> dict[str, Any]:
+    if engine_id != "voxcpm2":
+        return {}
+    return dict(options)
+
+
+def _voxcpm2_call_text_options(adapter: Any, engine_id: str, options: dict[str, Any]) -> dict[str, Any]:
+    voxcpm2_options = _voxcpm2_options_for_engine(engine_id, options)
+    if not voxcpm2_options:
+        return {}
+    try:
+        signature = inspect.signature(adapter.synthesize_call_text)
+    except (TypeError, ValueError):
+        return {}
+    parameters = signature.parameters.values()
+    if any(parameter.kind is inspect.Parameter.VAR_KEYWORD for parameter in parameters):
+        return voxcpm2_options
+    accepted = set(signature.parameters)
+    return {
+        key: value
+        for key, value in voxcpm2_options.items()
+        if key in accepted
+    }
+
+
 class NullPeerConnection:
     connectionState = "new"
 
@@ -735,6 +760,12 @@ class CallSession:
         reference_audio_b64: str | None = None,
         reference_transcript: str | None = None,
         reference_audio_content_type: str | None = None,
+        voxcpm2_cloning_mode: str = "auto",
+        voxcpm2_style_prompt: str | None = None,
+        voxcpm2_cfg_value: float = 2.0,
+        voxcpm2_inference_timesteps: int = 10,
+        voxcpm2_normalize: bool = True,
+        voxcpm2_denoise: bool = True,
     ) -> dict[str, Any]:
         self._cancelled_ai_turns.discard(turn_id)
         self.state = "thinking"
@@ -754,6 +785,14 @@ class CallSession:
                 reference_audio_b64=reference_audio_b64,
                 reference_transcript=reference_transcript,
                 reference_audio_content_type=reference_audio_content_type,
+                voxcpm2_options={
+                    "voxcpm2_cloning_mode": voxcpm2_cloning_mode,
+                    "voxcpm2_style_prompt": voxcpm2_style_prompt,
+                    "voxcpm2_cfg_value": voxcpm2_cfg_value,
+                    "voxcpm2_inference_timesteps": voxcpm2_inference_timesteps,
+                    "voxcpm2_normalize": voxcpm2_normalize,
+                    "voxcpm2_denoise": voxcpm2_denoise,
+                },
             )
             if turn_id in self._cancelled_ai_turns:
                 return {"status": "cancelled", "turn_id": turn_id}
@@ -1400,6 +1439,7 @@ class CallSession:
         reference_audio_b64: str | None,
         reference_transcript: str | None,
         reference_audio_content_type: str | None,
+        voxcpm2_options: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         adapter = tts_adapter or self.tts_adapter
         if adapter is None:
@@ -1420,6 +1460,7 @@ class CallSession:
                 reference_audio_b64,
                 reference_transcript,
                 reference_audio_content_type,
+                voxcpm2_options or {},
             )
         else:
             result = await asyncio.to_thread(
@@ -1432,6 +1473,7 @@ class CallSession:
                 reference_audio_b64,
                 reference_transcript,
                 reference_audio_content_type,
+                voxcpm2_options or {},
             )
         if hasattr(result, "model_dump"):
             result = result.model_dump()
@@ -1453,6 +1495,7 @@ class CallSession:
         reference_audio_b64: str | None,
         reference_transcript: str | None,
         reference_audio_content_type: str | None,
+        voxcpm2_options: dict[str, Any],
     ) -> Any:
         """Await an async TTS adapter."""
         if hasattr(adapter, "synthesize_call_text"):
@@ -1461,6 +1504,7 @@ class CallSession:
                 text=text,
                 voice_id=voice_id,
                 engine_id=engine_id,
+                **_voxcpm2_call_text_options(adapter, engine_id, voxcpm2_options),
             )
         if not reference_audio_b64:
             raise ValueError("call TTS reference audio is required")
@@ -1471,6 +1515,7 @@ class CallSession:
                 reference_transcript=reference_transcript,
                 reference_audio_content_type=reference_audio_content_type,
                 speech_speed=1.0,
+                **voxcpm2_options,
             )
         )
 
@@ -1484,6 +1529,7 @@ class CallSession:
         reference_audio_b64: str | None,
         reference_transcript: str | None,
         reference_audio_content_type: str | None,
+        voxcpm2_options: dict[str, Any],
     ) -> dict[str, Any]:
         """Synchronous TTS synthesis, called from asyncio.to_thread()."""
         if hasattr(adapter, "synthesize_call_text"):
@@ -1492,6 +1538,7 @@ class CallSession:
                 text=text,
                 voice_id=voice_id,
                 engine_id=engine_id,
+                **_voxcpm2_call_text_options(adapter, engine_id, voxcpm2_options),
             )
         else:
             if not reference_audio_b64:
@@ -1503,6 +1550,7 @@ class CallSession:
                     reference_transcript=reference_transcript,
                     reference_audio_content_type=reference_audio_content_type,
                     speech_speed=1.0,
+                    **voxcpm2_options,
                 )
             )
         if hasattr(result, "model_dump"):
