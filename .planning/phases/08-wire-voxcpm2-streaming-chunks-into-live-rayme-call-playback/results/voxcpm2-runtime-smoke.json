@@ -1,12 +1,12 @@
 {
-  "commit_sha": "10c37838bc7e3f2a12e97ca62f6cd4b40c17aa78",
+  "commit_sha": "6b69aeb98434678f4aa1853953a710f8b9b0f905",
   "cpu_fallback_detected": false,
   "cuda_available": true,
   "cuda_device_name": "NVIDIA GeForce RTX 3060",
   "device": "cuda",
   "model_cache_path": "C:\\Users\\pmpg\\.cache\\huggingface\\hub\\models--openbmb--VoxCPM2\\snapshots\\bffb3df5a29440629464e5e839f4d214c8714c3d",
   "model_id": "openbmb/VoxCPM2",
-  "model_load_ms": 23541.3,
+  "model_load_ms": 19694.4,
   "package": "voxcpm==2.0.2",
   "runtime_sample_rate": 48000,
   "sample_rate": 48000,
@@ -14,14 +14,14 @@
   "torch_version": "2.10.0+cu126",
   "vram_after_load": {
     "gpu_name": "NVIDIA GeForce RTX 3060",
-    "memory_free_mb": 5718,
+    "memory_free_mb": 5567,
     "memory_total_mb": 12288,
-    "memory_used_mb": 6393
+    "memory_used_mb": 6544
   },
   "vram_before": {
     "gpu_name": "NVIDIA GeForce RTX 3060",
-    "memory_free_mb": 11338,
+    "memory_free_mb": 11194,
     "memory_total_mb": 12288,
-    "memory_used_mb": 773
+    "memory_used_mb": 917
   }
 }

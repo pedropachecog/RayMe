@@ -151,3 +151,115 @@ cpu_fallback_detected: false
 
 Deploy result: success. OMEN is running commit
 `10c37838bc7e3f2a12e97ca62f6cd4b40c17aa78` through `scripts/deploy-omen.sh`.
+
+## OMEN Evidence Runner Fixes and Final Redeploy
+
+Timestamp: 2026-05-11T19:04:15Z
+
+During Task 3, the first live call-flow attempt failed before live calls because
+OMEN did not have the gitignored Phase 0 reference WAV at the runner's default
+path. The local Phase 0 fixture was copied to the same OMEN path:
+
+```bash
+scp .planning/phases/00-measurement-gate/probes/fixtures/short_ref_audio.wav rayme-pmpg:C:/Users/pmpg/rayme/RayMe/.planning/phases/00-measurement-gate/probes/fixtures/short_ref_audio.wav
+```
+
+The second attempt completed the first F5 speak call but hung in client-side
+peer cleanup. The runner was fixed to bound `RTCPeerConnection.close()` cleanup.
+
+The next attempt completed live calls but failed its own leak check because the
+payload included an absolute reference-audio path. The runner was fixed to write
+a sanitized reference source label instead of a local path.
+
+Final redeploy command:
+
+```bash
+OMEN_SSH_ALIAS=rayme-pmpg RAYME_OMEN_VERIFY_VOXCPM2=1 RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON=.planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/results/voxcpm2-runtime-smoke.json RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON=.planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/results/voxcpm2-vram-soak.json scripts/deploy-omen.sh
+```
+
+Final deployed commit SHA: `6b69aeb98434678f4aa1853953a710f8b9b0f905`
+
+Final runtime summary:
+
+```text
+package: voxcpm==2.0.2
+model_id: openbmb/VoxCPM2
+device: cuda
+cuda_device_name: NVIDIA GeForce RTX 3060
+torch_version: 2.10.0+cu126
+torch_cuda_version: 12.6
+runtime_sample_rate: 48000
+sample_rate: 48000
+model_load_ms: 19694.4
+cpu_fallback_detected: false
+```
+
+Final VRAM summary:
+
+```text
+memory_total_mb: 12288
+memory_used_peak_mb: 6544
+memory_free_min_mb: 5567
+vram_budget_mb: 11264
+within_11gb_budget: true
+cpu_fallback_detected: false
+```
+
+## Live Repeated Warm Call-Flow Evidence
+
+Timestamp: 2026-05-11T19:04:15Z
+
+Command:
+
+```bash
+ssh rayme-pmpg "powershell -NoProfile -ExecutionPolicy Bypass -Command \"cd C:\\Users\\pmpg\\rayme\\RayMe; ai-backend\\.venv\\Scripts\\python.exe .planning\\phases\\08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback\\08-run-call-flow-evidence.py --warm-samples 3 --web-base-url https://192.168.1.199:8443 --ai-base-url https://192.168.1.199:9443\""
+```
+
+Remote output:
+
+```text
+Wrote C:\Users\pmpg\rayme\RayMe\.planning\phases\08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback\results\voxcpm2-live-streaming-call-flow.json
+```
+
+Copy command:
+
+```bash
+scp rayme-pmpg:C:/Users/pmpg/rayme/RayMe/.planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/results/voxcpm2-live-streaming-call-flow.json .planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/results/voxcpm2-live-streaming-call-flow.json
+```
+
+Verifier command:
+
+```bash
+python3 .planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/08-verify-evidence.py --call-flow-only
+```
+
+Verifier output:
+
+```text
+PASS
+```
+
+Summary:
+
+```text
+warm_sample_count: 3
+voxcpm2_warm_call_ttfa_ms: 762.7
+f5_warm_call_ttfa_ms: 948.0
+voxcpm2_beats_f5: true
+```
+
+VoxCPM2 immediate `ai_audio_started_event.tts_playback` summary:
+
+```text
+sample 1: streaming_used=true, ai_audio_started_ms=761.0
+sample 2: streaming_used=true, ai_audio_started_ms=804.2
+sample 3: streaming_used=true, ai_audio_started_ms=762.7
+```
+
+VoxCPM2 final `tts_playback_final` summary:
+
+```text
+sample 1: whole_wav_fallback_used=false, chunk_count=6, total_generation_ms=6052.6, total_playback_ms=1210.0, inter_chunk_gaps_ms_count=5, inter_chunk_gaps_ms_min=250.7, inter_chunk_gaps_ms_max=274.4
+sample 2: whole_wav_fallback_used=false, chunk_count=32, total_generation_ms=17192.8, total_playback_ms=5370.0, inter_chunk_gaps_ms_count=31, inter_chunk_gaps_ms_min=241.0, inter_chunk_gaps_ms_max=290.4
+sample 3: whole_wav_fallback_used=false, chunk_count=39, total_generation_ms=20077.6, total_playback_ms=6490.0, inter_chunk_gaps_ms_count=38, inter_chunk_gaps_ms_min=242.1, inter_chunk_gaps_ms_max=299.1
+```
