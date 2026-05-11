@@ -52,7 +52,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 - [ ] **Phase 4: Call Feel** — Sentence-chunked streaming TTS, VAD-driven barge-in with LIFO cancel and mid-stream LLM abort, live bidirectional captions over data channel, echo-loop mitigation, Voice Visualizer three-state. The core-value phase.
 - [ ] **Phase 5: Voice Breadth & Unified Thread Polish** — Both TTS engines with cold-swap UX, per-character default + per-chat override, saved-audio toggles + inline replay, unified thread visual treatment, full SillyTavern text-UX parity (Regenerate / Edit / Swipes / Continue / alternate greetings / virtualization).
 - [ ] **Phase 6: Mobile Hardening & Ship Polish** — Full Android Chrome pass (Bluetooth routing, Wake Lock, visibility change), PWA manifest + icons, storage housekeeping (orphan reaper, retention), full Settings surface, error states, soak-test acceptance. v1 ships.
-- [ ] **Phase 7: Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations** — Planned evaluation and integration gate for VoxCPM2 after the v1 ship path.
+- [x] **Phase 7: Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations** — Completed on 2026-05-11; outcome `selectable_with_caveats`.
 
 ---
 
@@ -509,7 +509,9 @@ Plans:
 - [x] 07-09-PLAN.md - VoxCPM2 scenario matrix runner and promotion evidence schema enforcement (Wave 2)
 - [x] 07-10-PLAN.md - OMEN deployment/runtime smoke and VRAM soak evidence through `scripts/deploy-omen.sh` only (Wave 3)
 - [x] 07-11-PLAN.md - Live scenario matrix, generated WAV, and real call-flow evidence artifacts (Wave 4)
-- [ ] 07-12-PLAN.md - Manual listening quality gate and final promotion decision writeback (Wave 5)
+- [x] 07-12-PLAN.md - Manual listening quality gate and final promotion decision writeback (Wave 5)
+
+**Final outcome:** `selectable_with_caveats`. Manual listening judged VoxCPM2 far superior to F5, runtime/call-flow/VRAM gates passed, and streaming-collected first audio beat F5 in the benchmark matrix. F5 remains the default because current RayMe calls still wait for full VoxCPM2 synthesis before playback, so live call TTFA does not yet get the streaming benefit.
 
 ---
 

@@ -60,6 +60,8 @@ progress:
 - Phase 07 plan 07-08 completed on 2026-05-11: Saved VoxCPM2 cloning/style metadata now reaches real call playback through existing Web UI call and AI backend WebRTC speak APIs with bounded options and sanitized call TTS failures.
 - Phase 07 plan 07-09 completed on 2026-05-11: VoxCPM2 scenario matrix support now uses the shared chunk planner with generated sample paths, F5 promotion comparison fields, and stricter matrix/runtime/call-flow/decision-ready evidence verification.
 - Phase 07 plan 07-10 completed on 2026-05-11: Canonical OMEN deploy now captures live VoxCPM2 CUDA runtime smoke and VRAM evidence through `scripts/deploy-omen.sh`, with `voxcpm==2.0.2`, `openbmb/VoxCPM2`, 48 kHz output, CUDA torch, model cache path, and 6334 MB peak VRAM recorded.
+- Phase 07 plan 07-11 completed on 2026-05-11: Live VoxCPM2/F5 scenario matrix, generated WAV evidence, and real call-flow evidence were regenerated with BeauBrown-s2 (`voice_asset_531ca6a567db4f01a870cdfba8abae96.wav`) and passed matrix/call-flow verification.
+- Phase 07 plan 07-12 completed on 2026-05-11: VoxCPM2 final outcome is `selectable_with_caveats`; manual listening judged VoxCPM2 far superior to F5, while live RayMe call TTFA still favors F5 because calls do not yet consume VoxCPM2 streaming chunks.
 
 ## Current Decisions
 
@@ -161,6 +163,7 @@ progress:
 - Phase 07-10 OMEN deploy policy: VoxCPM2 runtime evidence must stay inside `scripts/deploy-omen.sh`; no alternate OMEN deployment scripts, launcher files, or manual scheduled-task edits are allowed.
 - Phase 07-10 VoxCPM2 loader policy: live `voxcpm==2.0.2` rejects the documented `device="cuda"` loader kwarg, so RayMe loads with the actual package API and verifies CUDA residency after model load.
 - Phase 07-10 OMEN TTS sync policy: optional TTS sync on OMEN must target Python 3.11 and repair CUDA PyTorch wheels after `uv sync`, because the default Windows sync path installs CPU torch.
+- Phase 07 final VoxCPM2 decision: VoxCPM2 is selectable with caveats. Quality is preferred over F5, runtime/call-flow/VRAM gates pass, but F5 remains the default until RayMe call playback consumes VoxCPM2 streaming chunks live.
 
 ## Evidence
 

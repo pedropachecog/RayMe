@@ -1,7 +1,7 @@
 engine,scenario,sample_path,listener,transcript,intelligibility_1_5,voice_match_1_5,accent_preservation_1_5,prosody_1_5,leakage_artifacts_1_5,mumbling_artifacts_1_5,pass,notes
-voxcpm2,short_reply,results/audio/voxcpm2__standard_python__short_reply.wav,,,,,,,,,,"score this VoxCPM2 standard Python sample"
-voxcpm2,medium_reply,results/audio/voxcpm2__standard_python__medium_reply.wav,,,,,,,,,,"score this VoxCPM2 standard Python sample"
-voxcpm2,long_reply,results/audio/voxcpm2__standard_python__long_reply.wav,,,,,,,,,,"score this VoxCPM2 standard Python sample"
-f5,short_reply,results/audio/f5__optimized__short_reply.wav,,,,,,,,,,"F5 optimized comparison sample"
-f5,medium_reply,results/audio/f5__optimized__medium_reply.wav,,,,,,,,,,"F5 optimized comparison sample"
-f5,long_reply,results/audio/f5__optimized__long_reply.wav,,,,,,,,,,"F5 optimized comparison sample"
+voxcpm2,short_reply,results/audio/voxcpm2__standard_python__short_reply.wav,Pedro,n/a,5,5,5,5,5,5,true,"Far superior to F5; no perceptible quality difference versus baseline or streaming VoxCPM2."
+voxcpm2,medium_reply,results/audio/voxcpm2__standard_python__medium_reply.wav,Pedro,n/a,5,5,5,5,5,5,true,"Far superior to F5; no perceptible quality difference versus baseline or streaming VoxCPM2."
+voxcpm2,long_reply,results/audio/voxcpm2__standard_python__long_reply.wav,Pedro,n/a,5,5,5,5,5,5,true,"Far superior to F5; no perceptible quality difference versus baseline or streaming VoxCPM2."
+f5,short_reply,results/audio/f5__optimized__short_reply.wav,Pedro,n/a,4,2,2,2,2,3,false,"Metallic, sometimes too fast, and repeats parts of the voice reference compared with VoxCPM2."
+f5,medium_reply,results/audio/f5__optimized__medium_reply.wav,Pedro,n/a,4,2,2,2,2,3,false,"Metallic, sometimes too fast, and repeats parts of the voice reference compared with VoxCPM2."
+f5,long_reply,results/audio/f5__optimized__long_reply.wav,Pedro,n/a,4,2,2,2,2,3,false,"Metallic, sometimes too fast, and repeats parts of the voice reference compared with VoxCPM2."
