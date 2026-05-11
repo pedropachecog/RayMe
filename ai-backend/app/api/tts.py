@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import logging
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -11,6 +12,7 @@ from app.models.model_manager import ModelManager
 from app.models.tts_registry import TtsSynthesisInput
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class TtsSynthesizeRequest(BaseModel):
@@ -64,6 +66,11 @@ def synthesize(request: Request, payload: TtsSynthesizeRequest) -> dict[str, Any
     except HTTPException:
         raise
     except Exception as exc:
+        logger.exception(
+            "[rayme-tts] synthesize.failed engine=%s exc=%s",
+            target_engine,
+            exc.__class__.__name__,
+        )
         _mark_engine_unavailable(manager, target_engine)
         raise HTTPException(
             status_code=502,
