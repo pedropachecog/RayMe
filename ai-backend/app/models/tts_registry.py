@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.util
 from collections.abc import Iterable, Mapping, Sequence
 from enum import Enum
-from typing import Protocol, runtime_checkable
+from typing import Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
@@ -29,6 +29,7 @@ EXPECTED_ENGINE_IDS = {
     "luxtts",
     "chatterbox_turbo",
     "tada_1b",
+    "voxcpm2",
 }
 
 
@@ -58,6 +59,12 @@ class TtsSynthesisInput(BaseModel):
     reference_audio_content_type: str | None = None
     reference_transcript: str | None = None
     speech_speed: float = Field(default=1.0, ge=0.5, le=1.5)
+    voxcpm2_cloning_mode: Literal["auto", "reference_only", "transcript_guided"] = "auto"
+    voxcpm2_style_prompt: str | None = Field(default=None, max_length=300)
+    voxcpm2_cfg_value: float = Field(default=2.0, ge=1.0, le=3.0)
+    voxcpm2_inference_timesteps: int = Field(default=10, ge=4, le=30)
+    voxcpm2_normalize: bool = True
+    voxcpm2_denoise: bool = True
 
 
 class TtsSynthesisOutput(BaseModel):
@@ -65,6 +72,8 @@ class TtsSynthesisOutput(BaseModel):
     wav_bytes: bytes
     sample_rate: int = 24000
     duration_ms: float | None = None
+    warning_codes: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class TtsAdapterUnavailable(RuntimeError):
@@ -181,6 +190,17 @@ TTS_ENGINE_METADATA: tuple[TtsEngineMetadata, ...] = (
         runtime_evidence="Scenario matrix measured acceptable Windows optimized long-form and about 7.5 GB peak VRAM.",
         quality_notes="One-hot residency is mandatory because this is the highest-VRAM measured roster path; WSL remains caution.",
     ),
+    TtsEngineMetadata(
+        id="voxcpm2",
+        label="VoxCPM2",
+        code_license="Apache-2.0",
+        model_license="Apache-2.0",
+        caveat_chips=["Candidate", "48 kHz", "RTX 3060 gate pending"],
+        runtime_evidence="Phase 7 optional runtime evidence required for openbmb/VoxCPM2: health, CUDA load, TTFA/RTF, VRAM, quality, and call-flow checks.",
+        requires_transcript=False,
+        supports_streaming=True,
+        quality_notes="Candidate 48 kHz output path supporting reference-only and transcript-guided cloning; promotion requires RayMe Phase 7 evidence.",
+    ),
 )
 
 
@@ -293,6 +313,7 @@ def build_default_tts_adapters() -> dict[str, TtsAdapter]:
     from app.models.tts_luxtts import LuxTtsAdapter
     from app.models.tts_qwen3 import Qwen3TtsAdapter
     from app.models.tts_tada import TadaTtsAdapter
+    from app.models.tts_voxcpm2 import VoxCpm2TtsAdapter
     from app.models.tts_xtts import XttsV2TtsAdapter
 
     adapters: tuple[TtsAdapter, ...] = (
@@ -302,6 +323,7 @@ def build_default_tts_adapters() -> dict[str, TtsAdapter]:
         LuxTtsAdapter(),
         ChatterboxTurboTtsAdapter(),
         TadaTtsAdapter(),
+        VoxCpm2TtsAdapter(),
     )
     return {adapter.engine_id: adapter for adapter in adapters}
 

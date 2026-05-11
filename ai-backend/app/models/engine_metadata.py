@@ -30,4 +30,5 @@ ENGINE_METADATA: tuple[EngineMetadata, ...] = (
     EngineMetadata(id="luxtts", label="LuxTTS", caveats=["quality caveat"]),
     EngineMetadata(id="chatterbox_turbo", label="Chatterbox Turbo", caveats=["experimental"]),
     EngineMetadata(id="tada_1b", label="TADA 1B", caveats=["experimental"]),
+    EngineMetadata(id="voxcpm2", label="VoxCPM2", caveats=["candidate"]),
 )

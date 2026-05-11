@@ -27,6 +27,12 @@ class TtsSynthesizeRequest(BaseModel):
     reference_audio_content_type: str | None = Field(default=None, max_length=120)
     use_default_engine: bool = False
     speech_speed: float = Field(default=1.0, ge=0.5, le=1.5)
+    voxcpm2_cloning_mode: str = Field(default="auto", pattern="^(auto|reference_only|transcript_guided)$")
+    voxcpm2_style_prompt: str | None = Field(default=None, max_length=300)
+    voxcpm2_cfg_value: float = Field(default=2.0, ge=1.0, le=3.0)
+    voxcpm2_inference_timesteps: int = Field(default=10, ge=4, le=30)
+    voxcpm2_normalize: bool = True
+    voxcpm2_denoise: bool = True
 
 
 @router.post("/tts/synthesize")
@@ -45,6 +51,12 @@ def synthesize(request: Request, payload: TtsSynthesizeRequest) -> dict[str, Any
                 reference_audio_content_type=payload.reference_audio_content_type,
                 reference_transcript=payload.reference_transcript,
                 speech_speed=payload.speech_speed,
+                voxcpm2_cloning_mode=payload.voxcpm2_cloning_mode,
+                voxcpm2_style_prompt=payload.voxcpm2_style_prompt,
+                voxcpm2_cfg_value=payload.voxcpm2_cfg_value,
+                voxcpm2_inference_timesteps=payload.voxcpm2_inference_timesteps,
+                voxcpm2_normalize=payload.voxcpm2_normalize,
+                voxcpm2_denoise=payload.voxcpm2_denoise,
             )
         )
         if not result.wav_bytes:
@@ -69,6 +81,7 @@ def synthesize(request: Request, payload: TtsSynthesizeRequest) -> dict[str, Any
         "audio_base64": base64.b64encode(result.wav_bytes).decode("ascii"),
         "sample_rate": result.sample_rate,
         "duration_ms": result.duration_ms,
+        "warnings": result.warning_codes or result.warnings,
     }
 
 
