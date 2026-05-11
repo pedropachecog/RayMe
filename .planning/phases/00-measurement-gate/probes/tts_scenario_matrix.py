@@ -34,6 +34,7 @@ from tts_ttfa import (
 ENGINE_ORDER = ("f5", "xtts", "luxtts", "chatterbox_turbo", "tada_1b", "qwen3", "voxcpm2")
 PROFILE_ORDER = ("baseline", "optimized", "standard_python", "optimized_seed_1337", "streaming_collected")
 PHASE_DIR = Path(".planning/phases/00-measurement-gate")
+REPO_ROOT = Path(__file__).resolve().parents[4]
 RESULT_PATH = PHASE_DIR / "results" / "tts_scenario_matrix_local.json"
 OUTPUT_SAMPLE_DIR = PHASE_DIR / "results" / "tts_scenario_audio"
 LONG_REPLY_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "target_text_1min.txt"
@@ -2274,7 +2275,7 @@ def run_engine_subprocess(
     env = _configure_user_cache_env()
     proc = subprocess.run(
         command,
-        cwd=Path(__file__).resolve().parent,
+        cwd=REPO_ROOT,
         capture_output=True,
         text=True,
         env=env,

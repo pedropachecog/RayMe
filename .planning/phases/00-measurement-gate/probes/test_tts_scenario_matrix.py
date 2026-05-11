@@ -333,6 +333,7 @@ def test_voxcpm2_runner_contract_uses_standard_python_cuda_path() -> None:
     assert "VoxCPM2 model parameters loaded on CPU" in source
     assert 'backend="standard_python_api"' in source
     assert 'profile="standard_python"' in source
+    assert "cwd=REPO_ROOT" in source
     assert 'mode="standard_python_streaming_collected"' in source
 
 
