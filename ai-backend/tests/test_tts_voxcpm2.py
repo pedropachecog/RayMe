@@ -49,12 +49,25 @@ def _tone(sample_rate: int = 48_000, seconds: float = 0.025) -> np.ndarray:
 
 class ScriptedVoxCpmRuntime:
     sample_rate = 48_000
+    allowed_generate_kwargs = {
+        "text",
+        "cfg_value",
+        "inference_timesteps",
+        "normalize",
+        "denoise",
+        "prompt_wav_path",
+        "prompt_text",
+        "reference_wav_path",
+    }
 
     def __init__(self, audio: np.ndarray | None = None) -> None:
         self.audio = _tone() if audio is None else audio
         self.calls: list[dict[str, Any]] = []
 
     def generate(self, **kwargs: Any) -> tuple[np.ndarray, int]:
+        unknown_kwargs = set(kwargs) - self.allowed_generate_kwargs
+        if unknown_kwargs:
+            raise TypeError(f"unexpected generate kwargs: {sorted(unknown_kwargs)}")
         self.calls.append(kwargs)
         return self.audio, self.sample_rate
 
@@ -118,12 +131,12 @@ def test_voxcpm2_reference_only_mode_when_transcript_missing() -> None:
 
     assert runtime.calls
     call = runtime.calls[0]
-    assert call["text"] == "RayMe should sound natural."
+    assert call["text"] == "(warm phone-call voice)RayMe should sound natural."
     assert "reference_wav_path" in call
     assert Path(call["reference_wav_path"]).suffix == ".wav"
     assert call.get("prompt_wav_path") is None
     assert call.get("prompt_text") is None
-    assert call["style_prompt"] == "warm phone-call voice"
+    assert "style_prompt" not in call
     assert call["cfg_value"] == 2.0
     assert call["inference_timesteps"] == 12
     assert call["normalize"] is True

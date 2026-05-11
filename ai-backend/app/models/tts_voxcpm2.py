@@ -117,16 +117,18 @@ def _build_generate_kwargs(
     reference_transcript: str,
     warning_codes: list[str],
 ) -> dict[str, Any]:
+    style_prompt = (request.voxcpm2_style_prompt or "").strip()
+    text = request.text
+    if style_prompt and request.voxcpm2_cloning_mode != "transcript_guided":
+        text = f"({style_prompt}){text}"
+
     kwargs: dict[str, Any] = {
-        "text": request.text,
+        "text": text,
         "cfg_value": request.voxcpm2_cfg_value,
         "inference_timesteps": request.voxcpm2_inference_timesteps,
         "normalize": request.voxcpm2_normalize,
         "denoise": request.voxcpm2_denoise,
     }
-    style_prompt = (request.voxcpm2_style_prompt or "").strip()
-    if style_prompt:
-        kwargs["style_prompt"] = style_prompt
 
     if request.voxcpm2_cloning_mode == "transcript_guided" and reference_transcript:
         kwargs["prompt_wav_path"] = str(reference_path)
