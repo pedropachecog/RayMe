@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 07-02-PLAN.md
-last_updated: "2026-05-11T02:17:19.156Z"
+stopped_at: Completed 07-03-PLAN.md
+last_updated: "2026-05-11T02:29:29.200Z"
 progress:
   total_phases: 9
   completed_phases: 4
   total_plans: 81
-  completed_plans: 69
-  percent: 85
+  completed_plans: 70
+  percent: 86
 ---
 
 ## Phase Status
@@ -52,6 +52,7 @@ progress:
 - Phase 03 plan 03-10 completed on 2026-04-25: full local Phase 3 automated acceptance passed across AI backend pytest, Web UI server pytest, client unit tests, desktop Chromium call specs, and mobile Chromium call spec with saved Playwright evidence.
 - Phase 07 plan 07-01 completed on 2026-05-11: RED AI backend VoxCPM2 contracts now cover roster metadata, CUDA-only adapter loading, bounded synthesis options, 48 kHz output, sanitized errors, and engine-scoped degradation.
 - Phase 07 plan 07-02 completed on 2026-05-11: RED Web UI server/client contracts now cover durable VoxCPM2 voice metadata, conditional Voice Lab controls, fallback roster copy, missing-transcript warning, and preview/test-play payload behavior.
+- Phase 07 plan 07-03 completed on 2026-05-11: RED call-flow contracts now cover saved VoxCPM2 metadata forwarding into real playback, bounded WebRTC speak options, sanitized `call_tts_failed`, and unchanged interrupt behavior.
 
 ## Current Decisions
 
@@ -131,6 +132,9 @@ progress:
 - Phase 07-01 contract policy: VoxCPM2 must be metadata-visible before runtime promotion, must load through `voxcpm==2.0.2` and `openbmb/VoxCPM2` with `device="cuda"`, and must sanitize traceback, local path, and model-id disclosure in public synthesis failures.
 - Phase 07-02 Voice Lab metadata policy: VoxCPM2 voice-level settings are contracted under `metadata.engine_settings.voxcpm2` and reused for preview, test-play, and future call playback.
 - Phase 07-02 missing-transcript policy: blank transcript with VoxCPM2 transcript-guided preference must fall back to reference-only behavior with warning code `voxcpm2_reference_only_without_transcript`.
+- Phase 07-03 call contract policy: VoxCPM2 preview success is insufficient; saved mode/style metadata must reach real call playback before promotion.
+- Phase 07-03 call error policy: VoxCPM2 call failures must surface sanitized `call_tts_failed` behavior while preserving truthful transcript rows.
+- Phase 07-03 validation policy: VoxCPM2 call option validation must be bounded and must not echo traceback, local path, or model-cache details.
 
 ## Evidence
 
@@ -157,8 +161,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-05-11T02:17:05.310Z
-Stopped at: Completed 07-02-PLAN.md
+Last session: 2026-05-11T02:29:29.172Z
+Stopped at: Completed 07-03-PLAN.md
 Resume file: None
 
 **Planned Phase:** 07 (Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations) — 12 plans — 2026-05-11T01:14:44.989Z
