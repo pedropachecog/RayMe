@@ -1,841 +1,13 @@
 {
-  "engine_payloads": [
-    {
-      "engine": "f5",
-      "host_account": "omen-pc/pmpg",
-      "rows": [
-        {
-          "audio_duration_s": 5.216,
-          "backend": "native_infer_whole_request",
-          "cached_prompt_build_ms": null,
-          "engine": "f5",
-          "generate_total_ms": 946.9,
-          "generate_ttfa_ms": 946.9,
-          "generation_rtf": 0.182,
-          "host_account": "omen-pc/pmpg",
-          "max_inter_chunk_gap_ms": null,
-          "mode": "non_streaming_clone",
-          "model_load_ms": 3291.3,
-          "optimization_notes": "Warm model only. Baseline F5 uses the whole-request infer path, so prompt prep remains folded into the measured request time.",
-          "optimizations_applied": [],
-          "output_wav": "results/audio/f5__baseline__short_reply.wav",
-          "peak_vram_mb": 761.9,
-          "profile": "baseline",
-          "request_prompt_prep_ms": 0.0,
-          "request_rtf": 0.182,
-          "request_total_ms": 946.9,
-          "request_ttfa_ms": 946.9,
-          "runtime": "omen_windows_native_cuda",
-          "sample_path": "results/audio/f5__baseline__short_reply.wav",
-          "sample_rate": 24000,
-          "scenario": "short_reply",
-          "scenario_description": "One concise assistant reply.",
-          "scenario_word_count": 18,
-          "status": "measured",
-          "stitched_playback_ms": null,
-          "streaming_support": "none",
-          "true_streaming": false,
-          "warmup_ms": 2779.2
-        },
-        {
-          "audio_duration_s": 14.645,
-          "backend": "native_infer_whole_request",
-          "cached_prompt_build_ms": null,
-          "engine": "f5",
-          "generate_total_ms": 2051.7,
-          "generate_ttfa_ms": 2051.7,
-          "generation_rtf": 0.14,
-          "host_account": "omen-pc/pmpg",
-          "max_inter_chunk_gap_ms": null,
-          "mode": "non_streaming_clone",
-          "model_load_ms": 3291.3,
-          "optimization_notes": "Warm model only. Baseline F5 uses the whole-request infer path, so prompt prep remains folded into the measured request time.",
-          "optimizations_applied": [],
-          "output_wav": "results/audio/f5__baseline__medium_reply.wav",
-          "peak_vram_mb": 781.8,
-          "profile": "baseline",
-          "request_prompt_prep_ms": 0.0,
-          "request_rtf": 0.14,
-          "request_total_ms": 2051.7,
-          "request_ttfa_ms": 2051.7,
-          "runtime": "omen_windows_native_cuda",
-          "sample_path": "results/audio/f5__baseline__medium_reply.wav",
-          "sample_rate": 24000,
-          "scenario": "medium_reply",
-          "scenario_description": "A practical multi-sentence assistant answer.",
-          "scenario_word_count": 41,
-          "status": "measured",
-          "stitched_playback_ms": null,
-          "streaming_support": "none",
-          "true_streaming": false,
-          "warmup_ms": 2779.2
-        },
-        {
-          "audio_duration_s": 55.528,
-          "backend": "native_infer_whole_request",
-          "cached_prompt_build_ms": null,
-          "engine": "f5",
-          "generate_total_ms": 6002.6,
-          "generate_ttfa_ms": 6002.6,
-          "generation_rtf": 0.108,
-          "host_account": "omen-pc/pmpg",
-          "max_inter_chunk_gap_ms": null,
-          "mode": "non_streaming_clone",
-          "model_load_ms": 3291.3,
-          "optimization_notes": "Warm model only. Baseline F5 uses the whole-request infer path, so prompt prep remains folded into the measured request time.",
-          "optimizations_applied": [],
-          "output_wav": "results/audio/f5__baseline__long_reply.wav",
-          "peak_vram_mb": 792.8,
-          "profile": "baseline",
-          "request_prompt_prep_ms": 0.0,
-          "request_rtf": 0.108,
-          "request_total_ms": 6002.6,
-          "request_ttfa_ms": 6002.6,
-          "runtime": "omen_windows_native_cuda",
-          "sample_path": "results/audio/f5__baseline__long_reply.wav",
-          "sample_rate": 24000,
-          "scenario": "long_reply",
-          "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
-          "scenario_word_count": 162,
-          "status": "measured",
-          "stitched_playback_ms": null,
-          "streaming_support": "none",
-          "true_streaming": false,
-          "warmup_ms": 2779.2
-        },
-        {
-          "audio_duration_s": 5.131,
-          "backend": "native_pytorch_chunked",
-          "cached_prompt_build_ms": 5.9,
-          "chunk_audio_duration_s": [
-            0.843,
-            4.288
-          ],
-          "chunk_audio_ready_offsets_ms": [
-            723.2,
-            1593.0
-          ],
-          "chunk_char_lengths": [
-            14,
-            70
-          ],
-          "chunk_count": 2,
-          "chunk_estimated_tokens": [
-            12,
-            42
-          ],
-          "chunk_generate_total_ms": [
-            723.3,
-            869.9
-          ],
-          "chunk_generate_ttfa_ms": [
-            723.2,
-            869.7
-          ],
-          "chunk_max_chars": 520,
-          "chunk_max_estimated_tokens": 260,
-          "chunk_text_preview": [
-            "I can do that.",
-            "The quickest fix is to keep the model warm and reuse the voice prompt."
-          ],
-          "chunk_word_counts": [
-            4,
-            14
-          ],
-          "chunking_strategy": "sentence_boundary_token_cap_v1",
-          "engine": "f5",
-          "generate_total_ms": 1593.2,
-          "generate_ttfa_ms": 723.2,
-          "generation_rtf": 0.311,
-          "host_account": "omen-pc/pmpg",
-          "inter_chunk_gap_ms": [
-            27.1
-          ],
-          "max_inter_chunk_gap_ms": 27.1,
-          "mode": "non_streaming_clone",
-          "model_load_ms": 3291.3,
-          "optimization_notes": "Prepared reference cached once per session and replies use the shared sentence-aware chunk planner.",
-          "optimizations_applied": [
-            "prepared_ref_cache",
-            "shared_chunk_planner"
-          ],
-          "output_wav": "results/audio/f5__optimized__short_reply.wav",
-          "peak_vram_mb": 757.5,
-          "profile": "optimized",
-          "request_prompt_prep_ms": 0.0,
-          "request_rtf": 0.311,
-          "request_total_ms": 1593.2,
-          "request_ttfa_ms": 723.2,
-          "runtime": "omen_windows_native_cuda",
-          "sample_path": "results/audio/f5__optimized__short_reply.wav",
-          "sample_rate": 24000,
-          "scenario": "short_reply",
-          "scenario_description": "One concise assistant reply.",
-          "scenario_word_count": 18,
-          "status": "measured",
-          "stitched_audio_duration_s": 5.131,
-          "stitched_playback_ms": 5881.0,
-          "streaming_support": "simulated",
-          "total_generation_ms": 1593.2,
-          "true_streaming": false,
-          "warmup_ms": 2779.2
-        },
-        {
-          "audio_duration_s": 14.795,
-          "backend": "native_pytorch_chunked",
-          "cached_prompt_build_ms": 5.9,
-          "chunk_audio_duration_s": [
-            4.661,
-            10.133
-          ],
-          "chunk_audio_ready_offsets_ms": [
-            904.6,
-            2029.7
-          ],
-          "chunk_char_lengths": [
-            76,
-            165
-          ],
-          "chunk_count": 2,
-          "chunk_estimated_tokens": [
-            40,
-            88
-          ],
-          "chunk_generate_total_ms": [
-            904.7,
-            1125.3
-          ],
-          "chunk_generate_ttfa_ms": [
-            904.6,
-            1125.0
-          ],
-          "chunk_max_chars": 520,
-          "chunk_max_estimated_tokens": 260,
-          "chunk_text_preview": [
-            "The main latency win comes from separating one-time setup from request work.",
-            "Load the model once at startup, precompute the voice conditioning when the speaker is chosen, an"
-          ],
-          "chunk_word_counts": [
-            13,
-            29
-          ],
-          "chunking_strategy": "sentence_boundary_token_cap_v1",
-          "engine": "f5",
-          "generate_total_ms": 2030.0,
-          "generate_ttfa_ms": 904.6,
-          "generation_rtf": 0.137,
-          "host_account": "omen-pc/pmpg",
-          "inter_chunk_gap_ms": [
-            0.0
-          ],
-          "max_inter_chunk_gap_ms": 0.0,
-          "mode": "non_streaming_clone",
-          "model_load_ms": 3291.3,
-          "optimization_notes": "Prepared reference cached once per session and replies use the shared sentence-aware chunk planner.",
-          "optimizations_applied": [
-            "prepared_ref_cache",
-            "shared_chunk_planner"
-          ],
-          "output_wav": "results/audio/f5__optimized__medium_reply.wav",
-          "peak_vram_mb": 780.8,
-          "profile": "optimized",
-          "request_prompt_prep_ms": 0.0,
-          "request_rtf": 0.137,
-          "request_total_ms": 2030.0,
-          "request_ttfa_ms": 904.6,
-          "runtime": "omen_windows_native_cuda",
-          "sample_path": "results/audio/f5__optimized__medium_reply.wav",
-          "sample_rate": 24000,
-          "scenario": "medium_reply",
-          "scenario_description": "A practical multi-sentence assistant answer.",
-          "scenario_word_count": 41,
-          "status": "measured",
-          "stitched_audio_duration_s": 14.795,
-          "stitched_playback_ms": 15699.2,
-          "streaming_support": "simulated",
-          "total_generation_ms": 2030.0,
-          "true_streaming": false,
-          "warmup_ms": 2779.2
-        },
-        {
-          "audio_duration_s": 56.288,
-          "backend": "native_pytorch_chunked",
-          "cached_prompt_build_ms": 5.9,
-          "chunk_audio_duration_s": [
-            5.952,
-            24.768,
-            25.568
-          ],
-          "chunk_audio_ready_offsets_ms": [
-            894.8,
-            3079.7,
-            5150.7
-          ],
-          "chunk_char_lengths": [
-            97,
-            403,
-            416
-          ],
-          "chunk_count": 3,
-          "chunk_estimated_tokens": [
-            64,
-            208,
-            223
-          ],
-          "chunk_generate_total_ms": [
-            895.1,
-            2185.7,
-            2070.5
-          ],
-          "chunk_generate_ttfa_ms": [
-            894.8,
-            2184.6,
-            2069.9
-          ],
-          "chunk_max_chars": 520,
-          "chunk_max_estimated_tokens": 260,
-          "chunk_text_preview": [
-            "Hey, I wanted to leave a fuller note so we can hear how the voice holds up over a longer stretch",
-            "The short samples are useful for latency, but they do not tell us much about consistency, pacing",
-            "I also want enough material to expose awkward transitions, repeated prosody, or the sort of flat"
-          ],
-          "chunk_word_counts": [
-            21,
-            68,
-            73
-          ],
-          "chunking_strategy": "sentence_boundary_token_cap_v1",
-          "engine": "f5",
-          "generate_total_ms": 5151.3,
-          "generate_ttfa_ms": 894.8,
-          "generation_rtf": 0.092,
-          "host_account": "omen-pc/pmpg",
-          "inter_chunk_gap_ms": [
-            0.0,
-            0.0
-          ],
-          "max_inter_chunk_gap_ms": 0.0,
-          "mode": "non_streaming_clone",
-          "model_load_ms": 3291.3,
-          "optimization_notes": "Prepared reference cached once per session and replies use the shared sentence-aware chunk planner.",
-          "optimizations_applied": [
-            "prepared_ref_cache",
-            "shared_chunk_planner"
-          ],
-          "output_wav": "results/audio/f5__optimized__long_reply.wav",
-          "peak_vram_mb": 838.2,
-          "profile": "optimized",
-          "request_prompt_prep_ms": 0.0,
-          "request_rtf": 0.092,
-          "request_total_ms": 5151.3,
-          "request_ttfa_ms": 894.8,
-          "runtime": "omen_windows_native_cuda",
-          "sample_path": "results/audio/f5__optimized__long_reply.wav",
-          "sample_rate": 24000,
-          "scenario": "long_reply",
-          "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
-          "scenario_word_count": 162,
-          "status": "measured",
-          "stitched_audio_duration_s": 56.288,
-          "stitched_playback_ms": 57182.8,
-          "streaming_support": "simulated",
-          "total_generation_ms": 5151.3,
-          "true_streaming": false,
-          "warmup_ms": 2779.2
-        }
-      ],
-      "runtime": "omen_windows_native_cuda"
-    },
-    {
-      "engine": "voxcpm2",
-      "host_account": "omen-pc/pmpg",
-      "rows": [
-        {
-          "audio_duration_s": 6.24,
-          "backend": "standard_python_api",
-          "cached_prompt_build_ms": null,
-          "engine": "voxcpm2",
-          "generate_total_ms": 9627.7,
-          "generate_ttfa_ms": 9627.7,
-          "generation_rtf": 1.543,
-          "host_account": "omen-pc/pmpg",
-          "max_inter_chunk_gap_ms": null,
-          "mode": "standard_python_generate",
-          "model_load_ms": 23018.3,
-          "optimization_notes": "Warm model only. VoxCPM2 standard Python generate path uses the official openbmb/VoxCPM2 runtime.",
-          "optimizations_applied": [],
-          "output_wav": "results/audio/voxcpm2__baseline__short_reply.wav",
-          "peak_vram_mb": 5793.8,
-          "profile": "baseline",
-          "request_prompt_prep_ms": 0.0,
-          "request_rtf": 1.543,
-          "request_total_ms": 9627.7,
-          "request_ttfa_ms": 9627.7,
-          "runtime": "omen_windows_native_cuda",
-          "sample_path": "results/audio/voxcpm2__baseline__short_reply.wav",
-          "sample_rate": 48000,
-          "scenario": "short_reply",
-          "scenario_description": "One concise assistant reply.",
-          "scenario_word_count": 18,
-          "status": "measured",
-          "stitched_playback_ms": null,
-          "streaming_support": "available_benchmark_only",
-          "true_streaming": false,
-          "warmup_ms": 5851.8
-        },
-        {
-          "audio_duration_s": 15.04,
-          "backend": "standard_python_api",
-          "cached_prompt_build_ms": null,
-          "engine": "voxcpm2",
-          "generate_total_ms": 23274.6,
-          "generate_ttfa_ms": 23274.6,
-          "generation_rtf": 1.548,
-          "host_account": "omen-pc/pmpg",
-          "max_inter_chunk_gap_ms": null,
-          "mode": "standard_python_generate",
-          "model_load_ms": 23018.3,
-          "optimization_notes": "Warm model only. VoxCPM2 standard Python generate path uses the official openbmb/VoxCPM2 runtime.",
-          "optimizations_applied": [],
-          "output_wav": "results/audio/voxcpm2__baseline__medium_reply.wav",
-          "peak_vram_mb": 5898.1,
-          "profile": "baseline",
-          "request_prompt_prep_ms": 0.0,
-          "request_rtf": 1.548,
-          "request_total_ms": 23274.6,
-          "request_ttfa_ms": 23274.6,
-          "runtime": "omen_windows_native_cuda",
-          "sample_path": "results/audio/voxcpm2__baseline__medium_reply.wav",
-          "sample_rate": 48000,
-          "scenario": "medium_reply",
-          "scenario_description": "A practical multi-sentence assistant answer.",
-          "scenario_word_count": 41,
-          "status": "measured",
-          "stitched_playback_ms": null,
-          "streaming_support": "available_benchmark_only",
-          "true_streaming": false,
-          "warmup_ms": 5851.8
-        },
-        {
-          "audio_duration_s": 46.08,
-          "backend": "standard_python_api",
-          "cached_prompt_build_ms": null,
-          "engine": "voxcpm2",
-          "generate_total_ms": 71161.1,
-          "generate_ttfa_ms": 71161.1,
-          "generation_rtf": 1.544,
-          "host_account": "omen-pc/pmpg",
-          "max_inter_chunk_gap_ms": null,
-          "mode": "standard_python_generate",
-          "model_load_ms": 23018.3,
-          "optimization_notes": "Warm model only. VoxCPM2 standard Python generate path uses the official openbmb/VoxCPM2 runtime.",
-          "optimizations_applied": [],
-          "output_wav": "results/audio/voxcpm2__baseline__long_reply.wav",
-          "peak_vram_mb": 6818.5,
-          "profile": "baseline",
-          "request_prompt_prep_ms": 0.0,
-          "request_rtf": 1.544,
-          "request_total_ms": 71161.1,
-          "request_ttfa_ms": 71161.1,
-          "runtime": "omen_windows_native_cuda",
-          "sample_path": "results/audio/voxcpm2__baseline__long_reply.wav",
-          "sample_rate": 48000,
-          "scenario": "long_reply",
-          "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
-          "scenario_word_count": 162,
-          "status": "measured",
-          "stitched_playback_ms": null,
-          "streaming_support": "available_benchmark_only",
-          "true_streaming": false,
-          "warmup_ms": 5851.8
-        },
-        {
-          "audio_duration_s": 9.6,
-          "backend": "standard_python_api",
-          "cached_prompt_build_ms": null,
-          "chunk_audio_duration_s": [
-            2.24,
-            7.36
-          ],
-          "chunk_audio_ready_offsets_ms": [
-            3546.2,
-            14862.9
-          ],
-          "chunk_char_lengths": [
-            14,
-            70
-          ],
-          "chunk_count": 2,
-          "chunk_estimated_tokens": [
-            12,
-            42
-          ],
-          "chunk_generate_total_ms": [
-            3546.2,
-            11316.7
-          ],
-          "chunk_generate_ttfa_ms": [
-            3546.2,
-            11316.7
-          ],
-          "chunk_max_chars": 500,
-          "chunk_max_estimated_tokens": 240,
-          "chunk_text_preview": [
-            "I can do that.",
-            "The quickest fix is to keep the model warm and reuse the voice prompt."
-          ],
-          "chunk_word_counts": [
-            4,
-            14
-          ],
-          "chunking_strategy": "sentence_boundary_token_cap_v1",
-          "engine": "voxcpm2",
-          "generate_total_ms": 14862.9,
-          "generate_ttfa_ms": 3546.2,
-          "generation_rtf": 1.548,
-          "host_account": "omen-pc/pmpg",
-          "inter_chunk_gap_ms": [
-            9076.7
-          ],
-          "max_inter_chunk_gap_ms": 9076.7,
-          "mode": "shared_chunked_playback",
-          "model_load_ms": 23018.3,
-          "optimization_notes": "VoxCPM2 standard Python generate path measured through the shared RayMe chunk planner; streaming API remains benchmark-only unless call code consumes chunks live.",
-          "optimizations_applied": [
-            "shared_chunk_planner"
-          ],
-          "output_wav": "results/audio/voxcpm2__standard_python__short_reply.wav",
-          "peak_vram_mb": 5794.8,
-          "profile": "standard_python",
-          "request_prompt_prep_ms": 0.0,
-          "request_rtf": 1.548,
-          "request_total_ms": 14862.9,
-          "request_ttfa_ms": 3546.2,
-          "runtime": "omen_windows_native_cuda",
-          "sample_path": "results/audio/voxcpm2__standard_python__short_reply.wav",
-          "sample_rate": 48000,
-          "scenario": "short_reply",
-          "scenario_description": "One concise assistant reply.",
-          "scenario_word_count": 18,
-          "status": "measured",
-          "stitched_audio_duration_s": 9.6,
-          "stitched_playback_ms": 22222.9,
-          "streaming_support": "available_benchmark_only",
-          "total_generation_ms": 14862.9,
-          "true_streaming": false,
-          "warmup_ms": 5851.8
-        },
-        {
-          "audio_duration_s": 16.32,
-          "backend": "standard_python_api",
-          "cached_prompt_build_ms": null,
-          "chunk_audio_duration_s": [
-            5.92,
-            10.4
-          ],
-          "chunk_audio_ready_offsets_ms": [
-            9192.9,
-            25341.3
-          ],
-          "chunk_char_lengths": [
-            76,
-            165
-          ],
-          "chunk_count": 2,
-          "chunk_estimated_tokens": [
-            40,
-            88
-          ],
-          "chunk_generate_total_ms": [
-            9192.9,
-            16148.4
-          ],
-          "chunk_generate_ttfa_ms": [
-            9192.9,
-            16148.4
-          ],
-          "chunk_max_chars": 500,
-          "chunk_max_estimated_tokens": 240,
-          "chunk_text_preview": [
-            "The main latency win comes from separating one-time setup from request work.",
-            "Load the model once at startup, precompute the voice conditioning when the speaker is chosen, an"
-          ],
-          "chunk_word_counts": [
-            13,
-            29
-          ],
-          "chunking_strategy": "sentence_boundary_token_cap_v1",
-          "engine": "voxcpm2",
-          "generate_total_ms": 25341.3,
-          "generate_ttfa_ms": 9192.9,
-          "generation_rtf": 1.553,
-          "host_account": "omen-pc/pmpg",
-          "inter_chunk_gap_ms": [
-            10228.4
-          ],
-          "max_inter_chunk_gap_ms": 10228.4,
-          "mode": "shared_chunked_playback",
-          "model_load_ms": 23018.3,
-          "optimization_notes": "VoxCPM2 standard Python generate path measured through the shared RayMe chunk planner; streaming API remains benchmark-only unless call code consumes chunks live.",
-          "optimizations_applied": [
-            "shared_chunk_planner"
-          ],
-          "output_wav": "results/audio/voxcpm2__standard_python__medium_reply.wav",
-          "peak_vram_mb": 5794.6,
-          "profile": "standard_python",
-          "request_prompt_prep_ms": 0.0,
-          "request_rtf": 1.553,
-          "request_total_ms": 25341.3,
-          "request_ttfa_ms": 9192.9,
-          "runtime": "omen_windows_native_cuda",
-          "sample_path": "results/audio/voxcpm2__standard_python__medium_reply.wav",
-          "sample_rate": 48000,
-          "scenario": "medium_reply",
-          "scenario_description": "A practical multi-sentence assistant answer.",
-          "scenario_word_count": 41,
-          "status": "measured",
-          "stitched_audio_duration_s": 16.32,
-          "stitched_playback_ms": 35741.3,
-          "streaming_support": "available_benchmark_only",
-          "total_generation_ms": 25341.3,
-          "true_streaming": false,
-          "warmup_ms": 5851.8
-        },
-        {
-          "audio_duration_s": 56.16,
-          "backend": "standard_python_api",
-          "cached_prompt_build_ms": null,
-          "chunk_audio_duration_s": [
-            6.08,
-            26.72,
-            23.36
-          ],
-          "chunk_audio_ready_offsets_ms": [
-            9498.3,
-            50741.8,
-            87166.7
-          ],
-          "chunk_char_lengths": [
-            97,
-            403,
-            416
-          ],
-          "chunk_count": 3,
-          "chunk_estimated_tokens": [
-            64,
-            208,
-            223
-          ],
-          "chunk_generate_total_ms": [
-            9498.3,
-            41243.4,
-            36424.9
-          ],
-          "chunk_generate_ttfa_ms": [
-            9498.3,
-            41243.4,
-            36424.9
-          ],
-          "chunk_max_chars": 500,
-          "chunk_max_estimated_tokens": 240,
-          "chunk_text_preview": [
-            "Hey, I wanted to leave a fuller note so we can hear how the voice holds up over a longer stretch",
-            "The short samples are useful for latency, but they do not tell us much about consistency, pacing",
-            "I also want enough material to expose awkward transitions, repeated prosody, or the sort of flat"
-          ],
-          "chunk_word_counts": [
-            21,
-            68,
-            73
-          ],
-          "chunking_strategy": "sentence_boundary_token_cap_v1",
-          "engine": "voxcpm2",
-          "generate_total_ms": 87166.7,
-          "generate_ttfa_ms": 9498.3,
-          "generation_rtf": 1.552,
-          "host_account": "omen-pc/pmpg",
-          "inter_chunk_gap_ms": [
-            35163.4,
-            9704.9
-          ],
-          "max_inter_chunk_gap_ms": 35163.4,
-          "mode": "shared_chunked_playback",
-          "model_load_ms": 23018.3,
-          "optimization_notes": "VoxCPM2 standard Python generate path measured through the shared RayMe chunk planner; streaming API remains benchmark-only unless call code consumes chunks live.",
-          "optimizations_applied": [
-            "shared_chunk_planner"
-          ],
-          "output_wav": "results/audio/voxcpm2__standard_python__long_reply.wav",
-          "peak_vram_mb": 6243.9,
-          "profile": "standard_python",
-          "request_prompt_prep_ms": 0.0,
-          "request_rtf": 1.552,
-          "request_total_ms": 87166.7,
-          "request_ttfa_ms": 9498.3,
-          "runtime": "omen_windows_native_cuda",
-          "sample_path": "results/audio/voxcpm2__standard_python__long_reply.wav",
-          "sample_rate": 48000,
-          "scenario": "long_reply",
-          "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
-          "scenario_word_count": 162,
-          "status": "measured",
-          "stitched_audio_duration_s": 56.16,
-          "stitched_playback_ms": 110526.7,
-          "streaming_support": "available_benchmark_only",
-          "total_generation_ms": 87166.7,
-          "true_streaming": false,
-          "warmup_ms": 5851.8
-        },
-        {
-          "audio_duration_s": 6.24,
-          "backend": "standard_python_api",
-          "cached_prompt_build_ms": null,
-          "engine": "voxcpm2",
-          "generate_total_ms": 10129.4,
-          "generate_ttfa_ms": 350.0,
-          "generation_rtf": 1.623,
-          "host_account": "omen-pc/pmpg",
-          "max_inter_chunk_gap_ms": null,
-          "mode": "standard_python_streaming_collected",
-          "model_load_ms": 23018.3,
-          "optimization_notes": "VoxCPM2 generate_streaming chunks are collected into one WAV for benchmark-only metrics; this row does not claim RayMe call-flow streaming.",
-          "optimizations_applied": [
-            "generate_streaming_collected"
-          ],
-          "output_wav": "results/audio/voxcpm2__streaming_collected__short_reply.wav",
-          "peak_vram_mb": 5793.8,
-          "profile": "streaming_collected",
-          "request_prompt_prep_ms": 0.0,
-          "request_rtf": 1.623,
-          "request_total_ms": 10129.4,
-          "request_ttfa_ms": 350.0,
-          "runtime": "omen_windows_native_cuda",
-          "sample_path": "results/audio/voxcpm2__streaming_collected__short_reply.wav",
-          "sample_rate": 48000,
-          "scenario": "short_reply",
-          "scenario_description": "One concise assistant reply.",
-          "scenario_word_count": 18,
-          "status": "measured",
-          "stitched_playback_ms": null,
-          "streaming_benchmark_only": true,
-          "streaming_support": "native_benchmark_only",
-          "true_streaming": false,
-          "warmup_ms": 5851.8
-        },
-        {
-          "audio_duration_s": 14.88,
-          "backend": "standard_python_api",
-          "cached_prompt_build_ms": null,
-          "engine": "voxcpm2",
-          "generate_total_ms": 23779.5,
-          "generate_ttfa_ms": 328.5,
-          "generation_rtf": 1.598,
-          "host_account": "omen-pc/pmpg",
-          "max_inter_chunk_gap_ms": null,
-          "mode": "standard_python_streaming_collected",
-          "model_load_ms": 23018.3,
-          "optimization_notes": "VoxCPM2 generate_streaming chunks are collected into one WAV for benchmark-only metrics; this row does not claim RayMe call-flow streaming.",
-          "optimizations_applied": [
-            "generate_streaming_collected"
-          ],
-          "output_wav": "results/audio/voxcpm2__streaming_collected__medium_reply.wav",
-          "peak_vram_mb": 5794.8,
-          "profile": "streaming_collected",
-          "request_prompt_prep_ms": 0.0,
-          "request_rtf": 1.598,
-          "request_total_ms": 23779.5,
-          "request_ttfa_ms": 328.5,
-          "runtime": "omen_windows_native_cuda",
-          "sample_path": "results/audio/voxcpm2__streaming_collected__medium_reply.wav",
-          "sample_rate": 48000,
-          "scenario": "medium_reply",
-          "scenario_description": "A practical multi-sentence assistant answer.",
-          "scenario_word_count": 41,
-          "status": "measured",
-          "stitched_playback_ms": null,
-          "streaming_benchmark_only": true,
-          "streaming_support": "native_benchmark_only",
-          "true_streaming": false,
-          "warmup_ms": 5851.8
-        },
-        {
-          "audio_duration_s": 51.84,
-          "backend": "standard_python_api",
-          "cached_prompt_build_ms": null,
-          "engine": "voxcpm2",
-          "generate_total_ms": 82603.9,
-          "generate_ttfa_ms": 356.0,
-          "generation_rtf": 1.593,
-          "host_account": "omen-pc/pmpg",
-          "max_inter_chunk_gap_ms": null,
-          "mode": "standard_python_streaming_collected",
-          "model_load_ms": 23018.3,
-          "optimization_notes": "VoxCPM2 generate_streaming chunks are collected into one WAV for benchmark-only metrics; this row does not claim RayMe call-flow streaming.",
-          "optimizations_applied": [
-            "generate_streaming_collected"
-          ],
-          "output_wav": "results/audio/voxcpm2__streaming_collected__long_reply.wav",
-          "peak_vram_mb": 5793.3,
-          "profile": "streaming_collected",
-          "request_prompt_prep_ms": 0.0,
-          "request_rtf": 1.593,
-          "request_total_ms": 82603.9,
-          "request_ttfa_ms": 356.0,
-          "runtime": "omen_windows_native_cuda",
-          "sample_path": "results/audio/voxcpm2__streaming_collected__long_reply.wav",
-          "sample_rate": 48000,
-          "scenario": "long_reply",
-          "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
-          "scenario_word_count": 162,
-          "status": "measured",
-          "stitched_playback_ms": null,
-          "streaming_benchmark_only": true,
-          "streaming_support": "native_benchmark_only",
-          "true_streaming": false,
-          "warmup_ms": 5851.8
-        }
-      ],
-      "runtime": "omen_windows_native_cuda"
-    }
-  ],
+  "probe": "tts_scenario_matrix",
+  "runtime": "omen_windows_native_cuda",
+  "host_account": "omen-pc/pmpg",
+  "ref_audio": "web-ui/server/data/blobs/voices/voice_asset_531ca6a567db4f01a870cdfba8abae96.wav",
+  "ref_text": "runtime-temp/voice_asset_531ca6a567db4f01a870cdfba8abae96.txt",
   "engines": [
     "f5",
-    "xtts",
-    "luxtts",
-    "chatterbox_turbo",
-    "tada_1b",
-    "qwen3",
     "voxcpm2"
   ],
-  "full_roster_context": [
-    "f5",
-    "xtts",
-    "luxtts",
-    "chatterbox_turbo",
-    "tada_1b",
-    "qwen3",
-    "voxcpm2"
-  ],
-  "host_account": "omen-pc/pmpg",
-  "live_generated_engines": [
-    "f5",
-    "voxcpm2"
-  ],
-  "meta": {
-    "gpu": {
-      "compute_capability": "8.6",
-      "cuda_available": true,
-      "cuda_version": "12.6",
-      "driver_version": "560.94",
-      "name": "NVIDIA GeForce RTX 3060",
-      "torch_version": "2.10.0+cu126",
-      "vram_total_mb": 12287
-    },
-    "platform": "Windows-10-10.0.26200-SP0",
-    "python_version": "3.11.15",
-    "timestamp": "2026-05-11T04:53:01+00:00"
-  },
-  "probe": "tts_scenario_matrix",
   "profiles": [
     "baseline",
     "optimized",
@@ -843,1050 +15,1725 @@
     "optimized_seed_1337",
     "streaming_collected"
   ],
-  "ref_audio": "web-ui/server/data/blobs/voices/voice_asset_5fa4413aed9340249fcafdff9ec9d1f4.wav",
-  "ref_text": "runtime-temp/rayme-voxcpm2-matrix-ref-ascii.txt",
+  "scenarios": [
+    {
+      "name": "short_reply",
+      "description": "One concise assistant reply.",
+      "word_count": 18
+    },
+    {
+      "name": "medium_reply",
+      "description": "A practical multi-sentence assistant answer.",
+      "word_count": 41
+    },
+    {
+      "name": "long_reply",
+      "description": "Long-form assistant narration from the Phase 0 fixture.",
+      "word_count": 162
+    }
+  ],
   "rows": [
     {
-      "audio_duration_s": 5.216,
-      "backend": "native_infer_whole_request",
-      "cached_prompt_build_ms": null,
       "engine": "f5",
-      "full_roster_context": [
-        "f5",
-        "xtts",
-        "luxtts",
-        "chatterbox_turbo",
-        "tada_1b",
-        "qwen3",
-        "voxcpm2"
-      ],
-      "generate_total_ms": 946.9,
-      "generate_ttfa_ms": 946.9,
-      "generation_rtf": 0.182,
-      "host_account": "omen-pc/pmpg",
-      "max_inter_chunk_gap_ms": null,
-      "mode": "non_streaming_clone",
-      "model_load_ms": 3291.3,
-      "optimization_notes": "Warm model only. Baseline F5 uses the whole-request infer path, so prompt prep remains folded into the measured request time.",
-      "optimizations_applied": [],
-      "output_wav": "results/audio/f5__baseline__short_reply.wav",
-      "peak_vram_mb": 761.9,
-      "profile": "baseline",
-      "request_prompt_prep_ms": 0.0,
-      "request_rtf": 0.182,
-      "request_total_ms": 946.9,
-      "request_ttfa_ms": 946.9,
       "runtime": "omen_windows_native_cuda",
-      "sample_path": "results/audio/f5__baseline__short_reply.wav",
-      "sample_rate": 24000,
+      "host_account": "omen-pc/pmpg",
+      "profile": "baseline",
       "scenario": "short_reply",
       "scenario_description": "One concise assistant reply.",
       "scenario_word_count": 18,
-      "status": "measured",
-      "stitched_playback_ms": null,
+      "backend": "native_infer_whole_request",
+      "mode": "non_streaming_clone",
       "streaming_support": "none",
       "true_streaming": false,
-      "warmup_ms": 2779.2
+      "status": "measured",
+      "model_load_ms": 5066.2,
+      "warmup_ms": 1922.7,
+      "cached_prompt_build_ms": null,
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 1117.1,
+      "generate_total_ms": 1117.1,
+      "request_ttfa_ms": 1117.1,
+      "request_total_ms": 1117.1,
+      "audio_duration_s": 3.925,
+      "generation_rtf": 0.285,
+      "request_rtf": 0.285,
+      "peak_vram_mb": 775.5,
+      "sample_rate": 24000,
+      "output_wav": "results/audio/f5__baseline__short_reply.wav",
+      "sample_path": "results/audio/f5__baseline__short_reply.wav",
+      "stitched_playback_ms": null,
+      "max_inter_chunk_gap_ms": null,
+      "optimizations_applied": [],
+      "optimization_notes": "Warm model only. Baseline F5 uses the whole-request infer path, so prompt prep remains folded into the measured request time."
     },
     {
-      "audio_duration_s": 14.645,
-      "backend": "native_infer_whole_request",
-      "cached_prompt_build_ms": null,
       "engine": "f5",
-      "full_roster_context": [
-        "f5",
-        "xtts",
-        "luxtts",
-        "chatterbox_turbo",
-        "tada_1b",
-        "qwen3",
-        "voxcpm2"
-      ],
-      "generate_total_ms": 2051.7,
-      "generate_ttfa_ms": 2051.7,
-      "generation_rtf": 0.14,
-      "host_account": "omen-pc/pmpg",
-      "max_inter_chunk_gap_ms": null,
-      "mode": "non_streaming_clone",
-      "model_load_ms": 3291.3,
-      "optimization_notes": "Warm model only. Baseline F5 uses the whole-request infer path, so prompt prep remains folded into the measured request time.",
-      "optimizations_applied": [],
-      "output_wav": "results/audio/f5__baseline__medium_reply.wav",
-      "peak_vram_mb": 781.8,
-      "profile": "baseline",
-      "request_prompt_prep_ms": 0.0,
-      "request_rtf": 0.14,
-      "request_total_ms": 2051.7,
-      "request_ttfa_ms": 2051.7,
       "runtime": "omen_windows_native_cuda",
-      "sample_path": "results/audio/f5__baseline__medium_reply.wav",
-      "sample_rate": 24000,
+      "host_account": "omen-pc/pmpg",
+      "profile": "baseline",
       "scenario": "medium_reply",
       "scenario_description": "A practical multi-sentence assistant answer.",
       "scenario_word_count": 41,
-      "status": "measured",
-      "stitched_playback_ms": null,
+      "backend": "native_infer_whole_request",
+      "mode": "non_streaming_clone",
       "streaming_support": "none",
       "true_streaming": false,
-      "warmup_ms": 2779.2
+      "status": "measured",
+      "model_load_ms": 5066.2,
+      "warmup_ms": 1922.7,
+      "cached_prompt_build_ms": null,
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 2310.5,
+      "generate_total_ms": 2310.5,
+      "request_ttfa_ms": 2310.5,
+      "request_total_ms": 2310.5,
+      "audio_duration_s": 10.986,
+      "generation_rtf": 0.21,
+      "request_rtf": 0.21,
+      "peak_vram_mb": 788.5,
+      "sample_rate": 24000,
+      "output_wav": "results/audio/f5__baseline__medium_reply.wav",
+      "sample_path": "results/audio/f5__baseline__medium_reply.wav",
+      "stitched_playback_ms": null,
+      "max_inter_chunk_gap_ms": null,
+      "optimizations_applied": [],
+      "optimization_notes": "Warm model only. Baseline F5 uses the whole-request infer path, so prompt prep remains folded into the measured request time."
     },
     {
-      "audio_duration_s": 55.528,
-      "backend": "native_infer_whole_request",
-      "cached_prompt_build_ms": null,
       "engine": "f5",
-      "full_roster_context": [
-        "f5",
-        "xtts",
-        "luxtts",
-        "chatterbox_turbo",
-        "tada_1b",
-        "qwen3",
-        "voxcpm2"
-      ],
-      "generate_total_ms": 6002.6,
-      "generate_ttfa_ms": 6002.6,
-      "generation_rtf": 0.108,
-      "host_account": "omen-pc/pmpg",
-      "max_inter_chunk_gap_ms": null,
-      "mode": "non_streaming_clone",
-      "model_load_ms": 3291.3,
-      "optimization_notes": "Warm model only. Baseline F5 uses the whole-request infer path, so prompt prep remains folded into the measured request time.",
-      "optimizations_applied": [],
-      "output_wav": "results/audio/f5__baseline__long_reply.wav",
-      "peak_vram_mb": 792.8,
-      "profile": "baseline",
-      "request_prompt_prep_ms": 0.0,
-      "request_rtf": 0.108,
-      "request_total_ms": 6002.6,
-      "request_ttfa_ms": 6002.6,
       "runtime": "omen_windows_native_cuda",
-      "sample_path": "results/audio/f5__baseline__long_reply.wav",
-      "sample_rate": 24000,
+      "host_account": "omen-pc/pmpg",
+      "profile": "baseline",
       "scenario": "long_reply",
       "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
       "scenario_word_count": 162,
-      "status": "measured",
-      "stitched_playback_ms": null,
+      "backend": "native_infer_whole_request",
+      "mode": "non_streaming_clone",
       "streaming_support": "none",
       "true_streaming": false,
-      "warmup_ms": 2779.2
+      "status": "measured",
+      "model_load_ms": 5066.2,
+      "warmup_ms": 1922.7,
+      "cached_prompt_build_ms": null,
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 6560.5,
+      "generate_total_ms": 6560.5,
+      "request_ttfa_ms": 6560.5,
+      "request_total_ms": 6560.5,
+      "audio_duration_s": 41.661,
+      "generation_rtf": 0.157,
+      "request_rtf": 0.157,
+      "peak_vram_mb": 796.3,
+      "sample_rate": 24000,
+      "output_wav": "results/audio/f5__baseline__long_reply.wav",
+      "sample_path": "results/audio/f5__baseline__long_reply.wav",
+      "stitched_playback_ms": null,
+      "max_inter_chunk_gap_ms": null,
+      "optimizations_applied": [],
+      "optimization_notes": "Warm model only. Baseline F5 uses the whole-request infer path, so prompt prep remains folded into the measured request time."
     },
     {
-      "audio_duration_s": 5.131,
+      "engine": "f5",
+      "runtime": "omen_windows_native_cuda",
+      "host_account": "omen-pc/pmpg",
+      "profile": "optimized",
+      "scenario": "short_reply",
+      "scenario_description": "One concise assistant reply.",
+      "scenario_word_count": 18,
       "backend": "native_pytorch_chunked",
-      "cached_prompt_build_ms": 5.9,
-      "chunk_audio_duration_s": [
-        0.843,
-        4.288
+      "mode": "non_streaming_clone",
+      "streaming_support": "simulated",
+      "true_streaming": false,
+      "status": "measured",
+      "model_load_ms": 5066.2,
+      "warmup_ms": 1922.7,
+      "cached_prompt_build_ms": 3.2,
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 912.6,
+      "generate_total_ms": 1953.0,
+      "request_ttfa_ms": 912.6,
+      "request_total_ms": 1953.0,
+      "audio_duration_s": 3.861,
+      "generation_rtf": 0.506,
+      "request_rtf": 0.506,
+      "peak_vram_mb": 771.1,
+      "sample_rate": 24000,
+      "output_wav": "results/audio/f5__optimized__short_reply.wav",
+      "sample_path": "results/audio/f5__optimized__short_reply.wav",
+      "stitched_playback_ms": 5184.8,
+      "max_inter_chunk_gap_ms": 410.9,
+      "optimizations_applied": [
+        "prepared_ref_cache",
+        "shared_chunk_planner"
       ],
-      "chunk_audio_ready_offsets_ms": [
-        723.2,
-        1593.0
-      ],
+      "optimization_notes": "Prepared reference cached once per session and replies use the shared sentence-aware chunk planner.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 260,
+      "chunk_max_chars": 520,
       "chunk_char_lengths": [
         14,
         70
-      ],
-      "chunk_count": 2,
-      "chunk_estimated_tokens": [
-        12,
-        42
-      ],
-      "chunk_generate_total_ms": [
-        723.3,
-        869.9
-      ],
-      "chunk_generate_ttfa_ms": [
-        723.2,
-        869.7
-      ],
-      "chunk_max_chars": 520,
-      "chunk_max_estimated_tokens": 260,
-      "chunk_text_preview": [
-        "I can do that.",
-        "The quickest fix is to keep the model warm and reuse the voice prompt."
       ],
       "chunk_word_counts": [
         4,
         14
       ],
-      "chunking_strategy": "sentence_boundary_token_cap_v1",
-      "engine": "f5",
-      "full_roster_context": [
-        "f5",
-        "xtts",
-        "luxtts",
-        "chatterbox_turbo",
-        "tada_1b",
-        "qwen3",
-        "voxcpm2"
+      "chunk_estimated_tokens": [
+        12,
+        42
       ],
-      "generate_total_ms": 1593.2,
-      "generate_ttfa_ms": 723.2,
-      "generation_rtf": 0.311,
-      "host_account": "omen-pc/pmpg",
+      "chunk_text_preview": [
+        "I can do that.",
+        "The quickest fix is to keep the model warm and reuse the voice prompt."
+      ],
+      "chunk_generate_ttfa_ms": [
+        912.6,
+        1040.1
+      ],
+      "chunk_generate_total_ms": [
+        912.7,
+        1040.3
+      ],
+      "chunk_audio_duration_s": [
+        0.629,
+        3.232
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        912.6,
+        1952.8
+      ],
       "inter_chunk_gap_ms": [
-        27.1
+        410.9
       ],
-      "max_inter_chunk_gap_ms": 27.1,
+      "total_generation_ms": 1953.0,
+      "stitched_audio_duration_s": 3.861
+    },
+    {
+      "engine": "f5",
+      "runtime": "omen_windows_native_cuda",
+      "host_account": "omen-pc/pmpg",
+      "profile": "optimized",
+      "scenario": "medium_reply",
+      "scenario_description": "A practical multi-sentence assistant answer.",
+      "scenario_word_count": 41,
+      "backend": "native_pytorch_chunked",
       "mode": "non_streaming_clone",
-      "model_load_ms": 3291.3,
-      "optimization_notes": "Prepared reference cached once per session and replies use the shared sentence-aware chunk planner.",
+      "streaming_support": "simulated",
+      "true_streaming": false,
+      "status": "measured",
+      "model_load_ms": 5066.2,
+      "warmup_ms": 1922.7,
+      "cached_prompt_build_ms": 3.2,
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 1051.5,
+      "generate_total_ms": 2310.6,
+      "request_ttfa_ms": 1051.5,
+      "request_total_ms": 2310.6,
+      "audio_duration_s": 11.136,
+      "generation_rtf": 0.207,
+      "request_rtf": 0.207,
+      "peak_vram_mb": 787.6,
+      "sample_rate": 24000,
+      "output_wav": "results/audio/f5__optimized__medium_reply.wav",
+      "sample_path": "results/audio/f5__optimized__medium_reply.wav",
+      "stitched_playback_ms": 12187.5,
+      "max_inter_chunk_gap_ms": 0.0,
       "optimizations_applied": [
         "prepared_ref_cache",
         "shared_chunk_planner"
       ],
-      "output_wav": "results/audio/f5__optimized__short_reply.wav",
-      "peak_vram_mb": 757.5,
-      "profile": "optimized",
-      "request_prompt_prep_ms": 0.0,
-      "request_rtf": 0.311,
-      "request_total_ms": 1593.2,
-      "request_ttfa_ms": 723.2,
-      "runtime": "omen_windows_native_cuda",
-      "sample_path": "results/audio/f5__optimized__short_reply.wav",
-      "sample_rate": 24000,
-      "scenario": "short_reply",
-      "scenario_description": "One concise assistant reply.",
-      "scenario_word_count": 18,
-      "status": "measured",
-      "stitched_audio_duration_s": 5.131,
-      "stitched_playback_ms": 5881.0,
-      "streaming_support": "simulated",
-      "total_generation_ms": 1593.2,
-      "true_streaming": false,
-      "warmup_ms": 2779.2
-    },
-    {
-      "audio_duration_s": 14.795,
-      "backend": "native_pytorch_chunked",
-      "cached_prompt_build_ms": 5.9,
-      "chunk_audio_duration_s": [
-        4.661,
-        10.133
-      ],
-      "chunk_audio_ready_offsets_ms": [
-        904.6,
-        2029.7
-      ],
+      "optimization_notes": "Prepared reference cached once per session and replies use the shared sentence-aware chunk planner.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 260,
+      "chunk_max_chars": 520,
       "chunk_char_lengths": [
         76,
         165
-      ],
-      "chunk_count": 2,
-      "chunk_estimated_tokens": [
-        40,
-        88
-      ],
-      "chunk_generate_total_ms": [
-        904.7,
-        1125.3
-      ],
-      "chunk_generate_ttfa_ms": [
-        904.6,
-        1125.0
-      ],
-      "chunk_max_chars": 520,
-      "chunk_max_estimated_tokens": 260,
-      "chunk_text_preview": [
-        "The main latency win comes from separating one-time setup from request work.",
-        "Load the model once at startup, precompute the voice conditioning when the speaker is chosen, an"
       ],
       "chunk_word_counts": [
         13,
         29
       ],
-      "chunking_strategy": "sentence_boundary_token_cap_v1",
-      "engine": "f5",
-      "full_roster_context": [
-        "f5",
-        "xtts",
-        "luxtts",
-        "chatterbox_turbo",
-        "tada_1b",
-        "qwen3",
-        "voxcpm2"
+      "chunk_estimated_tokens": [
+        40,
+        88
       ],
-      "generate_total_ms": 2030.0,
-      "generate_ttfa_ms": 904.6,
-      "generation_rtf": 0.137,
-      "host_account": "omen-pc/pmpg",
+      "chunk_text_preview": [
+        "The main latency win comes from separating one-time setup from request work.",
+        "Load the model once at startup, precompute the voice conditioning when the speaker is chosen, an"
+      ],
+      "chunk_generate_ttfa_ms": [
+        1051.5,
+        1258.4
+      ],
+      "chunk_generate_total_ms": [
+        1051.8,
+        1258.8
+      ],
+      "chunk_audio_duration_s": [
+        3.509,
+        7.627
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        1051.5,
+        2310.2
+      ],
       "inter_chunk_gap_ms": [
         0.0
       ],
-      "max_inter_chunk_gap_ms": 0.0,
+      "total_generation_ms": 2310.6,
+      "stitched_audio_duration_s": 11.136
+    },
+    {
+      "engine": "f5",
+      "runtime": "omen_windows_native_cuda",
+      "host_account": "omen-pc/pmpg",
+      "profile": "optimized",
+      "scenario": "long_reply",
+      "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
+      "scenario_word_count": 162,
+      "backend": "native_pytorch_chunked",
       "mode": "non_streaming_clone",
-      "model_load_ms": 3291.3,
-      "optimization_notes": "Prepared reference cached once per session and replies use the shared sentence-aware chunk planner.",
+      "streaming_support": "simulated",
+      "true_streaming": false,
+      "status": "measured",
+      "model_load_ms": 5066.2,
+      "warmup_ms": 1922.7,
+      "cached_prompt_build_ms": 3.2,
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 1114.6,
+      "generate_total_ms": 4980.9,
+      "request_ttfa_ms": 1114.6,
+      "request_total_ms": 4980.9,
+      "audio_duration_s": 42.4,
+      "generation_rtf": 0.117,
+      "request_rtf": 0.117,
+      "peak_vram_mb": 833.2,
+      "sample_rate": 24000,
+      "output_wav": "results/audio/f5__optimized__long_reply.wav",
+      "sample_path": "results/audio/f5__optimized__long_reply.wav",
+      "stitched_playback_ms": 43514.6,
+      "max_inter_chunk_gap_ms": 0.0,
       "optimizations_applied": [
         "prepared_ref_cache",
         "shared_chunk_planner"
       ],
-      "output_wav": "results/audio/f5__optimized__medium_reply.wav",
-      "peak_vram_mb": 780.8,
-      "profile": "optimized",
-      "request_prompt_prep_ms": 0.0,
-      "request_rtf": 0.137,
-      "request_total_ms": 2030.0,
-      "request_ttfa_ms": 904.6,
-      "runtime": "omen_windows_native_cuda",
-      "sample_path": "results/audio/f5__optimized__medium_reply.wav",
-      "sample_rate": 24000,
-      "scenario": "medium_reply",
-      "scenario_description": "A practical multi-sentence assistant answer.",
-      "scenario_word_count": 41,
-      "status": "measured",
-      "stitched_audio_duration_s": 14.795,
-      "stitched_playback_ms": 15699.2,
-      "streaming_support": "simulated",
-      "total_generation_ms": 2030.0,
-      "true_streaming": false,
-      "warmup_ms": 2779.2
-    },
-    {
-      "audio_duration_s": 56.288,
-      "backend": "native_pytorch_chunked",
-      "cached_prompt_build_ms": 5.9,
-      "chunk_audio_duration_s": [
-        5.952,
-        24.768,
-        25.568
-      ],
-      "chunk_audio_ready_offsets_ms": [
-        894.8,
-        3079.7,
-        5150.7
-      ],
+      "optimization_notes": "Prepared reference cached once per session and replies use the shared sentence-aware chunk planner.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 3,
+      "chunk_max_estimated_tokens": 260,
+      "chunk_max_chars": 520,
       "chunk_char_lengths": [
         97,
         403,
         416
-      ],
-      "chunk_count": 3,
-      "chunk_estimated_tokens": [
-        64,
-        208,
-        223
-      ],
-      "chunk_generate_total_ms": [
-        895.1,
-        2185.7,
-        2070.5
-      ],
-      "chunk_generate_ttfa_ms": [
-        894.8,
-        2184.6,
-        2069.9
-      ],
-      "chunk_max_chars": 520,
-      "chunk_max_estimated_tokens": 260,
-      "chunk_text_preview": [
-        "Hey, I wanted to leave a fuller note so we can hear how the voice holds up over a longer stretch",
-        "The short samples are useful for latency, but they do not tell us much about consistency, pacing",
-        "I also want enough material to expose awkward transitions, repeated prosody, or the sort of flat"
       ],
       "chunk_word_counts": [
         21,
         68,
         73
       ],
-      "chunking_strategy": "sentence_boundary_token_cap_v1",
-      "engine": "f5",
-      "full_roster_context": [
-        "f5",
-        "xtts",
-        "luxtts",
-        "chatterbox_turbo",
-        "tada_1b",
-        "qwen3",
-        "voxcpm2"
+      "chunk_estimated_tokens": [
+        64,
+        208,
+        223
       ],
-      "generate_total_ms": 5151.3,
-      "generate_ttfa_ms": 894.8,
-      "generation_rtf": 0.092,
-      "host_account": "omen-pc/pmpg",
+      "chunk_text_preview": [
+        "Hey, I wanted to leave a fuller note so we can hear how the voice holds up over a longer stretch",
+        "The short samples are useful for latency, but they do not tell us much about consistency, pacing",
+        "I also want enough material to expose awkward transitions, repeated prosody, or the sort of flat"
+      ],
+      "chunk_generate_ttfa_ms": [
+        1114.6,
+        1886.0,
+        1979.0
+      ],
+      "chunk_generate_total_ms": [
+        1114.9,
+        1886.5,
+        1979.5
+      ],
+      "chunk_audio_duration_s": [
+        4.48,
+        18.656,
+        19.264
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        1114.6,
+        3000.8,
+        4980.3
+      ],
       "inter_chunk_gap_ms": [
         0.0,
         0.0
       ],
-      "max_inter_chunk_gap_ms": 0.0,
-      "mode": "non_streaming_clone",
-      "model_load_ms": 3291.3,
-      "optimization_notes": "Prepared reference cached once per session and replies use the shared sentence-aware chunk planner.",
-      "optimizations_applied": [
-        "prepared_ref_cache",
-        "shared_chunk_planner"
-      ],
-      "output_wav": "results/audio/f5__optimized__long_reply.wav",
-      "peak_vram_mb": 838.2,
-      "profile": "optimized",
-      "request_prompt_prep_ms": 0.0,
-      "request_rtf": 0.092,
-      "request_total_ms": 5151.3,
-      "request_ttfa_ms": 894.8,
-      "runtime": "omen_windows_native_cuda",
-      "sample_path": "results/audio/f5__optimized__long_reply.wav",
-      "sample_rate": 24000,
-      "scenario": "long_reply",
-      "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
-      "scenario_word_count": 162,
-      "status": "measured",
-      "stitched_audio_duration_s": 56.288,
-      "stitched_playback_ms": 57182.8,
-      "streaming_support": "simulated",
-      "total_generation_ms": 5151.3,
-      "true_streaming": false,
-      "warmup_ms": 2779.2
+      "total_generation_ms": 4980.9,
+      "stitched_audio_duration_s": 42.4
     },
     {
-      "audio_duration_s": 6.24,
-      "backend": "standard_python_api",
-      "cached_prompt_build_ms": null,
       "engine": "voxcpm2",
-      "full_roster_context": [
-        "f5",
-        "xtts",
-        "luxtts",
-        "chatterbox_turbo",
-        "tada_1b",
-        "qwen3",
-        "voxcpm2"
-      ],
-      "generate_total_ms": 9627.7,
-      "generate_ttfa_ms": 9627.7,
-      "generation_rtf": 1.543,
-      "host_account": "omen-pc/pmpg",
-      "max_inter_chunk_gap_ms": null,
-      "mode": "standard_python_generate",
-      "model_load_ms": 23018.3,
-      "optimization_notes": "Warm model only. VoxCPM2 standard Python generate path uses the official openbmb/VoxCPM2 runtime.",
-      "optimizations_applied": [],
-      "output_wav": "results/audio/voxcpm2__baseline__short_reply.wav",
-      "peak_vram_mb": 5793.8,
-      "profile": "baseline",
-      "request_prompt_prep_ms": 0.0,
-      "request_rtf": 1.543,
-      "request_total_ms": 9627.7,
-      "request_ttfa_ms": 9627.7,
       "runtime": "omen_windows_native_cuda",
-      "sample_path": "results/audio/voxcpm2__baseline__short_reply.wav",
-      "sample_rate": 48000,
+      "host_account": "omen-pc/pmpg",
+      "profile": "baseline",
       "scenario": "short_reply",
       "scenario_description": "One concise assistant reply.",
       "scenario_word_count": 18,
-      "status": "measured",
-      "stitched_playback_ms": null,
+      "backend": "standard_python_api",
+      "mode": "standard_python_generate",
       "streaming_support": "available_benchmark_only",
       "true_streaming": false,
-      "warmup_ms": 5851.8
+      "status": "measured",
+      "model_load_ms": 25333.4,
+      "warmup_ms": 9008.1,
+      "cached_prompt_build_ms": null,
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 7980.3,
+      "generate_total_ms": 7980.3,
+      "request_ttfa_ms": 7980.3,
+      "request_total_ms": 7980.3,
+      "audio_duration_s": 4.96,
+      "generation_rtf": 1.609,
+      "request_rtf": 1.609,
+      "peak_vram_mb": 6094.5,
+      "sample_rate": 48000,
+      "output_wav": "results/audio/voxcpm2__baseline__short_reply.wav",
+      "sample_path": "results/audio/voxcpm2__baseline__short_reply.wav",
+      "stitched_playback_ms": null,
+      "max_inter_chunk_gap_ms": null,
+      "optimizations_applied": [],
+      "optimization_notes": "Warm model only. VoxCPM2 standard Python generate path uses the official openbmb/VoxCPM2 runtime."
     },
     {
-      "audio_duration_s": 15.04,
-      "backend": "standard_python_api",
-      "cached_prompt_build_ms": null,
       "engine": "voxcpm2",
-      "full_roster_context": [
-        "f5",
-        "xtts",
-        "luxtts",
-        "chatterbox_turbo",
-        "tada_1b",
-        "qwen3",
-        "voxcpm2"
-      ],
-      "generate_total_ms": 23274.6,
-      "generate_ttfa_ms": 23274.6,
-      "generation_rtf": 1.548,
-      "host_account": "omen-pc/pmpg",
-      "max_inter_chunk_gap_ms": null,
-      "mode": "standard_python_generate",
-      "model_load_ms": 23018.3,
-      "optimization_notes": "Warm model only. VoxCPM2 standard Python generate path uses the official openbmb/VoxCPM2 runtime.",
-      "optimizations_applied": [],
-      "output_wav": "results/audio/voxcpm2__baseline__medium_reply.wav",
-      "peak_vram_mb": 5898.1,
-      "profile": "baseline",
-      "request_prompt_prep_ms": 0.0,
-      "request_rtf": 1.548,
-      "request_total_ms": 23274.6,
-      "request_ttfa_ms": 23274.6,
       "runtime": "omen_windows_native_cuda",
-      "sample_path": "results/audio/voxcpm2__baseline__medium_reply.wav",
-      "sample_rate": 48000,
+      "host_account": "omen-pc/pmpg",
+      "profile": "baseline",
       "scenario": "medium_reply",
       "scenario_description": "A practical multi-sentence assistant answer.",
       "scenario_word_count": 41,
-      "status": "measured",
-      "stitched_playback_ms": null,
+      "backend": "standard_python_api",
+      "mode": "standard_python_generate",
       "streaming_support": "available_benchmark_only",
       "true_streaming": false,
-      "warmup_ms": 5851.8
+      "status": "measured",
+      "model_load_ms": 25333.4,
+      "warmup_ms": 9008.1,
+      "cached_prompt_build_ms": null,
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 20401.8,
+      "generate_total_ms": 20401.8,
+      "request_ttfa_ms": 20401.8,
+      "request_total_ms": 20401.8,
+      "audio_duration_s": 12.64,
+      "generation_rtf": 1.614,
+      "request_rtf": 1.614,
+      "peak_vram_mb": 6093.7,
+      "sample_rate": 48000,
+      "output_wav": "results/audio/voxcpm2__baseline__medium_reply.wav",
+      "sample_path": "results/audio/voxcpm2__baseline__medium_reply.wav",
+      "stitched_playback_ms": null,
+      "max_inter_chunk_gap_ms": null,
+      "optimizations_applied": [],
+      "optimization_notes": "Warm model only. VoxCPM2 standard Python generate path uses the official openbmb/VoxCPM2 runtime."
     },
     {
-      "audio_duration_s": 46.08,
-      "backend": "standard_python_api",
-      "cached_prompt_build_ms": null,
       "engine": "voxcpm2",
-      "full_roster_context": [
-        "f5",
-        "xtts",
-        "luxtts",
-        "chatterbox_turbo",
-        "tada_1b",
-        "qwen3",
-        "voxcpm2"
-      ],
-      "generate_total_ms": 71161.1,
-      "generate_ttfa_ms": 71161.1,
-      "generation_rtf": 1.544,
-      "host_account": "omen-pc/pmpg",
-      "max_inter_chunk_gap_ms": null,
-      "mode": "standard_python_generate",
-      "model_load_ms": 23018.3,
-      "optimization_notes": "Warm model only. VoxCPM2 standard Python generate path uses the official openbmb/VoxCPM2 runtime.",
-      "optimizations_applied": [],
-      "output_wav": "results/audio/voxcpm2__baseline__long_reply.wav",
-      "peak_vram_mb": 6818.5,
-      "profile": "baseline",
-      "request_prompt_prep_ms": 0.0,
-      "request_rtf": 1.544,
-      "request_total_ms": 71161.1,
-      "request_ttfa_ms": 71161.1,
       "runtime": "omen_windows_native_cuda",
-      "sample_path": "results/audio/voxcpm2__baseline__long_reply.wav",
-      "sample_rate": 48000,
+      "host_account": "omen-pc/pmpg",
+      "profile": "baseline",
       "scenario": "long_reply",
       "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
       "scenario_word_count": 162,
-      "status": "measured",
-      "stitched_playback_ms": null,
+      "backend": "standard_python_api",
+      "mode": "standard_python_generate",
       "streaming_support": "available_benchmark_only",
       "true_streaming": false,
-      "warmup_ms": 5851.8
+      "status": "measured",
+      "model_load_ms": 25333.4,
+      "warmup_ms": 9008.1,
+      "cached_prompt_build_ms": null,
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 66082.9,
+      "generate_total_ms": 66082.9,
+      "request_ttfa_ms": 66082.9,
+      "request_total_ms": 66082.9,
+      "audio_duration_s": 40.96,
+      "generation_rtf": 1.613,
+      "request_rtf": 1.613,
+      "peak_vram_mb": 6673.4,
+      "sample_rate": 48000,
+      "output_wav": "results/audio/voxcpm2__baseline__long_reply.wav",
+      "sample_path": "results/audio/voxcpm2__baseline__long_reply.wav",
+      "stitched_playback_ms": null,
+      "max_inter_chunk_gap_ms": null,
+      "optimizations_applied": [],
+      "optimization_notes": "Warm model only. VoxCPM2 standard Python generate path uses the official openbmb/VoxCPM2 runtime."
     },
     {
-      "audio_duration_s": 9.6,
+      "engine": "voxcpm2",
+      "runtime": "omen_windows_native_cuda",
+      "host_account": "omen-pc/pmpg",
+      "profile": "standard_python",
+      "scenario": "short_reply",
+      "scenario_description": "One concise assistant reply.",
+      "scenario_word_count": 18,
       "backend": "standard_python_api",
+      "mode": "shared_chunked_playback",
+      "streaming_support": "available_benchmark_only",
+      "true_streaming": false,
+      "status": "measured",
+      "model_load_ms": 25333.4,
+      "warmup_ms": 9008.1,
       "cached_prompt_build_ms": null,
-      "chunk_audio_duration_s": [
-        2.24,
-        7.36
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 2479.3,
+      "generate_total_ms": 10554.3,
+      "request_ttfa_ms": 2479.3,
+      "request_total_ms": 10554.3,
+      "audio_duration_s": 6.4,
+      "generation_rtf": 1.649,
+      "request_rtf": 1.649,
+      "peak_vram_mb": 6094.5,
+      "sample_rate": 48000,
+      "output_wav": "results/audio/voxcpm2__standard_python__short_reply.wav",
+      "sample_path": "results/audio/voxcpm2__standard_python__short_reply.wav",
+      "stitched_playback_ms": 15514.3,
+      "max_inter_chunk_gap_ms": 6634.9,
+      "optimizations_applied": [
+        "shared_chunk_planner"
       ],
-      "chunk_audio_ready_offsets_ms": [
-        3546.2,
-        14862.9
-      ],
+      "optimization_notes": "VoxCPM2 standard Python generate path measured through the shared RayMe chunk planner; streaming API remains benchmark-only unless call code consumes chunks live.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 240,
+      "chunk_max_chars": 500,
       "chunk_char_lengths": [
         14,
         70
-      ],
-      "chunk_count": 2,
-      "chunk_estimated_tokens": [
-        12,
-        42
-      ],
-      "chunk_generate_total_ms": [
-        3546.2,
-        11316.7
-      ],
-      "chunk_generate_ttfa_ms": [
-        3546.2,
-        11316.7
-      ],
-      "chunk_max_chars": 500,
-      "chunk_max_estimated_tokens": 240,
-      "chunk_text_preview": [
-        "I can do that.",
-        "The quickest fix is to keep the model warm and reuse the voice prompt."
       ],
       "chunk_word_counts": [
         4,
         14
       ],
-      "chunking_strategy": "sentence_boundary_token_cap_v1",
-      "engine": "voxcpm2",
-      "full_roster_context": [
-        "f5",
-        "xtts",
-        "luxtts",
-        "chatterbox_turbo",
-        "tada_1b",
-        "qwen3",
-        "voxcpm2"
+      "chunk_estimated_tokens": [
+        12,
+        42
       ],
-      "generate_total_ms": 14862.9,
-      "generate_ttfa_ms": 3546.2,
-      "generation_rtf": 1.548,
-      "host_account": "omen-pc/pmpg",
+      "chunk_text_preview": [
+        "I can do that.",
+        "The quickest fix is to keep the model warm and reuse the voice prompt."
+      ],
+      "chunk_generate_ttfa_ms": [
+        2479.3,
+        8074.9
+      ],
+      "chunk_generate_total_ms": [
+        2479.3,
+        8074.9
+      ],
+      "chunk_audio_duration_s": [
+        1.44,
+        4.96
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        2479.3,
+        10554.3
+      ],
       "inter_chunk_gap_ms": [
-        9076.7
+        6634.9
       ],
-      "max_inter_chunk_gap_ms": 9076.7,
+      "total_generation_ms": 10554.3,
+      "stitched_audio_duration_s": 6.4
+    },
+    {
+      "engine": "voxcpm2",
+      "runtime": "omen_windows_native_cuda",
+      "host_account": "omen-pc/pmpg",
+      "profile": "standard_python",
+      "scenario": "medium_reply",
+      "scenario_description": "A practical multi-sentence assistant answer.",
+      "scenario_word_count": 41,
+      "backend": "standard_python_api",
       "mode": "shared_chunked_playback",
-      "model_load_ms": 23018.3,
-      "optimization_notes": "VoxCPM2 standard Python generate path measured through the shared RayMe chunk planner; streaming API remains benchmark-only unless call code consumes chunks live.",
+      "streaming_support": "available_benchmark_only",
+      "true_streaming": false,
+      "status": "measured",
+      "model_load_ms": 25333.4,
+      "warmup_ms": 9008.1,
+      "cached_prompt_build_ms": null,
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 5779.2,
+      "generate_total_ms": 18819.0,
+      "request_ttfa_ms": 5779.2,
+      "request_total_ms": 18819.0,
+      "audio_duration_s": 11.52,
+      "generation_rtf": 1.634,
+      "request_rtf": 1.634,
+      "peak_vram_mb": 6094.5,
+      "sample_rate": 48000,
+      "output_wav": "results/audio/voxcpm2__standard_python__medium_reply.wav",
+      "sample_path": "results/audio/voxcpm2__standard_python__medium_reply.wav",
+      "stitched_playback_ms": 26819.0,
+      "max_inter_chunk_gap_ms": 9519.8,
       "optimizations_applied": [
         "shared_chunk_planner"
       ],
-      "output_wav": "results/audio/voxcpm2__standard_python__short_reply.wav",
-      "peak_vram_mb": 5794.8,
-      "profile": "standard_python",
-      "request_prompt_prep_ms": 0.0,
-      "request_rtf": 1.548,
-      "request_total_ms": 14862.9,
-      "request_ttfa_ms": 3546.2,
-      "runtime": "omen_windows_native_cuda",
-      "sample_path": "results/audio/voxcpm2__standard_python__short_reply.wav",
-      "sample_rate": 48000,
-      "scenario": "short_reply",
-      "scenario_description": "One concise assistant reply.",
-      "scenario_word_count": 18,
-      "status": "measured",
-      "stitched_audio_duration_s": 9.6,
-      "stitched_playback_ms": 22222.9,
-      "streaming_support": "available_benchmark_only",
-      "total_generation_ms": 14862.9,
-      "true_streaming": false,
-      "warmup_ms": 5851.8
-    },
-    {
-      "audio_duration_s": 16.32,
-      "backend": "standard_python_api",
-      "cached_prompt_build_ms": null,
-      "chunk_audio_duration_s": [
-        5.92,
-        10.4
-      ],
-      "chunk_audio_ready_offsets_ms": [
-        9192.9,
-        25341.3
-      ],
+      "optimization_notes": "VoxCPM2 standard Python generate path measured through the shared RayMe chunk planner; streaming API remains benchmark-only unless call code consumes chunks live.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 2,
+      "chunk_max_estimated_tokens": 240,
+      "chunk_max_chars": 500,
       "chunk_char_lengths": [
         76,
         165
-      ],
-      "chunk_count": 2,
-      "chunk_estimated_tokens": [
-        40,
-        88
-      ],
-      "chunk_generate_total_ms": [
-        9192.9,
-        16148.4
-      ],
-      "chunk_generate_ttfa_ms": [
-        9192.9,
-        16148.4
-      ],
-      "chunk_max_chars": 500,
-      "chunk_max_estimated_tokens": 240,
-      "chunk_text_preview": [
-        "The main latency win comes from separating one-time setup from request work.",
-        "Load the model once at startup, precompute the voice conditioning when the speaker is chosen, an"
       ],
       "chunk_word_counts": [
         13,
         29
       ],
-      "chunking_strategy": "sentence_boundary_token_cap_v1",
-      "engine": "voxcpm2",
-      "full_roster_context": [
-        "f5",
-        "xtts",
-        "luxtts",
-        "chatterbox_turbo",
-        "tada_1b",
-        "qwen3",
-        "voxcpm2"
+      "chunk_estimated_tokens": [
+        40,
+        88
       ],
-      "generate_total_ms": 25341.3,
-      "generate_ttfa_ms": 9192.9,
-      "generation_rtf": 1.553,
-      "host_account": "omen-pc/pmpg",
+      "chunk_text_preview": [
+        "The main latency win comes from separating one-time setup from request work.",
+        "Load the model once at startup, precompute the voice conditioning when the speaker is chosen, an"
+      ],
+      "chunk_generate_ttfa_ms": [
+        5779.2,
+        13039.8
+      ],
+      "chunk_generate_total_ms": [
+        5779.2,
+        13039.8
+      ],
+      "chunk_audio_duration_s": [
+        3.52,
+        8.0
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        5779.2,
+        18819.0
+      ],
       "inter_chunk_gap_ms": [
-        10228.4
+        9519.8
       ],
-      "max_inter_chunk_gap_ms": 10228.4,
+      "total_generation_ms": 18819.0,
+      "stitched_audio_duration_s": 11.52
+    },
+    {
+      "engine": "voxcpm2",
+      "runtime": "omen_windows_native_cuda",
+      "host_account": "omen-pc/pmpg",
+      "profile": "standard_python",
+      "scenario": "long_reply",
+      "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
+      "scenario_word_count": 162,
+      "backend": "standard_python_api",
       "mode": "shared_chunked_playback",
-      "model_load_ms": 23018.3,
-      "optimization_notes": "VoxCPM2 standard Python generate path measured through the shared RayMe chunk planner; streaming API remains benchmark-only unless call code consumes chunks live.",
+      "streaming_support": "available_benchmark_only",
+      "true_streaming": false,
+      "status": "measured",
+      "model_load_ms": 25333.4,
+      "warmup_ms": 9008.1,
+      "cached_prompt_build_ms": null,
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 7236.0,
+      "generate_total_ms": 72027.4,
+      "request_ttfa_ms": 7236.0,
+      "request_total_ms": 72027.4,
+      "audio_duration_s": 44.64,
+      "generation_rtf": 1.614,
+      "request_rtf": 1.614,
+      "peak_vram_mb": 6094.2,
+      "sample_rate": 48000,
+      "output_wav": "results/audio/voxcpm2__standard_python__long_reply.wav",
+      "sample_path": "results/audio/voxcpm2__standard_python__long_reply.wav",
+      "stitched_playback_ms": 91867.4,
+      "max_inter_chunk_gap_ms": 28208.9,
       "optimizations_applied": [
         "shared_chunk_planner"
       ],
-      "output_wav": "results/audio/voxcpm2__standard_python__medium_reply.wav",
-      "peak_vram_mb": 5794.6,
-      "profile": "standard_python",
-      "request_prompt_prep_ms": 0.0,
-      "request_rtf": 1.553,
-      "request_total_ms": 25341.3,
-      "request_ttfa_ms": 9192.9,
-      "runtime": "omen_windows_native_cuda",
-      "sample_path": "results/audio/voxcpm2__standard_python__medium_reply.wav",
-      "sample_rate": 48000,
-      "scenario": "medium_reply",
-      "scenario_description": "A practical multi-sentence assistant answer.",
-      "scenario_word_count": 41,
-      "status": "measured",
-      "stitched_audio_duration_s": 16.32,
-      "stitched_playback_ms": 35741.3,
-      "streaming_support": "available_benchmark_only",
-      "total_generation_ms": 25341.3,
-      "true_streaming": false,
-      "warmup_ms": 5851.8
-    },
-    {
-      "audio_duration_s": 56.16,
-      "backend": "standard_python_api",
-      "cached_prompt_build_ms": null,
-      "chunk_audio_duration_s": [
-        6.08,
-        26.72,
-        23.36
-      ],
-      "chunk_audio_ready_offsets_ms": [
-        9498.3,
-        50741.8,
-        87166.7
-      ],
+      "optimization_notes": "VoxCPM2 standard Python generate path measured through the shared RayMe chunk planner; streaming API remains benchmark-only unless call code consumes chunks live.",
+      "chunking_strategy": "sentence_boundary_token_cap_v1",
+      "chunk_count": 3,
+      "chunk_max_estimated_tokens": 240,
+      "chunk_max_chars": 500,
       "chunk_char_lengths": [
         97,
         403,
         416
-      ],
-      "chunk_count": 3,
-      "chunk_estimated_tokens": [
-        64,
-        208,
-        223
-      ],
-      "chunk_generate_total_ms": [
-        9498.3,
-        41243.4,
-        36424.9
-      ],
-      "chunk_generate_ttfa_ms": [
-        9498.3,
-        41243.4,
-        36424.9
-      ],
-      "chunk_max_chars": 500,
-      "chunk_max_estimated_tokens": 240,
-      "chunk_text_preview": [
-        "Hey, I wanted to leave a fuller note so we can hear how the voice holds up over a longer stretch",
-        "The short samples are useful for latency, but they do not tell us much about consistency, pacing",
-        "I also want enough material to expose awkward transitions, repeated prosody, or the sort of flat"
       ],
       "chunk_word_counts": [
         21,
         68,
         73
       ],
-      "chunking_strategy": "sentence_boundary_token_cap_v1",
-      "engine": "voxcpm2",
-      "full_roster_context": [
-        "f5",
-        "xtts",
-        "luxtts",
-        "chatterbox_turbo",
-        "tada_1b",
-        "qwen3",
-        "voxcpm2"
+      "chunk_estimated_tokens": [
+        64,
+        208,
+        223
       ],
-      "generate_total_ms": 87166.7,
-      "generate_ttfa_ms": 9498.3,
-      "generation_rtf": 1.552,
-      "host_account": "omen-pc/pmpg",
+      "chunk_text_preview": [
+        "Hey, I wanted to leave a fuller note so we can hear how the voice holds up over a longer stretch",
+        "The short samples are useful for latency, but they do not tell us much about consistency, pacing",
+        "I also want enough material to expose awkward transitions, repeated prosody, or the sort of flat"
+      ],
+      "chunk_generate_ttfa_ms": [
+        7236.0,
+        32688.9,
+        32102.5
+      ],
+      "chunk_generate_total_ms": [
+        7236.0,
+        32688.9,
+        32102.5
+      ],
+      "chunk_audio_duration_s": [
+        4.48,
+        20.32,
+        19.84
+      ],
+      "chunk_audio_ready_offsets_ms": [
+        7236.0,
+        39924.9,
+        72027.4
+      ],
       "inter_chunk_gap_ms": [
-        35163.4,
-        9704.9
+        28208.9,
+        11782.5
       ],
-      "max_inter_chunk_gap_ms": 35163.4,
-      "mode": "shared_chunked_playback",
-      "model_load_ms": 23018.3,
-      "optimization_notes": "VoxCPM2 standard Python generate path measured through the shared RayMe chunk planner; streaming API remains benchmark-only unless call code consumes chunks live.",
-      "optimizations_applied": [
-        "shared_chunk_planner"
-      ],
-      "output_wav": "results/audio/voxcpm2__standard_python__long_reply.wav",
-      "peak_vram_mb": 6243.9,
-      "profile": "standard_python",
-      "request_prompt_prep_ms": 0.0,
-      "request_rtf": 1.552,
-      "request_total_ms": 87166.7,
-      "request_ttfa_ms": 9498.3,
-      "runtime": "omen_windows_native_cuda",
-      "sample_path": "results/audio/voxcpm2__standard_python__long_reply.wav",
-      "sample_rate": 48000,
-      "scenario": "long_reply",
-      "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
-      "scenario_word_count": 162,
-      "status": "measured",
-      "stitched_audio_duration_s": 56.16,
-      "stitched_playback_ms": 110526.7,
-      "streaming_support": "available_benchmark_only",
-      "total_generation_ms": 87166.7,
-      "true_streaming": false,
-      "warmup_ms": 5851.8
+      "total_generation_ms": 72027.4,
+      "stitched_audio_duration_s": 44.64
     },
     {
-      "audio_duration_s": 6.24,
-      "backend": "standard_python_api",
-      "cached_prompt_build_ms": null,
       "engine": "voxcpm2",
-      "full_roster_context": [
-        "f5",
-        "xtts",
-        "luxtts",
-        "chatterbox_turbo",
-        "tada_1b",
-        "qwen3",
-        "voxcpm2"
-      ],
-      "generate_total_ms": 10129.4,
-      "generate_ttfa_ms": 350.0,
-      "generation_rtf": 1.623,
-      "host_account": "omen-pc/pmpg",
-      "max_inter_chunk_gap_ms": null,
-      "mode": "standard_python_streaming_collected",
-      "model_load_ms": 23018.3,
-      "optimization_notes": "VoxCPM2 generate_streaming chunks are collected into one WAV for benchmark-only metrics; this row does not claim RayMe call-flow streaming.",
-      "optimizations_applied": [
-        "generate_streaming_collected"
-      ],
-      "output_wav": "results/audio/voxcpm2__streaming_collected__short_reply.wav",
-      "peak_vram_mb": 5793.8,
-      "profile": "streaming_collected",
-      "request_prompt_prep_ms": 0.0,
-      "request_rtf": 1.623,
-      "request_total_ms": 10129.4,
-      "request_ttfa_ms": 350.0,
       "runtime": "omen_windows_native_cuda",
-      "sample_path": "results/audio/voxcpm2__streaming_collected__short_reply.wav",
-      "sample_rate": 48000,
+      "host_account": "omen-pc/pmpg",
+      "profile": "streaming_collected",
       "scenario": "short_reply",
       "scenario_description": "One concise assistant reply.",
       "scenario_word_count": 18,
-      "status": "measured",
-      "stitched_playback_ms": null,
-      "streaming_benchmark_only": true,
+      "backend": "standard_python_api",
+      "mode": "standard_python_streaming_collected",
       "streaming_support": "native_benchmark_only",
       "true_streaming": false,
-      "warmup_ms": 5851.8
-    },
-    {
-      "audio_duration_s": 14.88,
-      "backend": "standard_python_api",
+      "status": "measured",
+      "model_load_ms": 25333.4,
+      "warmup_ms": 9008.1,
       "cached_prompt_build_ms": null,
-      "engine": "voxcpm2",
-      "full_roster_context": [
-        "f5",
-        "xtts",
-        "luxtts",
-        "chatterbox_turbo",
-        "tada_1b",
-        "qwen3",
-        "voxcpm2"
-      ],
-      "generate_total_ms": 23779.5,
-      "generate_ttfa_ms": 328.5,
-      "generation_rtf": 1.598,
-      "host_account": "omen-pc/pmpg",
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 387.9,
+      "generate_total_ms": 8357.7,
+      "request_ttfa_ms": 387.9,
+      "request_total_ms": 8357.7,
+      "audio_duration_s": 4.96,
+      "generation_rtf": 1.685,
+      "request_rtf": 1.685,
+      "peak_vram_mb": 6095.2,
+      "sample_rate": 48000,
+      "output_wav": "results/audio/voxcpm2__streaming_collected__short_reply.wav",
+      "sample_path": "results/audio/voxcpm2__streaming_collected__short_reply.wav",
+      "stitched_playback_ms": null,
       "max_inter_chunk_gap_ms": null,
-      "mode": "standard_python_streaming_collected",
-      "model_load_ms": 23018.3,
-      "optimization_notes": "VoxCPM2 generate_streaming chunks are collected into one WAV for benchmark-only metrics; this row does not claim RayMe call-flow streaming.",
       "optimizations_applied": [
         "generate_streaming_collected"
       ],
-      "output_wav": "results/audio/voxcpm2__streaming_collected__medium_reply.wav",
-      "peak_vram_mb": 5794.8,
-      "profile": "streaming_collected",
-      "request_prompt_prep_ms": 0.0,
-      "request_rtf": 1.598,
-      "request_total_ms": 23779.5,
-      "request_ttfa_ms": 328.5,
+      "optimization_notes": "VoxCPM2 generate_streaming chunks are collected into one WAV for benchmark-only metrics; this row does not claim RayMe call-flow streaming.",
+      "streaming_benchmark_only": true
+    },
+    {
+      "engine": "voxcpm2",
       "runtime": "omen_windows_native_cuda",
-      "sample_path": "results/audio/voxcpm2__streaming_collected__medium_reply.wav",
-      "sample_rate": 48000,
+      "host_account": "omen-pc/pmpg",
+      "profile": "streaming_collected",
       "scenario": "medium_reply",
       "scenario_description": "A practical multi-sentence assistant answer.",
       "scenario_word_count": 41,
-      "status": "measured",
-      "stitched_playback_ms": null,
-      "streaming_benchmark_only": true,
+      "backend": "standard_python_api",
+      "mode": "standard_python_streaming_collected",
       "streaming_support": "native_benchmark_only",
       "true_streaming": false,
-      "warmup_ms": 5851.8
-    },
-    {
-      "audio_duration_s": 51.84,
-      "backend": "standard_python_api",
+      "status": "measured",
+      "model_load_ms": 25333.4,
+      "warmup_ms": 9008.1,
       "cached_prompt_build_ms": null,
-      "engine": "voxcpm2",
-      "full_roster_context": [
-        "f5",
-        "xtts",
-        "luxtts",
-        "chatterbox_turbo",
-        "tada_1b",
-        "qwen3",
-        "voxcpm2"
-      ],
-      "generate_total_ms": 82603.9,
-      "generate_ttfa_ms": 356.0,
-      "generation_rtf": 1.593,
-      "host_account": "omen-pc/pmpg",
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 381.2,
+      "generate_total_ms": 20864.5,
+      "request_ttfa_ms": 381.2,
+      "request_total_ms": 20864.5,
+      "audio_duration_s": 12.48,
+      "generation_rtf": 1.672,
+      "request_rtf": 1.672,
+      "peak_vram_mb": 6094.0,
+      "sample_rate": 48000,
+      "output_wav": "results/audio/voxcpm2__streaming_collected__medium_reply.wav",
+      "sample_path": "results/audio/voxcpm2__streaming_collected__medium_reply.wav",
+      "stitched_playback_ms": null,
       "max_inter_chunk_gap_ms": null,
-      "mode": "standard_python_streaming_collected",
-      "model_load_ms": 23018.3,
-      "optimization_notes": "VoxCPM2 generate_streaming chunks are collected into one WAV for benchmark-only metrics; this row does not claim RayMe call-flow streaming.",
       "optimizations_applied": [
         "generate_streaming_collected"
       ],
-      "output_wav": "results/audio/voxcpm2__streaming_collected__long_reply.wav",
-      "peak_vram_mb": 5793.3,
-      "profile": "streaming_collected",
-      "request_prompt_prep_ms": 0.0,
-      "request_rtf": 1.593,
-      "request_total_ms": 82603.9,
-      "request_ttfa_ms": 356.0,
+      "optimization_notes": "VoxCPM2 generate_streaming chunks are collected into one WAV for benchmark-only metrics; this row does not claim RayMe call-flow streaming.",
+      "streaming_benchmark_only": true
+    },
+    {
+      "engine": "voxcpm2",
       "runtime": "omen_windows_native_cuda",
-      "sample_path": "results/audio/voxcpm2__streaming_collected__long_reply.wav",
-      "sample_rate": 48000,
+      "host_account": "omen-pc/pmpg",
+      "profile": "streaming_collected",
       "scenario": "long_reply",
       "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
       "scenario_word_count": 162,
-      "status": "measured",
-      "stitched_playback_ms": null,
-      "streaming_benchmark_only": true,
+      "backend": "standard_python_api",
+      "mode": "standard_python_streaming_collected",
       "streaming_support": "native_benchmark_only",
       "true_streaming": false,
-      "warmup_ms": 5851.8
-    }
-  ],
-  "runtime": "omen_windows_native_cuda",
-  "scenarios": [
-    {
-      "description": "One concise assistant reply.",
-      "name": "short_reply",
-      "word_count": 18
-    },
-    {
-      "description": "A practical multi-sentence assistant answer.",
-      "name": "medium_reply",
-      "word_count": 41
-    },
-    {
-      "description": "Long-form assistant narration from the Phase 0 fixture.",
-      "name": "long_reply",
-      "word_count": 162
+      "status": "measured",
+      "model_load_ms": 25333.4,
+      "warmup_ms": 9008.1,
+      "cached_prompt_build_ms": null,
+      "request_prompt_prep_ms": 0.0,
+      "generate_ttfa_ms": 399.1,
+      "generate_total_ms": 65693.0,
+      "request_ttfa_ms": 399.1,
+      "request_total_ms": 65693.0,
+      "audio_duration_s": 39.36,
+      "generation_rtf": 1.669,
+      "request_rtf": 1.669,
+      "peak_vram_mb": 6094.2,
+      "sample_rate": 48000,
+      "output_wav": "results/audio/voxcpm2__streaming_collected__long_reply.wav",
+      "sample_path": "results/audio/voxcpm2__streaming_collected__long_reply.wav",
+      "stitched_playback_ms": null,
+      "max_inter_chunk_gap_ms": null,
+      "optimizations_applied": [
+        "generate_streaming_collected"
+      ],
+      "optimization_notes": "VoxCPM2 generate_streaming chunks are collected into one WAV for benchmark-only metrics; this row does not claim RayMe call-flow streaming.",
+      "streaming_benchmark_only": true
     }
   ],
   "summary": {
-    "best_request_total": {
-      "long_reply": {
-        "engine": "f5",
-        "output_wav": "results/audio/f5__optimized__long_reply.wav",
-        "profile": "optimized",
-        "request_total_ms": 5151.3,
-        "runtime": "omen_windows_native_cuda"
+    "best_request_ttfa": {
+      "short_reply": {
+        "engine": "voxcpm2",
+        "runtime": "omen_windows_native_cuda",
+        "profile": "streaming_collected",
+        "request_ttfa_ms": 387.9,
+        "output_wav": "results/audio/voxcpm2__streaming_collected__short_reply.wav"
       },
       "medium_reply": {
-        "engine": "f5",
-        "output_wav": "results/audio/f5__optimized__medium_reply.wav",
-        "profile": "optimized",
-        "request_total_ms": 2030.0,
-        "runtime": "omen_windows_native_cuda"
+        "engine": "voxcpm2",
+        "runtime": "omen_windows_native_cuda",
+        "profile": "streaming_collected",
+        "request_ttfa_ms": 381.2,
+        "output_wav": "results/audio/voxcpm2__streaming_collected__medium_reply.wav"
       },
-      "short_reply": {
-        "engine": "f5",
-        "output_wav": "results/audio/f5__baseline__short_reply.wav",
-        "profile": "baseline",
-        "request_total_ms": 946.9,
-        "runtime": "omen_windows_native_cuda"
+      "long_reply": {
+        "engine": "voxcpm2",
+        "runtime": "omen_windows_native_cuda",
+        "profile": "streaming_collected",
+        "request_ttfa_ms": 399.1,
+        "output_wav": "results/audio/voxcpm2__streaming_collected__long_reply.wav"
       }
     },
-    "best_request_ttfa": {
-      "long_reply": {
-        "engine": "voxcpm2",
-        "output_wav": "results/audio/voxcpm2__streaming_collected__long_reply.wav",
-        "profile": "streaming_collected",
-        "request_ttfa_ms": 356.0,
-        "runtime": "omen_windows_native_cuda"
+    "best_request_total": {
+      "short_reply": {
+        "engine": "f5",
+        "runtime": "omen_windows_native_cuda",
+        "profile": "baseline",
+        "request_total_ms": 1117.1,
+        "output_wav": "results/audio/f5__baseline__short_reply.wav"
       },
       "medium_reply": {
-        "engine": "voxcpm2",
-        "output_wav": "results/audio/voxcpm2__streaming_collected__medium_reply.wav",
-        "profile": "streaming_collected",
-        "request_ttfa_ms": 328.5,
-        "runtime": "omen_windows_native_cuda"
+        "engine": "f5",
+        "runtime": "omen_windows_native_cuda",
+        "profile": "baseline",
+        "request_total_ms": 2310.5,
+        "output_wav": "results/audio/f5__baseline__medium_reply.wav"
       },
-      "short_reply": {
-        "engine": "voxcpm2",
-        "output_wav": "results/audio/voxcpm2__streaming_collected__short_reply.wav",
-        "profile": "streaming_collected",
-        "request_ttfa_ms": 350.0,
-        "runtime": "omen_windows_native_cuda"
+      "long_reply": {
+        "engine": "f5",
+        "runtime": "omen_windows_native_cuda",
+        "profile": "optimized",
+        "request_total_ms": 4980.9,
+        "output_wav": "results/audio/f5__optimized__long_reply.wav"
       }
     },
     "best_stitched_playback": {
-      "long_reply": {
+      "short_reply": {
         "engine": "f5",
-        "output_wav": "results/audio/f5__optimized__long_reply.wav",
-        "profile": "optimized",
         "runtime": "omen_windows_native_cuda",
-        "stitched_playback_ms": 57182.8
+        "profile": "optimized",
+        "stitched_playback_ms": 5184.8,
+        "output_wav": "results/audio/f5__optimized__short_reply.wav"
       },
       "medium_reply": {
         "engine": "f5",
-        "output_wav": "results/audio/f5__optimized__medium_reply.wav",
-        "profile": "optimized",
         "runtime": "omen_windows_native_cuda",
-        "stitched_playback_ms": 15699.2
+        "profile": "optimized",
+        "stitched_playback_ms": 12187.5,
+        "output_wav": "results/audio/f5__optimized__medium_reply.wav"
       },
-      "short_reply": {
+      "long_reply": {
         "engine": "f5",
-        "output_wav": "results/audio/f5__optimized__short_reply.wav",
-        "profile": "optimized",
         "runtime": "omen_windows_native_cuda",
-        "stitched_playback_ms": 5881.0
+        "profile": "optimized",
+        "stitched_playback_ms": 43514.6,
+        "output_wav": "results/audio/f5__optimized__long_reply.wav"
       }
     },
     "promotion_comparison": {
       "baseline_engine": "f5",
-      "by_scenario": {
-        "long_reply": {
-          "f5_request_total_ms": 5151.3,
-          "f5_request_ttfa_ms": 894.8,
-          "f5_sample_path": "results/audio/f5__optimized__long_reply.wav",
-          "voxcpm2_beats_f5_ttfa": true,
-          "voxcpm2_request_total_ms": 82603.9,
-          "voxcpm2_request_ttfa_ms": 356.0,
-          "voxcpm2_sample_path": "results/audio/voxcpm2__streaming_collected__long_reply.wav"
-        },
-        "medium_reply": {
-          "f5_request_total_ms": 2030.0,
-          "f5_request_ttfa_ms": 904.6,
-          "f5_sample_path": "results/audio/f5__optimized__medium_reply.wav",
-          "voxcpm2_beats_f5_ttfa": true,
-          "voxcpm2_request_total_ms": 23779.5,
-          "voxcpm2_request_ttfa_ms": 328.5,
-          "voxcpm2_sample_path": "results/audio/voxcpm2__streaming_collected__medium_reply.wav"
-        },
-        "short_reply": {
-          "f5_request_total_ms": 1593.2,
-          "f5_request_ttfa_ms": 723.2,
-          "f5_sample_path": "results/audio/f5__optimized__short_reply.wav",
-          "voxcpm2_beats_f5_ttfa": true,
-          "voxcpm2_request_total_ms": 10129.4,
-          "voxcpm2_request_ttfa_ms": 350.0,
-          "voxcpm2_sample_path": "results/audio/voxcpm2__streaming_collected__short_reply.wav"
-        }
-      },
       "candidate_engine": "voxcpm2",
       "metric": "request_ttfa_ms",
-      "requires_manual_quality": true
+      "requires_manual_quality": true,
+      "by_scenario": {
+        "short_reply": {
+          "f5_request_ttfa_ms": 912.6,
+          "f5_request_total_ms": 1953.0,
+          "f5_sample_path": "results/audio/f5__optimized__short_reply.wav",
+          "voxcpm2_request_ttfa_ms": 387.9,
+          "voxcpm2_request_total_ms": 8357.7,
+          "voxcpm2_sample_path": "results/audio/voxcpm2__streaming_collected__short_reply.wav",
+          "voxcpm2_beats_f5_ttfa": true
+        },
+        "medium_reply": {
+          "f5_request_ttfa_ms": 1051.5,
+          "f5_request_total_ms": 2310.6,
+          "f5_sample_path": "results/audio/f5__optimized__medium_reply.wav",
+          "voxcpm2_request_ttfa_ms": 381.2,
+          "voxcpm2_request_total_ms": 20864.5,
+          "voxcpm2_sample_path": "results/audio/voxcpm2__streaming_collected__medium_reply.wav",
+          "voxcpm2_beats_f5_ttfa": true
+        },
+        "long_reply": {
+          "f5_request_ttfa_ms": 1114.6,
+          "f5_request_total_ms": 4980.9,
+          "f5_sample_path": "results/audio/f5__optimized__long_reply.wav",
+          "voxcpm2_request_ttfa_ms": 399.1,
+          "voxcpm2_request_total_ms": 65693.0,
+          "voxcpm2_sample_path": "results/audio/voxcpm2__streaming_collected__long_reply.wav",
+          "voxcpm2_beats_f5_ttfa": true
+        }
+      }
+    }
+  },
+  "engine_payloads": [
+    {
+      "engine": "f5",
+      "runtime": "omen_windows_native_cuda",
+      "host_account": "omen-pc/pmpg",
+      "rows": [
+        {
+          "engine": "f5",
+          "runtime": "omen_windows_native_cuda",
+          "host_account": "omen-pc/pmpg",
+          "profile": "baseline",
+          "scenario": "short_reply",
+          "scenario_description": "One concise assistant reply.",
+          "scenario_word_count": 18,
+          "backend": "native_infer_whole_request",
+          "mode": "non_streaming_clone",
+          "streaming_support": "none",
+          "true_streaming": false,
+          "status": "measured",
+          "model_load_ms": 5066.2,
+          "warmup_ms": 1922.7,
+          "cached_prompt_build_ms": null,
+          "request_prompt_prep_ms": 0.0,
+          "generate_ttfa_ms": 1117.1,
+          "generate_total_ms": 1117.1,
+          "request_ttfa_ms": 1117.1,
+          "request_total_ms": 1117.1,
+          "audio_duration_s": 3.925,
+          "generation_rtf": 0.285,
+          "request_rtf": 0.285,
+          "peak_vram_mb": 775.5,
+          "sample_rate": 24000,
+          "output_wav": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\f5__baseline__short_reply.wav",
+          "sample_path": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\f5__baseline__short_reply.wav",
+          "stitched_playback_ms": null,
+          "max_inter_chunk_gap_ms": null,
+          "optimizations_applied": [],
+          "optimization_notes": "Warm model only. Baseline F5 uses the whole-request infer path, so prompt prep remains folded into the measured request time."
+        },
+        {
+          "engine": "f5",
+          "runtime": "omen_windows_native_cuda",
+          "host_account": "omen-pc/pmpg",
+          "profile": "baseline",
+          "scenario": "medium_reply",
+          "scenario_description": "A practical multi-sentence assistant answer.",
+          "scenario_word_count": 41,
+          "backend": "native_infer_whole_request",
+          "mode": "non_streaming_clone",
+          "streaming_support": "none",
+          "true_streaming": false,
+          "status": "measured",
+          "model_load_ms": 5066.2,
+          "warmup_ms": 1922.7,
+          "cached_prompt_build_ms": null,
+          "request_prompt_prep_ms": 0.0,
+          "generate_ttfa_ms": 2310.5,
+          "generate_total_ms": 2310.5,
+          "request_ttfa_ms": 2310.5,
+          "request_total_ms": 2310.5,
+          "audio_duration_s": 10.986,
+          "generation_rtf": 0.21,
+          "request_rtf": 0.21,
+          "peak_vram_mb": 788.5,
+          "sample_rate": 24000,
+          "output_wav": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\f5__baseline__medium_reply.wav",
+          "sample_path": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\f5__baseline__medium_reply.wav",
+          "stitched_playback_ms": null,
+          "max_inter_chunk_gap_ms": null,
+          "optimizations_applied": [],
+          "optimization_notes": "Warm model only. Baseline F5 uses the whole-request infer path, so prompt prep remains folded into the measured request time."
+        },
+        {
+          "engine": "f5",
+          "runtime": "omen_windows_native_cuda",
+          "host_account": "omen-pc/pmpg",
+          "profile": "baseline",
+          "scenario": "long_reply",
+          "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
+          "scenario_word_count": 162,
+          "backend": "native_infer_whole_request",
+          "mode": "non_streaming_clone",
+          "streaming_support": "none",
+          "true_streaming": false,
+          "status": "measured",
+          "model_load_ms": 5066.2,
+          "warmup_ms": 1922.7,
+          "cached_prompt_build_ms": null,
+          "request_prompt_prep_ms": 0.0,
+          "generate_ttfa_ms": 6560.5,
+          "generate_total_ms": 6560.5,
+          "request_ttfa_ms": 6560.5,
+          "request_total_ms": 6560.5,
+          "audio_duration_s": 41.661,
+          "generation_rtf": 0.157,
+          "request_rtf": 0.157,
+          "peak_vram_mb": 796.3,
+          "sample_rate": 24000,
+          "output_wav": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\f5__baseline__long_reply.wav",
+          "sample_path": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\f5__baseline__long_reply.wav",
+          "stitched_playback_ms": null,
+          "max_inter_chunk_gap_ms": null,
+          "optimizations_applied": [],
+          "optimization_notes": "Warm model only. Baseline F5 uses the whole-request infer path, so prompt prep remains folded into the measured request time."
+        },
+        {
+          "engine": "f5",
+          "runtime": "omen_windows_native_cuda",
+          "host_account": "omen-pc/pmpg",
+          "profile": "optimized",
+          "scenario": "short_reply",
+          "scenario_description": "One concise assistant reply.",
+          "scenario_word_count": 18,
+          "backend": "native_pytorch_chunked",
+          "mode": "non_streaming_clone",
+          "streaming_support": "simulated",
+          "true_streaming": false,
+          "status": "measured",
+          "model_load_ms": 5066.2,
+          "warmup_ms": 1922.7,
+          "cached_prompt_build_ms": 3.2,
+          "request_prompt_prep_ms": 0.0,
+          "generate_ttfa_ms": 912.6,
+          "generate_total_ms": 1953.0,
+          "request_ttfa_ms": 912.6,
+          "request_total_ms": 1953.0,
+          "audio_duration_s": 3.861,
+          "generation_rtf": 0.506,
+          "request_rtf": 0.506,
+          "peak_vram_mb": 771.1,
+          "sample_rate": 24000,
+          "output_wav": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\f5__optimized__short_reply.wav",
+          "sample_path": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\f5__optimized__short_reply.wav",
+          "stitched_playback_ms": 5184.8,
+          "max_inter_chunk_gap_ms": 410.9,
+          "optimizations_applied": [
+            "prepared_ref_cache",
+            "shared_chunk_planner"
+          ],
+          "optimization_notes": "Prepared reference cached once per session and replies use the shared sentence-aware chunk planner.",
+          "chunking_strategy": "sentence_boundary_token_cap_v1",
+          "chunk_count": 2,
+          "chunk_max_estimated_tokens": 260,
+          "chunk_max_chars": 520,
+          "chunk_char_lengths": [
+            14,
+            70
+          ],
+          "chunk_word_counts": [
+            4,
+            14
+          ],
+          "chunk_estimated_tokens": [
+            12,
+            42
+          ],
+          "chunk_text_preview": [
+            "I can do that.",
+            "The quickest fix is to keep the model warm and reuse the voice prompt."
+          ],
+          "chunk_generate_ttfa_ms": [
+            912.6,
+            1040.1
+          ],
+          "chunk_generate_total_ms": [
+            912.7,
+            1040.3
+          ],
+          "chunk_audio_duration_s": [
+            0.629,
+            3.232
+          ],
+          "chunk_audio_ready_offsets_ms": [
+            912.6,
+            1952.8
+          ],
+          "inter_chunk_gap_ms": [
+            410.9
+          ],
+          "total_generation_ms": 1953.0,
+          "stitched_audio_duration_s": 3.861
+        },
+        {
+          "engine": "f5",
+          "runtime": "omen_windows_native_cuda",
+          "host_account": "omen-pc/pmpg",
+          "profile": "optimized",
+          "scenario": "medium_reply",
+          "scenario_description": "A practical multi-sentence assistant answer.",
+          "scenario_word_count": 41,
+          "backend": "native_pytorch_chunked",
+          "mode": "non_streaming_clone",
+          "streaming_support": "simulated",
+          "true_streaming": false,
+          "status": "measured",
+          "model_load_ms": 5066.2,
+          "warmup_ms": 1922.7,
+          "cached_prompt_build_ms": 3.2,
+          "request_prompt_prep_ms": 0.0,
+          "generate_ttfa_ms": 1051.5,
+          "generate_total_ms": 2310.6,
+          "request_ttfa_ms": 1051.5,
+          "request_total_ms": 2310.6,
+          "audio_duration_s": 11.136,
+          "generation_rtf": 0.207,
+          "request_rtf": 0.207,
+          "peak_vram_mb": 787.6,
+          "sample_rate": 24000,
+          "output_wav": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\f5__optimized__medium_reply.wav",
+          "sample_path": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\f5__optimized__medium_reply.wav",
+          "stitched_playback_ms": 12187.5,
+          "max_inter_chunk_gap_ms": 0.0,
+          "optimizations_applied": [
+            "prepared_ref_cache",
+            "shared_chunk_planner"
+          ],
+          "optimization_notes": "Prepared reference cached once per session and replies use the shared sentence-aware chunk planner.",
+          "chunking_strategy": "sentence_boundary_token_cap_v1",
+          "chunk_count": 2,
+          "chunk_max_estimated_tokens": 260,
+          "chunk_max_chars": 520,
+          "chunk_char_lengths": [
+            76,
+            165
+          ],
+          "chunk_word_counts": [
+            13,
+            29
+          ],
+          "chunk_estimated_tokens": [
+            40,
+            88
+          ],
+          "chunk_text_preview": [
+            "The main latency win comes from separating one-time setup from request work.",
+            "Load the model once at startup, precompute the voice conditioning when the speaker is chosen, an"
+          ],
+          "chunk_generate_ttfa_ms": [
+            1051.5,
+            1258.4
+          ],
+          "chunk_generate_total_ms": [
+            1051.8,
+            1258.8
+          ],
+          "chunk_audio_duration_s": [
+            3.509,
+            7.627
+          ],
+          "chunk_audio_ready_offsets_ms": [
+            1051.5,
+            2310.2
+          ],
+          "inter_chunk_gap_ms": [
+            0.0
+          ],
+          "total_generation_ms": 2310.6,
+          "stitched_audio_duration_s": 11.136
+        },
+        {
+          "engine": "f5",
+          "runtime": "omen_windows_native_cuda",
+          "host_account": "omen-pc/pmpg",
+          "profile": "optimized",
+          "scenario": "long_reply",
+          "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
+          "scenario_word_count": 162,
+          "backend": "native_pytorch_chunked",
+          "mode": "non_streaming_clone",
+          "streaming_support": "simulated",
+          "true_streaming": false,
+          "status": "measured",
+          "model_load_ms": 5066.2,
+          "warmup_ms": 1922.7,
+          "cached_prompt_build_ms": 3.2,
+          "request_prompt_prep_ms": 0.0,
+          "generate_ttfa_ms": 1114.6,
+          "generate_total_ms": 4980.9,
+          "request_ttfa_ms": 1114.6,
+          "request_total_ms": 4980.9,
+          "audio_duration_s": 42.4,
+          "generation_rtf": 0.117,
+          "request_rtf": 0.117,
+          "peak_vram_mb": 833.2,
+          "sample_rate": 24000,
+          "output_wav": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\f5__optimized__long_reply.wav",
+          "sample_path": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\f5__optimized__long_reply.wav",
+          "stitched_playback_ms": 43514.6,
+          "max_inter_chunk_gap_ms": 0.0,
+          "optimizations_applied": [
+            "prepared_ref_cache",
+            "shared_chunk_planner"
+          ],
+          "optimization_notes": "Prepared reference cached once per session and replies use the shared sentence-aware chunk planner.",
+          "chunking_strategy": "sentence_boundary_token_cap_v1",
+          "chunk_count": 3,
+          "chunk_max_estimated_tokens": 260,
+          "chunk_max_chars": 520,
+          "chunk_char_lengths": [
+            97,
+            403,
+            416
+          ],
+          "chunk_word_counts": [
+            21,
+            68,
+            73
+          ],
+          "chunk_estimated_tokens": [
+            64,
+            208,
+            223
+          ],
+          "chunk_text_preview": [
+            "Hey, I wanted to leave a fuller note so we can hear how the voice holds up over a longer stretch",
+            "The short samples are useful for latency, but they do not tell us much about consistency, pacing",
+            "I also want enough material to expose awkward transitions, repeated prosody, or the sort of flat"
+          ],
+          "chunk_generate_ttfa_ms": [
+            1114.6,
+            1886.0,
+            1979.0
+          ],
+          "chunk_generate_total_ms": [
+            1114.9,
+            1886.5,
+            1979.5
+          ],
+          "chunk_audio_duration_s": [
+            4.48,
+            18.656,
+            19.264
+          ],
+          "chunk_audio_ready_offsets_ms": [
+            1114.6,
+            3000.8,
+            4980.3
+          ],
+          "inter_chunk_gap_ms": [
+            0.0,
+            0.0
+          ],
+          "total_generation_ms": 4980.9,
+          "stitched_audio_duration_s": 42.4
+        }
+      ]
+    },
+    {
+      "engine": "voxcpm2",
+      "runtime": "omen_windows_native_cuda",
+      "host_account": "omen-pc/pmpg",
+      "rows": [
+        {
+          "engine": "voxcpm2",
+          "runtime": "omen_windows_native_cuda",
+          "host_account": "omen-pc/pmpg",
+          "profile": "baseline",
+          "scenario": "short_reply",
+          "scenario_description": "One concise assistant reply.",
+          "scenario_word_count": 18,
+          "backend": "standard_python_api",
+          "mode": "standard_python_generate",
+          "streaming_support": "available_benchmark_only",
+          "true_streaming": false,
+          "status": "measured",
+          "model_load_ms": 25333.4,
+          "warmup_ms": 9008.1,
+          "cached_prompt_build_ms": null,
+          "request_prompt_prep_ms": 0.0,
+          "generate_ttfa_ms": 7980.3,
+          "generate_total_ms": 7980.3,
+          "request_ttfa_ms": 7980.3,
+          "request_total_ms": 7980.3,
+          "audio_duration_s": 4.96,
+          "generation_rtf": 1.609,
+          "request_rtf": 1.609,
+          "peak_vram_mb": 6094.5,
+          "sample_rate": 48000,
+          "output_wav": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__baseline__short_reply.wav",
+          "sample_path": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__baseline__short_reply.wav",
+          "stitched_playback_ms": null,
+          "max_inter_chunk_gap_ms": null,
+          "optimizations_applied": [],
+          "optimization_notes": "Warm model only. VoxCPM2 standard Python generate path uses the official openbmb/VoxCPM2 runtime."
+        },
+        {
+          "engine": "voxcpm2",
+          "runtime": "omen_windows_native_cuda",
+          "host_account": "omen-pc/pmpg",
+          "profile": "baseline",
+          "scenario": "medium_reply",
+          "scenario_description": "A practical multi-sentence assistant answer.",
+          "scenario_word_count": 41,
+          "backend": "standard_python_api",
+          "mode": "standard_python_generate",
+          "streaming_support": "available_benchmark_only",
+          "true_streaming": false,
+          "status": "measured",
+          "model_load_ms": 25333.4,
+          "warmup_ms": 9008.1,
+          "cached_prompt_build_ms": null,
+          "request_prompt_prep_ms": 0.0,
+          "generate_ttfa_ms": 20401.8,
+          "generate_total_ms": 20401.8,
+          "request_ttfa_ms": 20401.8,
+          "request_total_ms": 20401.8,
+          "audio_duration_s": 12.64,
+          "generation_rtf": 1.614,
+          "request_rtf": 1.614,
+          "peak_vram_mb": 6093.7,
+          "sample_rate": 48000,
+          "output_wav": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__baseline__medium_reply.wav",
+          "sample_path": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__baseline__medium_reply.wav",
+          "stitched_playback_ms": null,
+          "max_inter_chunk_gap_ms": null,
+          "optimizations_applied": [],
+          "optimization_notes": "Warm model only. VoxCPM2 standard Python generate path uses the official openbmb/VoxCPM2 runtime."
+        },
+        {
+          "engine": "voxcpm2",
+          "runtime": "omen_windows_native_cuda",
+          "host_account": "omen-pc/pmpg",
+          "profile": "baseline",
+          "scenario": "long_reply",
+          "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
+          "scenario_word_count": 162,
+          "backend": "standard_python_api",
+          "mode": "standard_python_generate",
+          "streaming_support": "available_benchmark_only",
+          "true_streaming": false,
+          "status": "measured",
+          "model_load_ms": 25333.4,
+          "warmup_ms": 9008.1,
+          "cached_prompt_build_ms": null,
+          "request_prompt_prep_ms": 0.0,
+          "generate_ttfa_ms": 66082.9,
+          "generate_total_ms": 66082.9,
+          "request_ttfa_ms": 66082.9,
+          "request_total_ms": 66082.9,
+          "audio_duration_s": 40.96,
+          "generation_rtf": 1.613,
+          "request_rtf": 1.613,
+          "peak_vram_mb": 6673.4,
+          "sample_rate": 48000,
+          "output_wav": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__baseline__long_reply.wav",
+          "sample_path": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__baseline__long_reply.wav",
+          "stitched_playback_ms": null,
+          "max_inter_chunk_gap_ms": null,
+          "optimizations_applied": [],
+          "optimization_notes": "Warm model only. VoxCPM2 standard Python generate path uses the official openbmb/VoxCPM2 runtime."
+        },
+        {
+          "engine": "voxcpm2",
+          "runtime": "omen_windows_native_cuda",
+          "host_account": "omen-pc/pmpg",
+          "profile": "standard_python",
+          "scenario": "short_reply",
+          "scenario_description": "One concise assistant reply.",
+          "scenario_word_count": 18,
+          "backend": "standard_python_api",
+          "mode": "shared_chunked_playback",
+          "streaming_support": "available_benchmark_only",
+          "true_streaming": false,
+          "status": "measured",
+          "model_load_ms": 25333.4,
+          "warmup_ms": 9008.1,
+          "cached_prompt_build_ms": null,
+          "request_prompt_prep_ms": 0.0,
+          "generate_ttfa_ms": 2479.3,
+          "generate_total_ms": 10554.3,
+          "request_ttfa_ms": 2479.3,
+          "request_total_ms": 10554.3,
+          "audio_duration_s": 6.4,
+          "generation_rtf": 1.649,
+          "request_rtf": 1.649,
+          "peak_vram_mb": 6094.5,
+          "sample_rate": 48000,
+          "output_wav": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__standard_python__short_reply.wav",
+          "sample_path": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__standard_python__short_reply.wav",
+          "stitched_playback_ms": 15514.3,
+          "max_inter_chunk_gap_ms": 6634.9,
+          "optimizations_applied": [
+            "shared_chunk_planner"
+          ],
+          "optimization_notes": "VoxCPM2 standard Python generate path measured through the shared RayMe chunk planner; streaming API remains benchmark-only unless call code consumes chunks live.",
+          "chunking_strategy": "sentence_boundary_token_cap_v1",
+          "chunk_count": 2,
+          "chunk_max_estimated_tokens": 240,
+          "chunk_max_chars": 500,
+          "chunk_char_lengths": [
+            14,
+            70
+          ],
+          "chunk_word_counts": [
+            4,
+            14
+          ],
+          "chunk_estimated_tokens": [
+            12,
+            42
+          ],
+          "chunk_text_preview": [
+            "I can do that.",
+            "The quickest fix is to keep the model warm and reuse the voice prompt."
+          ],
+          "chunk_generate_ttfa_ms": [
+            2479.3,
+            8074.9
+          ],
+          "chunk_generate_total_ms": [
+            2479.3,
+            8074.9
+          ],
+          "chunk_audio_duration_s": [
+            1.44,
+            4.96
+          ],
+          "chunk_audio_ready_offsets_ms": [
+            2479.3,
+            10554.3
+          ],
+          "inter_chunk_gap_ms": [
+            6634.9
+          ],
+          "total_generation_ms": 10554.3,
+          "stitched_audio_duration_s": 6.4
+        },
+        {
+          "engine": "voxcpm2",
+          "runtime": "omen_windows_native_cuda",
+          "host_account": "omen-pc/pmpg",
+          "profile": "standard_python",
+          "scenario": "medium_reply",
+          "scenario_description": "A practical multi-sentence assistant answer.",
+          "scenario_word_count": 41,
+          "backend": "standard_python_api",
+          "mode": "shared_chunked_playback",
+          "streaming_support": "available_benchmark_only",
+          "true_streaming": false,
+          "status": "measured",
+          "model_load_ms": 25333.4,
+          "warmup_ms": 9008.1,
+          "cached_prompt_build_ms": null,
+          "request_prompt_prep_ms": 0.0,
+          "generate_ttfa_ms": 5779.2,
+          "generate_total_ms": 18819.0,
+          "request_ttfa_ms": 5779.2,
+          "request_total_ms": 18819.0,
+          "audio_duration_s": 11.52,
+          "generation_rtf": 1.634,
+          "request_rtf": 1.634,
+          "peak_vram_mb": 6094.5,
+          "sample_rate": 48000,
+          "output_wav": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__standard_python__medium_reply.wav",
+          "sample_path": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__standard_python__medium_reply.wav",
+          "stitched_playback_ms": 26819.0,
+          "max_inter_chunk_gap_ms": 9519.8,
+          "optimizations_applied": [
+            "shared_chunk_planner"
+          ],
+          "optimization_notes": "VoxCPM2 standard Python generate path measured through the shared RayMe chunk planner; streaming API remains benchmark-only unless call code consumes chunks live.",
+          "chunking_strategy": "sentence_boundary_token_cap_v1",
+          "chunk_count": 2,
+          "chunk_max_estimated_tokens": 240,
+          "chunk_max_chars": 500,
+          "chunk_char_lengths": [
+            76,
+            165
+          ],
+          "chunk_word_counts": [
+            13,
+            29
+          ],
+          "chunk_estimated_tokens": [
+            40,
+            88
+          ],
+          "chunk_text_preview": [
+            "The main latency win comes from separating one-time setup from request work.",
+            "Load the model once at startup, precompute the voice conditioning when the speaker is chosen, an"
+          ],
+          "chunk_generate_ttfa_ms": [
+            5779.2,
+            13039.8
+          ],
+          "chunk_generate_total_ms": [
+            5779.2,
+            13039.8
+          ],
+          "chunk_audio_duration_s": [
+            3.52,
+            8.0
+          ],
+          "chunk_audio_ready_offsets_ms": [
+            5779.2,
+            18819.0
+          ],
+          "inter_chunk_gap_ms": [
+            9519.8
+          ],
+          "total_generation_ms": 18819.0,
+          "stitched_audio_duration_s": 11.52
+        },
+        {
+          "engine": "voxcpm2",
+          "runtime": "omen_windows_native_cuda",
+          "host_account": "omen-pc/pmpg",
+          "profile": "standard_python",
+          "scenario": "long_reply",
+          "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
+          "scenario_word_count": 162,
+          "backend": "standard_python_api",
+          "mode": "shared_chunked_playback",
+          "streaming_support": "available_benchmark_only",
+          "true_streaming": false,
+          "status": "measured",
+          "model_load_ms": 25333.4,
+          "warmup_ms": 9008.1,
+          "cached_prompt_build_ms": null,
+          "request_prompt_prep_ms": 0.0,
+          "generate_ttfa_ms": 7236.0,
+          "generate_total_ms": 72027.4,
+          "request_ttfa_ms": 7236.0,
+          "request_total_ms": 72027.4,
+          "audio_duration_s": 44.64,
+          "generation_rtf": 1.614,
+          "request_rtf": 1.614,
+          "peak_vram_mb": 6094.2,
+          "sample_rate": 48000,
+          "output_wav": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__standard_python__long_reply.wav",
+          "sample_path": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__standard_python__long_reply.wav",
+          "stitched_playback_ms": 91867.4,
+          "max_inter_chunk_gap_ms": 28208.9,
+          "optimizations_applied": [
+            "shared_chunk_planner"
+          ],
+          "optimization_notes": "VoxCPM2 standard Python generate path measured through the shared RayMe chunk planner; streaming API remains benchmark-only unless call code consumes chunks live.",
+          "chunking_strategy": "sentence_boundary_token_cap_v1",
+          "chunk_count": 3,
+          "chunk_max_estimated_tokens": 240,
+          "chunk_max_chars": 500,
+          "chunk_char_lengths": [
+            97,
+            403,
+            416
+          ],
+          "chunk_word_counts": [
+            21,
+            68,
+            73
+          ],
+          "chunk_estimated_tokens": [
+            64,
+            208,
+            223
+          ],
+          "chunk_text_preview": [
+            "Hey, I wanted to leave a fuller note so we can hear how the voice holds up over a longer stretch",
+            "The short samples are useful for latency, but they do not tell us much about consistency, pacing",
+            "I also want enough material to expose awkward transitions, repeated prosody, or the sort of flat"
+          ],
+          "chunk_generate_ttfa_ms": [
+            7236.0,
+            32688.9,
+            32102.5
+          ],
+          "chunk_generate_total_ms": [
+            7236.0,
+            32688.9,
+            32102.5
+          ],
+          "chunk_audio_duration_s": [
+            4.48,
+            20.32,
+            19.84
+          ],
+          "chunk_audio_ready_offsets_ms": [
+            7236.0,
+            39924.9,
+            72027.4
+          ],
+          "inter_chunk_gap_ms": [
+            28208.9,
+            11782.5
+          ],
+          "total_generation_ms": 72027.4,
+          "stitched_audio_duration_s": 44.64
+        },
+        {
+          "engine": "voxcpm2",
+          "runtime": "omen_windows_native_cuda",
+          "host_account": "omen-pc/pmpg",
+          "profile": "streaming_collected",
+          "scenario": "short_reply",
+          "scenario_description": "One concise assistant reply.",
+          "scenario_word_count": 18,
+          "backend": "standard_python_api",
+          "mode": "standard_python_streaming_collected",
+          "streaming_support": "native_benchmark_only",
+          "true_streaming": false,
+          "status": "measured",
+          "model_load_ms": 25333.4,
+          "warmup_ms": 9008.1,
+          "cached_prompt_build_ms": null,
+          "request_prompt_prep_ms": 0.0,
+          "generate_ttfa_ms": 387.9,
+          "generate_total_ms": 8357.7,
+          "request_ttfa_ms": 387.9,
+          "request_total_ms": 8357.7,
+          "audio_duration_s": 4.96,
+          "generation_rtf": 1.685,
+          "request_rtf": 1.685,
+          "peak_vram_mb": 6095.2,
+          "sample_rate": 48000,
+          "output_wav": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__streaming_collected__short_reply.wav",
+          "sample_path": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__streaming_collected__short_reply.wav",
+          "stitched_playback_ms": null,
+          "max_inter_chunk_gap_ms": null,
+          "optimizations_applied": [
+            "generate_streaming_collected"
+          ],
+          "optimization_notes": "VoxCPM2 generate_streaming chunks are collected into one WAV for benchmark-only metrics; this row does not claim RayMe call-flow streaming.",
+          "streaming_benchmark_only": true
+        },
+        {
+          "engine": "voxcpm2",
+          "runtime": "omen_windows_native_cuda",
+          "host_account": "omen-pc/pmpg",
+          "profile": "streaming_collected",
+          "scenario": "medium_reply",
+          "scenario_description": "A practical multi-sentence assistant answer.",
+          "scenario_word_count": 41,
+          "backend": "standard_python_api",
+          "mode": "standard_python_streaming_collected",
+          "streaming_support": "native_benchmark_only",
+          "true_streaming": false,
+          "status": "measured",
+          "model_load_ms": 25333.4,
+          "warmup_ms": 9008.1,
+          "cached_prompt_build_ms": null,
+          "request_prompt_prep_ms": 0.0,
+          "generate_ttfa_ms": 381.2,
+          "generate_total_ms": 20864.5,
+          "request_ttfa_ms": 381.2,
+          "request_total_ms": 20864.5,
+          "audio_duration_s": 12.48,
+          "generation_rtf": 1.672,
+          "request_rtf": 1.672,
+          "peak_vram_mb": 6094.0,
+          "sample_rate": 48000,
+          "output_wav": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__streaming_collected__medium_reply.wav",
+          "sample_path": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__streaming_collected__medium_reply.wav",
+          "stitched_playback_ms": null,
+          "max_inter_chunk_gap_ms": null,
+          "optimizations_applied": [
+            "generate_streaming_collected"
+          ],
+          "optimization_notes": "VoxCPM2 generate_streaming chunks are collected into one WAV for benchmark-only metrics; this row does not claim RayMe call-flow streaming.",
+          "streaming_benchmark_only": true
+        },
+        {
+          "engine": "voxcpm2",
+          "runtime": "omen_windows_native_cuda",
+          "host_account": "omen-pc/pmpg",
+          "profile": "streaming_collected",
+          "scenario": "long_reply",
+          "scenario_description": "Long-form assistant narration from the Phase 0 fixture.",
+          "scenario_word_count": 162,
+          "backend": "standard_python_api",
+          "mode": "standard_python_streaming_collected",
+          "streaming_support": "native_benchmark_only",
+          "true_streaming": false,
+          "status": "measured",
+          "model_load_ms": 25333.4,
+          "warmup_ms": 9008.1,
+          "cached_prompt_build_ms": null,
+          "request_prompt_prep_ms": 0.0,
+          "generate_ttfa_ms": 399.1,
+          "generate_total_ms": 65693.0,
+          "request_ttfa_ms": 399.1,
+          "request_total_ms": 65693.0,
+          "audio_duration_s": 39.36,
+          "generation_rtf": 1.669,
+          "request_rtf": 1.669,
+          "peak_vram_mb": 6094.2,
+          "sample_rate": 48000,
+          "output_wav": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__streaming_collected__long_reply.wav",
+          "sample_path": ".planning\\phases\\07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency\\results\\audio\\voxcpm2__streaming_collected__long_reply.wav",
+          "stitched_playback_ms": null,
+          "max_inter_chunk_gap_ms": null,
+          "optimizations_applied": [
+            "generate_streaming_collected"
+          ],
+          "optimization_notes": "VoxCPM2 generate_streaming chunks are collected into one WAV for benchmark-only metrics; this row does not claim RayMe call-flow streaming.",
+          "streaming_benchmark_only": true
+        }
+      ]
+    }
+  ],
+  "meta": {
+    "timestamp": "2026-05-11T11:09:30+00:00",
+    "python_version": "3.11.15",
+    "platform": "Windows-10-10.0.26200-SP0",
+    "gpu": {
+      "cuda_available": true,
+      "name": "NVIDIA GeForce RTX 3060",
+      "vram_total_mb": 12287,
+      "compute_capability": "8.6",
+      "driver_version": "560.94",
+      "cuda_version": "12.6",
+      "torch_version": "2.10.0+cu126"
     }
   }
 }
