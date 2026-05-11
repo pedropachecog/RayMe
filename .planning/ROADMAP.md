@@ -501,7 +501,7 @@ Plans:
 - [x] 07-01-PLAN.md - AI backend VoxCPM2 RED contracts for metadata, CUDA-only adapter behavior, synthesis options, and engine-scoped failures (Wave 0)
 - [x] 07-02-PLAN.md - Web UI server/client RED contracts for VoxCPM2 voice metadata, controls, fallback roster, and missing-transcript warning (Wave 0)
 - [x] 07-03-PLAN.md - Call-flow RED contracts for VoxCPM2 settings forwarding, sanitized call failures, and interrupt/cancel preservation (Wave 0)
-- [ ] 07-04-PLAN.md - Scenario matrix RED tests and deterministic Phase 7 evidence templates/verifier (Wave 0)
+- [x] 07-04-PLAN.md - Scenario matrix RED tests and deterministic Phase 7 evidence templates/verifier (Wave 0)
 - [ ] 07-05-PLAN.md - Runtime-path decision artifact plus AI backend optional `voxcpm2` runtime, metadata, adapter, and `/tts/synthesize` bounded option support (Wave 1)
 - [ ] 07-06-PLAN.md - Web UI server durable VoxCPM2 voice metadata and preview/test-play payload support (Wave 1)
 - [ ] 07-07-PLAN.md - Client Voice Lab VoxCPM2 fallback roster, labels, types, and conditional mode/style controls (Wave 1)
