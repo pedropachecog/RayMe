@@ -320,9 +320,10 @@ POWERSHELL
 if [[ "$RAYME_OMEN_VERIFY_VOXCPM2" == "1" ]]; then
   deploy_log="$(mktemp)"
   set +e
-  run_remote_deploy | tee "$deploy_log"
-  deploy_status=${PIPESTATUS[0]}
+  run_remote_deploy >"$deploy_log" 2>&1
+  deploy_status=$?
   set -e
+  cat "$deploy_log"
   if [[ "$deploy_status" -ne 0 ]]; then
     exit "$deploy_status"
   fi
