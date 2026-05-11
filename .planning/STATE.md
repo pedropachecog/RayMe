@@ -68,14 +68,16 @@ progress:
 - Phase 08 plan 08-03 completed on 2026-05-11: Existing `/webrtc/speak` and Web UI call SSE surfaces now have tests proving immediate streaming metrics, final playback proof fields, sanitized failures, and one durable AI speech row without a VoxCPM2 public route.
 - Phase 08 plan 08-04 completed on 2026-05-11: Phase 8 evidence tooling now records repeated warm F5/VoxCPM2 call samples from immediate `ai_audio_started_event.tts_playback` metrics and rejects fallback, carrier-mixing, raw leaks, or slower-than-F5 medians before decision writeback.
 - Phase 08 plan 08-05 completed on 2026-05-11: OMEN dirty Phase 07 evidence changes were preserved on a dedicated branch before canonical deployment, CUDA VoxCPM2 runtime/VRAM evidence was regenerated at commit `6b69aeb98434678f4aa1853953a710f8b9b0f905`, and live repeated warm call-flow evidence proved VoxCPM2 median first-audio `762.7 ms` beat F5 `948.0 ms`.
+- Phase 08 completed on 2026-05-11: VoxCPM2 live call playback now consumes streaming chunks and same-run warm median first-audio beat F5; VoxCPM2 is the preferred/default live-call TTS engine.
 
 ## Current Decisions
 
 - HTTPS strategy: `mkcert` on LAN, validated on Android Chrome via `https://192.168.1.199:8443`.
 - Operating rules: see `.planning/OPERATING-NOTES.md` before backend LAN/Android HTTPS work. Key points: use real backend `OMEN-PC`/`192.168.1.199`, keep Windows artifacts under `C:\Users\pmpg\rayme\`, reuse `.local/phase1-tls/` certs, and do not create throwaway certs.
 - STT default: `distil-large-v3` (`int8_float16`), WER `0.0627`.
-- TTS v1 default: `f5`.
-- TTS v1 roster: `F5-TTS`, `XTTS v2`, `Qwen3-TTS 0.6B-Base`.
+- TTS v1 default baseline: `f5` from Phase 0; live-call default is `voxcpm2` after Phase 8 evidence.
+- TTS live-call default: voxcpm2 (Phase 8 evidence: results/voxcpm2-live-streaming-call-flow.json).
+- TTS v1 roster: `F5-TTS`, `XTTS v2`, `Qwen3-TTS 0.6B-Base`, and `VoxCPM2`.
 - Phase 08-01 streaming adapter policy: VoxCPM2 streaming stays internal to the AI backend through `TtsAudioChunk` and `TtsStreamingAdapter`.
 - Phase 08-01 no-fallback policy: `VoxCpm2TtsAdapter.stream()` calls `generate_streaming()` directly and rejects empty streams instead of falling back to `runtime.generate()`.
 - Phase 08-02 call-session streaming policy: VoxCPM2 live call playback uses `adapter.stream()` only for `voxcpm2` adapters with a callable stream method.
@@ -89,6 +91,7 @@ progress:
 - Phase 08-05 OMEN preservation policy: dirty OMEN checkout changes are preserved on a named branch and commit before deployment; the preserved Phase 07 evidence branch is `preserve/phase08-omen-dirty-20260511T183300Z` at `2077f8ddb7d50a6cca5f1d14ff26456a781f990a`.
 - Phase 08-05 live evidence result: on OMEN commit `6b69aeb98434678f4aa1853953a710f8b9b0f905`, VoxCPM2 warm live call TTFA median was `762.7 ms` versus F5 `948.0 ms`, with `voxcpm2_beats_f5: true`, streaming used, and whole-WAV fallback false.
 - Phase 08-05 evidence hygiene policy: live call-flow evidence must use sanitized reference source labels and must not include absolute local reference-audio paths.
+- Phase 08-06 final VoxCPM2 live-call decision: VoxCPM2 is promoted as the preferred/default live-call TTS engine, with F5 retained as fallback/comparator, after `--decision-ready` verified Phase 8 same-run live streaming evidence.
 - TTS future implementation policy: keep all measured engine paths available, including `LuxTTS`, `Chatterbox Turbo`, and `TADA 1B`; use quality evaluations to choose defaults, labels, warnings, and retesting priorities.
 - TTS long-form implementation: shared engine-agnostic chunk planner is now implemented in the scenario harness; raw whole-generation fallback rows are no longer the only comparison.
 - TTS quality notes: Spike 003 is closed as `PASS_WITH_CAVEATS`. LuxTTS optimized is very fast but has current user-sample quality failures; Chatterbox Turbo baseline long-form is gibberish, while optimized long-form normal and seed 1337 are fine on the listened long samples; TADA Windows optimized long is acceptable while WSL is caution; XTTS/F5 long samples need sample/tuning caveats.
@@ -182,7 +185,7 @@ progress:
 - Phase 07-10 OMEN deploy policy: VoxCPM2 runtime evidence must stay inside `scripts/deploy-omen.sh`; no alternate OMEN deployment scripts, launcher files, or manual scheduled-task edits are allowed.
 - Phase 07-10 VoxCPM2 loader policy: live `voxcpm==2.0.2` rejects the documented `device="cuda"` loader kwarg, so RayMe loads with the actual package API and verifies CUDA residency after model load.
 - Phase 07-10 OMEN TTS sync policy: optional TTS sync on OMEN must target Python 3.11 and repair CUDA PyTorch wheels after `uv sync`, because the default Windows sync path installs CPU torch.
-- Phase 07 final VoxCPM2 decision: VoxCPM2 is selectable with caveats. Quality is preferred over F5, runtime/call-flow/VRAM gates pass, but F5 remains the default until RayMe call playback consumes VoxCPM2 streaming chunks live.
+- Phase 07 final VoxCPM2 decision: VoxCPM2 was selectable with caveats. Quality was preferred over F5, runtime/call-flow/VRAM gates passed, and the remaining live streaming playback caveat is now closed by the Phase 8 VoxCPM2 live-call default decision.
 
 ## Evidence
 

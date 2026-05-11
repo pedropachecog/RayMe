@@ -53,7 +53,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 - [ ] **Phase 5: Voice Breadth & Unified Thread Polish** — Both TTS engines with cold-swap UX, per-character default + per-chat override, saved-audio toggles + inline replay, unified thread visual treatment, full SillyTavern text-UX parity (Regenerate / Edit / Swipes / Continue / alternate greetings / virtualization).
 - [ ] **Phase 6: Mobile Hardening & Ship Polish** — Full Android Chrome pass (Bluetooth routing, Wake Lock, visibility change), PWA manifest + icons, storage housekeeping (orphan reaper, retention), full Settings surface, error states, soak-test acceptance. v1 ships.
 - [x] **Phase 7: Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations** — Completed on 2026-05-11; outcome `selectable_with_caveats`.
-- [ ] **Phase 8: Wire VoxCPM2 streaming chunks into live RayMe call playback** — Planned follow-up to convert VoxCPM2 benchmark streaming TTFA into actual live call playback latency.
+- [ ] **Phase 8: Wire VoxCPM2 streaming chunks into live RayMe call playback** — Converts VoxCPM2 benchmark streaming TTFA into actual live call playback latency and gates the live-call default decision.
 
 ---
 
@@ -512,7 +512,7 @@ Plans:
 - [x] 07-11-PLAN.md - Live scenario matrix, generated WAV, and real call-flow evidence artifacts (Wave 4)
 - [x] 07-12-PLAN.md - Manual listening quality gate and final promotion decision writeback (Wave 5)
 
-**Final outcome:** `selectable_with_caveats`. Manual listening judged VoxCPM2 far superior to F5, runtime/call-flow/VRAM gates passed, and streaming-collected first audio beat F5 in the benchmark matrix. F5 remains the default because current RayMe calls still wait for full VoxCPM2 synthesis before playback, so live call TTFA does not yet get the streaming benefit.
+**Final outcome:** `selectable_with_caveats`. Manual listening judged VoxCPM2 far superior to F5, runtime/call-flow/VRAM gates passed, and streaming-collected first audio beat F5 in the benchmark matrix. At Phase 7 close, F5 remained the default because live RayMe calls still waited for full VoxCPM2 synthesis before playback; Phase 8 later closed that caveat with live streaming playback evidence.
 
 ### Phase 8: Wire VoxCPM2 streaming chunks into live RayMe call playback
 
@@ -530,6 +530,8 @@ Plans:
 - [x] 08-04-PLAN.md - Phase 8 repeated warm call-flow evidence runner and verifier that rejects fallback and slower-than-F5 medians (Wave 1)
 - [x] 08-05-PLAN.md - OMEN dirty-checkout preflight, canonical deployment, and live VoxCPM2-versus-F5 evidence artifacts (Wave 4)
 - [ ] 08-06-PLAN.md - Evidence-gated durable VoxCPM2 live-call default decision writeback (Wave 5)
+
+**Final outcome:** promoted_for_live_call_default. VoxCPM2 beat F5 by same-run warm median first-audio (`762.7 ms` vs `948.0 ms`) with `streaming_used=true` and `whole_wav_fallback_used=false`; VoxCPM2 is the preferred/default live-call TTS engine and F5 remains available as fallback/comparator.
 
 ---
 
