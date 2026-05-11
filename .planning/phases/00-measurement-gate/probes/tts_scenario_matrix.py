@@ -1976,7 +1976,7 @@ def _run_voxcpm2_engine(
                 chunk_peak_vram_mb.append(peak_vram_mb)
                 chunk_wavs.append(wav)
             stitched_wav = np.concatenate(chunk_wavs) if chunk_wavs else np.zeros(1, dtype=np.float32)
-            sample_out = _sample_path(sample_root, "voxcpm2", "optimized", scenario.name)
+            sample_out = _sample_path(sample_root, "voxcpm2", "standard_python", scenario.name)
             _write_audio_sample(sample_out, stitched_wav, rate)
             audio_duration_s = len(stitched_wav) / float(rate)
             chunk_extra = _chunk_playback_metadata(
