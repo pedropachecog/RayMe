@@ -1,6 +1,6 @@
 ---
 phase: 07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency
-reviewed: 2026-05-11T11:35:56Z
+reviewed: 2026-05-11T11:48:10Z
 depth: standard
 files_reviewed: 27
 files_reviewed_list:
@@ -41,80 +41,67 @@ status: issues_found
 
 # Phase 07: Code Review Report
 
-**Reviewed:** 2026-05-11T11:35:56Z
+**Reviewed:** 2026-05-11T11:48:10Z
 **Depth:** standard
 **Files Reviewed:** 27
 **Status:** issues_found
 
 ## Summary
 
-Reviewed the VoxCPM2 adapter, TTS API routing, call-flow propagation, Voice Lab UI/server metadata handling, tests, and OMEN deployment changes. The integration is mostly bounded and sanitizes public failures, but the new VoxCPM2 adapter sends parameters that do not match the upstream runtime contract, and the transient TTS endpoint can mask invalid engine requests with an internal server error. `ai-backend/uv.lock` was excluded as a lock file per review-scope filtering.
+Reviewed the scoped VoxCPM2 backend adapter, TTS registry/API wiring, WebRTC call path, Voice Lab UI, web-server voice/call facades, deployment script, and related tests. The fixes closed several API-shape and sanitization paths, but three behavioral risks remain: Voice Lab still ignores per-engine transcript metadata, fallback engine normalization can expose VoxCPM2 as selectable when the backend did not report it, and VoxCPM2 CUDA fallback detection can pass when device probing returns no evidence.
 
 ## Warnings
 
-### WR-01: VoxCPM2 Style Prompt Is Sent as an Unsupported Runtime Keyword
+### WR-01: Voice Lab Requires Transcripts For Engines That Declare They Do Not Need One
 
-**File:** `ai-backend/app/models/tts_voxcpm2.py:127`
-**Issue:** `_build_generate_kwargs` adds `style_prompt` directly to `runtime.generate(**generate_kwargs)`. The VoxCPM2 `generate()` API supports style/control instructions by prepending parenthesized control text to `text`; it does not expose a `style_prompt` keyword. Any non-empty style prompt from Voice Lab will therefore raise a runtime `TypeError` and make VoxCPM2 preview/call synthesis fail.
+**File:** `web-ui/client/src/routes/voice-lab/+page.svelte:149`
+**Issue:** `transcriptRequired` is hard-coded to `selectedEngine !== 'voxcpm2'`. That contradicts the engine metadata shown in the picker, where XTTS v2 and other engines can advertise `requires_transcript: false`. When those engines are available, preview and save remain disabled until the user enters a transcript even though the selected engine does not require one.
+**Fix:**
+```svelte
+$: selectedEngineMetadata = engines.find((engine) => engine.id === selectedEngine);
+$: transcriptRequired = selectedEngineMetadata?.requires_transcript === true;
+$: hasRequiredTranscript = !transcriptRequired || Boolean(transcript.trim());
+```
+
+### WR-02: Missing Backend Engine Metadata Falls Back To Selectable VoxCPM2
+
+**File:** `web-ui/client/src/routes/voice-lab/+page.svelte:212`
+**Issue:** `normalizeEngines()` seeds the map with `DEFAULT_TTS_ENGINES` and returns every default entry even when `settings.ai_backend_status.available_engines` is a non-empty backend list that omits an engine. Because the default VoxCPM2 entry is `available: true` at lines 96-102, an older or degraded backend response that does not include VoxCPM2 still renders VoxCPM2 as selectable, leading users into guaranteed preview/save failures.
+**Fix:**
+```ts
+const returnedIds = new Set<string>();
+// add each backend-reported id to returnedIds while normalizing
+
+return DEFAULT_TTS_ENGINES.map((engine) => {
+  const normalized = byId.get(engine.id) ?? engine;
+  if (!returnedIds.has(engine.id)) {
+    return {
+      ...normalized,
+      availability: {
+        available: false,
+        state: 'unavailable',
+        unavailable_reason: 'Engine was not reported by the AI backend.'
+      }
+    };
+  }
+  return normalized;
+});
+```
+
+### WR-03: VoxCPM2 CUDA Guard Accepts Unknown Device Evidence
+
+**File:** `ai-backend/app/models/tts_voxcpm2.py:96`
+**Issue:** `_assert_runtime_uses_cuda()` only raises when it finds device types and none are CUDA. If runtime objects expose no parameters, or parameter probing fails, `device_types` remains empty and the adapter accepts the runtime despite having no proof that VoxCPM2 loaded on CUDA. The deployment smoke script has the same shape at `scripts/deploy-omen.sh:179`, where an empty `device_types` set also passes. That weakens the Phase 7 CPU-fallback gate.
 **Fix:**
 ```python
-style_prompt = (request.voxcpm2_style_prompt or "").strip()
-text = request.text
-if style_prompt and request.voxcpm2_cloning_mode != "transcript_guided":
-    text = f"({style_prompt}){text}"
-
-kwargs: dict[str, Any] = {
-    "text": text,
-    "cfg_value": request.voxcpm2_cfg_value,
-    "inference_timesteps": request.voxcpm2_inference_timesteps,
-    "normalize": request.voxcpm2_normalize,
-    "denoise": request.voxcpm2_denoise,
-}
+if "cuda" not in device_types:
+    raise RuntimeError("VoxCPM2 runtime did not expose CUDA-loaded parameters")
 ```
-Also update `ai-backend/tests/test_tts_voxcpm2.py` so the fake runtime rejects unknown kwargs and asserts the style prompt is folded into `text`.
 
-### WR-02: Transcript-Guided VoxCPM2 Mode Drops the Reference Cloning Input
-
-**File:** `ai-backend/app/models/tts_voxcpm2.py:131`
-**Issue:** Transcript-guided mode sends only `prompt_wav_path` and `prompt_text`. VoxCPM2's Hi-Fi cloning path combines those with `reference_wav_path` for the same clip, so the current implementation switches to continuation-style prompting instead of the intended high-fidelity voice cloning path. This can reduce cloning quality exactly in the mode users choose for better fidelity.
-**Fix:**
-```python
-if request.voxcpm2_cloning_mode == "transcript_guided" and reference_transcript:
-    kwargs["prompt_wav_path"] = str(reference_path)
-    kwargs["prompt_text"] = reference_transcript
-    kwargs["reference_wav_path"] = str(reference_path)
-else:
-    kwargs["reference_wav_path"] = str(reference_path)
-    if request.voxcpm2_cloning_mode != "reference_only" and not reference_transcript:
-        warning_codes.append("voxcpm2_reference_only_without_transcript")
-```
-Add a test assertion that transcript-guided synthesis includes both `prompt_wav_path` and `reference_wav_path`.
-
-### WR-03: Invalid TTS Engine Requests Can Mask the Intended Public Error
-
-**File:** `ai-backend/app/api/tts.py:74`
-**Issue:** `synthesize()` catches any switch/synthesis failure and calls `_mark_engine_unavailable(manager, target_engine)`. With an unknown `engine_id`, `ModelManager.switch_tts_engine()` raises `ValueError`, then `_mark_engine_unavailable()` calls `ModelManager._mark_unavailable()` with that same unknown id, which raises `KeyError`. That secondary failure can turn a sanitized 502 response into an unhandled 500.
-**Fix:**
-```python
-def _mark_engine_unavailable(manager: Any, engine_id: str) -> None:
-    statuses = getattr(manager, "_statuses", {})
-    if isinstance(statuses, dict) and engine_id not in statuses:
-        return
-    marker = getattr(manager, "_mark_unavailable", None)
-    if callable(marker):
-        try:
-            marker(engine_id, "engine synthesis failed")
-        except Exception:
-            logger.warning(
-                "[rayme-tts] mark_unavailable.failed engine=%s",
-                engine_id,
-                exc_info=True,
-            )
-```
-Cover this with a `/tts/synthesize` test that posts an unknown `engine_id` and asserts the public error remains sanitized.
+Apply the same fail-closed check in the deployment probe after collecting `device_types`, or add a documented runtime-specific CUDA probe that cannot pass on missing evidence.
 
 ---
 
-_Reviewed: 2026-05-11T11:35:56Z_
+_Reviewed: 2026-05-11T11:48:10Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
