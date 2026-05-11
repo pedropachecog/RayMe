@@ -1,19 +1,21 @@
 # Phase 03 OMEN-PC Live Evidence
 
-Phase 3 deployment/runtime evidence for `OMEN-PC`. Physical Android Chrome
-product-owner acceptance remains pending.
+Phase 3 deployment/runtime evidence for `OMEN-PC`. Desktop live LAN/GPU
+acceptance passed on `OMEN-PC`; physical Android Chrome product-owner
+acceptance remains pending.
 
 ## Runtime Identity
 
-- Date/time: `2026-04-25T22:44:42Z`
+- Date/time: `2026-05-11T22:58:10Z`
 - Operator: Codex
-- Deployed commit SHA: `a325c355130c87ccda7eb3079589fe00993d3ace`
+- Deployed commit SHA: `e48e2ce57cc31a30e7df97c1f0ea9215c136dc45`
 - Branch: `main`
 - Canonical checkout: `C:\Users\pmpg\rayme\RayMe\`
 - TLS directory: `C:\Users\pmpg\rayme\phase1-tls\`
 - Web URL: `https://192.168.1.199:8443`
 - AI health URL: `https://192.168.1.199:9443/health`
-- Listening ports after restart: `9443 -> pid 29968`, `8443 -> pid 9048`
+- Listening endpoints after deploy: `https://192.168.1.199:8443` and
+  `https://192.168.1.199:9443/health` responded from the live services.
 
 ## Deployment Result
 
@@ -25,12 +27,29 @@ scripts/deploy-omen.sh
 
 Result:
 
-- `OMEN-PC` pulled `a325c355130c87ccda7eb3079589fe00993d3ace`.
-- Web client production build passed on `OMEN-PC`.
-- Scheduled tasks `RayMePhase1AI` and `RayMePhase1Web` restarted.
+- `OMEN-PC` checkout verified at `e48e2ce57cc31a30e7df97c1f0ea9215c136dc45`.
+- Deployment used the canonical `scripts/deploy-omen.sh` path.
+- Web client production build had already passed on `OMEN-PC`.
 - AI backend and Web UI listeners were verified on `192.168.1.199`.
 
+## Current Acceptance Snapshot
+
+- Live desktop browser acceptance: passed.
+- Browser secure context: `window.isSecureContext === true`.
+- Non-mocked live call spec target: `desktop-chromium` against
+  `https://192.168.1.199:8443` and `https://192.168.1.199:9443/health`.
+- Live call session: `rtc_4bc2136a389c428195ae6ddc9c353846`.
+- Web UI call ID: `call_a221cc68290840c085b0db70b6fd3520`.
+- Result line: `1 passed (6.1m)`.
+- Five-minute stability line:
+  `duration_ms=300000 before_user=2 before_ai=2 after_user=13 after_ai=12`.
+- Browser console/page-error guard: passed.
+- Call writeback: thread returned with `call_start`, at least two
+  `user_speech`, at least two `ai_speech`, and `call_end` rows.
+
 ## Deployment Fixes Applied
+
+Earlier 03-11 deploy/debug history retained for traceability:
 
 The first deploy of `62bb40786ffefb9b83f3ae7f882d645e60342583`
 failed to keep the AI backend online because `OMEN-PC` runs the AI backend
@@ -135,6 +154,33 @@ NVIDIA GeForce RTX 3060, driver 560.94, 1156 MiB used, 12288 MiB total
 
 ## AI Backend `/health` JSON
 
+Current health spot check after deployed commit
+`e48e2ce57cc31a30e7df97c1f0ea9215c136dc45`:
+
+```json
+{
+  "service": "rayme-ai-backend",
+  "status": "degraded",
+  "stt_model": "distil-large-v3",
+  "stt_compute_type": "int8_float16",
+  "stt_language": "en",
+  "stt_ready": true,
+  "vad_ready": true,
+  "vad_threshold": 0.5,
+  "vad_end_silence_ms": 700,
+  "resident_tts_engine": "f5",
+  "available_engines": [
+    {"id": "f5", "available": true, "resident": true, "state": "resident"},
+    {"id": "voxcpm2", "available": true, "resident": false, "state": "idle"}
+  ],
+  "loading_engine": null,
+  "vram_used_mb": 3481.6,
+  "vram_headroom_mb": 7518.4,
+  "phase": "02",
+  "capabilities": ["health", "stt", "vad", "tts"]
+}
+```
+
 Captured after redeploy:
 
 ```json
@@ -208,15 +254,75 @@ ai_backend_status.vram_headroom_mb: 9666.5
 
 ## Live Browser Call Spec
 
-Command started:
+Passing command, run on `OMEN-PC` from
+`C:\Users\pmpg\rayme\RayMe`:
 
 ```text
-RAYME_ENABLE_LIVE_E2E=1 RAYME_LIVE_WEB_URL=https://192.168.1.199:8443 RAYME_LIVE_AI_HEALTH_URL=https://192.168.1.199:9443/health npm --prefix web-ui/client run test:e2e -- tests/e2e/live-call.spec.ts --project=desktop-chromium
+$env:RAYME_ENABLE_LIVE_E2E='1'
+$env:RAYME_LIVE_WEB_URL='https://192.168.1.199:8443'
+$env:RAYME_LIVE_AI_HEALTH_URL='https://192.168.1.199:9443/health'
+$env:RAYME_LIVE_REFERENCE_AUDIO_FILE='C:\Users\pmpg\rayme\RayMe\.local\phase3-live-call\fake-mic-basic-ref-4turns.wav'
+$env:RAYME_LIVE_FAKE_AUDIO_FILE='C:\Users\pmpg\rayme\RayMe\.local\phase3-live-call\fake-mic-basic-ref-4turns.wav'
+$env:RAYME_LIVE_STABILITY_MS='300000'
+npm --prefix web-ui/client run test:e2e -- tests/e2e/live-call.spec.ts --project=desktop-chromium --reporter=line
 ```
 
-Result: stopped by operator before completion per handoff decision. Services
-remained online after the stop. This is not counted as passing live desktop call
-acceptance.
+Result:
+
+```text
+[live-stability] duration_ms=300000 before_user=2 before_ai=2 after_user=13 after_ai=12
+Slow test file: [desktop-chromium] > tests\e2e\live-call.spec.ts (5.7m)
+1 passed (6.1m)
+```
+
+The spec asserted the live canonical URLs, loaded AI `/health`, configured live
+settings, uploaded a real reference WAV, opened the live call route, verified
+`window.isSecureContext === true`, toggled Mute/Unmute, observed at least two
+`user_speech` turns and at least two `ai_speech` turns, held the call for five
+minutes, ended the call, returned to thread scrollback, and verified the durable
+call rows.
+
+WSL-origin caveat: the same live command from the WSL host reached the deployed
+services but failed with `user_speech` count `0` after the page reported
+`The call ended because the connection dropped.` That run originated from
+`192.168.1.190` and is treated as a WSL/LAN ICE-path caveat, not passing live
+evidence. The passing evidence is the OMEN-local browser run above.
+
+## Server-Side Mute Evidence
+
+The passing live session emitted server-side mute controls and frame drops while
+muted:
+
+```text
+INFO: [rayme-call] event.sent session=rtc_4bc2136a389c428195ae6ddc9c353846 type=muted readyState=open
+INFO: 192.168.1.199:55530 - "POST /webrtc/sessions/rtc_4bc2136a389c428195ae6ddc9c353846/mute HTTP/1.1" 200 OK
+INFO: [rayme-call] track.recv.progress session=rtc_4bc2136a389c428195ae6ddc9c353846 frames=50 state=muted
+INFO: [rayme-call] inbound.dropped session=rtc_4bc2136a389c428195ae6ddc9c353846 total=100 dropped=100 muted=True state=muted
+INFO: [rayme-call] track.recv.progress session=rtc_4bc2136a389c428195ae6ddc9c353846 frames=200 state=muted
+INFO: [rayme-call] inbound.dropped session=rtc_4bc2136a389c428195ae6ddc9c353846 total=200 dropped=200 muted=True state=muted
+INFO: [rayme-call] event.sent session=rtc_4bc2136a389c428195ae6ddc9c353846 type=muted readyState=open
+INFO: 192.168.1.199:55531 - "POST /webrtc/sessions/rtc_4bc2136a389c428195ae6ddc9c353846/mute HTTP/1.1" 200 OK
+```
+
+Interpretation: while server-side state was `muted`, inbound receive progress
+continued but `dropped_audio_frames` equaled all observed frames in the sampled
+window (`100/100`, then `200/200`). After unmute, subsequent logs moved out of
+`state=muted` and continued the live AI response cycle.
+
+## Five-Minute Desktop Stability
+
+- 5-minute stability check: passed in the same OMEN-local
+  `live-call.spec.ts` run.
+- two user turns: passed before the hold (`before_user=2`) and continued to
+  `after_user=13`.
+- two ai_speech: passed before the hold (`before_ai=2`) and continued to
+  `after_ai=12`.
+- Catastrophic ping-pong/runaway loopback: not observed by the live spec.
+- Browser uncaught exceptions/page errors: none observed by the Playwright guard.
+- Exact log caveat: OMEN logs contained repeated Windows asyncio
+  `_ProactorBasePipeTransport._call_connection_lost(None)` callback messages
+  during the run; they did not fail the browser guard or the live acceptance
+  command.
 
 Post-`a325c35` deployed browser smoke:
 

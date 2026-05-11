@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: milestone_complete
-stopped_at: Completed 08-06-PLAN.md
-last_updated: "2026-05-11T19:17:36.564Z"
+status: in_progress
+stopped_at: Waiting for 03-12 Android Chrome product-owner acceptance checkpoint
+last_updated: "2026-05-11T22:58:10Z"
 progress:
   total_phases: 10
   completed_phases: 7
   total_plans: 87
-  completed_plans: 85
+  completed_plans: 86
   percent: 70
 ---
 
@@ -50,6 +50,7 @@ progress:
 - Phase 03 plan 03-08 completed on 2026-04-25: operational call UI route, thread and character Start Call entry points, RMS visualizer, toolbar, live transcript, call row rendering, and mobile control layout passed client unit plus desktop/mobile Playwright contracts.
 - Phase 03 plan 03-09 completed on 2026-04-25: full MVP call loop now carries `user_final` turns through server-owned `/turns` SSE orchestration, LLM token streaming, saved-voice TTS playback, durable speech rows, and interrupt-safe cancellation.
 - Phase 03 plan 03-10 completed on 2026-04-25: full local Phase 3 automated acceptance passed across AI backend pytest, Web UI server pytest, client unit tests, desktop Chromium call specs, and mobile Chromium call spec with saved Playwright evidence.
+- Phase 03 plan 03-11 completed on 2026-05-11: live OMEN-PC desktop call acceptance passed at deployed commit `e48e2ce57cc31a30e7df97c1f0ea9215c136dc45`, with secure LAN HTTPS, current GPU `/health`, server-side mute frame-drop evidence, durable call writeback, and a 5-minute stability hold recorded in `OMEN-PC-LIVE-EVIDENCE.md`.
 - Phase 07 plan 07-01 completed on 2026-05-11: RED AI backend VoxCPM2 contracts now cover roster metadata, CUDA-only adapter loading, bounded synthesis options, 48 kHz output, sanitized errors, and engine-scoped degradation.
 - Phase 07 plan 07-02 completed on 2026-05-11: RED Web UI server/client contracts now cover durable VoxCPM2 voice metadata, conditional Voice Lab controls, fallback roster copy, missing-transcript warning, and preview/test-play payload behavior.
 - Phase 07 plan 07-03 completed on 2026-05-11: RED call-flow contracts now cover saved VoxCPM2 metadata forwarding into real playback, bounded WebRTC speak options, sanitized `call_tts_failed`, and unchanged interrupt behavior.
