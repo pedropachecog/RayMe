@@ -35,7 +35,12 @@ from app.call.tracks import (
     write_pcm_frames_to_temp_wav,
 )
 from app.config import AiBackendSettings
-from app.models.tts_registry import MAX_REFERENCE_AUDIO_BYTES, TtsSynthesisInput
+from app.models.tts_registry import (
+    MAX_REFERENCE_AUDIO_BYTES,
+    TtsAudioChunk,
+    TtsStreamingAdapter,
+    TtsSynthesisInput,
+)
 
 EventSink = Callable[[dict[str, Any]], Awaitable[None] | None]
 
@@ -81,6 +86,14 @@ def _decode_reference_audio_b64(reference_audio_b64: str) -> bytes:
     if len(decoded) > MAX_REFERENCE_AUDIO_BYTES:
         raise ValueError("call TTS reference audio is too large")
     return decoded
+
+
+def _adapter_supports_streaming(adapter: Any, engine_id: str) -> bool:
+    return (
+        engine_id == "voxcpm2"
+        and adapter is not None
+        and callable(getattr(adapter, "stream", None))
+    )
 
 
 class NullPeerConnection:
@@ -781,26 +794,45 @@ class CallSession:
             self.active_turn_task = current_task
 
         audio_started_event: dict[str, Any] | None = None
+        final_playback: dict[str, Any] | None = None
+        generation_started = time.perf_counter()
+        voxcpm2_options = {
+            "voxcpm2_cloning_mode": voxcpm2_cloning_mode,
+            "voxcpm2_style_prompt": voxcpm2_style_prompt,
+            "voxcpm2_cfg_value": voxcpm2_cfg_value,
+            "voxcpm2_inference_timesteps": voxcpm2_inference_timesteps,
+            "voxcpm2_normalize": voxcpm2_normalize,
+            "voxcpm2_denoise": voxcpm2_denoise,
+        }
+        adapter = tts_adapter or self.tts_adapter
 
         try:
+            if _adapter_supports_streaming(adapter, engine_id):
+                return await self._speak_streaming_speech(
+                    turn_id=turn_id,
+                    text=text,
+                    voice_id=voice_id,
+                    engine_id=engine_id,
+                    final_chunk=final_chunk,
+                    adapter=adapter,
+                    reference_audio_b64=reference_audio_b64,
+                    reference_transcript=reference_transcript,
+                    reference_audio_content_type=reference_audio_content_type,
+                    voxcpm2_options=voxcpm2_options,
+                )
+
             result = await self._synthesize_speech(
                 turn_id=turn_id,
                 text=text,
                 voice_id=voice_id,
                 engine_id=engine_id,
-                tts_adapter=tts_adapter,
+                tts_adapter=adapter,
                 reference_audio_b64=reference_audio_b64,
                 reference_transcript=reference_transcript,
                 reference_audio_content_type=reference_audio_content_type,
-                voxcpm2_options={
-                    "voxcpm2_cloning_mode": voxcpm2_cloning_mode,
-                    "voxcpm2_style_prompt": voxcpm2_style_prompt,
-                    "voxcpm2_cfg_value": voxcpm2_cfg_value,
-                    "voxcpm2_inference_timesteps": voxcpm2_inference_timesteps,
-                    "voxcpm2_normalize": voxcpm2_normalize,
-                    "voxcpm2_denoise": voxcpm2_denoise,
-                },
+                voxcpm2_options=voxcpm2_options,
             )
+            total_generation_ms = round((time.perf_counter() - generation_started) * 1000, 1)
             if turn_id in self._cancelled_ai_turns:
                 return {"status": "cancelled", "turn_id": turn_id}
             wav_bytes = bytes(result.get("wav_bytes") or b"")
@@ -814,7 +846,9 @@ class CallSession:
                     wav_bytes,
                     preroll_seconds=CALL_TTS_AUDIO_PREROLL_SECONDS,
                 )
+                first_chunk_enqueued_ms = round((time.perf_counter() - generation_started) * 1000, 1)
                 self.state = "speaking"
+                ai_audio_started_ms = round((time.perf_counter() - generation_started) * 1000, 1)
                 audio_started_event = simple_event(
                     AI_AUDIO_STARTED_EVENT,
                     session_id=self.session_id,
@@ -822,11 +856,39 @@ class CallSession:
                     voice_id=voice_id,
                     engine_id=engine_id,
                     audio=audio_stats,
+                    tts_playback={
+                        "streaming_used": False,
+                        "fallback_used": False,
+                        "whole_wav_fallback_used": False,
+                        "first_chunk_generated_ms": None,
+                        "first_chunk_enqueued_ms": first_chunk_enqueued_ms,
+                        "ai_audio_started_ms": ai_audio_started_ms,
+                        "chunk_count_at_start": 1,
+                        "inter_chunk_gaps_ms": [],
+                    },
                 )
                 await self.emit_event(audio_started_event)
                 await self._wait_for_outbound_audio_playback(playback_seconds)
+                final_playback = {
+                    "streaming_used": False,
+                    "fallback_used": False,
+                    "whole_wav_fallback_used": False,
+                    "chunk_count": 1,
+                    "total_generation_ms": total_generation_ms,
+                    "total_playback_ms": round(playback_seconds * 1000, 1),
+                    "inter_chunk_gaps_ms": [],
+                }
             else:
                 await self._queue_outbound_audio(wav_bytes)
+                final_playback = {
+                    "streaming_used": False,
+                    "fallback_used": False,
+                    "whole_wav_fallback_used": False,
+                    "chunk_count": 0,
+                    "total_generation_ms": total_generation_ms,
+                    "total_playback_ms": 0.0,
+                    "inter_chunk_gaps_ms": [],
+                }
         except asyncio.CancelledError:
             self._cancelled_ai_turns.add(turn_id)
             raise
@@ -840,6 +902,8 @@ class CallSession:
                 retry_allowed=True,
             )
             event["engine_id"] = engine_id
+            if final_playback is not None:
+                event["tts_playback_final"] = final_playback
             await self.emit_event(event)
             if audio_started_event is not None:
                 return {**event, "ai_audio_started_event": audio_started_event}
@@ -863,6 +927,7 @@ class CallSession:
                     turn_id=turn_id,
                     voice_id=voice_id,
                     engine_id=engine_id,
+                    tts_playback_final=final_playback,
                 )
             )
             if audio_started_event is not None:
@@ -877,7 +942,205 @@ class CallSession:
         }
         if audio_started_event is not None:
             queued_event["ai_audio_started_event"] = audio_started_event
+        if final_playback is not None:
+            queued_event["tts_playback_final"] = final_playback
         return queued_event
+
+    async def _speak_streaming_speech(
+        self,
+        *,
+        turn_id: str,
+        text: str,
+        voice_id: str,
+        engine_id: str,
+        final_chunk: bool,
+        adapter: TtsStreamingAdapter,
+        reference_audio_b64: str | None,
+        reference_transcript: str | None,
+        reference_audio_content_type: str | None,
+        voxcpm2_options: dict[str, Any],
+    ) -> dict[str, Any]:
+        started_at = time.perf_counter()
+        queue: asyncio.Queue[Any] = asyncio.Queue()
+        sentinel = object()
+        audio_started_event: dict[str, Any] | None = None
+        chunk_count = 0
+        playback_seconds = 0.0
+        generated_at_values: list[float] = []
+        inter_chunk_gaps_ms: list[float] = []
+        producer_task: asyncio.Task[Any] | None = None
+
+        def elapsed_ms() -> float:
+            return round((time.perf_counter() - started_at) * 1000, 1)
+
+        def final_metrics() -> dict[str, Any]:
+            total_generation_ms = elapsed_ms()
+            if generated_at_values:
+                total_generation_ms = max(total_generation_ms, generated_at_values[-1])
+            return {
+                "streaming_used": True,
+                "fallback_used": False,
+                "whole_wav_fallback_used": False,
+                "chunk_count": chunk_count,
+                "total_generation_ms": round(total_generation_ms, 1),
+                "total_playback_ms": round(playback_seconds * 1000, 1),
+                "inter_chunk_gaps_ms": list(inter_chunk_gaps_ms),
+            }
+
+        try:
+            request = self._build_tts_synthesis_input(
+                text=text,
+                reference_audio_b64=reference_audio_b64,
+                reference_transcript=reference_transcript,
+                reference_audio_content_type=reference_audio_content_type,
+                voxcpm2_options=voxcpm2_options,
+            )
+            loop = asyncio.get_running_loop()
+
+            def put_threadsafe(item: Any) -> None:
+                try:
+                    loop.call_soon_threadsafe(queue.put_nowait, item)
+                except RuntimeError:
+                    return
+
+            def produce() -> None:
+                try:
+                    for chunk in adapter.stream(request):
+                        if turn_id in self._cancelled_ai_turns:
+                            break
+                        put_threadsafe(chunk)
+                except Exception as exc:
+                    put_threadsafe(exc)
+                finally:
+                    put_threadsafe(sentinel)
+
+            producer_task = asyncio.create_task(asyncio.to_thread(produce))
+
+            while True:
+                item = await queue.get()
+                if item is sentinel:
+                    break
+                if isinstance(item, Exception):
+                    raise item
+                if turn_id in self._cancelled_ai_turns:
+                    break
+
+                if isinstance(item, TtsAudioChunk):
+                    wav_bytes = bytes(item.wav_bytes or b"")
+                    generated_at_ms = float(item.generated_at_ms or 0.0)
+                else:
+                    wav_bytes = bytes(getattr(item, "wav_bytes", b"") or b"")
+                    generated_at_ms = float(getattr(item, "generated_at_ms", elapsed_ms()) or 0.0)
+                if not wav_bytes:
+                    continue
+                if generated_at_values:
+                    inter_chunk_gaps_ms.append(
+                        round(max(generated_at_ms - generated_at_values[-1], 0.0), 1)
+                    )
+                generated_at_values.append(generated_at_ms)
+
+                preroll_seconds = CALL_TTS_AUDIO_PREROLL_SECONDS if chunk_count == 0 else 0.0
+                audio_stats = audio_stats_for_wav_bytes(
+                    wav_bytes,
+                    target_sample_rate=int(getattr(self.outbound_audio_track, "sample_rate", 48000)),
+                )
+                playback_seconds += await self._queue_outbound_audio(
+                    wav_bytes,
+                    preroll_seconds=preroll_seconds,
+                )
+                chunk_count += 1
+
+                if chunk_count == 1:
+                    first_chunk_enqueued_ms = elapsed_ms()
+                    self.state = "speaking"
+                    ai_audio_started_ms = elapsed_ms()
+                    audio_started_event = simple_event(
+                        AI_AUDIO_STARTED_EVENT,
+                        session_id=self.session_id,
+                        turn_id=turn_id,
+                        voice_id=voice_id,
+                        engine_id=engine_id,
+                        audio=audio_stats,
+                        tts_playback={
+                            "streaming_used": True,
+                            "fallback_used": False,
+                            "whole_wav_fallback_used": False,
+                            "first_chunk_generated_ms": generated_at_ms,
+                            "first_chunk_enqueued_ms": first_chunk_enqueued_ms,
+                            "ai_audio_started_ms": ai_audio_started_ms,
+                            "chunk_count_at_start": 1,
+                            "inter_chunk_gaps_ms": list(inter_chunk_gaps_ms),
+                        },
+                    )
+                    await self.emit_event(audio_started_event)
+
+            if producer_task is not None:
+                await producer_task
+            if chunk_count == 0:
+                raise ValueError("VoxCPM2 streaming synthesis failed")
+
+            if turn_id in self._cancelled_ai_turns:
+                self.state = "listening"
+                cancelled_event = {"status": "cancelled", "turn_id": turn_id}
+                if audio_started_event is not None:
+                    cancelled_event["ai_audio_started_event"] = audio_started_event
+                return cancelled_event
+
+            await self._wait_for_outbound_audio_playback(playback_seconds)
+            playback_final = final_metrics()
+
+            if turn_id in self._cancelled_ai_turns:
+                self.state = "listening"
+                cancelled_event = {"status": "cancelled", "turn_id": turn_id}
+                if audio_started_event is not None:
+                    cancelled_event["ai_audio_started_event"] = audio_started_event
+                cancelled_event["tts_playback_final"] = playback_final
+                return cancelled_event
+
+            if final_chunk:
+                self.state = "listening"
+                done_event = await self.emit_event(
+                    simple_event(
+                        AI_DONE_EVENT,
+                        session_id=self.session_id,
+                        turn_id=turn_id,
+                        voice_id=voice_id,
+                        engine_id=engine_id,
+                        tts_playback_final=playback_final,
+                    )
+                )
+                if audio_started_event is not None:
+                    return {**done_event, "ai_audio_started_event": audio_started_event}
+                return done_event
+
+            queued_event: dict[str, Any] = {
+                "status": "queued",
+                "session_id": self.session_id,
+                "turn_id": turn_id,
+                "engine_id": engine_id,
+                "tts_playback_final": playback_final,
+            }
+            if audio_started_event is not None:
+                queued_event["ai_audio_started_event"] = audio_started_event
+            return queued_event
+        except asyncio.CancelledError:
+            self._cancelled_ai_turns.add(turn_id)
+            raise
+        except Exception:
+            self.state = "listening"
+            event = failed_event(
+                session_id=self.session_id,
+                turn_id=turn_id,
+                code="call_tts_failed",
+                message="Speech playback failed. Please try again.",
+                retry_allowed=True,
+            )
+            event["engine_id"] = engine_id
+            event["tts_playback_final"] = final_metrics()
+            await self.emit_event(event)
+            if audio_started_event is not None:
+                return {**event, "ai_audio_started_event": audio_started_event}
+            return event
 
     async def cancel_ai_turn(self, turn_id: str | None = None) -> None:
         active = self.active_turn_task
@@ -1435,6 +1698,26 @@ class CallSession:
             }
         return None
 
+    def _build_tts_synthesis_input(
+        self,
+        *,
+        text: str,
+        reference_audio_b64: str | None,
+        reference_transcript: str | None,
+        reference_audio_content_type: str | None,
+        voxcpm2_options: dict[str, Any],
+    ) -> TtsSynthesisInput:
+        if not reference_audio_b64:
+            raise ValueError("call TTS reference audio is required")
+        return TtsSynthesisInput(
+            text=text,
+            reference_audio=_decode_reference_audio_b64(reference_audio_b64),
+            reference_transcript=reference_transcript,
+            reference_audio_content_type=reference_audio_content_type,
+            speech_speed=1.0,
+            **voxcpm2_options,
+        )
+
     async def _synthesize_speech(
         self,
         *,
@@ -1516,13 +1799,12 @@ class CallSession:
         if not reference_audio_b64:
             raise ValueError("call TTS reference audio is required")
         return await adapter.synthesize(
-            TtsSynthesisInput(
+            self._build_tts_synthesis_input(
                 text=text,
-                reference_audio=_decode_reference_audio_b64(reference_audio_b64),
+                reference_audio_b64=reference_audio_b64,
                 reference_transcript=reference_transcript,
                 reference_audio_content_type=reference_audio_content_type,
-                speech_speed=1.0,
-                **voxcpm2_options,
+                voxcpm2_options=voxcpm2_options,
             )
         )
 
@@ -1551,13 +1833,12 @@ class CallSession:
             if not reference_audio_b64:
                 raise ValueError("call TTS reference audio is required")
             result = adapter.synthesize(
-                TtsSynthesisInput(
+                self._build_tts_synthesis_input(
                     text=text,
-                    reference_audio=_decode_reference_audio_b64(reference_audio_b64),
+                    reference_audio_b64=reference_audio_b64,
                     reference_transcript=reference_transcript,
                     reference_audio_content_type=reference_audio_content_type,
-                    speech_speed=1.0,
-                    **voxcpm2_options,
+                    voxcpm2_options=voxcpm2_options,
                 )
             )
         if hasattr(result, "model_dump"):

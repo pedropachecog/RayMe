@@ -1185,7 +1185,7 @@ def test_voxcpm2_streaming_speak_returns_one_done_event_for_final_turn() -> None
 def test_interrupt_after_first_voxcpm2_stream_chunk_discards_late_chunks() -> None:
     events: list[dict[str, Any]] = []
 
-    async def scenario() -> tuple[dict[str, Any], ObservableStreamingOutboundAudioTrack]:
+    async def scenario() -> ObservableStreamingOutboundAudioTrack:
         track = ObservableStreamingOutboundAudioTrack()
         adapter = ScriptedStreamingTtsAdapter()
         session, _ = _new_session(
@@ -1211,21 +1211,24 @@ def test_interrupt_after_first_voxcpm2_stream_chunk_discards_late_chunks() -> No
                 speech,
                 label="VoxCPM2 first streamed chunk enqueue",
             )
-            await session.cancel_ai_turn("ai-turn-voxcpm2-stream-cancel")
+            await session.interrupt()
             adapter.release_second_chunk.set()
-            return await speech, track
+            try:
+                await speech
+            except asyncio.CancelledError:
+                pass
+            return track
         finally:
             adapter.release_second_chunk.set()
             if not speech.done():
                 speech.cancel()
 
-    event, track = _run(scenario())
+    track = _run(scenario())
 
-    assert event["status"] == "cancelled"
     assert track.chunks == [SCRIPTED_WAV_BYTES]
     assert track.preroll_seconds == [CALL_TTS_AUDIO_PREROLL_SECONDS]
     assert track.stop_calls == 1
-    assert [item["type"] for item in events] == ["ai_audio_started"]
+    assert [item["type"] for item in events] == ["ai_audio_started", "interrupted"]
     assert "ai_done" not in [item["type"] for item in events]
 
 
