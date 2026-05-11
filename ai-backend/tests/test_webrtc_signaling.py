@@ -357,6 +357,36 @@ def test_webrtc_speak_accepts_bounded_voxcpm2_options(stub_webrtc: None) -> None
     ]
 
 
+def test_webrtc_speak_rejects_reference_audio_over_web_ui_limit(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_webrtc: None,
+) -> None:
+    monkeypatch.setattr(webrtc_module, "MAX_REFERENCE_AUDIO_BYTES", len(b"real-sample") - 1)
+    adapter = ScriptedTtsAdapter()
+    manager = ScriptedModelManager(adapters={"voxcpm2": adapter})
+    client = _client(model_manager=manager)
+    session_id = "call-session-reference-too-large"
+    client.post("/webrtc/offer", json={**_offer_payload(session_id=session_id), "engine_id": "voxcpm2"})
+
+    response = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={
+            "turn_id": "ai-turn-reference-too-large",
+            "text": "Hello from VoxCPM2.",
+            "voice_id": "voice-voxcpm2",
+            "engine_id": "voxcpm2",
+            "reference_audio_base64": base64.b64encode(b"real-sample").decode("ascii"),
+        },
+    )
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == {
+        "code": "call_tts_reference_audio_too_large",
+        "message": "Reference audio is too large",
+    }
+    assert adapter.calls == []
+
+
 def test_webrtc_speak_rejects_unbounded_voxcpm2_options_with_sanitized_422(
     stub_webrtc: None,
 ) -> None:

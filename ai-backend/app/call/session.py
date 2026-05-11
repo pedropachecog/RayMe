@@ -35,7 +35,7 @@ from app.call.tracks import (
     write_pcm_frames_to_temp_wav,
 )
 from app.config import AiBackendSettings
-from app.models.tts_registry import TtsSynthesisInput
+from app.models.tts_registry import MAX_REFERENCE_AUDIO_BYTES, TtsSynthesisInput
 
 EventSink = Callable[[dict[str, Any]], Awaitable[None] | None]
 
@@ -74,6 +74,13 @@ def _voxcpm2_call_text_options(adapter: Any, engine_id: str, options: dict[str, 
         for key, value in voxcpm2_options.items()
         if key in accepted
     }
+
+
+def _decode_reference_audio_b64(reference_audio_b64: str) -> bytes:
+    decoded = base64.b64decode(reference_audio_b64, validate=True)
+    if len(decoded) > MAX_REFERENCE_AUDIO_BYTES:
+        raise ValueError("call TTS reference audio is too large")
+    return decoded
 
 
 class NullPeerConnection:
@@ -1511,7 +1518,7 @@ class CallSession:
         return await adapter.synthesize(
             TtsSynthesisInput(
                 text=text,
-                reference_audio=base64.b64decode(reference_audio_b64, validate=True),
+                reference_audio=_decode_reference_audio_b64(reference_audio_b64),
                 reference_transcript=reference_transcript,
                 reference_audio_content_type=reference_audio_content_type,
                 speech_speed=1.0,
@@ -1546,7 +1553,7 @@ class CallSession:
             result = adapter.synthesize(
                 TtsSynthesisInput(
                     text=text,
-                    reference_audio=base64.b64decode(reference_audio_b64, validate=True),
+                    reference_audio=_decode_reference_audio_b64(reference_audio_b64),
                     reference_transcript=reference_transcript,
                     reference_audio_content_type=reference_audio_content_type,
                     speech_speed=1.0,

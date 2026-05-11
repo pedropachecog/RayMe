@@ -15,6 +15,10 @@ from app.api.stt import _settings_from_app, _stt_adapter_from_app, _vad_adapter_
 from app.call.session import CallSession, CallSessionManager
 from app.call.tracks import QueuedAudioOutputTrack
 from app.models.model_manager import ModelManager
+from app.models.tts_registry import (
+    MAX_REFERENCE_AUDIO_B64_LENGTH,
+    MAX_REFERENCE_AUDIO_BYTES,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +80,7 @@ class SpeakRequest(BaseModel):
     final_chunk: bool = False
     reference_audio_b64: str | None = Field(
         default=None,
+        max_length=MAX_REFERENCE_AUDIO_B64_LENGTH,
         validation_alias=AliasChoices("reference_audio_b64", "reference_audio_base64"),
     )
     reference_transcript: str | None = Field(default=None, max_length=10000)
@@ -283,6 +288,7 @@ async def speak_session(
 ) -> dict[str, Any]:
     session = _session_or_404(request, session_id)
     try:
+        _reject_oversized_reference_audio(payload.reference_audio_b64)
         adapter = _tts_adapter(request, payload.engine_id)
         event = await session.speak_text(
             payload.turn_id,
@@ -431,6 +437,21 @@ def _manager_from_app(request: Request) -> CallSessionManager:
     manager = CallSessionManager(settings=settings)
     request.app.state.call_session_manager = manager
     return manager
+
+
+def _reject_oversized_reference_audio(reference_audio_b64: str | None) -> None:
+    if not reference_audio_b64:
+        return
+    padding = len(reference_audio_b64) - len(reference_audio_b64.rstrip("="))
+    decoded_size = max((len(reference_audio_b64) * 3 // 4) - padding, 0)
+    if decoded_size > MAX_REFERENCE_AUDIO_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "call_tts_reference_audio_too_large",
+                "message": "Reference audio is too large",
+            },
+        )
 
 
 def _session_or_404(request: Request, session_id: str) -> CallSession:
