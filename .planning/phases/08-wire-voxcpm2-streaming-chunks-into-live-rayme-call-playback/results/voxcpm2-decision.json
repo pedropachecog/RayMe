@@ -1,0 +1,12 @@
+{
+  "final_outcome": "promoted_for_live_call_default",
+  "preferred_call_tts_engine": "voxcpm2",
+  "fallback_call_tts_engine": "f5",
+  "evidence_path": "results/voxcpm2-live-streaming-call-flow.json",
+  "voxcpm2_warm_call_ttfa_ms": 762.7,
+  "f5_warm_call_ttfa_ms": 948.0,
+  "voxcpm2_beats_f5": true,
+  "streaming_used": true,
+  "whole_wav_fallback_used": false,
+  "rationale": "Phase 8 live RayMe call evidence showed VoxCPM2 same-run warm median first-audio at 762.7 ms versus F5 at 948.0 ms, with streamed chunk playback used and whole-WAV fallback disabled."
+}
