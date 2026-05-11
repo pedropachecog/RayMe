@@ -21,6 +21,7 @@ from app.api.chat import get_chat_session
 from app.api.threads import get_thread_session
 from app.api.voices import get_voice_session
 from app.main import create_app
+from app.domain.call_service import CallService
 from app.storage.models import Base, Character, Message, Thread, Voice, VoiceAsset
 from app.storage.session import create_engine
 
@@ -584,6 +585,113 @@ def test_two_turns_stream_tokens_and_write_exact_speech_rows_before_call_end(
     assert all(call["session_id"] == started["session_id"] for call in call_fixture.backend.speak_calls)
 
 
+def test_voxcpm2_call_voice_reference_forwards_mode_and_style(
+    call_fixture: CallFixture,
+) -> None:
+    call_fixture.completion.token_sequences = [["VoxCPM2 call reply."]]
+    thread_id = asyncio.run(_insert_voxcpm2_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    expected_voxcpm2_fields = {
+        "voxcpm2_cloning_mode": "transcript_guided",
+        "voxcpm2_style_prompt": "warm phone call voice",
+        "voxcpm2_cfg_value": 2.4,
+        "voxcpm2_inference_timesteps": 12,
+        "voxcpm2_normalize": True,
+        "voxcpm2_denoise": False,
+    }
+
+    voice_reference = asyncio.run(
+        _voice_reference_for_started_call(
+            call_fixture.sessionmaker,
+            started["call_id"],
+            call_fixture.voice_blob_dir,
+        )
+    )
+
+    assert voice_reference["reference_audio_base64"]
+    assert voice_reference["reference_transcript"] == "Saved VoxCPM2 transcript."
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-voxcpm2",
+            "text": "Use the saved VoxCPM2 voice.",
+            "source": "user_final",
+        },
+    )
+
+    assert response.status_code == 200
+    assert call_fixture.backend.speak_calls
+    speak_payload = call_fixture.backend.speak_calls[-1]["payload"]
+    assert speak_payload["voice_id"] == started["voice_id"]
+    assert speak_payload["engine_id"] == "voxcpm2"
+    assert not any("voxcpm2" in getattr(route, "path", "") for route in call_fixture.app.routes)
+    assert (
+        {key: voice_reference.get(key) for key in expected_voxcpm2_fields},
+        {key: speak_payload.get(key) for key in expected_voxcpm2_fields},
+    ) == (expected_voxcpm2_fields, expected_voxcpm2_fields)
+
+
+def test_voxcpm2_call_tts_failure_is_sanitized_and_truthful(
+    call_fixture: CallFixture,
+) -> None:
+    class FailingVoxCpm2CallBackend(ScriptedCallBackend):
+        async def speak_call(
+            self,
+            base_url: str,
+            session_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            self.speak_calls.append(
+                {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
+            )
+            from app.domain.ai_backend_client import AiBackendProcessingError
+
+            raise AiBackendProcessingError(
+                code="call_tts_failed",
+                message=(
+                    "Traceback in /home/pmpg/.cache/huggingface/openbmb/VoxCPM2 "
+                    r"C:\Users\pmpg\rayme\model-cache"
+                ),
+            )
+
+    call_fixture.completion.token_sequences = [["Audio will fail after text."]]
+    failing_backend = FailingVoxCpm2CallBackend()
+    calls_module = importlib.import_module("app.api.calls")
+    call_fixture.app.dependency_overrides[calls_module.get_call_backend_client] = lambda: failing_backend
+    thread_id = asyncio.run(_insert_voxcpm2_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-voxcpm2-failure",
+            "text": "Persist this exact VoxCPM2 user speech.",
+            "source": "user_final",
+        },
+    )
+
+    assert response.status_code == 200
+    events = _sse_events(response.text)
+    assert {
+        "type": "error",
+        "turn_id": "turn-voxcpm2-failure",
+        "code": "call_tts_failed",
+        "message": "Speech playback failed",
+    } in events
+    public_body = json.dumps(events)
+    assert "Traceback" not in public_body
+    assert "/home/" not in public_body
+    assert r"C:\\" not in public_body
+    assert "openbmb/VoxCPM2" not in public_body
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert ("user_speech", "user", "Persist this exact VoxCPM2 user speech.") in rows
+    assert any(row == ("ai_speech", "assistant", "Audio will fail after text.") for row in rows)
+    assert failing_backend.speak_calls[-1]["payload"]["engine_id"] == "voxcpm2"
+
+
 def test_turn_generation_failure_preserves_user_speech_and_returns_fixed_code(
     call_fixture: CallFixture,
 ) -> None:
@@ -754,6 +862,35 @@ async def _insert_thread_with_character_and_voice(sessionmaker: async_sessionmak
     return await _insert_thread(sessionmaker, character_id=character_id)
 
 
+async def _insert_voxcpm2_thread_with_character_and_voice(sessionmaker: async_sessionmaker) -> str:
+    character_id = "char_voxcpm2_call_ready"
+    voice_id = f"voice_{character_id}"
+    await _insert_voice(
+        sessionmaker,
+        voice_id=voice_id,
+        default_engine="voxcpm2",
+        reference_transcript="Saved VoxCPM2 transcript.",
+        metadata={
+            "engine_settings": {
+                "voxcpm2": {
+                    "cloning_mode": "transcript_guided",
+                    "style_prompt": "warm phone call voice",
+                    "cfg_value": 2.4,
+                    "inference_timesteps": 12,
+                    "normalize": True,
+                    "denoise": False,
+                }
+            }
+        },
+    )
+    await _insert_character(sessionmaker, character_id=character_id, default_voice_id=voice_id)
+    return await _insert_thread(
+        sessionmaker,
+        character_id=character_id,
+        thread_id="thread_voxcpm2_call_ready",
+    )
+
+
 async def _insert_character_with_voice(
     sessionmaker: async_sessionmaker,
     *,
@@ -765,7 +902,15 @@ async def _insert_character_with_voice(
     return await _insert_character(sessionmaker, character_id=character_id, default_voice_id=voice_id)
 
 
-async def _insert_voice(sessionmaker: async_sessionmaker, *, voice_id: str, deleted: bool = False) -> None:
+async def _insert_voice(
+    sessionmaker: async_sessionmaker,
+    *,
+    voice_id: str,
+    deleted: bool = False,
+    default_engine: str = "F5-TTS",
+    reference_transcript: str = "Reference transcript for the assigned voice.",
+    metadata: dict[str, Any] | None = None,
+) -> None:
     if _TEST_VOICE_BLOB_DIR is not None:
         _TEST_VOICE_BLOB_DIR.mkdir(parents=True, exist_ok=True)
         (_TEST_VOICE_BLOB_DIR / f"voice_asset_{voice_id}.wav").write_bytes(b"voice sample bytes")
@@ -773,9 +918,9 @@ async def _insert_voice(sessionmaker: async_sessionmaker, *, voice_id: str, dele
         voice = Voice(
             id=voice_id,
             name=f"Voice {voice_id}",
-            default_engine="F5-TTS",
-            reference_transcript="Reference transcript for the assigned voice.",
-            metadata_json={},
+            default_engine=default_engine,
+            reference_transcript=reference_transcript,
+            metadata_json=dict(metadata or {}),
         )
         if deleted:
             from app.storage.models import utc_now
@@ -797,6 +942,15 @@ async def _insert_voice(sessionmaker: async_sessionmaker, *, voice_id: str, dele
             )
         )
         await session.commit()
+
+
+async def _voice_reference_for_started_call(
+    sessionmaker: async_sessionmaker,
+    call_id: str,
+    voice_blob_dir: Path,
+) -> dict[str, Any]:
+    async with sessionmaker() as session:
+        return await CallService(session).voice_reference_for_call(call_id, voice_blob_dir)
 
 
 async def _insert_character(
