@@ -64,6 +64,9 @@ class ScriptedVoxCpmRuntime:
         self.audio = _tone() if audio is None else audio
         self.calls: list[dict[str, Any]] = []
 
+    def parameters(self) -> list[Any]:
+        return [types.SimpleNamespace(device=types.SimpleNamespace(type="cuda"))]
+
     def generate(self, **kwargs: Any) -> tuple[np.ndarray, int]:
         unknown_kwargs = set(kwargs) - self.allowed_generate_kwargs
         if unknown_kwargs:
@@ -111,6 +114,13 @@ def test_voxcpm2_adapter_uses_cuda_guard_and_runtime_loader(monkeypatch: pytest.
     assert calls
     assert calls[0][0] == ("openbmb/VoxCPM2",)
     assert calls[0][1]["load_denoiser"] is False
+
+
+def test_voxcpm2_cuda_guard_rejects_missing_device_evidence() -> None:
+    voxcpm2_module = _voxcpm2_module()
+
+    with pytest.raises(RuntimeError, match="did not expose CUDA-loaded parameters"):
+        voxcpm2_module._assert_runtime_uses_cuda(object())
 
 
 def test_voxcpm2_reference_only_mode_when_transcript_missing() -> None:

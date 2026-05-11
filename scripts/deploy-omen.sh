@@ -186,8 +186,8 @@ for candidate in (model, tts_model, getattr(model, "model", None)):
             break
     except Exception:
         pass
-if device_types == {"cpu"}:
-    raise RuntimeError("VoxCPM2 model parameters loaded on CPU")
+if "cuda" not in device_types:
+    raise RuntimeError("VoxCPM2 runtime did not expose CUDA-loaded parameters")
 
 try:
     from huggingface_hub import snapshot_download

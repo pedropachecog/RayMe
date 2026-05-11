@@ -106,8 +106,8 @@ def _assert_runtime_uses_cuda(runtime: Any) -> None:
                 break
         except Exception:
             continue
-    if device_types and "cuda" not in device_types:
-        raise RuntimeError("VoxCPM2 runtime did not load on CUDA")
+    if "cuda" not in device_types:
+        raise RuntimeError("VoxCPM2 runtime did not expose CUDA-loaded parameters")
 
 
 def _build_generate_kwargs(
