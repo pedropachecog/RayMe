@@ -80,15 +80,15 @@ function Invoke-RayMeVoxCpm2Verification {
       $uvVenv = Join-Path $repo ".local\uv-bootstrap"
       & "$repo\ai-backend\.venv\Scripts\python.exe" -m venv $uvVenv
       if ($LASTEXITCODE -ne 0) { throw "Failed to create repo-local uv bootstrap venv" }
-      & "$uvVenv\Scripts\python.exe" -m pip install --upgrade pip
+      & "$uvVenv\Scripts\python.exe" -m pip install --upgrade pip | Out-Host
       if ($LASTEXITCODE -ne 0) { throw "Failed to upgrade pip in repo-local uv bootstrap venv" }
-      & "$uvVenv\Scripts\python.exe" -m pip install "uv==0.11.6"
+      & "$uvVenv\Scripts\python.exe" -m pip install "uv==0.11.6" | Out-Host
       if ($LASTEXITCODE -ne 0) { throw "Failed to install repo-local uv CLI" }
     }
     return $repoLocalUv
   }
 
-  $uv = Get-RayMeUv
+  $uv = [string](Get-RayMeUv | Select-Object -Last 1)
   & $uv sync --project ai-backend --extra tts
   if ($LASTEXITCODE -ne 0) { throw "uv sync --project ai-backend --extra tts failed" }
 
