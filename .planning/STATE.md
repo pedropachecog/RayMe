@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Phase 08 planned
-last_updated: "2026-05-11T14:13:22.718Z"
+stopped_at: Completed 08-01-PLAN.md
+last_updated: "2026-05-11T14:38:01.034Z"
 progress:
   total_phases: 10
   completed_phases: 5
   total_plans: 87
-  completed_plans: 79
-  percent: 91
+  completed_plans: 80
+  percent: 92
 ---
 
 ## Phase Status
@@ -63,6 +63,7 @@ progress:
 - Phase 07 plan 07-11 completed on 2026-05-11: Live VoxCPM2/F5 scenario matrix, generated WAV evidence, and real call-flow evidence were regenerated with BeauBrown-s2 (`voice_asset_531ca6a567db4f01a870cdfba8abae96.wav`) and passed matrix/call-flow verification.
 - Phase 07 plan 07-12 completed on 2026-05-11: VoxCPM2 final outcome is `selectable_with_caveats`; manual listening judged VoxCPM2 far superior to F5, while live RayMe call TTFA still favors F5 because calls do not yet consume VoxCPM2 streaming chunks.
 - Phase 08 planned on 2026-05-11: six verified plans now cover VoxCPM2 streaming adapter work, CallSession streamed playback, `/webrtc` and Web UI call semantics, repeated warm evidence tooling, OMEN dirty-checkout preflight plus canonical deployment evidence, and evidence-gated durable decision writeback.
+- Phase 08 plan 08-01 completed on 2026-05-11: the AI backend now exports an internal TTS streaming chunk contract, and VoxCPM2 can yield validated timed WAV chunks from `generate_streaming` without whole-generation fallback.
 
 ## Current Decisions
 
@@ -71,6 +72,8 @@ progress:
 - STT default: `distil-large-v3` (`int8_float16`), WER `0.0627`.
 - TTS v1 default: `f5`.
 - TTS v1 roster: `F5-TTS`, `XTTS v2`, `Qwen3-TTS 0.6B-Base`.
+- Phase 08-01 streaming adapter policy: VoxCPM2 streaming stays internal to the AI backend through `TtsAudioChunk` and `TtsStreamingAdapter`.
+- Phase 08-01 no-fallback policy: `VoxCpm2TtsAdapter.stream()` calls `generate_streaming()` directly and rejects empty streams instead of falling back to `runtime.generate()`.
 - TTS future implementation policy: keep all measured engine paths available, including `LuxTTS`, `Chatterbox Turbo`, and `TADA 1B`; use quality evaluations to choose defaults, labels, warnings, and retesting priorities.
 - TTS long-form implementation: shared engine-agnostic chunk planner is now implemented in the scenario harness; raw whole-generation fallback rows are no longer the only comparison.
 - TTS quality notes: Spike 003 is closed as `PASS_WITH_CAVEATS`. LuxTTS optimized is very fast but has current user-sample quality failures; Chatterbox Turbo baseline long-form is gibberish, while optimized long-form normal and seed 1337 are fine on the listened long samples; TADA Windows optimized long is acceptable while WSL is caution; XTTS/F5 long samples need sample/tuning caveats.
@@ -192,8 +195,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-05-11T14:13:40.567Z
-Stopped at: Phase 08 planned
-Resume file: .planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/08-01-PLAN.md
+Last session: 2026-05-11T14:38:00.787Z
+Stopped at: Completed 08-01-PLAN.md
+Resume file: None
 
 **Planned Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6 verified plans, ready to execute — 2026-05-11T14:13:40.567Z

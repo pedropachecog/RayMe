@@ -524,7 +524,7 @@ Plans:
 **Wave summary:** Wave 1 creates the internal streaming adapter contract and Phase 8 evidence tooling in parallel; Wave 2 streams VoxCPM2 chunks through `CallSession`; Wave 3 preserves `/webrtc` and Web UI call semantics; Wave 4 records the OMEN dirty-checkout preflight, then runs canonical OMEN deployment plus live repeated warm evidence after the gate is clean/resolved; Wave 5 performs gated decision writeback.
 
 Plans:
-- [ ] 08-01-PLAN.md - Internal AI-backend TTS streaming contract plus VoxCPM2 `generate_streaming` adapter (Wave 1)
+- [x] 08-01-PLAN.md - Internal AI-backend TTS streaming contract plus VoxCPM2 `generate_streaming` adapter (Wave 1)
 - [ ] 08-02-PLAN.md - CallSession streamed chunk playback, first-audio metrics, interrupt-safe cancellation, and single completion (Wave 2)
 - [ ] 08-03-PLAN.md - Existing `/webrtc` speak and Web UI call SSE semantics with streaming timing fields and one durable AI speech row (Wave 3)
 - [ ] 08-04-PLAN.md - Phase 8 repeated warm call-flow evidence runner and verifier that rejects fallback and slower-than-F5 medians (Wave 1)
