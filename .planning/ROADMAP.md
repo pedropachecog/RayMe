@@ -493,22 +493,23 @@ Roadmap-level decisions that remain open after Phase-0 resolves the empirical qu
 **Goal:** Add VoxCPM2 as a first-class visible TTS roster candidate and decide, from RayMe-specific evidence, whether it is promoted, selectable with caveats, visible unavailable, or rejected from runtime loading.
 **Requirements delivered:** REQ-02, REQ-20, REQ-21, REQ-22, REQ-23, REQ-24, REQ-41, REQ-42, REQ-45, REQ-62, REQ-80, REQ-A3.
 **Depends on:** Phase 6
-**Plans:** 11 plans
+**Plans:** 12 plans
 
-**Wave summary:** Wave 0 creates RED contracts and evidence scaffolding; Wave 1 implements backend/server/client roster support; Wave 2 wires call-flow and scenario matrix evidence; Wave 3 runs OMEN runtime evidence through `scripts/deploy-omen.sh`; Wave 4 runs live/manual promotion gating.
+**Wave summary:** Wave 0 creates RED contracts and evidence scaffolding; Wave 1 implements backend/server/client roster support; Wave 2 wires call-flow and scenario matrix evidence; Wave 3 runs OMEN runtime evidence through `scripts/deploy-omen.sh`; Wave 4 runs live matrix/call-flow artifact generation; Wave 5 runs manual quality and final promotion writeback.
 
 Plans:
 - [ ] 07-01-PLAN.md - AI backend VoxCPM2 RED contracts for metadata, CUDA-only adapter behavior, synthesis options, and engine-scoped failures (Wave 0)
 - [ ] 07-02-PLAN.md - Web UI server/client RED contracts for VoxCPM2 voice metadata, controls, fallback roster, and missing-transcript warning (Wave 0)
 - [ ] 07-03-PLAN.md - Call-flow RED contracts for VoxCPM2 settings forwarding, sanitized call failures, and interrupt/cancel preservation (Wave 0)
 - [ ] 07-04-PLAN.md - Scenario matrix RED tests and deterministic Phase 7 evidence templates/verifier (Wave 0)
-- [ ] 07-05-PLAN.md - AI backend optional `voxcpm2` runtime, metadata, adapter, and `/tts/synthesize` bounded option support (Wave 1)
+- [ ] 07-05-PLAN.md - Runtime-path decision artifact plus AI backend optional `voxcpm2` runtime, metadata, adapter, and `/tts/synthesize` bounded option support (Wave 1)
 - [ ] 07-06-PLAN.md - Web UI server durable VoxCPM2 voice metadata and preview/test-play payload support (Wave 1)
 - [ ] 07-07-PLAN.md - Client Voice Lab VoxCPM2 fallback roster, labels, types, and conditional mode/style controls (Wave 1)
 - [ ] 07-08-PLAN.md - Real call-flow integration through existing Web UI call and AI backend speak APIs (Wave 2)
 - [ ] 07-09-PLAN.md - VoxCPM2 scenario matrix runner and promotion evidence schema enforcement (Wave 2)
 - [ ] 07-10-PLAN.md - OMEN deployment/runtime smoke and VRAM soak evidence through `scripts/deploy-omen.sh` only (Wave 3)
-- [ ] 07-11-PLAN.md - Full matrix, real call-flow, manual quality, and final promotion decision writeback (Wave 4)
+- [ ] 07-11-PLAN.md - Live scenario matrix, generated WAV, and real call-flow evidence artifacts (Wave 4)
+- [ ] 07-12-PLAN.md - Manual listening quality gate and final promotion decision writeback (Wave 5)
 
 ---
 

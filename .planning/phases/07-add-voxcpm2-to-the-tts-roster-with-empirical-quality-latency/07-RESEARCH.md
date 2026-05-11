@@ -462,32 +462,34 @@ except Exception as exc:
 |---|-------|---------|---------------|
 | A1 | No user confirmation is needed for the preliminary engine id `voxcpm2` because context leaves exact id wording to Claude's discretion. [ASSUMED] | Standard Stack / Architecture Patterns | If the user prefers a different id, tests and persisted metadata keys would need renaming before implementation. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Will `voxcpm==2.0.2` install and load cleanly in the current OMEN Windows AI venv?**
-   - What we know: OMEN has Python 3.10.8, CUDA torch `2.10.0+cu126`, RTX 3060 12 GB, and `voxcpm` is not currently installed. [VERIFIED: ssh rayme-pmpg probes]
-   - What's unclear: VoxCPM dependencies such as `torchcodec`, `funasr`, and `gradio>=6` may introduce Windows install/runtime friction. [VERIFIED: PyPI JSON]
-   - Recommendation: Wave 0 should run an install/import/load smoke in the optional `tts` extra and save the exact sync result before adapter work. [VERIFIED: ai-backend/docs/RUNTIME-EVIDENCE.md]
+The research unknowns below remain empirical runtime facts, but they are no longer planning blockers. Each is converted into an explicit Phase 7 evidence gate so executors measure the fact instead of assuming it.
 
-2. **Does standard VoxCPM2 fit under RayMe's 11 GB production budget with Whisper + Silero?**
-   - What we know: Official model card lists VoxCPM2 VRAM around 8 GB, while RayMe's STT baseline previously used about 1.7 GB and the budget is 11 GB. [CITED: Hugging Face model card; VERIFIED: .planning/STATE.md]
-   - What's unclear: RTX 3060 Windows allocator overhead, `torch.compile`, denoiser choice, and first-run compile/cache behavior. [VERIFIED: codebase/runtime docs]
-   - Recommendation: Plan both `optimize=True` and `optimize=False` measurements and require peak VRAM under 11 GB before availability/promotion. [CITED: VoxCPM installation docs]
+1. **`voxcpm==2.0.2` install/load on OMEN Windows AI venv**
+   - Known baseline: OMEN has Python 3.10.8, CUDA torch `2.10.0+cu126`, RTX 3060 12 GB, and `voxcpm` is not currently installed. [VERIFIED: ssh rayme-pmpg probes]
+   - Evidence gate: Plan 07-10 runs `scripts/deploy-omen.sh` with `RAYME_OMEN_VERIFY_VOXCPM2=1`, records `uv sync --project ai-backend --extra tts`, imports `voxcpm`, loads `VoxCPM.from_pretrained("openbmb/VoxCPM2", device="cuda")`, and saves `results/voxcpm2-runtime-smoke.json`.
+   - Decision effect: install/import/load failure maps to visible unavailable or rejected-from-runtime-loading per D-04, not silent promotion.
 
-3. **Does style control work acceptably with transcript-guided cloning?**
-   - What we know: Context requires style controls for preview, test-play, and calls; official docs use parenthesized style text, but CLI docs say `--control` cannot be used with `--prompt-text`. [VERIFIED: 07-CONTEXT.md; CITED: VoxCPM API docs]
-   - What's unclear: Whether Python `generate(text="(style)...", prompt_wav_path=..., prompt_text=...)` is supported, ignored, or degraded. [CITED: VoxCPM API docs]
-   - Recommendation: Add a live adapter contract and manual listening row for style + transcript-guided mode; do not promote until behavior is known. [VERIFIED: 07-CONTEXT.md]
+2. **RTX 3060 11 GB production VRAM fit with Whisper + Silero + one TTS**
+   - Known baseline: official model card lists VoxCPM2 VRAM around 8 GB, RayMe's STT baseline previously used about 1.7 GB, and the budget is 11 GB. [CITED: Hugging Face model card; VERIFIED: .planning/STATE.md]
+   - Evidence gate: Plan 07-10 writes `results/voxcpm2-vram-soak.json` with peak/free VRAM, resident engines, STT/VAD readiness, `passed_11gb_budget`, and `cpu_fallback_detected=false`.
+   - Decision effect: exceeding 11000 MB blocks promotion and availability per D-04/D-14.
 
-4. **Will `generate_streaming` improve real RayMe call TTFA?**
-   - What we know: Official API yields waveform chunks, but the current RayMe call path synthesizes then enqueues WAV bytes. [CITED: VoxCPM API docs; VERIFIED: ai-backend/app/call/session.py]
-   - What's unclear: Whether Phase 7 will land after production chunked playback exists in the codebase or must add the adapter streaming contract itself. [VERIFIED: ROADMAP.md says Phase 7 follows v1 path, current repo is at Phase 3 state]
-   - Recommendation: Planner should first add tests/contracts for observable call TTFA and audio-start event timing, then choose whole-WAV vs streaming adapter behavior from measured results. [VERIFIED: REQ-45, ai-backend/app/call/session.py]
+3. **Style control behavior with transcript-guided cloning**
+   - Known baseline: context requires style controls; official docs show parenthesized style text, while CLI notes indicate control limitations with prompt text. [VERIFIED: 07-CONTEXT.md; CITED: VoxCPM API docs]
+   - Evidence gate: Plans 07-05 through 07-07 add bounded style fields and tests; Plan 07-11 generates styled VoxCPM2 samples; Plan 07-12 requires manual quality rows covering style + transcript-guided output.
+   - Decision effect: degraded style behavior becomes a caveat or promotion blocker, not a hidden runtime assumption.
 
-5. **Where should VoxCPM2 model cache live on OMEN?**
-   - What we know: Official API supports `cache_dir`, and context requires documenting model/cache/artifact paths while keeping large downloads out of git. [CITED: VoxCPM API docs; VERIFIED: 07-CONTEXT.md]
-   - What's unclear: Exact durable Windows path is not locked. [VERIFIED: 07-CONTEXT.md discretion]
-   - Recommendation: Use a RayMe-owned, gitignored path under `C:\Users\pmpg\rayme\` and document it in the evidence artifact; do not place weights under tracked repo paths. [VERIFIED: .planning/OPERATING-NOTES.md]
+4. **`generate_streaming` impact on real RayMe call TTFA**
+   - Known baseline: official API yields waveform chunks, but the current RayMe call path synthesizes then enqueues WAV bytes. [CITED: VoxCPM API docs; VERIFIED: ai-backend/app/call/session.py]
+   - Evidence gate: Plan 07-05 creates `07-RUNTIME-PATH-DECISION.md` evaluating standard Python `generate`, `generate_streaming`, NanoVLLM-VoxCPM, and vLLM-Omni-style serving before the adapter path. Plan 07-09 records streaming rows as benchmark-only unless production call code consumes chunks. Plan 07-11 compares VoxCPM2 warm call TTFA against F5 in `voxcpm2-call-flow.json`.
+   - Decision effect: streaming can only support a promotion claim if the measured call-flow artifact shows a real call-feel win through the RayMe API.
+
+5. **Durable VoxCPM2 model/cache path on OMEN**
+   - Known baseline: official API supports `cache_dir`, and context requires documenting model/cache/artifact paths while keeping large downloads out of git. [CITED: VoxCPM API docs; VERIFIED: 07-CONTEXT.md]
+   - Evidence gate: Plan 07-10 records the exact model/cache path in `07-OMEN-EVIDENCE.md` and `results/voxcpm2-runtime-smoke.json`; cache contents stay outside tracked repo paths.
+   - Decision effect: undocumented or git-tracked weights fail the runtime evidence gate per D-21.
 
 ## Environment Availability
 

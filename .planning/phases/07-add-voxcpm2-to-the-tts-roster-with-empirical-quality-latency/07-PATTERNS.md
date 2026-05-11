@@ -1,8 +1,8 @@
 # Phase 7: Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations - Pattern Map
 
 **Mapped:** 2026-05-11
-**Files analyzed:** 40 new/modified files or artifact families
-**Analogs found:** 36 / 40
+**Files analyzed:** 41 new/modified files or artifact families
+**Analogs found:** 37 / 41
 
 ## File Classification
 
@@ -44,6 +44,7 @@
 | `.planning/phases/07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency/MANUAL-QUALITY.csv` | test artifact | file-I/O | `.planning/spikes/003-tts-engine-extension-luxtts-chatterbox-tada/MANUAL-QUALITY.csv` | exact |
 | `.planning/phases/07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency/results/voxcpm2-scenario-matrix.{json,csv}` | test artifact | batch, file-I/O | `.planning/spikes/003-tts-engine-extension-luxtts-chatterbox-tada/RESULT-MATRIX.csv` | exact |
 | `.planning/phases/07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency/results/audio/*.wav` | test artifact | file-I/O | `.planning/phases/00-measurement-gate/probes/tts_scenario_matrix.py` sample output | exact |
+| `.planning/phases/07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency/07-run-call-flow-evidence.py` | utility/probe | request-response, event-driven, file-I/O | `web-ui/server/tests/test_calls.py` + `web-ui/server/app/domain/ai_backend_client.py` | partial |
 | `.planning/phases/07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency/results/voxcpm2-vram-soak.json` | test artifact | batch, file-I/O | `ai-backend/app/models/model_manager.py` health VRAM fields | partial |
 | `.planning/phases/07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency/results/voxcpm2-call-flow.json` | test artifact | event-driven, file-I/O | `web-ui/server/tests/test_calls.py` speak-call payload assertions | partial |
 | `.planning/phases/07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency/07-OMEN-EVIDENCE.md` | config/test artifact | batch, operations | `scripts/deploy-omen.sh` | partial |
@@ -1331,6 +1332,12 @@ Web UI server and browser should keep using `/tts/synthesize` and `/webrtc/sessi
 **Apply to:** VoxCPM2 short/medium/long scenarios, streaming benchmark rows, generated WAVs, matrix CSV/JSON, promotion gate
 
 Use the same scenario text, chunk planner, TTFA/RTF/stitch fields, VRAM fields, and WAV output naming shape.
+
+### Call-Flow Evidence Probe
+**Source:** `web-ui/server/tests/test_calls.py`, `web-ui/server/app/domain/ai_backend_client.py`, `ai-backend/app/api/webrtc.py`, `ai-backend/app/call/session.py`
+**Apply to:** `.planning/phases/07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency/07-run-call-flow-evidence.py`
+
+Build the probe like a focused integration harness over existing RayMe APIs. Reuse the same payload shapes tested by `test_calls.py` and the Web UI AI backend client instead of adding VoxCPM2-specific public routes. The probe should write JSON only under the Phase 7 `results/` directory and record sanitized failure categories, `warm_call_ttfa_ms`, `f5_warm_call_ttfa_ms`, preview/test-play pass flags, call audio enqueue status, and saved AI audio path.
 
 ### OMEN Deployment
 **Source:** `AGENTS.md`; `scripts/deploy-omen.sh` lines 1-23, 48-51, 87-95, 127-141
