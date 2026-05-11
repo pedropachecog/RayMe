@@ -53,6 +53,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 - [ ] **Phase 5: Voice Breadth & Unified Thread Polish** — Both TTS engines with cold-swap UX, per-character default + per-chat override, saved-audio toggles + inline replay, unified thread visual treatment, full SillyTavern text-UX parity (Regenerate / Edit / Swipes / Continue / alternate greetings / virtualization).
 - [ ] **Phase 6: Mobile Hardening & Ship Polish** — Full Android Chrome pass (Bluetooth routing, Wake Lock, visibility change), PWA manifest + icons, storage housekeeping (orphan reaper, retention), full Settings surface, error states, soak-test acceptance. v1 ships.
 - [x] **Phase 7: Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations** — Completed on 2026-05-11; outcome `selectable_with_caveats`.
+- [ ] **Phase 8: Wire VoxCPM2 streaming chunks into live RayMe call playback** — Planned follow-up to convert VoxCPM2 benchmark streaming TTFA into actual live call playback latency.
 
 ---
 
@@ -513,6 +514,16 @@ Plans:
 
 **Final outcome:** `selectable_with_caveats`. Manual listening judged VoxCPM2 far superior to F5, runtime/call-flow/VRAM gates passed, and streaming-collected first audio beat F5 in the benchmark matrix. F5 remains the default because current RayMe calls still wait for full VoxCPM2 synthesis before playback, so live call TTFA does not yet get the streaming benefit.
 
+### Phase 8: Wire VoxCPM2 streaming chunks into live RayMe call playback
+
+**Goal:** [To be planned]
+**Requirements**: TBD
+**Depends on:** Phase 7
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 8 to break down)
+
 ---
 
-*Roadmap derived 2026-04-17 from requirements + research synthesis. Next: `/gsd-plan-phase 0`.*
+*Roadmap derived 2026-04-17 from requirements + research synthesis. Next: `/gsd-plan-phase 8`.*
