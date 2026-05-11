@@ -178,8 +178,10 @@
     }
 
     const byId = new Map(DEFAULT_TTS_ENGINES.map((engine) => [engine.id, engine]));
+    const returnedIds = new Set<string>();
     for (const item of value) {
       if (typeof item === 'string') {
+        returnedIds.add(item);
         const fallback = byId.get(item);
         if (fallback) {
           byId.set(item, fallback);
@@ -192,6 +194,7 @@
       if (!id) {
         continue;
       }
+      returnedIds.add(id);
 
       const fallback = byId.get(id);
       byId.set(id, {
@@ -210,7 +213,20 @@
       });
     }
 
-    return DEFAULT_TTS_ENGINES.map((engine) => byId.get(engine.id) ?? engine);
+    return DEFAULT_TTS_ENGINES.map((engine) => {
+      const normalized = byId.get(engine.id) ?? engine;
+      if (!returnedIds.has(engine.id)) {
+        return {
+          ...normalized,
+          availability: {
+            available: false,
+            state: 'unavailable',
+            unavailable_reason: 'Engine was not reported by the AI backend.'
+          }
+        };
+      }
+      return normalized;
+    });
   }
 
   async function handleSampleSelected(file: File) {
