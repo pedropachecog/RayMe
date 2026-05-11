@@ -117,8 +117,10 @@ class ScriptedTtsAdapter:
 class ScriptedGenericTtsAdapter:
     def __init__(self) -> None:
         self.reference_audio: bytes | None = None
+        self.payload: Any | None = None
 
     def synthesize(self, payload: Any) -> dict[str, Any]:
+        self.payload = payload
         self.reference_audio = payload.reference_audio
         return {"wav_bytes": SCRIPTED_WAV_BYTES, "sample_rate": 24000, "duration_ms": 120}
 
@@ -1142,6 +1144,38 @@ def test_speak_text_generic_adapter_uses_real_reference_audio() -> None:
     assert adapter.reference_audio == b"real-sample"
 
 
+def test_speak_text_generic_adapter_passes_voxcpm2_options() -> None:
+    adapter = ScriptedGenericTtsAdapter()
+    session, _ = _new_session(tts_adapter=adapter)
+
+    _run(
+        session.speak_text(
+            "ai-turn-voxcpm2-options",
+            "Hello from VoxCPM2.",
+            "voice-voxcpm2",
+            "voxcpm2",
+            final_chunk=True,
+            reference_audio_b64="cmVhbC1zYW1wbGU=",
+            reference_transcript="Real VoxCPM2 reference text.",
+            reference_audio_content_type="audio/wav",
+            voxcpm2_cloning_mode="transcript_guided",
+            voxcpm2_style_prompt="warm phone call voice",
+            voxcpm2_cfg_value=2.4,
+            voxcpm2_inference_timesteps=12,
+            voxcpm2_normalize=True,
+            voxcpm2_denoise=False,
+        )
+    )
+
+    assert adapter.payload is not None
+    assert adapter.payload.voxcpm2_cloning_mode == "transcript_guided"
+    assert adapter.payload.voxcpm2_style_prompt == "warm phone call voice"
+    assert adapter.payload.voxcpm2_cfg_value == 2.4
+    assert adapter.payload.voxcpm2_inference_timesteps == 12
+    assert adapter.payload.voxcpm2_normalize is True
+    assert adapter.payload.voxcpm2_denoise is False
+
+
 def test_interrupt_cancels_active_speech_before_ai_done() -> None:
     events: list[dict[str, Any]] = []
     track = ScriptedOutboundAudioTrack()
@@ -1173,6 +1207,42 @@ def test_interrupt_cancels_active_speech_before_ai_done() -> None:
 
     assert track.chunks == []
     assert track.stop_calls == 1
+    assert "ai_audio_started" not in [item["type"] for item in events]
+    assert "ai_done" not in [item["type"] for item in events]
+
+
+def test_interrupt_cancels_voxcpm2_active_speech_before_ai_done() -> None:
+    events: list[dict[str, Any]] = []
+    track = ScriptedOutboundAudioTrack()
+    adapter = ScriptedTtsAdapter(delay=1)
+    session, _ = _new_session(
+        tts_adapter=adapter,
+        outbound_audio_track=track,
+        event_sink=events.append,
+    )
+
+    async def scenario() -> None:
+        speech = asyncio.create_task(
+            session.speak_text(
+                "ai-turn-voxcpm2-cancel",
+                "This VoxCPM2 speech should stop.",
+                "voice-voxcpm2",
+                "voxcpm2",
+                final_chunk=True,
+            )
+        )
+        await asyncio.sleep(0)
+        await session.interrupt()
+        try:
+            await speech
+        except asyncio.CancelledError:
+            pass
+
+    _run(scenario())
+
+    assert track.chunks == []
+    assert track.stop_calls == 1
+    assert [item["type"] for item in events] == ["interrupted"]
     assert "ai_audio_started" not in [item["type"] for item in events]
     assert "ai_done" not in [item["type"] for item in events]
 

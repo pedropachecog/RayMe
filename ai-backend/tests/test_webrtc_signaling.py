@@ -42,6 +42,7 @@ class ScriptedTtsAdapter:
         text: str,
         voice_id: str,
         engine_id: str,
+        **options: Any,
     ) -> dict[str, Any]:
         self.calls.append(
             {
@@ -49,17 +50,26 @@ class ScriptedTtsAdapter:
                 "text": text,
                 "voice_id": voice_id,
                 "engine_id": engine_id,
+                **options,
             }
         )
         if self.fail:
-            raise RuntimeError("raw model failure")
+            raise RuntimeError(
+                "raw model failure Traceback /home/pmpg/.cache/model-cache "
+                r"C:\Users\pmpg\rayme\model-cache"
+            )
         return {"wav_bytes": SCRIPTED_WAV_BYTES, "sample_rate": 24000, "duration_ms": 100}
 
 
 class ScriptedModelManager:
-    def __init__(self, adapter: ScriptedTtsAdapter | None = None) -> None:
+    def __init__(
+        self,
+        adapter: ScriptedTtsAdapter | None = None,
+        *,
+        adapters: dict[str, ScriptedTtsAdapter] | None = None,
+    ) -> None:
         self.switch_calls: list[str] = []
-        self.tts_adapters = {"f5": adapter or ScriptedTtsAdapter()}
+        self.tts_adapters = dict(adapters or {"f5": adapter or ScriptedTtsAdapter()})
 
     def switch_tts_engine(self, engine_id: str) -> None:
         self.switch_calls.append(engine_id)
@@ -302,6 +312,85 @@ def test_webrtc_speak_synthesizes_with_exact_engine_and_emits_done(stub_webrtc: 
     assert payload["event"]["turn_id"] == "ai-turn-1"
 
 
+def test_webrtc_speak_accepts_bounded_voxcpm2_options(stub_webrtc: None) -> None:
+    adapter = ScriptedTtsAdapter()
+    manager = ScriptedModelManager(adapters={"voxcpm2": adapter})
+    client = _client(model_manager=manager)
+    session_id = "call-session-voxcpm2-options"
+    client.post("/webrtc/offer", json={**_offer_payload(session_id=session_id), "engine_id": "voxcpm2"})
+
+    response = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={
+            "turn_id": "ai-turn-voxcpm2",
+            "text": "Hello from VoxCPM2.",
+            "voice_id": "voice-voxcpm2",
+            "engine_id": "voxcpm2",
+            "final_chunk": True,
+            "reference_audio_base64": "cmVhbC1zYW1wbGU=",
+            "reference_transcript": "Real VoxCPM2 reference text.",
+            "reference_audio_content_type": "audio/wav",
+            "voxcpm2_cloning_mode": "transcript_guided",
+            "voxcpm2_style_prompt": "warm phone call voice",
+            "voxcpm2_cfg_value": 2.4,
+            "voxcpm2_inference_timesteps": 12,
+            "voxcpm2_normalize": True,
+            "voxcpm2_denoise": False,
+        },
+    )
+
+    assert response.status_code == 200
+    assert manager.switch_calls == ["voxcpm2"]
+    assert adapter.calls == [
+        {
+            "turn_id": "ai-turn-voxcpm2",
+            "text": "Hello from VoxCPM2.",
+            "voice_id": "voice-voxcpm2",
+            "engine_id": "voxcpm2",
+            "voxcpm2_cloning_mode": "transcript_guided",
+            "voxcpm2_style_prompt": "warm phone call voice",
+            "voxcpm2_cfg_value": 2.4,
+            "voxcpm2_inference_timesteps": 12,
+            "voxcpm2_normalize": True,
+            "voxcpm2_denoise": False,
+        }
+    ]
+
+
+def test_webrtc_speak_rejects_unbounded_voxcpm2_options_with_sanitized_422(
+    stub_webrtc: None,
+) -> None:
+    adapter = ScriptedTtsAdapter()
+    manager = ScriptedModelManager(adapters={"voxcpm2": adapter})
+    client = _client(model_manager=manager)
+    session_id = "call-session-voxcpm2-invalid"
+    client.post("/webrtc/offer", json={**_offer_payload(session_id=session_id), "engine_id": "voxcpm2"})
+
+    invalid = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={
+            "turn_id": "ai-turn-voxcpm2-invalid",
+            "text": "Hello from VoxCPM2.",
+            "voice_id": "voice-voxcpm2",
+            "engine_id": "voxcpm2",
+            "voxcpm2_cloning_mode": "invalid",
+            "voxcpm2_style_prompt": (
+                "Traceback /home/pmpg/.cache/model-cache "
+                r"C:\Users\pmpg\rayme\model-cache "
+            )
+            * 30,
+            "voxcpm2_cfg_value": 99,
+            "voxcpm2_inference_timesteps": 500,
+        },
+    )
+
+    assert invalid.status_code == 422
+    assert "Traceback" not in invalid.text
+    assert "/home/" not in invalid.text
+    assert r"C:\\" not in invalid.text
+    assert "model-cache" not in invalid.text
+
+
 def test_webrtc_speak_failure_returns_fixed_call_tts_failed_code(stub_webrtc: None) -> None:
     client = _client(model_manager=ScriptedModelManager(ScriptedTtsAdapter(fail=True)))
     session_id = "call-session-1"
@@ -325,6 +414,10 @@ def test_webrtc_speak_failure_returns_fixed_call_tts_failed_code(stub_webrtc: No
         "engine_id": "f5",
     }
     assert "raw model failure" not in response.text
+    assert "Traceback" not in response.text
+    assert "/home/" not in response.text
+    assert r"C:\\" not in response.text
+    assert "model-cache" not in response.text
 
 
 def test_webrtc_end_control_returns_session_state(stub_webrtc: None) -> None:
