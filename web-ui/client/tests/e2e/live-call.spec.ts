@@ -111,7 +111,15 @@ test('live OMEN-PC browser call completes two user to AI cycles without mocked c
     expect(afterAiTurns).toBeGreaterThanOrEqual(beforeAiTurns);
   }
 
+  const endResponsePromise = page.waitForResponse(
+    (response) =>
+      /\/api\/calls\/[^/]+\/end$/.test(new URL(response.url()).pathname) &&
+      response.request().method() === 'POST' &&
+      response.ok(),
+    { timeout: 60_000 }
+  );
   await page.getByRole('button', { name: 'End Call' }).click();
+  await endResponsePromise;
   await expect(page.getByRole('button', { name: 'Return to Thread' })).toBeVisible({ timeout: 60_000 });
   await page.getByRole('button', { name: 'Return to Thread' }).click();
   await expect(page).toHaveURL(new RegExp(`/chat/${escapeRegExp(fixture.threadId)}$`), { timeout: 60_000 });
