@@ -104,6 +104,14 @@ function Invoke-RayMeVoxCpm2Verification {
   & $uv sync --project ai-backend --extra tts --python $pythonVersion
   if ($LASTEXITCODE -ne 0) { throw "uv sync --project ai-backend --extra tts failed" }
 
+  Write-Host "== Installing CUDA PyTorch wheels"
+  & $uv pip install `
+    --python "$repo\ai-backend\.venv\Scripts\python.exe" `
+    --index-url "https://download.pytorch.org/whl/cu126" `
+    "torch==2.10.0+cu126" `
+    "torchaudio==2.10.0+cu126"
+  if ($LASTEXITCODE -ne 0) { throw "Failed to install CUDA PyTorch wheels for VoxCPM2 verification" }
+
   $env:PATH = "$cudaRuntimeBin;$env:PATH"
   $probe = @'
 import gc
