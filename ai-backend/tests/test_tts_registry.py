@@ -273,13 +273,23 @@ class ScriptedSwitchingManager:
             "tada_1b": adapter,
             "voxcpm2": adapter,
         }
+        self._statuses = {engine_id: "idle" for engine_id in self.tts_adapters}
         self.switch_calls: list[str] = []
+        self.unavailable_calls: list[tuple[str, str]] = []
 
     def switch_tts_engine(self, target_engine: str) -> None:
+        if target_engine not in self.tts_adapters:
+            raise ValueError(f"Unknown TTS engine: {target_engine}")
         self.loading_engine = target_engine
         self.switch_calls.append(target_engine)
         self.resident_tts_engine = target_engine
         self.loading_engine = None
+
+    def _mark_unavailable(self, engine_id: str, reason: str) -> None:
+        if engine_id not in self._statuses:
+            raise KeyError(engine_id)
+        self._statuses[engine_id] = "unavailable"
+        self.unavailable_calls.append((engine_id, reason))
 
 
 def _synthesis_payload(**overrides: Any) -> dict[str, Any]:
@@ -433,6 +443,28 @@ def test_tts_synthesize_failure_returns_fixed_public_error() -> None:
     assert "C:\\" not in rendered
     assert "/home/" not in rendered
     assert "openbmb/VoxCPM2" not in rendered
+
+
+def test_tts_synthesize_unknown_engine_keeps_public_error_sanitized() -> None:
+    adapter = ScriptedSynthesisAdapter()
+    manager = ScriptedSwitchingManager(adapter)
+    app = create_app()
+    app.state.model_manager = manager
+    client = TestClient(app)
+
+    response = client.post("/tts/synthesize", json=_synthesis_payload(engine_id="missing_engine"))
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == {
+        "code": "tts_failed",
+        "message": "Synthesis failed",
+        "engine_id": "missing_engine",
+    }
+    assert manager.unavailable_calls == []
+    rendered = response.text
+    assert "KeyError" not in rendered
+    assert "ValueError" not in rendered
+    assert "Unknown TTS engine" not in rendered
 
 
 def test_f5_adapter_uses_runtime_infer_and_returns_wav_bytes() -> None:

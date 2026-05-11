@@ -143,6 +143,16 @@ def _manager_from_app(request: Request) -> Any:
 
 
 def _mark_engine_unavailable(manager: Any, engine_id: str) -> None:
+    statuses = getattr(manager, "_statuses", {})
+    if isinstance(statuses, dict) and engine_id not in statuses:
+        return
     marker = getattr(manager, "_mark_unavailable", None)
     if callable(marker):
-        marker(engine_id, "engine synthesis failed")
+        try:
+            marker(engine_id, "engine synthesis failed")
+        except Exception:
+            logger.warning(
+                "[rayme-tts] mark_unavailable.failed engine=%s",
+                engine_id,
+                exc_info=True,
+            )
