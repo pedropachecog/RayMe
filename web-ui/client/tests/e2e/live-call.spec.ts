@@ -120,8 +120,9 @@ test('live OMEN-PC browser call completes two user to AI cycles without mocked c
   );
   await page.getByRole('button', { name: 'End Call' }).click();
   await endResponsePromise;
-  await expect(page.getByRole('button', { name: 'Return to Thread' })).toBeVisible({ timeout: 60_000 });
-  await page.getByRole('button', { name: 'Return to Thread' }).click();
+  const returnToThreadButton = page.locator('button', { hasText: 'Return to Thread' });
+  await expect(returnToThreadButton).toBeVisible({ timeout: 60_000 });
+  await returnToThreadButton.click();
   await expect(page).toHaveURL(new RegExp(`/chat/${escapeRegExp(fixture.threadId)}$`), { timeout: 60_000 });
   await expect.poll(() => threadRowCount(page, 'call_start'), { timeout: 60_000 }).toBeGreaterThanOrEqual(1);
   await expect.poll(() => threadRowCount(page, 'user_speech'), { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
