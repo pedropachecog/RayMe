@@ -8,9 +8,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from tts_scenario_matrix import (
     ENGINE_CHUNK_LIMITS,
     ENGINE_ORDER,
+    MODEL_ID_VOXCPM2,
     ScenarioSpec,
     _chunk_playback_metadata,
     _estimate_tts_tokens,
+    _voxcpm2_model_sample_rate,
     _split_sentence_units,
     build_chunk_plan,
     build_result_row,
@@ -321,3 +323,22 @@ def test_voxcpm2_promotion_summary_compares_against_f5() -> None:
     assert "voxcpm2" in ENGINE_ORDER
     assert summary["promotion_comparison"]["baseline_engine"] == "f5"
     assert summary["promotion_comparison"]["candidate_engine"] == "voxcpm2"
+
+
+def test_voxcpm2_runner_contract_uses_standard_python_cuda_path() -> None:
+    source = Path(__file__).with_name("tts_scenario_matrix.py").read_text(encoding="utf-8")
+
+    assert MODEL_ID_VOXCPM2 == "openbmb/VoxCPM2"
+    assert 'from_pretrained(MODEL_ID_VOXCPM2, load_denoiser=False, device="cuda")' in source
+    assert 'backend="standard_python_api"' in source
+    assert 'mode="standard_python_streaming_collected"' in source
+
+
+def test_voxcpm2_sample_rate_comes_from_runtime_model() -> None:
+    class FakeTtsModel:
+        sample_rate = 48_000
+
+    class FakeRuntime:
+        tts_model = FakeTtsModel()
+
+    assert _voxcpm2_model_sample_rate(FakeRuntime()) == 48_000
