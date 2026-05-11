@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import base64
+import asyncio
+import math
 from io import BytesIO
 from typing import Any
 
@@ -11,6 +13,7 @@ from fastapi.testclient import TestClient
 
 import app.api.webrtc as webrtc_module
 from app.main import create_app
+from app.models.tts_registry import TtsAudioChunk
 
 MUTE_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/mute"
 INTERRUPT_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/interrupt"
@@ -61,12 +64,46 @@ class ScriptedTtsAdapter:
         return {"wav_bytes": SCRIPTED_WAV_BYTES, "sample_rate": 24000, "duration_ms": 100}
 
 
+class ScriptedStreamingTtsAdapter:
+    engine_id = "voxcpm2"
+
+    def __init__(self, *, fail: str | None = None) -> None:
+        self.fail = fail
+        self.calls: list[Any] = []
+
+    def synthesize(self, _payload: Any) -> dict[str, Any]:
+        raise AssertionError("whole synthesis fallback was used")
+
+    def stream(self, request: Any) -> Any:
+        self.calls.append(request)
+        if self.fail == "before_first_audio":
+            raise RuntimeError("Traceback /home/pmpg/.cache openbmb/VoxCPM2")
+        yield TtsAudioChunk(
+            engine_id=self.engine_id,
+            chunk_index=0,
+            wav_bytes=SCRIPTED_WAV_BYTES,
+            sample_rate=24000,
+            duration_ms=100,
+            generated_at_ms=25.0,
+        )
+        if self.fail == "after_first_audio":
+            raise RuntimeError("Traceback /home/pmpg/.cache openbmb/VoxCPM2")
+        yield TtsAudioChunk(
+            engine_id=self.engine_id,
+            chunk_index=1,
+            wav_bytes=SCRIPTED_WAV_BYTES,
+            sample_rate=24000,
+            duration_ms=100,
+            generated_at_ms=60.0,
+        )
+
+
 class ScriptedModelManager:
     def __init__(
         self,
-        adapter: ScriptedTtsAdapter | None = None,
+        adapter: Any | None = None,
         *,
-        adapters: dict[str, ScriptedTtsAdapter] | None = None,
+        adapters: dict[str, Any] | None = None,
     ) -> None:
         self.switch_calls: list[str] = []
         self.tts_adapters = dict(adapters or {"f5": adapter or ScriptedTtsAdapter()})
@@ -317,7 +354,10 @@ def test_webrtc_speak_accepts_bounded_voxcpm2_options(stub_webrtc: None) -> None
     manager = ScriptedModelManager(adapters={"voxcpm2": adapter})
     client = _client(model_manager=manager)
     session_id = "call-session-voxcpm2-options"
-    client.post("/webrtc/offer", json={**_offer_payload(session_id=session_id), "engine_id": "voxcpm2"})
+    client.post(
+        "/webrtc/offer",
+        json={**_offer_payload(session_id=session_id), "engine_id": "voxcpm2"},
+    )
 
     response = client.post(
         SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
@@ -355,6 +395,112 @@ def test_webrtc_speak_accepts_bounded_voxcpm2_options(stub_webrtc: None) -> None
             "voxcpm2_denoise": False,
         }
     ]
+
+
+def test_webrtc_speak_returns_streaming_tts_playback_metrics_for_voxcpm2(
+    stub_webrtc: None,
+) -> None:
+    adapter = ScriptedStreamingTtsAdapter()
+    manager = ScriptedModelManager(adapters={"voxcpm2": adapter})
+    client = _client(model_manager=manager)
+    session_id = "call-session-voxcpm2-streaming"
+    client.post(
+        "/webrtc/offer",
+        json={**_offer_payload(session_id=session_id), "engine_id": "voxcpm2"},
+    )
+
+    response = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={
+            "turn_id": "ai-turn-voxcpm2-streaming",
+            "text": "Hello from VoxCPM2 streaming.",
+            "voice_id": "voice-voxcpm2",
+            "engine_id": "voxcpm2",
+            "final_chunk": True,
+            "reference_audio_base64": "cmVhbC1zYW1wbGU=",
+            "reference_transcript": "Real VoxCPM2 reference text.",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert manager.switch_calls == ["voxcpm2"]
+    assert len(adapter.calls) == 1
+    assert payload["event"]["type"] == "ai_done"
+
+    started_event = payload["event"]["ai_audio_started_event"]
+    assert started_event["type"] == "ai_audio_started"
+    started_playback = started_event["tts_playback"]
+    assert started_playback["streaming_used"] is True
+    assert started_playback["chunk_count_at_start"] == 1
+    assert "total_generation_ms" not in started_playback
+    assert "total_playback_ms" not in started_playback
+
+    final_playback = payload["event"]["tts_playback_final"]
+    assert final_playback["streaming_used"] is True
+    assert final_playback["chunk_count"] >= 1
+    assert math.isfinite(final_playback["total_generation_ms"])
+    assert math.isfinite(final_playback["total_playback_ms"])
+    assert isinstance(final_playback["inter_chunk_gaps_ms"], list)
+
+
+def test_webrtc_speak_streaming_failure_keeps_fixed_public_error(
+    stub_webrtc: None,
+) -> None:
+    adapter = ScriptedStreamingTtsAdapter(fail="before_first_audio")
+    manager = ScriptedModelManager(adapters={"voxcpm2": adapter})
+    client = _client(model_manager=manager)
+    session_id = "call-session-voxcpm2-streaming-fail"
+    client.post("/webrtc/offer", json={**_offer_payload(session_id=session_id), "engine_id": "voxcpm2"})
+
+    response = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={
+            "turn_id": "ai-turn-voxcpm2-streaming-fail",
+            "text": "Hello from a failing VoxCPM2 stream.",
+            "voice_id": "voice-voxcpm2",
+            "engine_id": "voxcpm2",
+            "final_chunk": True,
+            "reference_audio_base64": "cmVhbC1zYW1wbGU=",
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == {
+        "code": "call_tts_failed",
+        "message": "Speech playback failed",
+        "engine_id": "voxcpm2",
+    }
+    assert "Traceback" not in response.text
+    assert "/home/" not in response.text
+    assert ".cache" not in response.text
+    assert "openbmb/VoxCPM2" not in response.text
+
+    late_failure_adapter = ScriptedStreamingTtsAdapter(fail="after_first_audio")
+    late_session_id = "call-session-voxcpm2-streaming-late-fail"
+    client.post(
+        "/webrtc/offer",
+        json={**_offer_payload(session_id=late_session_id), "engine_id": "voxcpm2"},
+    )
+    session = client.app.state.call_session_manager.get_session(late_session_id)
+    event = asyncio.run(
+        session.speak_text(
+            "ai-turn-voxcpm2-streaming-late-fail",
+            "Hello from a late failing VoxCPM2 stream.",
+            "voice-voxcpm2",
+            "voxcpm2",
+            final_chunk=True,
+            tts_adapter=late_failure_adapter,
+            reference_audio_b64="cmVhbC1zYW1wbGU=",
+        )
+    )
+
+    assert event["type"] == "failed"
+    assert event["code"] == "call_tts_failed"
+    assert event["ai_audio_started_event"]["tts_playback"]["streaming_used"] is True
+    assert event["ai_audio_started_event"]["tts_playback"]["chunk_count_at_start"] == 1
+    assert event["tts_playback_final"]["streaming_used"] is True
+    assert event["tts_playback_final"]["chunk_count"] == 1
 
 
 def test_webrtc_speak_rejects_reference_audio_over_web_ui_limit(
