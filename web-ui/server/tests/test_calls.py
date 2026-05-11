@@ -797,6 +797,81 @@ def test_turn_yields_ai_audio_started_event_when_nested_inside_speak_result_even
     assert audio_started_events[0]["turn_id"] == "turn-audio-started"
 
 
+def test_turn_forwards_streaming_audio_started_metrics_without_extra_speech_rows(
+    call_fixture: CallFixture,
+) -> None:
+    class BackendWithStreamingAudioMetrics(ScriptedCallBackend):
+        async def speak_call(
+            self,
+            base_url: str,
+            session_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            self.speak_calls.append(
+                {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
+            )
+            return {
+                "session_id": session_id,
+                "event": {
+                    "type": "ai_done",
+                    "ai_audio_started_event": {
+                        "type": "ai_audio_started",
+                        "tts_playback": {
+                            "streaming_used": True,
+                            "fallback_used": False,
+                            "whole_wav_fallback_used": False,
+                            "chunk_count_at_start": 1,
+                            "first_chunk_generated_ms": 390.0,
+                            "first_chunk_enqueued_ms": 410.0,
+                            "ai_audio_started_ms": 412.0,
+                            "inter_chunk_gaps_ms": [],
+                        },
+                    },
+                    "tts_playback_final": {
+                        "streaming_used": True,
+                        "fallback_used": False,
+                        "whole_wav_fallback_used": False,
+                        "chunk_count": 3,
+                        "total_generation_ms": 1800.0,
+                        "total_playback_ms": 1700.0,
+                        "inter_chunk_gaps_ms": [22.0, 31.0],
+                    },
+                },
+            }
+
+    call_fixture.completion.token_sequences = [["Streaming ", "AI reply."]]
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    calls_module = importlib.import_module("app.api.calls")
+    backend_with_metrics = BackendWithStreamingAudioMetrics()
+    call_fixture.app.dependency_overrides[calls_module.get_call_backend_client] = (
+        lambda: backend_with_metrics
+    )
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-streaming-audio-metrics",
+            "text": "Speak with streaming audio metrics.",
+            "source": "user_final",
+        },
+    )
+
+    assert response.status_code == 200
+    events = _sse_events(response.text)
+    audio_started_events = [event for event in events if event["type"] == "ai_audio_started"]
+    assert len(audio_started_events) == 1
+    tts_playback = audio_started_events[0]["tts_playback"]
+    assert tts_playback["chunk_count_at_start"] == 1
+    assert "total_generation_ms" not in tts_playback
+    assert "total_playback_ms" not in tts_playback
+
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    speech_rows = [row for row in rows if row[0] == "ai_speech"]
+    assert speech_rows == [("ai_speech", "assistant", "Streaming AI reply.")]
+
+
 def test_interrupt_cancels_server_generation_and_ai_backend_session(
     call_fixture: CallFixture,
 ) -> None:
