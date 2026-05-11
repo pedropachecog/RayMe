@@ -10,7 +10,8 @@
     qwen3_0_6b: ['Opt-in', 'Latency caveat', 'Accent caveat'],
     luxtts: ['Quality caveat', 'Retest references'],
     chatterbox_turbo: ['Experimental', 'Avoid baseline long-form'],
-    tada_1b: ['Experimental', 'High VRAM', 'WSL caution']
+    tada_1b: ['Experimental', 'High VRAM', 'WSL caution'],
+    voxcpm2: ['Candidate', '48 kHz', 'RTX 3060 gate pending']
   };
 
   function caveatsFor(engine: TtsEngineMetadata) {
@@ -45,6 +46,8 @@
             {engine.availability?.unavailable_reason || 'This engine is not available in the current runtime.'}
           {:else if engine.id === 'qwen3_0_6b'}
             Qwen3-TTS 0.6B-Base is experimental and non-default; use it only when you want the Apache-2.0 path despite current latency and accent caveats.
+          {:else if engine.id === 'voxcpm2'}
+            VoxCPM2 is a candidate engine pending RTX 3060 call-feel evidence.
           {:else if engine.requires_transcript}
             Transcript required for this voice clone path.
           {:else}

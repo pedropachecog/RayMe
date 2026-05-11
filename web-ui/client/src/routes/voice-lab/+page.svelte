@@ -89,6 +89,13 @@
         state: 'unavailable',
         unavailable_reason: 'engine synthesis is not implemented in Phase 02'
       }
+    },
+    {
+      id: 'voxcpm2',
+      label: 'VoxCPM2',
+      caveat_chips: ['Candidate', '48 kHz', 'RTX 3060 gate pending'],
+      requires_transcript: false,
+      availability: { available: true, state: 'idle' }
     }
   ];
 

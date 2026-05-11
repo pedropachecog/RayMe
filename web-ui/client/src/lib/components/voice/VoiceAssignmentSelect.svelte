@@ -31,6 +31,8 @@
         return 'Chatterbox Turbo';
       case 'tada_1b':
         return 'TADA 1B';
+      case 'voxcpm2':
+        return 'VoxCPM2';
       default:
         return engine ? String(engine) : 'Unknown engine';
     }

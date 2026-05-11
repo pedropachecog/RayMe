@@ -366,6 +366,7 @@ export type TtsEngineId =
   | 'luxtts'
   | 'chatterbox_turbo'
   | 'tada_1b'
+  | 'voxcpm2'
   | (string & {});
 
 export interface TtsEngineAvailability {
@@ -411,7 +412,7 @@ export interface VoiceSummary {
   name: string;
   default_engine: TtsEngineId;
   reference_transcript?: string | null;
-  metadata?: Record<string, unknown>;
+  metadata?: VoiceMetadata;
   status?: 'available' | 'deleted' | string;
   unavailable_label?: string | null;
   deleted_at?: string | null;
@@ -421,12 +422,32 @@ export interface VoiceSummary {
 
 export interface VoiceDetail extends VoiceSummary {}
 
+export type VoxCpm2CloningMode = 'reference_only' | 'transcript_guided';
+
+export interface VoxCpm2EngineSettings {
+  cloning_mode?: VoxCpm2CloningMode;
+  style_prompt?: string;
+  cfg_value?: number;
+  inference_timesteps?: number;
+  normalize?: boolean;
+  denoise?: boolean;
+}
+
+export interface VoiceEngineSettings {
+  voxcpm2?: VoxCpm2EngineSettings;
+  [engineId: string]: Record<string, unknown> | VoxCpm2EngineSettings | undefined;
+}
+
+export interface VoiceMetadata extends Record<string, unknown> {
+  engine_settings?: VoiceEngineSettings;
+}
+
 export interface VoiceSavePayload {
   asset_id: string;
   name: string;
   default_engine: TtsEngineId;
   reference_transcript?: string | null;
-  metadata?: Record<string, unknown>;
+  metadata?: VoiceMetadata;
 }
 
 export interface VoicePreviewPayload {
@@ -438,6 +459,7 @@ export interface VoicePreviewPayload {
   use_default_engine?: boolean;
   engine?: TtsEngineId | null;
   speech_speed?: number;
+  metadata?: VoiceMetadata;
 }
 
 export interface VoiceTestPlayPayload {
