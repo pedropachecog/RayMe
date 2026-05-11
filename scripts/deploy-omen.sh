@@ -69,7 +69,27 @@ if (-not (Test-Path "$cudaRuntimeBin\cublas64_12.dll")) {
 
 function Invoke-RayMeVoxCpm2Verification {
   Write-Host "== Verifying VoxCPM2 runtime smoke"
-  & uv sync --project ai-backend --extra tts
+
+  function Get-RayMeUv {
+    $command = Get-Command uv -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+
+    $repoLocalUv = Join-Path $repo ".local\uv-bootstrap\Scripts\uv.exe"
+    if (-not (Test-Path $repoLocalUv)) {
+      Write-Host "== Bootstrapping repo-local uv CLI"
+      $uvVenv = Join-Path $repo ".local\uv-bootstrap"
+      & "$repo\ai-backend\.venv\Scripts\python.exe" -m venv $uvVenv
+      if ($LASTEXITCODE -ne 0) { throw "Failed to create repo-local uv bootstrap venv" }
+      & "$uvVenv\Scripts\python.exe" -m pip install --upgrade pip
+      if ($LASTEXITCODE -ne 0) { throw "Failed to upgrade pip in repo-local uv bootstrap venv" }
+      & "$uvVenv\Scripts\python.exe" -m pip install "uv==0.11.6"
+      if ($LASTEXITCODE -ne 0) { throw "Failed to install repo-local uv CLI" }
+    }
+    return $repoLocalUv
+  }
+
+  $uv = Get-RayMeUv
+  & $uv sync --project ai-backend --extra tts
   if ($LASTEXITCODE -ne 0) { throw "uv sync --project ai-backend --extra tts failed" }
 
   $env:PATH = "$cudaRuntimeBin;$env:PATH"
@@ -203,7 +223,7 @@ print("__RAYME_VOXCPM2_PROBE_JSON__" + json.dumps({
 }, sort_keys=True))
 '@
 
-  $probeOutput = $probe | & uv run --project ai-backend python -
+  $probeOutput = $probe | & $uv run --project ai-backend python -
   if ($LASTEXITCODE -ne 0) { throw "VoxCPM2 runtime verification failed" }
   $probeLine = $probeOutput | Where-Object { $_ -like "__RAYME_VOXCPM2_PROBE_JSON__*" } | Select-Object -Last 1
   if (-not $probeLine) { throw "VoxCPM2 runtime verification did not emit JSON evidence" }
