@@ -18,14 +18,17 @@
     AiBackendEngineStatus,
     TtsEngineMetadata,
     VoiceAsset,
+    VoiceMetadata,
     VoiceSummary,
     VoiceTestPlayPayload,
+    VoxCpm2EngineSettings,
     VoiceSynthesisResult
   } from '$lib/api/types';
   import AudioSampleDropzone from '$lib/components/voice/AudioSampleDropzone.svelte';
   import SynthPreviewPanel from '$lib/components/voice/SynthPreviewPanel.svelte';
   import TranscriptEditor from '$lib/components/voice/TranscriptEditor.svelte';
   import TtsEnginePicker from '$lib/components/voice/TtsEnginePicker.svelte';
+  import VoxCpm2Controls from '$lib/components/voice/VoxCpm2Controls.svelte';
   import VoiceDeleteDialog from '$lib/components/voice/VoiceDeleteDialog.svelte';
   import VoiceLibraryList from '$lib/components/voice/VoiceLibraryList.svelte';
   import VoiceRenameDialog from '$lib/components/voice/VoiceRenameDialog.svelte';
@@ -100,6 +103,14 @@
   ];
 
   const validSampleExtension = /\.(wav|mp3|flac)$/i;
+  const DEFAULT_VOXCPM2_SETTINGS: Required<VoxCpm2EngineSettings> = {
+    cloning_mode: 'reference_only',
+    style_prompt: '',
+    cfg_value: 2.0,
+    inference_timesteps: 10,
+    normalize: false,
+    denoise: false
+  };
 
   let voiceName = '';
   let selectedFile: File | null = null;
@@ -109,6 +120,9 @@
   let previewText = 'The line is open. This is how the saved RayMe voice will sound.';
   let useDefaultEngine = true;
   let speechSpeed = 0.85;
+  let engineSettings = {
+    voxcpm2: { ...DEFAULT_VOXCPM2_SETTINGS }
+  };
   let engines: TtsEngineMetadata[] = DEFAULT_TTS_ENGINES;
   let uploadState: 'idle' | 'uploading' | 'ready' | 'error' = 'idle';
   let transcriptState: 'idle' | 'pending' | 'ready' | 'error' = 'idle';
@@ -132,8 +146,10 @@
   let deleteState: 'idle' | 'deleting' = 'idle';
   let activeAudio: HTMLAudioElement | null = null;
 
-  $: canPreview = Boolean(asset && transcript.trim() && selectedEngine && previewText.trim());
-  $: canSave = Boolean(asset && voiceName.trim() && transcript.trim() && selectedEngine);
+  $: transcriptRequired = selectedEngine !== 'voxcpm2';
+  $: hasRequiredTranscript = !transcriptRequired || Boolean(transcript.trim());
+  $: canPreview = Boolean(asset && hasRequiredTranscript && selectedEngine && previewText.trim());
+  $: canSave = Boolean(asset && voiceName.trim() && hasRequiredTranscript && selectedEngine);
   $: uploadedSampleUrl = asset ? toApiPath(`/voices/assets/${encodeURIComponent(asset.asset_id)}/sample`) : null;
   $: if (transcriptState === 'error' && transcript.trim()) {
     transcriptState = 'ready';
@@ -261,7 +277,8 @@
         preview_text: previewText,
         use_default_engine: useDefaultEngine,
         engine: useDefaultEngine ? null : selectedEngine,
-        speech_speed: speechSpeed
+        speech_speed: speechSpeed,
+        ...(selectedEngine === 'voxcpm2' ? { metadata: buildVoiceMetadata() } : {})
       });
       previewAudioUrl = synthesisAudioUrl(result);
       previewState = previewAudioUrl ? 'ready' : 'error';
@@ -289,14 +306,8 @@
         default_engine: selectedEngine,
         reference_transcript: transcript.trim(),
         metadata: {
-          source: 'voice-lab',
-          sample_filename: selectedFile?.name ?? null,
-          speech_speed: speechSpeed,
-          engine_settings: {
-            [selectedEngine]: {
-              speech_speed: speechSpeed
-            }
-          }
+          ...buildVoiceMetadata(),
+          sample_filename: selectedFile?.name ?? null
         }
       });
       saveState = 'saved';
@@ -448,6 +459,35 @@
   function voiceNameFromFilename(filename: string) {
     return filename.replace(/\.[^.]+$/, '').trim();
   }
+
+  function buildVoiceMetadata(): VoiceMetadata {
+    if (selectedEngine === 'voxcpm2') {
+      return {
+        source: 'voice-lab',
+        speech_speed: speechSpeed,
+        engine_settings: {
+          voxcpm2: {
+            cloning_mode: engineSettings.voxcpm2.cloning_mode,
+            style_prompt: engineSettings.voxcpm2.style_prompt,
+            cfg_value: engineSettings.voxcpm2.cfg_value,
+            inference_timesteps: engineSettings.voxcpm2.inference_timesteps,
+            normalize: engineSettings.voxcpm2.normalize,
+            denoise: engineSettings.voxcpm2.denoise
+          }
+        }
+      };
+    }
+
+    return {
+      source: 'voice-lab',
+      speech_speed: speechSpeed,
+      engine_settings: {
+        [selectedEngine || 'f5']: {
+          speech_speed: speechSpeed
+        }
+      }
+    };
+  }
 </script>
 
 <section class="voice-lab" aria-labelledby="voice-lab-title">
@@ -485,6 +525,10 @@
       />
 
       <TtsEnginePicker bind:selectedEngine {engines} />
+
+      {#if selectedEngine === 'voxcpm2'}
+        <VoxCpm2Controls bind:settings={engineSettings.voxcpm2} {transcript} />
+      {/if}
 
       <SynthPreviewPanel
         bind:previewText

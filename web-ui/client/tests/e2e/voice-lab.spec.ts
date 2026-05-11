@@ -127,6 +127,7 @@ test('Voice Lab renders VoxCPM2 controls only for VoxCPM2 and saves settings', a
   await setRangeValue(page.getByLabel('CFG value'), '2.2');
   await setRangeValue(page.getByLabel('Inference timesteps'), '12');
   await page.getByLabel('Normalize').check();
+  await setRangeValue(page.getByLabel('Speech speed'), '0.75');
   await page.getByLabel('Voice name').fill('RayMe Browser Voice');
   await page.getByRole('button', { name: 'Save Voice' }).click();
   await expect(page.getByText('Voice saved.')).toBeVisible();
