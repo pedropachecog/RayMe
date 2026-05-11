@@ -53,7 +53,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 - [ ] **Phase 5: Voice Breadth & Unified Thread Polish** — Both TTS engines with cold-swap UX, per-character default + per-chat override, saved-audio toggles + inline replay, unified thread visual treatment, full SillyTavern text-UX parity (Regenerate / Edit / Swipes / Continue / alternate greetings / virtualization).
 - [ ] **Phase 6: Mobile Hardening & Ship Polish** — Full Android Chrome pass (Bluetooth routing, Wake Lock, visibility change), PWA manifest + icons, storage housekeeping (orphan reaper, retention), full Settings surface, error states, soak-test acceptance. v1 ships.
 - [x] **Phase 7: Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations** — Completed on 2026-05-11; outcome `selectable_with_caveats`.
-- [ ] **Phase 8: Wire VoxCPM2 streaming chunks into live RayMe call playback** — Converts VoxCPM2 benchmark streaming TTFA into actual live call playback latency and gates the live-call default decision.
+- [x] **Phase 8: Wire VoxCPM2 streaming chunks into live RayMe call playback** — Completed on 2026-05-11; outcome `promoted_for_live_call_default`.
 
 ---
 
@@ -529,7 +529,7 @@ Plans:
 - [x] 08-03-PLAN.md - Existing `/webrtc` speak and Web UI call SSE semantics with streaming timing fields and one durable AI speech row (Wave 3)
 - [x] 08-04-PLAN.md - Phase 8 repeated warm call-flow evidence runner and verifier that rejects fallback and slower-than-F5 medians (Wave 1)
 - [x] 08-05-PLAN.md - OMEN dirty-checkout preflight, canonical deployment, and live VoxCPM2-versus-F5 evidence artifacts (Wave 4)
-- [ ] 08-06-PLAN.md - Evidence-gated durable VoxCPM2 live-call default decision writeback (Wave 5)
+- [x] 08-06-PLAN.md - Evidence-gated durable VoxCPM2 live-call default decision writeback (Wave 5)
 
 **Final outcome:** promoted_for_live_call_default. VoxCPM2 beat F5 by same-run warm median first-audio (`762.7 ms` vs `948.0 ms`) with `streaming_used=true` and `whole_wav_fallback_used=false`; VoxCPM2 is the preferred/default live-call TTS engine and F5 remains available as fallback/comparator.
 
