@@ -27,10 +27,19 @@ fi
 RAYME_SSH_ALIAS="${OMEN_SSH_ALIAS}" RAYME_SSH_USER="${OMEN_SSH_USER:-pmpg}" \
   "$REPO_ROOT/scripts/bootstrap-rayme-ssh.sh" restore >/dev/null
 
+ps_single_quote() {
+  local value="${1//\'/\'\'}"
+  printf "'%s'" "$value"
+}
+
+remote_bootstrap="\$env:EXPECTED_HEAD=$(ps_single_quote "$local_head"); "
+remote_bootstrap+="\$env:OMEN_REPO=$(ps_single_quote "$OMEN_REPO"); "
+remote_bootstrap+="\$env:OMEN_BRANCH=$(ps_single_quote "$OMEN_BRANCH"); "
+remote_bootstrap+="\$env:RAYME_OMEN_VERIFY_VOXCPM2=$(ps_single_quote "$RAYME_OMEN_VERIFY_VOXCPM2"); "
+remote_bootstrap+="Invoke-Expression ([Console]::In.ReadToEnd())"
+
 run_remote_deploy() {
-EXPECTED_HEAD="${local_head}" OMEN_REPO="${OMEN_REPO}" OMEN_BRANCH="${OMEN_BRANCH}" \
-RAYME_OMEN_VERIFY_VOXCPM2="${RAYME_OMEN_VERIFY_VOXCPM2}" \
-ssh "${OMEN_SSH_ALIAS}" "powershell -NoProfile -ExecutionPolicy Bypass -Command - " <<'POWERSHELL'
+ssh "${OMEN_SSH_ALIAS}" "powershell -NoProfile -ExecutionPolicy Bypass -Command \"${remote_bootstrap}\"" <<'POWERSHELL'
 $ErrorActionPreference = "Stop"
 $repo = $env:OMEN_REPO
 if (-not $repo) { $repo = "C:\Users\pmpg\rayme\RayMe" }
