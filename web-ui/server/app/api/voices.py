@@ -17,6 +17,7 @@ from app.domain.ai_backend_client import AiBackendClient, AiBackendClientError
 from app.domain.voice_assets import VoiceSampleValidationError
 from app.domain.voice_service import (
     VoiceAssetNotFoundError,
+    VoiceMetadataValidationError,
     VoiceNotFoundError,
     VoiceReferencedError,
     VoiceService,
@@ -44,6 +45,7 @@ class VoicePatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     default_engine: str | None = Field(default=None, min_length=1, max_length=80)
     reference_transcript: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 class VoicePreview(BaseModel):
@@ -57,6 +59,7 @@ class VoicePreview(BaseModel):
     use_default_engine: bool = True
     engine: str | None = Field(default=None, max_length=80)
     speech_speed: float = Field(default=1.0, ge=0.5, le=1.5)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class VoiceTestPlay(BaseModel):
@@ -189,10 +192,14 @@ async def preview_voice(
     service: VoiceService = Depends(get_voice_service),
 ) -> dict[str, Any]:
     payload_state = payload.model_dump()
+    if "metadata" not in payload.model_fields_set:
+        payload_state.pop("metadata", None)
     try:
         return await service.preview_voice(payload_state)
     except VoiceAssetNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Voice asset not found") from exc
+    except VoiceMetadataValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception:
         return JSONResponse(
             status_code=502,
@@ -212,6 +219,8 @@ async def save_voice(
         return await service.save_voice(payload.model_dump())
     except VoiceAssetNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Voice asset not found") from exc
+    except VoiceMetadataValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.get("")
@@ -237,6 +246,8 @@ async def patch_voice(
         return await service.rename_voice(voice_id, payload.model_dump(exclude_unset=True))
     except VoiceNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Voice not found") from exc
+    except VoiceMetadataValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.delete("/{voice_id}")
@@ -268,6 +279,8 @@ async def test_play_voice(
         raise HTTPException(status_code=404, detail="Voice not found") from exc
     except VoiceAssetNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Voice asset not found") from exc
+    except VoiceMetadataValidationError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except VoiceSynthesisFailedError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
