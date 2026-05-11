@@ -342,6 +342,28 @@ def test_tts_synthesize_accepts_web_ui_reference_audio_alias() -> None:
     assert adapter.last_request.speech_speed == 0.75
 
 
+def test_tts_synthesize_rejects_reference_audio_over_web_ui_limit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tts_module = importlib.import_module("app.api.tts")
+    monkeypatch.setattr(tts_module, "MAX_REFERENCE_AUDIO_BYTES", len(b"reference wav") - 1)
+    adapter = ScriptedSynthesisAdapter()
+    manager = ScriptedSwitchingManager(adapter)
+    app = create_app()
+    app.state.model_manager = manager
+    client = TestClient(app)
+
+    response = client.post("/tts/synthesize", json=_synthesis_payload())
+
+    assert response.status_code == 413
+    assert response.json()["detail"] == {
+        "code": "invalid_tts_request",
+        "message": "reference audio is too large",
+    }
+    assert manager.switch_calls == []
+    assert adapter.last_request is None
+
+
 def test_tts_synthesize_accepts_bounded_voxcpm2_options() -> None:
     adapter = ScriptedSynthesisAdapter()
     manager = ScriptedSwitchingManager(adapter)

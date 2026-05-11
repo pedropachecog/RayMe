@@ -31,6 +31,8 @@ EXPECTED_ENGINE_IDS = {
     "tada_1b",
     "voxcpm2",
 }
+MAX_REFERENCE_AUDIO_BYTES = 25 * 1024 * 1024
+MAX_REFERENCE_AUDIO_B64_LENGTH = 36 * 1024 * 1024
 
 
 class TtsEngineAvailability(BaseModel):

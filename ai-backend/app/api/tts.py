@@ -9,7 +9,11 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from app.config import AiBackendSettings
 from app.models.model_manager import ModelManager
-from app.models.tts_registry import TtsSynthesisInput
+from app.models.tts_registry import (
+    MAX_REFERENCE_AUDIO_B64_LENGTH,
+    MAX_REFERENCE_AUDIO_BYTES,
+    TtsSynthesisInput,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -23,6 +27,7 @@ class TtsSynthesizeRequest(BaseModel):
     text: str = Field(min_length=1, max_length=5000)
     reference_audio_b64: str = Field(
         min_length=1,
+        max_length=MAX_REFERENCE_AUDIO_B64_LENGTH,
         validation_alias=AliasChoices("reference_audio_b64", "reference_audio_base64"),
     )
     reference_transcript: str | None = Field(default=None, max_length=10000)
@@ -120,6 +125,14 @@ def _decode_reference_audio(reference_audio_b64: str) -> bytes:
             detail={
                 "code": "invalid_tts_request",
                 "message": "reference_audio_b64 must not be empty",
+            },
+        )
+    if len(decoded) > MAX_REFERENCE_AUDIO_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "code": "invalid_tts_request",
+                "message": "reference audio is too large",
             },
         )
     return decoded
