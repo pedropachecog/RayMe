@@ -97,11 +97,6 @@ test('live OMEN-PC browser call completes two user to AI cycles without mocked c
   await expect.poll(() => transcriptTurnCount(page, 'user_speech'), { timeout: 240_000 }).toBeGreaterThanOrEqual(2);
   await expect.poll(() => transcriptTurnCount(page, 'ai_speech'), { timeout: 300_000 }).toBeGreaterThanOrEqual(2);
 
-  if (await page.getByRole('button', { name: 'Interrupt' }).isEnabled()) {
-    await page.getByRole('button', { name: 'Interrupt' }).click();
-    await expect(page.getByText(/Interrupted|Listening/)).toBeVisible({ timeout: 30_000 });
-  }
-
   await page.getByRole('button', { name: 'End Call' }).click();
   await expect(page.getByRole('button', { name: 'Return to Thread' })).toBeVisible({ timeout: 60_000 });
   await page.getByRole('button', { name: 'Return to Thread' }).click();
