@@ -120,6 +120,18 @@ async def _create_audio_offer() -> tuple[Any, dict[str, str]]:
     return pc, {"sdp": pc.localDescription.sdp, "type": pc.localDescription.type}
 
 
+async def _close_peer_connection(pc: Any) -> None:
+    close = getattr(pc, "close", None)
+    if not callable(close):
+        return
+    result = close()
+    if asyncio.iscoroutine(result):
+        try:
+            await asyncio.wait_for(result, timeout=5.0)
+        except TimeoutError:
+            return
+
+
 def _require_ok(response: ApiResponse, *, operation: str) -> dict[str, Any]:
     if 200 <= response.status < 300:
         return response.payload
@@ -262,11 +274,7 @@ async def _run_speak_call(
         http_elapsed_ms = round((time.perf_counter() - request_started) * 1000.0, 1)
     finally:
         if pc is not None:
-            close = getattr(pc, "close", None)
-            if callable(close):
-                result = close()
-                if asyncio.iscoroutine(result):
-                    await result
+            await _close_peer_connection(pc)
 
     if not measured:
         return None
