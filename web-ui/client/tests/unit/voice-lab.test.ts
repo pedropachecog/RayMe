@@ -34,6 +34,9 @@ const voiceLabSources = sourceFiles
 const routeSource = existsSync('src/routes/voice-lab/+page.svelte')
   ? readFileSync('src/routes/voice-lab/+page.svelte', 'utf8')
   : '';
+const apiTypesSource = existsSync('src/lib/api/types.ts')
+  ? readFileSync('src/lib/api/types.ts', 'utf8')
+  : '';
 
 const requiredVoiceLabCopy = [
   'Voice Lab',
@@ -327,6 +330,22 @@ describe('Voice Lab Phase 2 source contract', () => {
     expect(routeSource).toMatch(/engine_settings[\s\S]*voxcpm2[\s\S]*cloning_mode/);
     expect(routeSource).toMatch(/selectedEngine[\s\S]*voxcpm2[\s\S]*engine_settings/);
     expect(routeSource).toMatch(/selectedEngine[\s\S]*f5[\s\S]*speech_speed/);
+  });
+
+  it('types VoxCPM2 voice metadata and transient synthesis payload options', () => {
+    for (const sourceTerm of [
+      "'voxcpm2'",
+      'VoxCpm2EngineSettings',
+      'cloning_mode',
+      'style_prompt',
+      'cfg_value',
+      'inference_timesteps',
+      'normalize',
+      'denoise',
+      'engine_settings'
+    ]) {
+      expect(apiTypesSource).toContain(sourceTerm);
+    }
   });
 
   it('allows saving a voice without a successful preview gate', () => {
