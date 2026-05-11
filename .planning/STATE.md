@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Phase 7 planned
-last_updated: "2026-05-11T01:14:44.989Z"
+stopped_at: Completed 07-01-PLAN.md
+last_updated: "2026-05-11T02:07:18.063Z"
 progress:
   total_phases: 9
   completed_phases: 4
   total_plans: 81
-  completed_plans: 67
-  percent: 83
+  completed_plans: 68
+  percent: 84
 ---
 
 ## Phase Status
@@ -50,6 +50,7 @@ progress:
 - Phase 03 plan 03-08 completed on 2026-04-25: operational call UI route, thread and character Start Call entry points, RMS visualizer, toolbar, live transcript, call row rendering, and mobile control layout passed client unit plus desktop/mobile Playwright contracts.
 - Phase 03 plan 03-09 completed on 2026-04-25: full MVP call loop now carries `user_final` turns through server-owned `/turns` SSE orchestration, LLM token streaming, saved-voice TTS playback, durable speech rows, and interrupt-safe cancellation.
 - Phase 03 plan 03-10 completed on 2026-04-25: full local Phase 3 automated acceptance passed across AI backend pytest, Web UI server pytest, client unit tests, desktop Chromium call specs, and mobile Chromium call spec with saved Playwright evidence.
+- Phase 07 plan 07-01 completed on 2026-05-11: RED AI backend VoxCPM2 contracts now cover roster metadata, CUDA-only adapter loading, bounded synthesis options, 48 kHz output, sanitized errors, and engine-scoped degradation.
 
 ## Current Decisions
 
@@ -126,6 +127,7 @@ progress:
 - Phase 03-09 interrupt policy: button interrupt cancels browser SSE reading, server LLM generation, and AI backend speech playback before returning to listening.
 - Phase 03-10 evidence policy: local Phase 3 call acceptance must keep mocked call specs free of skip/only/TODO gates, save browser evidence with command/timestamp/commit/pass-fail details, and leave live acceptance opt-in through `RAYME_ENABLE_LIVE_E2E`.
 - Phase 07 planned on 2026-05-11: VoxCPM2 roster evaluation is ready to execute with 12 verified plans across 5 execution waves, including runtime-path decision, Wave 0 contracts, OMEN-only deployment evidence through `scripts/deploy-omen.sh`, live call-flow evidence, manual listening, and final promotion writeback.
+- Phase 07-01 contract policy: VoxCPM2 must be metadata-visible before runtime promotion, must load through `voxcpm==2.0.2` and `openbmb/VoxCPM2` with `device="cuda"`, and must sanitize traceback, local path, and model-id disclosure in public synthesis failures.
 
 ## Evidence
 
@@ -152,8 +154,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-05-11T01:14:44.989Z
-Stopped at: Phase 7 planned
-Resume file: .planning/phases/07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency/07-01-PLAN.md
+Last session: 2026-05-11T02:07:18.036Z
+Stopped at: Completed 07-01-PLAN.md
+Resume file: None
 
 **Planned Phase:** 07 (Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations) — 12 plans — 2026-05-11T01:14:44.989Z

@@ -498,7 +498,7 @@ Roadmap-level decisions that remain open after Phase-0 resolves the empirical qu
 **Wave summary:** Wave 0 creates RED contracts and evidence scaffolding; Wave 1 implements backend/server/client roster support; Wave 2 wires call-flow and scenario matrix evidence; Wave 3 runs OMEN runtime evidence through `scripts/deploy-omen.sh`; Wave 4 runs live matrix/call-flow artifact generation; Wave 5 runs manual quality and final promotion writeback.
 
 Plans:
-- [ ] 07-01-PLAN.md - AI backend VoxCPM2 RED contracts for metadata, CUDA-only adapter behavior, synthesis options, and engine-scoped failures (Wave 0)
+- [x] 07-01-PLAN.md - AI backend VoxCPM2 RED contracts for metadata, CUDA-only adapter behavior, synthesis options, and engine-scoped failures (Wave 0)
 - [ ] 07-02-PLAN.md - Web UI server/client RED contracts for VoxCPM2 voice metadata, controls, fallback roster, and missing-transcript warning (Wave 0)
 - [ ] 07-03-PLAN.md - Call-flow RED contracts for VoxCPM2 settings forwarding, sanitized call failures, and interrupt/cancel preservation (Wave 0)
 - [ ] 07-04-PLAN.md - Scenario matrix RED tests and deterministic Phase 7 evidence templates/verifier (Wave 0)
