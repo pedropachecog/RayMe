@@ -31,13 +31,14 @@ from tts_ttfa import (
     compute_rtf,
 )
 
-ENGINE_ORDER = ("f5", "xtts", "luxtts", "chatterbox_turbo", "tada_1b", "qwen3")
-PROFILE_ORDER = ("baseline", "optimized", "optimized_seed_1337")
+ENGINE_ORDER = ("f5", "xtts", "luxtts", "chatterbox_turbo", "tada_1b", "qwen3", "voxcpm2")
+PROFILE_ORDER = ("baseline", "optimized", "optimized_seed_1337", "streaming_collected")
 PHASE_DIR = Path(".planning/phases/00-measurement-gate")
 RESULT_PATH = PHASE_DIR / "results" / "tts_scenario_matrix_local.json"
 OUTPUT_SAMPLE_DIR = PHASE_DIR / "results" / "tts_scenario_audio"
 LONG_REPLY_FIXTURE = Path(__file__).resolve().parent / "fixtures" / "target_text_1min.txt"
 CHATTERBOX_ALT_SEED = 1337
+MODEL_ID_VOXCPM2 = "openbmb/VoxCPM2"
 ABBREVIATIONS = {
     "dr",
     "mr",
@@ -58,6 +59,7 @@ ENGINE_CHUNK_LIMITS = {
     "chatterbox_turbo": {"max_estimated_tokens": 240, "max_chars": 480, "min_words": 8, "first_words": 24},
     "tada_1b": {"max_estimated_tokens": 240, "max_chars": 480, "min_words": 8, "first_words": 24},
     "qwen3": {"max_estimated_tokens": 220, "max_chars": 440, "min_words": 8, "first_words": 24},
+    "voxcpm2": {"max_estimated_tokens": 240, "max_chars": 500, "min_words": 8, "first_words": 24},
 }
 SHORT_REPLY_TEXT = (
     "I can do that. The quickest fix is to keep the model warm and reuse the voice prompt."
@@ -468,6 +470,9 @@ def build_result_row(
         "peak_vram_mb": _round_or_none(peak_vram_mb),
         "sample_rate": sample_rate,
         "output_wav": str(output_wav) if output_wav else None,
+        "sample_path": str(output_wav) if output_wav else None,
+        "stitched_playback_ms": None,
+        "max_inter_chunk_gap_ms": None,
         "optimizations_applied": optimizations_applied,
         "optimization_notes": optimization_notes,
     }
@@ -550,6 +555,46 @@ def _best_row(rows: list[dict[str, Any]], scenario: str, metric: str) -> dict[st
     )
 
 
+def _promotion_comparison(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    scenarios: list[str] = []
+    for row in rows:
+        scenario = row.get("scenario")
+        if scenario and scenario not in scenarios:
+            scenarios.append(str(scenario))
+
+    comparisons: dict[str, Any] = {}
+    for scenario in scenarios:
+        f5_row = _best_row(
+            [row for row in rows if row.get("engine") == "f5"],
+            scenario,
+            "request_ttfa_ms",
+        )
+        voxcpm2_row = _best_row(
+            [row for row in rows if row.get("engine") == "voxcpm2"],
+            scenario,
+            "request_ttfa_ms",
+        )
+        comparisons[scenario] = {
+            "f5_request_ttfa_ms": f5_row.get("request_ttfa_ms") if f5_row else None,
+            "f5_request_total_ms": f5_row.get("request_total_ms") if f5_row else None,
+            "f5_sample_path": f5_row.get("sample_path") if f5_row else None,
+            "voxcpm2_request_ttfa_ms": voxcpm2_row.get("request_ttfa_ms") if voxcpm2_row else None,
+            "voxcpm2_request_total_ms": voxcpm2_row.get("request_total_ms") if voxcpm2_row else None,
+            "voxcpm2_sample_path": voxcpm2_row.get("sample_path") if voxcpm2_row else None,
+            "voxcpm2_beats_f5_ttfa": (
+                bool(voxcpm2_row and f5_row)
+                and float(voxcpm2_row["request_ttfa_ms"]) < float(f5_row["request_ttfa_ms"])
+            ),
+        }
+    return {
+        "baseline_engine": "f5",
+        "candidate_engine": "voxcpm2",
+        "metric": "request_ttfa_ms",
+        "requires_manual_quality": True,
+        "by_scenario": comparisons,
+    }
+
+
 def build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
     scenarios = []
     for row in rows:
@@ -593,6 +638,7 @@ def build_summary(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "best_request_ttfa": best_request_ttfa,
         "best_request_total": best_request_total,
         "best_stitched_playback": best_stitched_playback,
+        "promotion_comparison": _promotion_comparison(rows),
     }
 
 
@@ -1760,6 +1806,306 @@ def _run_qwen3_engine(
     return rows
 
 
+def _voxcpm2_model_sample_rate(model: Any) -> int:
+    tts_model = getattr(model, "tts_model", None)
+    sample_rate = getattr(tts_model, "sample_rate", None)
+    if sample_rate is None:
+        sample_rate = getattr(model, "sample_rate", None)
+    if sample_rate is None:
+        raise ValueError("VoxCPM2 runtime did not report an output sample rate")
+    return int(sample_rate)
+
+
+def _voxcpm2_generate_kwargs(*, text: str, ref_audio: str, ref_text: str) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "text": text,
+        "cfg_value": 2.0,
+        "inference_timesteps": 10,
+    }
+    reference_text = ref_text.strip()
+    if reference_text:
+        kwargs["prompt_wav_path"] = ref_audio
+        kwargs["prompt_text"] = reference_text
+    else:
+        kwargs["reference_wav_path"] = ref_audio
+    return kwargs
+
+
+def _run_voxcpm2_engine(
+    *,
+    runtime: str,
+    host_account: str,
+    ref_audio: str,
+    ref_text: str,
+    scenarios: list[ScenarioSpec],
+    sample_root: Path,
+) -> list[dict[str, Any]]:
+    import numpy as np
+    import torch
+    from voxcpm import VoxCPM
+
+    torch.cuda.empty_cache()
+    with Timer() as load_timer:
+        model = VoxCPM.from_pretrained(MODEL_ID_VOXCPM2, load_denoiser=False, device="cuda")
+    sample_rate = _voxcpm2_model_sample_rate(model)
+    warmup_cuda()
+    with Timer() as warm_timer:
+        _ = model.generate(**_voxcpm2_generate_kwargs(text="Warm.", ref_audio=ref_audio, ref_text=ref_text))
+        _maybe_cuda_sync(torch)
+
+    rows: list[dict[str, Any]] = []
+    model_load_ms = load_timer.elapsed_ms
+    warmup_ms = warm_timer.elapsed_ms
+
+    def synthesize(text: str) -> tuple[float, float, float, float, int, np.ndarray]:
+        with Timer() as timer:
+            sample = model.generate(**_voxcpm2_generate_kwargs(text=text, ref_audio=ref_audio, ref_text=ref_text))
+            _maybe_cuda_sync(torch)
+        rate = _voxcpm2_model_sample_rate(model)
+        wav = _to_float_np(sample)
+        return (
+            timer.elapsed_ms,
+            timer.elapsed_ms,
+            len(wav) / float(rate),
+            float(sample_vram_mb()["peak_allocated_mb"]),
+            rate,
+            wav,
+        )
+
+    baseline_notes = (
+        "Warm model only. VoxCPM2 standard Python generate path uses the official openbmb/VoxCPM2 runtime."
+    )
+    for scenario in scenarios:
+        try:
+            torch.cuda.reset_peak_memory_stats()
+            ttfa_ms, total_ms, audio_duration_s, peak_vram_mb, rate, wav = synthesize(scenario.text)
+            sample_out = _sample_path(sample_root, "voxcpm2", "baseline", scenario.name)
+            _write_audio_sample(sample_out, wav, rate)
+            rows.append(
+                build_result_row(
+                    engine="voxcpm2",
+                    runtime=runtime,
+                    host_account=host_account,
+                    profile="baseline",
+                    scenario=scenario,
+                    backend="standard_python_api",
+                    mode="standard_python_generate",
+                    streaming_support="available_benchmark_only",
+                    true_streaming=False,
+                    model_load_ms=model_load_ms,
+                    warmup_ms=warmup_ms,
+                    cached_prompt_build_ms=None,
+                    request_prompt_prep_ms=0.0,
+                    generate_ttfa_ms=ttfa_ms,
+                    generate_total_ms=total_ms,
+                    audio_duration_s=audio_duration_s,
+                    peak_vram_mb=peak_vram_mb,
+                    sample_rate=rate,
+                    output_wav=sample_out,
+                    optimizations_applied=[],
+                    optimization_notes=baseline_notes,
+                )
+            )
+        except Exception:
+            rows.append(
+                build_result_row(
+                    engine="voxcpm2",
+                    runtime=runtime,
+                    host_account=host_account,
+                    profile="baseline",
+                    scenario=scenario,
+                    backend="standard_python_api",
+                    mode="standard_python_generate",
+                    streaming_support="available_benchmark_only",
+                    true_streaming=False,
+                    model_load_ms=model_load_ms,
+                    warmup_ms=warmup_ms,
+                    cached_prompt_build_ms=None,
+                    request_prompt_prep_ms=None,
+                    generate_ttfa_ms=None,
+                    generate_total_ms=None,
+                    audio_duration_s=None,
+                    peak_vram_mb=None,
+                    sample_rate=None,
+                    output_wav=None,
+                    optimizations_applied=[],
+                    optimization_notes=baseline_notes,
+                    status="failed",
+                    reason=traceback.format_exc(limit=12),
+                )
+            )
+
+    optimized_notes = (
+        "VoxCPM2 standard Python generate path measured through the shared RayMe chunk planner; "
+        "streaming API remains benchmark-only unless call code consumes chunks live."
+    )
+    for scenario in scenarios:
+        try:
+            torch.cuda.reset_peak_memory_stats()
+            plan = build_chunk_plan("voxcpm2", scenario.text)
+            chunk_ttfa_ms: list[float] = []
+            chunk_total_ms: list[float] = []
+            chunk_audio_duration_s: list[float] = []
+            chunk_peak_vram_mb: list[float] = []
+            chunk_wavs: list[np.ndarray] = []
+            rate = sample_rate
+            for chunk_text in plan.chunks:
+                ttfa_ms, total_ms, audio_duration_s, peak_vram_mb, rate, wav = synthesize(chunk_text)
+                chunk_ttfa_ms.append(ttfa_ms)
+                chunk_total_ms.append(total_ms)
+                chunk_audio_duration_s.append(audio_duration_s)
+                chunk_peak_vram_mb.append(peak_vram_mb)
+                chunk_wavs.append(wav)
+            stitched_wav = np.concatenate(chunk_wavs) if chunk_wavs else np.zeros(1, dtype=np.float32)
+            sample_out = _sample_path(sample_root, "voxcpm2", "optimized", scenario.name)
+            _write_audio_sample(sample_out, stitched_wav, rate)
+            audio_duration_s = len(stitched_wav) / float(rate)
+            chunk_extra = _chunk_playback_metadata(
+                plan=plan,
+                chunk_ttfa_ms=chunk_ttfa_ms,
+                chunk_total_ms=chunk_total_ms,
+                chunk_audio_duration_s=chunk_audio_duration_s,
+            )
+            rows.append(
+                build_result_row(
+                    engine="voxcpm2",
+                    runtime=runtime,
+                    host_account=host_account,
+                    profile="optimized",
+                    scenario=scenario,
+                    backend="standard_python_api",
+                    mode="shared_chunked_playback",
+                    streaming_support="available_benchmark_only",
+                    true_streaming=False,
+                    model_load_ms=model_load_ms,
+                    warmup_ms=warmup_ms,
+                    cached_prompt_build_ms=None,
+                    request_prompt_prep_ms=0.0,
+                    generate_ttfa_ms=chunk_ttfa_ms[0] if chunk_ttfa_ms else None,
+                    generate_total_ms=sum(chunk_total_ms),
+                    audio_duration_s=audio_duration_s,
+                    peak_vram_mb=max(chunk_peak_vram_mb) if chunk_peak_vram_mb else 0.0,
+                    sample_rate=rate,
+                    output_wav=sample_out,
+                    optimizations_applied=["shared_chunk_planner"],
+                    optimization_notes=optimized_notes,
+                    extra=chunk_extra,
+                )
+            )
+        except Exception:
+            rows.append(
+                build_result_row(
+                    engine="voxcpm2",
+                    runtime=runtime,
+                    host_account=host_account,
+                    profile="optimized",
+                    scenario=scenario,
+                    backend="standard_python_api",
+                    mode="shared_chunked_playback",
+                    streaming_support="available_benchmark_only",
+                    true_streaming=False,
+                    model_load_ms=model_load_ms,
+                    warmup_ms=warmup_ms,
+                    cached_prompt_build_ms=None,
+                    request_prompt_prep_ms=None,
+                    generate_ttfa_ms=None,
+                    generate_total_ms=None,
+                    audio_duration_s=None,
+                    peak_vram_mb=None,
+                    sample_rate=None,
+                    output_wav=None,
+                    optimizations_applied=["shared_chunk_planner"],
+                    optimization_notes=optimized_notes,
+                    status="failed",
+                    reason=traceback.format_exc(limit=12),
+                )
+            )
+
+    if hasattr(model, "generate_streaming"):
+        streaming_notes = (
+            "VoxCPM2 generate_streaming chunks are collected into one WAV for benchmark-only metrics; "
+            "this row does not claim RayMe call-flow streaming."
+        )
+        for scenario in scenarios:
+            try:
+                torch.cuda.reset_peak_memory_stats()
+                chunks: list[np.ndarray] = []
+                first_chunk_s: float | None = None
+                with Timer() as timer:
+                    started = time.perf_counter()
+                    for chunk in model.generate_streaming(
+                        **_voxcpm2_generate_kwargs(text=scenario.text, ref_audio=ref_audio, ref_text=ref_text)
+                    ):
+                        if first_chunk_s is None:
+                            first_chunk_s = time.perf_counter() - started
+                        chunks.append(_to_float_np(chunk))
+                    _maybe_cuda_sync(torch)
+                rate = _voxcpm2_model_sample_rate(model)
+                wav = np.concatenate(chunks) if chunks else np.zeros(1, dtype=np.float32)
+                sample_out = _sample_path(sample_root, "voxcpm2", "streaming_collected", scenario.name)
+                _write_audio_sample(sample_out, wav, rate)
+                audio_duration_s = len(wav) / float(rate)
+                rows.append(
+                    build_result_row(
+                        engine="voxcpm2",
+                        runtime=runtime,
+                        host_account=host_account,
+                        profile="streaming_collected",
+                        scenario=scenario,
+                        backend="standard_python_api",
+                        mode="standard_python_streaming_collected",
+                        streaming_support="native_benchmark_only",
+                        true_streaming=False,
+                        model_load_ms=model_load_ms,
+                        warmup_ms=warmup_ms,
+                        cached_prompt_build_ms=None,
+                        request_prompt_prep_ms=0.0,
+                        generate_ttfa_ms=(first_chunk_s or timer.elapsed_s) * 1000.0,
+                        generate_total_ms=timer.elapsed_ms,
+                        audio_duration_s=audio_duration_s,
+                        peak_vram_mb=float(sample_vram_mb()["peak_allocated_mb"]),
+                        sample_rate=rate,
+                        output_wav=sample_out,
+                        optimizations_applied=["generate_streaming_collected"],
+                        optimization_notes=streaming_notes,
+                        extra={"streaming_benchmark_only": True},
+                    )
+                )
+            except Exception:
+                rows.append(
+                    build_result_row(
+                        engine="voxcpm2",
+                        runtime=runtime,
+                        host_account=host_account,
+                        profile="streaming_collected",
+                        scenario=scenario,
+                        backend="standard_python_api",
+                        mode="standard_python_streaming_collected",
+                        streaming_support="native_benchmark_only",
+                        true_streaming=False,
+                        model_load_ms=model_load_ms,
+                        warmup_ms=warmup_ms,
+                        cached_prompt_build_ms=None,
+                        request_prompt_prep_ms=None,
+                        generate_ttfa_ms=None,
+                        generate_total_ms=None,
+                        audio_duration_s=None,
+                        peak_vram_mb=None,
+                        sample_rate=None,
+                        output_wav=None,
+                        optimizations_applied=["generate_streaming_collected"],
+                        optimization_notes=streaming_notes,
+                        status="failed",
+                        reason=traceback.format_exc(limit=12),
+                        extra={"streaming_benchmark_only": True},
+                    )
+                )
+
+    del model
+    torch.cuda.empty_cache()
+    return rows
+
+
 def run_engine_locally(
     *,
     engine: str,
@@ -1816,6 +2162,15 @@ def run_engine_locally(
             )
         elif engine == "qwen3":
             rows = _run_qwen3_engine(
+                runtime=runtime,
+                host_account=host_account,
+                ref_audio=ref_audio,
+                ref_text=ref_text,
+                scenarios=scenarios,
+                sample_root=sample_root,
+            )
+        elif engine == "voxcpm2":
+            rows = _run_voxcpm2_engine(
                 runtime=runtime,
                 host_account=host_account,
                 ref_audio=ref_audio,
