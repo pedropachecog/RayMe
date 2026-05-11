@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: Ready to execute
-stopped_at: Completed 07-06-PLAN.md
-last_updated: "2026-05-11T02:58:33.148Z"
+stopped_at: Completed 07-07-PLAN.md
+last_updated: "2026-05-11T03:14:42.341Z"
 progress:
   total_phases: 9
   completed_phases: 4
   total_plans: 81
-  completed_plans: 73
-  percent: 90
+  completed_plans: 74
+  percent: 91
 ---
 
 ## Phase Status
@@ -56,6 +56,7 @@ progress:
 - Phase 07 plan 07-04 completed on 2026-05-11: RED scenario matrix contracts now require VoxCPM2 shared chunk planning, short/medium/long rows, `sample_path` evidence, F5-named promotion comparison, and deterministic Phase 07 evidence templates/verifier.
 - Phase 07 plan 07-05 completed on 2026-05-11: VoxCPM2 is now metadata-visible with optional `voxcpm==2.0.2`, a CUDA-only standard Python adapter, bounded `/tts/synthesize` options, warning propagation, and the D-17 runtime-path decision artifact.
 - Phase 07 plan 07-06 completed on 2026-05-11: Web UI server voice metadata now normalizes and persists bounded VoxCPM2 mode/style settings, reuses saved settings for preview/test-play, and forwards flat `voxcpm2_*` synthesis payload fields only for the VoxCPM2 engine.
+- Phase 07 plan 07-07 completed on 2026-05-11: Client Voice Lab now exposes VoxCPM2 fallback roster copy, typed `metadata.engine_settings.voxcpm2` payloads, and conditional mode/style controls that preserve VoxCPM2 state while keeping non-VoxCPM2 preview payloads clean.
 
 ## Current Decisions
 
@@ -145,6 +146,9 @@ progress:
 - Phase 07-05 runtime guard policy: VoxCPM2 loading requires CUDA through `require_torch_cuda_runtime("VoxCPM2")` and `device="cuda"`.
 - Phase 07-06 Web UI metadata default policy: VoxCPM2 voice metadata defaults to `reference_only`, empty `style_prompt`, `cfg_value` 2.0, `inference_timesteps` 10, `normalize` false, and `denoise` false.
 - Phase 07-06 synthesis bridge policy: Web UI server forwards VoxCPM2 settings to the AI backend only when the target engine is `voxcpm2`; other engines omit all `voxcpm2_*` payload fields even if saved metadata exists.
+- Phase 07-07 client metadata policy: browser save/preview typing uses `metadata.engine_settings.voxcpm2`; preview includes VoxCPM2 metadata only when VoxCPM2 is selected.
+- Phase 07-07 Voice Lab UI policy: VoxCPM2 settings are route-owned state preserved across engine switches, but controls render only for `selectedEngine === "voxcpm2"`.
+- Phase 07-07 client default policy: VoxCPM2 controls mirror server defaults from Plan 07-06: `reference_only`, empty style, cfg 2.0, 10 timesteps, normalize false, and denoise false.
 
 ## Evidence
 
@@ -171,8 +175,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-05-11T02:58:33.122Z
-Stopped at: Completed 07-06-PLAN.md
+Last session: 2026-05-11T03:14:42.316Z
+Stopped at: Completed 07-07-PLAN.md
 Resume file: None
 
 **Planned Phase:** 07 (Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations) — 12 plans — 2026-05-11T01:14:44.989Z

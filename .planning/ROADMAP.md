@@ -504,7 +504,7 @@ Plans:
 - [x] 07-04-PLAN.md - Scenario matrix RED tests and deterministic Phase 7 evidence templates/verifier (Wave 0)
 - [x] 07-05-PLAN.md - Runtime-path decision artifact plus AI backend optional `voxcpm2` runtime, metadata, adapter, and `/tts/synthesize` bounded option support (Wave 1)
 - [x] 07-06-PLAN.md - Web UI server durable VoxCPM2 voice metadata and preview/test-play payload support (Wave 1)
-- [ ] 07-07-PLAN.md - Client Voice Lab VoxCPM2 fallback roster, labels, types, and conditional mode/style controls (Wave 1)
+- [x] 07-07-PLAN.md - Client Voice Lab VoxCPM2 fallback roster, labels, types, and conditional mode/style controls (Wave 1)
 - [ ] 07-08-PLAN.md - Real call-flow integration through existing Web UI call and AI backend speak APIs (Wave 2)
 - [ ] 07-09-PLAN.md - VoxCPM2 scenario matrix runner and promotion evidence schema enforcement (Wave 2)
 - [ ] 07-10-PLAN.md - OMEN deployment/runtime smoke and VRAM soak evidence through `scripts/deploy-omen.sh` only (Wave 3)
