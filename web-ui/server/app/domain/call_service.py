@@ -21,6 +21,11 @@ from app.domain.thread_service import (
     ThreadService,
     new_message_id,
 )
+from app.domain.voice_service import (
+    VOXCPM2_ENGINE_ID,
+    VoiceMetadataValidationError,
+    normalize_voxcpm2_engine_settings,
+)
 from app.storage.models import Character, Message, Thread, Voice, VoiceAsset, utc_now
 
 CALL_VOICE_REQUIRED = "call_voice_required"
@@ -252,11 +257,22 @@ class CallService:
             "[voice-ref] OK call=%s voice_id=%s asset_id=%s file_size=%d",
             call_id, voice.id, asset.id, sample_path.stat().st_size,
         )
-        return {
+        voice_reference = {
             "reference_audio_base64": base64.b64encode(sample_path.read_bytes()).decode("ascii"),
             "reference_audio_content_type": asset.content_type,
             "reference_transcript": voice.reference_transcript,
         }
+        if call.engine_id == VOXCPM2_ENGINE_ID:
+            try:
+                voice_reference.update(_voxcpm2_call_fields(voice.metadata_json))
+            except VoiceMetadataValidationError:
+                logger.warning(
+                    "[voice-ref] INVALID_VOXCPM2_METADATA call=%s voice_id=%s",
+                    call_id,
+                    voice.id,
+                )
+                raise CallVoiceUnavailableError() from None
+        return voice_reference
 
     async def end_call(self, call_id: str, reason: str = "hangup") -> dict[str, Any]:
         call = self._active_call(call_id)
@@ -352,6 +368,20 @@ class CallService:
         if call is None:
             raise CallSessionNotFoundError()
         return call
+
+
+def _voxcpm2_call_fields(metadata: Any) -> dict[str, Any]:
+    engine_settings = metadata.get("engine_settings") if isinstance(metadata, dict) else None
+    raw_settings = engine_settings.get(VOXCPM2_ENGINE_ID) if isinstance(engine_settings, dict) else None
+    settings = normalize_voxcpm2_engine_settings(raw_settings)
+    return {
+        "voxcpm2_cloning_mode": settings["cloning_mode"],
+        "voxcpm2_style_prompt": settings["style_prompt"],
+        "voxcpm2_cfg_value": settings["cfg_value"],
+        "voxcpm2_inference_timesteps": settings["inference_timesteps"],
+        "voxcpm2_normalize": settings["normalize"],
+        "voxcpm2_denoise": settings["denoise"],
+    }
 
 
 __all__ = [

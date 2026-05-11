@@ -445,15 +445,20 @@ async def create_call_turn(
                 except AiBackendClientError as exc:
                     logger.warning(
                         "[call-turn] speak_call.sync_failed call=%s turn=%s "
-                        "code=%s message=%s — yielding ai_done for UI recovery",
+                        "code=%s message=%s — yielding sanitized TTS error",
                         call_id,
                         payload.turn_id,
                         exc.code,
                         exc.message,
                     )
-                    # TTS failed but LLM text was saved. Yield ai_done so the
-                    # browser transitions from 'speaking' back to 'listening'.
-                    # The user sees the AI text but no audio — they can try again.
+                    yield _sse(
+                        {
+                            "type": "error",
+                            "turn_id": payload.turn_id,
+                            "code": "call_tts_failed",
+                            "message": "Speech playback failed",
+                        }
+                    )
                 audio_started_event = _extract_ai_audio_started_event(speak_result)
                 if audio_started_event is not None:
                     yield _sse(audio_started_event)

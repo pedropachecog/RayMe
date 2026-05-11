@@ -582,6 +582,10 @@ def test_two_turns_stream_tokens_and_write_exact_speech_rows_before_call_end(
         call["payload"]["reference_transcript"] == "Reference transcript for the assigned voice."
         for call in call_fixture.backend.speak_calls
     )
+    assert all(
+        not any(key.startswith("voxcpm2_") for key in call["payload"])
+        for call in call_fixture.backend.speak_calls
+    )
     assert all(call["session_id"] == started["session_id"] for call in call_fixture.backend.speak_calls)
 
 
