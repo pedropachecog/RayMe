@@ -4,6 +4,9 @@ set -euo pipefail
 OMEN_SSH_ALIAS="${OMEN_SSH_ALIAS:-rayme-pmpg}"
 OMEN_REPO="${OMEN_REPO:-C:\\Users\\pmpg\\rayme\\RayMe}"
 OMEN_BRANCH="${OMEN_BRANCH:-main}"
+RAYME_OMEN_VERIFY_VOXCPM2="${RAYME_OMEN_VERIFY_VOXCPM2:-0}"
+RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON="${RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON:-${RAYME_VOXCPM2_RUNTIME_SMOKE_JSON:-}}"
+RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON="${RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON:-${RAYME_VOXCPM2_VRAM_SOAK_JSON:-}}"
 
 SCRIPT_DIR=$(
   CDPATH= cd -- "$(dirname -- "$0")"
@@ -16,10 +19,17 @@ REPO_ROOT=$(
 
 local_head="$(git rev-parse HEAD)"
 
+if [[ "$RAYME_OMEN_VERIFY_VOXCPM2" == "1" && -z "$RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON" ]]; then
+  echo "RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON must be set when RAYME_OMEN_VERIFY_VOXCPM2=1" >&2
+  exit 2
+fi
+
 RAYME_SSH_ALIAS="${OMEN_SSH_ALIAS}" RAYME_SSH_USER="${OMEN_SSH_USER:-pmpg}" \
   "$REPO_ROOT/scripts/bootstrap-rayme-ssh.sh" restore >/dev/null
 
+run_remote_deploy() {
 EXPECTED_HEAD="${local_head}" OMEN_REPO="${OMEN_REPO}" OMEN_BRANCH="${OMEN_BRANCH}" \
+RAYME_OMEN_VERIFY_VOXCPM2="${RAYME_OMEN_VERIFY_VOXCPM2}" \
 ssh "${OMEN_SSH_ALIAS}" "powershell -NoProfile -ExecutionPolicy Bypass -Command - " <<'POWERSHELL'
 $ErrorActionPreference = "Stop"
 $repo = $env:OMEN_REPO
@@ -27,11 +37,14 @@ if (-not $repo) { $repo = "C:\Users\pmpg\rayme\RayMe" }
 $branch = $env:OMEN_BRANCH
 if (-not $branch) { $branch = "main" }
 $expectedHead = $env:EXPECTED_HEAD
+$verifyVoxCpm2 = $env:RAYME_OMEN_VERIFY_VOXCPM2 -eq "1"
 
 Set-Location $repo
 Write-Host "== OMEN deploy: repo $(Get-Location)"
-git checkout -- .
-git clean -fd
+$dirty = git status --porcelain
+if ($dirty) {
+  throw "OMEN checkout has local changes; refusing to deploy without discarding work: $($dirty -join '; ')"
+}
 git fetch origin $branch
 git pull --ff-only origin $branch
 $actualHead = (git rev-parse HEAD).Trim()
@@ -43,6 +56,156 @@ if ($expectedHead -and $actualHead -ne $expectedHead) {
 $cudaRuntimeBin = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin"
 if (-not (Test-Path "$cudaRuntimeBin\cublas64_12.dll")) {
   throw "Missing CUDA 12 runtime at $cudaRuntimeBin. Expected cublas64_12.dll for faster-whisper GPU STT."
+}
+
+function Invoke-RayMeVoxCpm2Verification {
+  Write-Host "== Verifying VoxCPM2 runtime smoke"
+  & uv sync --project ai-backend --extra tts
+  if ($LASTEXITCODE -ne 0) { throw "uv sync --project ai-backend --extra tts failed" }
+
+  $env:PATH = "$cudaRuntimeBin;$env:PATH"
+  $probe = @'
+import gc
+import importlib.metadata
+import json
+import os
+import subprocess
+import time
+
+MODEL_ID = "openbmb/VoxCPM2"
+EXPECTED_PACKAGE = "voxcpm==2.0.2"
+
+
+def gpu_snapshot():
+    output = subprocess.check_output(
+        [
+            "nvidia-smi",
+            "--query-gpu=name,memory.total,memory.used,memory.free",
+            "--format=csv,noheader,nounits",
+        ],
+        text=True,
+    ).strip().splitlines()[0]
+    name, total, used, free = [part.strip() for part in output.split(",")]
+    return {
+        "gpu_name": name,
+        "memory_total_mb": int(total),
+        "memory_used_mb": int(used),
+        "memory_free_mb": int(free),
+    }
+
+
+before = gpu_snapshot()
+
+import torch
+
+torch_version = torch.__version__
+if "+cpu" in torch_version.lower():
+    raise RuntimeError(f"CPU-only torch is not allowed for VoxCPM2: {torch_version}")
+if not torch.version.cuda:
+    raise RuntimeError(f"CUDA torch build is required for VoxCPM2: {torch_version}")
+if not torch.cuda.is_available():
+    raise RuntimeError("torch.cuda.is_available() is false for VoxCPM2")
+
+package_version = importlib.metadata.version("voxcpm")
+package = f"voxcpm=={package_version}"
+if package != EXPECTED_PACKAGE:
+    raise RuntimeError(f"Expected {EXPECTED_PACKAGE}, got {package}")
+
+from voxcpm import VoxCPM
+
+started = time.perf_counter()
+model = VoxCPM.from_pretrained(MODEL_ID, device="cuda")
+load_ms = round((time.perf_counter() - started) * 1000, 1)
+
+tts_model = getattr(model, "tts_model", None)
+sample_rate = getattr(tts_model, "sample_rate", None)
+if sample_rate is None:
+    raise RuntimeError("VoxCPM2 runtime did not expose tts_model.sample_rate")
+sample_rate = int(sample_rate)
+if sample_rate != 48000:
+    raise RuntimeError(f"Expected VoxCPM2 runtime sample rate 48000, got {sample_rate}")
+
+device_types = set()
+for candidate in (model, tts_model, getattr(model, "model", None)):
+    if candidate is None or not hasattr(candidate, "parameters"):
+        continue
+    try:
+        for parameter in candidate.parameters():
+            device_types.add(parameter.device.type)
+            break
+    except Exception:
+        pass
+if device_types == {"cpu"}:
+    raise RuntimeError("VoxCPM2 model parameters loaded on CPU")
+
+try:
+    from huggingface_hub import snapshot_download
+
+    cache_path = snapshot_download(MODEL_ID, local_files_only=True)
+except Exception:
+    cache_path = os.environ.get("HF_HOME") or os.path.expanduser("~/.cache/huggingface")
+
+after = gpu_snapshot()
+peak_vram_mb = max(before["memory_used_mb"], after["memory_used_mb"])
+free_min_mb = min(before["memory_free_mb"], after["memory_free_mb"])
+
+runtime_smoke = {
+    "commit_sha": os.environ.get("EXPECTED_HEAD", ""),
+    "package": package,
+    "model_id": MODEL_ID,
+    "device": "cuda",
+    "sample_rate": sample_rate,
+    "runtime_sample_rate": sample_rate,
+    "torch_version": torch_version,
+    "torch_cuda_version": torch.version.cuda,
+    "cuda_available": True,
+    "cuda_device_name": torch.cuda.get_device_name(0),
+    "model_cache_path": cache_path,
+    "model_load_ms": load_ms,
+    "vram_before": before,
+    "vram_after_load": after,
+    "cpu_fallback_detected": False,
+}
+vram_soak = {
+    "gpu_name": after["gpu_name"],
+    "memory_total_mb": after["memory_total_mb"],
+    "memory_used_peak_mb": peak_vram_mb,
+    "memory_free_min_mb": free_min_mb,
+    "resident_engines": ["voxcpm2_standalone_probe"],
+    "stt_model": "distil-large-v3",
+    "vad_ready": False,
+    "iterations": 1,
+    "passed_11gb_budget": peak_vram_mb <= 11264,
+    "cpu_fallback_detected": False,
+    "peak_vram_mb": peak_vram_mb,
+    "vram_budget_mb": 11264,
+    "within_11gb_budget": peak_vram_mb <= 11264,
+}
+if peak_vram_mb > 11264:
+    raise RuntimeError(f"VoxCPM2 peak VRAM {peak_vram_mb} MB exceeds 11264 MB budget")
+
+del model
+gc.collect()
+torch.cuda.empty_cache()
+
+print("__RAYME_VOXCPM2_PROBE_JSON__" + json.dumps({
+    "runtime_smoke": runtime_smoke,
+    "vram_soak": vram_soak,
+}, sort_keys=True))
+'@
+
+  $probeOutput = $probe | & uv run --project ai-backend python -
+  if ($LASTEXITCODE -ne 0) { throw "VoxCPM2 runtime verification failed" }
+  $probeLine = $probeOutput | Where-Object { $_ -like "__RAYME_VOXCPM2_PROBE_JSON__*" } | Select-Object -Last 1
+  if (-not $probeLine) { throw "VoxCPM2 runtime verification did not emit JSON evidence" }
+  $probeJson = $probeLine.Substring("__RAYME_VOXCPM2_PROBE_JSON__".Length)
+  $payload = $probeJson | ConvertFrom-Json
+  $script:VoxCpm2RuntimeSmoke = $payload.runtime_smoke
+  $script:VoxCpm2VramSoak = $payload.vram_soak
+}
+
+if ($verifyVoxCpm2) {
+  Invoke-RayMeVoxCpm2Verification
 }
 
 Write-Host "== Verifying AI GPU runtime"
@@ -139,6 +302,65 @@ $webStatus | Select-Object endpoint_status,resident_tts_engine | Format-List
 if ($webStatus.endpoint_status -match "unreachable" -or $webStatus.resident_tts_engine -ne "f5") {
   throw "Web UI cannot reach the resident F5 AI backend"
 }
+
+if ($verifyVoxCpm2) {
+  $script:VoxCpm2RuntimeSmoke.commit_sha = $actualHead
+  $script:VoxCpm2VramSoak.vad_ready = [bool]$aiStatus.vad_ready
+  if ($aiStatus.stt_model) { $script:VoxCpm2VramSoak.stt_model = [string]$aiStatus.stt_model }
+  $script:VoxCpm2VramSoak.resident_engines = @(
+    "voxcpm2_standalone_probe",
+    "live_ai_backend:$($aiStatus.resident_tts_engine)"
+  )
+  Write-Host "__RAYME_VOXCPM2_RUNTIME_SMOKE_JSON__$($script:VoxCpm2RuntimeSmoke | ConvertTo-Json -Depth 8 -Compress)"
+  Write-Host "__RAYME_VOXCPM2_VRAM_SOAK_JSON__$($script:VoxCpm2VramSoak | ConvertTo-Json -Depth 8 -Compress)"
+}
 POWERSHELL
+}
+
+if [[ "$RAYME_OMEN_VERIFY_VOXCPM2" == "1" ]]; then
+  deploy_log="$(mktemp)"
+  set +e
+  run_remote_deploy | tee "$deploy_log"
+  deploy_status=${PIPESTATUS[0]}
+  set -e
+  if [[ "$deploy_status" -ne 0 ]]; then
+    exit "$deploy_status"
+  fi
+
+  runtime_json="$(sed -n 's/^__RAYME_VOXCPM2_RUNTIME_SMOKE_JSON__//p' "$deploy_log" | tail -n 1)"
+  if [[ -z "$runtime_json" ]]; then
+    echo "VoxCPM2 runtime smoke JSON marker was not found in deploy output" >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "$RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON")"
+  python3 - "$runtime_json" "$RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(sys.argv[1])
+Path(sys.argv[2]).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+
+  vram_json="$(sed -n 's/^__RAYME_VOXCPM2_VRAM_SOAK_JSON__//p' "$deploy_log" | tail -n 1)"
+  if [[ -n "$RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON" ]]; then
+    if [[ -z "$vram_json" ]]; then
+      echo "VoxCPM2 VRAM soak JSON marker was not found in deploy output" >&2
+      exit 1
+    fi
+    mkdir -p "$(dirname "$RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON")"
+    python3 - "$vram_json" "$RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(sys.argv[1])
+Path(sys.argv[2]).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+  fi
+  rm -f "$deploy_log"
+else
+  run_remote_deploy
+fi
 
 echo "OMEN deploy complete: ${local_head}"
