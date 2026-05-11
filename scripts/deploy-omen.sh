@@ -67,6 +67,16 @@ if (-not (Test-Path "$cudaRuntimeBin\cublas64_12.dll")) {
   throw "Missing CUDA 12 runtime at $cudaRuntimeBin. Expected cublas64_12.dll for faster-whisper GPU STT."
 }
 
+function Stop-RayMePortOwners {
+  Write-Host "== Stopping existing port owners"
+  $ports = Get-NetTCPConnection -State Listen -LocalPort 8443,9443 -ErrorAction SilentlyContinue
+  if ($ports) {
+    $ports | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize
+    $ports.OwningProcess | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force }
+  }
+  Start-Sleep -Seconds 3
+}
+
 function Invoke-RayMeVoxCpm2Verification {
   Write-Host "== Verifying VoxCPM2 runtime smoke"
 
@@ -234,6 +244,7 @@ print("__RAYME_VOXCPM2_PROBE_JSON__" + json.dumps({
 }
 
 if ($verifyVoxCpm2) {
+  Stop-RayMePortOwners
   Invoke-RayMeVoxCpm2Verification
 }
 
@@ -268,13 +279,7 @@ Set-Location "$repo\web-ui\client"
 npm run build
 Set-Location $repo
 
-Write-Host "== Stopping existing port owners"
-$ports = Get-NetTCPConnection -State Listen -LocalPort 8443,9443 -ErrorAction SilentlyContinue
-if ($ports) {
-  $ports | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize
-  $ports.OwningProcess | Sort-Object -Unique | ForEach-Object { Stop-Process -Id $_ -Force }
-}
-Start-Sleep -Seconds 3
+Stop-RayMePortOwners
 
 Write-Host "== Asserting canonical scheduled tasks"
 schtasks /Delete /TN RayMePhase1AI /F 2>&1 | Out-Null
