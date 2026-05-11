@@ -80,6 +80,66 @@ test('Voice Lab saves after preview returns HTTP 502 and stays on RayMe APIs', a
   assertNoBrowserErrors();
 });
 
+test('Voice Lab renders VoxCPM2 controls only for VoxCPM2 and saves settings', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  const voiceEvents: string[] = [];
+
+  page.on('request', (request) => {
+    expectRayMeApiRequest(request);
+    recordVoiceApiRequest(request, voiceEvents);
+  });
+
+  await routeVoiceLabApis(page, { includeVoxCpm2: true, expectedEngine: 'voxcpm2' });
+
+  await page.goto('/voice-lab');
+  await expect(page.getByRole('heading', { name: 'Voice Lab' })).toBeVisible();
+
+  await page.getByLabel('Upload Sample').setInputFiles({
+    name: 'voxcpm2-sample.wav',
+    mimeType: 'audio/wav',
+    buffer: makeTinyWav()
+  });
+  await page.getByRole('button', { name: 'Transcribe Sample' }).click();
+  await expect(page.getByLabel('Reference transcript')).toHaveValue(sampleTranscript);
+  await page.getByLabel('Reference transcript').fill(editedTranscript);
+
+  await expect(page.getByRole('radio', { name: /F5-TTS/ })).toBeChecked();
+  await expect(page.getByRole('radio', { name: /Reference only/ })).toHaveCount(0);
+  await expect(page.getByRole('radio', { name: /Transcript guided/ })).toHaveCount(0);
+
+  await expect(page.getByRole('radio', { name: /VoxCPM2/ })).toBeVisible();
+  await page.getByRole('radio', { name: /VoxCPM2/ }).check();
+  await expect(page.getByRole('radio', { name: /Reference only/ })).toBeVisible();
+  await expect(page.getByRole('radio', { name: /Transcript guided/ })).toBeVisible();
+  await expect(
+    page.getByText('Transcript-guided mode may improve VoxCPM2 results')
+  ).toBeVisible();
+  await expect(page.getByLabel('Style prompt')).toHaveAttribute('maxlength', '300');
+  await expect(page.getByLabel('CFG value')).toHaveAttribute('min', '1');
+  await expect(page.getByLabel('CFG value')).toHaveAttribute('max', '3');
+  await expect(page.getByLabel('Inference timesteps')).toHaveAttribute('min', '4');
+  await expect(page.getByLabel('Inference timesteps')).toHaveAttribute('max', '30');
+
+  await page.getByRole('radio', { name: /Transcript guided/ }).check();
+  await page.getByLabel('Style prompt').fill('Warm phone-call delivery.');
+  await setRangeValue(page.getByLabel('CFG value'), '2.2');
+  await setRangeValue(page.getByLabel('Inference timesteps'), '12');
+  await page.getByLabel('Voice name').fill('RayMe Browser Voice');
+  await page.getByRole('button', { name: 'Save Voice' }).click();
+  await expect(page.getByText('Voice saved.')).toBeVisible();
+
+  expect(voiceEvents).toEqual(
+    expect.arrayContaining([
+      'POST /api/voices/assets',
+      'POST /api/voices/assets/sample-asset/transcribe',
+      'POST /api/voices'
+    ])
+  );
+  assertNoBrowserErrors();
+});
+
 test('Voice Lab unlocks preview and save after failed transcription with manual transcript', async ({
   page
 }) => {
@@ -262,7 +322,12 @@ test('Gallery voice badges show assigned, none, and force-deleted unavailable st
 
 async function routeVoiceLabApis(
   page: Page,
-  options: { transcribeFails?: boolean; expectedTranscript?: string } = {}
+  options: {
+    transcribeFails?: boolean;
+    expectedTranscript?: string;
+    includeVoxCpm2?: boolean;
+    expectedEngine?: string;
+  } = {}
 ) {
   await page.route('**/api/settings', async (route) => {
     await fulfillJson(route, {
@@ -317,7 +382,18 @@ async function routeVoiceLabApis(
             available: false,
             state: 'unavailable',
             unavailable_reason: 'engine synthesis is not implemented in Phase 02'
-          }
+          },
+          ...(options.includeVoxCpm2
+            ? [
+                {
+                  id: 'voxcpm2',
+                  label: 'VoxCPM2',
+                  available: true,
+                  state: 'idle',
+                  caveats: ['Candidate', '48 kHz', 'RTX 3060 gate pending']
+                }
+              ]
+            : [])
         ]
       }
     });
@@ -330,25 +406,39 @@ async function routeVoiceLabApis(
     }
 
     expect(route.request().method()).toBe('POST');
+    const expectedEngine = options.expectedEngine ?? 'f5';
+    const expectedMetadata =
+      expectedEngine === 'voxcpm2'
+        ? {
+            speech_speed: options.transcribeFails ? 0.85 : 0.75,
+            engine_settings: {
+              voxcpm2: {
+                cloning_mode: 'transcript_guided',
+                style_prompt: 'Warm phone-call delivery.',
+                cfg_value: 2.2,
+                inference_timesteps: 12,
+                normalize: true,
+                denoise: false
+              }
+            }
+          }
+        : {
+            speech_speed: options.transcribeFails ? 0.85 : 0.75
+          };
     expect(route.request().postDataJSON()).toMatchObject({
       asset_id: 'sample-asset',
       name: options.transcribeFails ? 'android-sample' : 'RayMe Browser Voice',
       reference_transcript: options.expectedTranscript ?? editedTranscript,
-      default_engine: 'f5',
-      metadata: {
-        speech_speed: options.transcribeFails ? 0.85 : 0.75
-      }
+      default_engine: expectedEngine,
+      metadata: expectedMetadata
     });
     await fulfillJson(route, {
       voice_id: 'voice-rayme',
       asset_id: 'sample-asset',
       name: options.transcribeFails ? 'android-sample' : 'RayMe Browser Voice',
-      default_engine: 'f5',
+      default_engine: expectedEngine,
       reference_transcript: options.expectedTranscript ?? editedTranscript,
-      metadata: {
-        speech_speed: options.transcribeFails ? 0.85 : 0.75,
-        engine_settings: { f5: { speech_speed: options.transcribeFails ? 0.85 : 0.75 } }
-      },
+      metadata: expectedMetadata,
       status: 'available'
     }, 201);
   });

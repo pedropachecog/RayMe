@@ -67,7 +67,21 @@ const engineLabels = [
   'Qwen3-TTS 0.6B-Base',
   'LuxTTS',
   'Chatterbox Turbo',
-  'TADA 1B'
+  'TADA 1B',
+  'VoxCPM2'
+];
+
+const voxcpm2Copy = [
+  'VoxCPM2',
+  'Candidate',
+  '48 kHz',
+  'RTX 3060 gate pending',
+  'Reference only',
+  'Transcript guided',
+  'Transcript-guided mode may improve VoxCPM2 results',
+  'Style prompt',
+  'CFG value',
+  'Inference timesteps'
 ];
 
 afterEach(() => {
@@ -253,6 +267,66 @@ describe('Voice Lab Phase 2 source contract', () => {
     }
 
     expect(voiceLabSources).not.toContain("['F5-TTS', 'XTTS v2', 'Qwen3-TTS 0.6B-Base']");
+  });
+
+  it('renders VoxCPM2 controls only for VoxCPM2', () => {
+    for (const copy of voxcpm2Copy) {
+      expect(voiceLabSources).toContain(copy);
+    }
+
+    expect(routeSource).toContain("id: 'voxcpm2'");
+    expect(routeSource).toMatch(/selectedEngine\s*={3}\s*['"]voxcpm2['"]/);
+    expect(routeSource).toMatch(/maxlength={?300}?|maxLength={?300}?|maxlength="300"/);
+    expect(routeSource).toMatch(/cfg_value[\s\S]*(?:min="?1(?:\.0)?"?)[\s\S]*(?:max="?3(?:\.0)?"?)/);
+    expect(routeSource).toMatch(
+      /inference_timesteps[\s\S]*(?:min="?4"?)[\s\S]*(?:max="?30"?)/,
+    );
+    expect(routeSource).not.toMatch(/Reference only[\s\S]*XTTS v2|Transcript guided[\s\S]*F5-TTS/);
+  });
+
+  it('saves VoxCPM2 engine_settings while preserving non-VoxCPM2 UX', async () => {
+    const fetchMock = installFetch({ voice_id: 'voice-voxcpm2' });
+
+    await saveVoice({
+      asset_id: 'asset-voxcpm2',
+      name: 'VoxCPM2 Voice',
+      default_engine: 'voxcpm2',
+      reference_transcript: 'Editable transcript.',
+      metadata: {
+        source: 'voice-lab',
+        engine_settings: {
+          voxcpm2: {
+            cloning_mode: 'transcript_guided',
+            style_prompt: 'Warm phone-call delivery.',
+            cfg_value: 2.2,
+            inference_timesteps: 12,
+            normalize: true,
+            denoise: false
+          },
+          f5: {
+            speech_speed: 0.85
+          }
+        }
+      }
+    });
+
+    expect(JSON.parse(lastRequest(fetchMock).init.body as string)).toMatchObject({
+      metadata: {
+        engine_settings: {
+          voxcpm2: {
+            cloning_mode: 'transcript_guided',
+            style_prompt: 'Warm phone-call delivery.',
+            cfg_value: 2.2,
+            inference_timesteps: 12,
+            normalize: true,
+            denoise: false
+          }
+        }
+      }
+    });
+    expect(routeSource).toMatch(/engine_settings[\s\S]*voxcpm2[\s\S]*cloning_mode/);
+    expect(routeSource).toMatch(/selectedEngine[\s\S]*voxcpm2[\s\S]*engine_settings/);
+    expect(routeSource).toMatch(/selectedEngine[\s\S]*f5[\s\S]*speech_speed/);
   });
 
   it('allows saving a voice without a successful preview gate', () => {
