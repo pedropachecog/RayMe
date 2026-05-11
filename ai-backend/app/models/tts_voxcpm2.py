@@ -133,6 +133,7 @@ def _build_generate_kwargs(
     if request.voxcpm2_cloning_mode == "transcript_guided" and reference_transcript:
         kwargs["prompt_wav_path"] = str(reference_path)
         kwargs["prompt_text"] = reference_transcript
+        kwargs["reference_wav_path"] = str(reference_path)
     else:
         kwargs["reference_wav_path"] = str(reference_path)
         if request.voxcpm2_cloning_mode != "reference_only" and not reference_transcript:

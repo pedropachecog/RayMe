@@ -162,6 +162,8 @@ def test_voxcpm2_transcript_guided_mode_passes_prompt_text() -> None:
     assert call["prompt_text"] == "A clean reference transcript."
     assert "prompt_wav_path" in call
     assert Path(call["prompt_wav_path"]).suffix == ".wav"
+    assert "reference_wav_path" in call
+    assert call["reference_wav_path"] == call["prompt_wav_path"]
     assert result.warning_codes == []
 
 
