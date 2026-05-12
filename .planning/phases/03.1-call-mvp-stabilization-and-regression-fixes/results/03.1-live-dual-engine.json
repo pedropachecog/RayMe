@@ -1,0 +1,37 @@
+{
+  "phase": "03.1-call-mvp-stabilization-and-regression-fixes",
+  "commit": "85bbacc919c83d1b486883e616156b2d8778c3f5",
+  "deployed_commit": "85bbacc919c83d1b486883e616156b2d8778c3f5",
+  "generated_at": "2026-05-12T16:06:10Z",
+  "web_url": "https://192.168.1.199:8443",
+  "ai_health_url": "https://192.168.1.199:9443/health",
+  "engines": {
+    "voxcpm2": {
+      "status": "passed",
+      "call_started": true,
+      "user_speech_count": 2,
+      "ai_speech_count": 2,
+      "call_end_written": true,
+      "mute_exercised": true,
+      "route_surface": "existing /api/calls route",
+      "notes": "OMEN-local desktop live spec passed through the existing call flow with sanitized result counts."
+    },
+    "f5": {
+      "status": "passed",
+      "call_started": true,
+      "user_speech_count": 2,
+      "ai_speech_count": 2,
+      "call_end_written": true,
+      "mute_exercised": true,
+      "route_surface": "existing /api/calls route",
+      "notes": "OMEN-local desktop live spec passed through the existing call flow with sanitized result counts."
+    }
+  },
+  "overall_status": "passed",
+  "sanitization": {
+    "contains_secrets": false,
+    "contains_tracebacks": false,
+    "contains_raw_paths": false,
+    "notes": "Committed artifact contains structured pass/fail fields only; live audio fixture paths and raw logs are omitted."
+  }
+}
