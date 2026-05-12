@@ -43,6 +43,7 @@ test.describe('mobile-chromium call path', () => {
     ]) {
       const box = await control.boundingBox();
       expect(box).not.toBeNull();
+      expect(box!.width).toBeGreaterThanOrEqual(44);
       expect(box!.height).toBeGreaterThanOrEqual(44);
       expect(box!.y + box!.height).toBeLessThanOrEqual(navBox!.y);
     }

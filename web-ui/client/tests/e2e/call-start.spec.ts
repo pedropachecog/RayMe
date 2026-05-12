@@ -5,6 +5,10 @@ import { makeCharacter, makeThreadDetail } from './helpers/fixtures';
 
 const characterId = 'call-start-character';
 const threadId = 'call-start-thread';
+const MEDIA_RECONNECT_MAX_ATTEMPTS = 2;
+const MIC_BACKFILL_ROLLING_MS = 180000;
+const TERMINAL_CONNECTION_DROPPED_COPY =
+  'The call ended because the connection dropped. Your transcript so far was saved.';
 
 type ReconnectRouteCounters = {
   offerCount: number;
@@ -26,6 +30,18 @@ type ReconnectRouteOptions = {
   recoverEvents?: Array<Record<string, unknown>>;
   offerDelayMs?: number;
   failOfferFrom?: number;
+};
+
+type StartupRouteCounters = {
+  startCount: number;
+  offerCount: number;
+  endCount: number;
+  requestOrder: string[];
+};
+
+type CallStartRouteOptions = {
+  failOffer?: boolean;
+  offerGate?: Promise<void>;
 };
 
 type MockCallMediaSnapshot = {
@@ -64,6 +80,31 @@ test('starts a call from the thread header Start call control', async ({ page })
   await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Mute' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'End Call' })).toBeVisible();
+  assertNoBrowserErrors();
+});
+
+test('keeps startup in Connecting until microphone access and WebRTC offer complete', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  let resolveOffer: () => void = () => {};
+  const offerGate = new Promise<void>((resolve) => {
+    resolveOffer = resolve;
+  });
+  const counters = await installCallStartRoutes(page, { offerGate });
+
+  await page.goto(`/chat/${threadId}`);
+  await page.getByRole('button', { name: 'Start call' }).click();
+
+  await expect.poll(() => counters.startCount).toBe(1);
+  await expect.poll(() => counters.offerCount).toBe(1);
+  expect(counters.requestOrder).toEqual(['start', 'offer']);
+  await expect(page.getByRole('status').getByText('Connecting')).toBeVisible();
+  await expect(page.getByTestId('voice-visualizer')).toHaveCount(0);
+
+  resolveOffer();
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
   assertNoBrowserErrors();
 });
 
@@ -190,7 +231,7 @@ test('re-offers with a new peer instead of ending when browser peer connection f
   assertNoBrowserErrors();
 });
 
-test('sends reconnect backfill tail before applying the replacement answer when the first batch is slow', async ({
+test('sends reconnect backfill tail without omitting the 35256-69467ms missing-chunks span before setRemoteDescription', async ({
   page
 }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
@@ -207,6 +248,14 @@ test('sends reconnect backfill tail before applying the replacement answer when 
   expect(counters.backfills[0]).toMatchObject({ batch_index: 1, final: false });
   expect(counters.backfills[1]).toMatchObject({ batch_index: 2, final: true });
   expect(Number(counters.backfills[1].duration_ms ?? 0)).toBeGreaterThan(0);
+  expect(MIC_BACKFILL_ROLLING_MS).toBe(180000);
+  expect(counters.backfills.every((entry) => Number(entry.duration_ms ?? 0) <= 10_000)).toBe(true);
+
+  const selectedOffsets = reconnectBackfillSelections(counters);
+  expect(selectedOffsets.length).toBeGreaterThanOrEqual(2);
+  for (let index = 1; index < selectedOffsets.length; index += 1) {
+    expect(selectedOffsets[index].startMs).toBe(selectedOffsets[index - 1].endMs);
+  }
 
   const finalSendingIndex = counters.debugEvents.findIndex(
     (entry) =>
@@ -391,8 +440,8 @@ test('recovers and ends after the reconnect attempt limit gives up', async ({
   await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.ok')).toBe(2);
   await setCurrentMockPeerState(page, 'failed', 'disconnected');
 
-  await expect(page.getByRole('alert').getByText('The call ended because the connection dropped.')).toBeVisible();
-  expect(counters.offerCount).toBe(3);
+  await expect(page.getByRole('alert').getByText(TERMINAL_CONNECTION_DROPPED_COPY)).toBeVisible();
+  expect(counters.offerCount).toBe(1 + MEDIA_RECONNECT_MAX_ATTEMPTS);
   await expect.poll(() => counters.recoverCount).toBeGreaterThanOrEqual(1);
   await expect.poll(() => counters.endCount).toBe(1);
   expect(debugEventCount(counters, 'pc.media_reconnect.give_up')).toBe(1);
@@ -570,6 +619,16 @@ async function getMockCallMediaSnapshot(page: Page): Promise<MockCallMediaSnapsh
 
 function debugEventCount(counters: ReconnectRouteCounters, event: string) {
   return counters.debugEvents.filter((entry) => entry.event === event).length;
+}
+
+function reconnectBackfillSelections(counters: ReconnectRouteCounters) {
+  return counters.debugEvents
+    .filter((entry) => entry.event === 'mic.reconnect_backfill.sending')
+    .map((entry) => ({
+      startMs: Number(entry.detail.selectedStartOffsetMs),
+      endMs: Number(entry.detail.selectedEndOffsetMs)
+    }))
+    .filter((entry) => Number.isFinite(entry.startMs) && Number.isFinite(entry.endMs));
 }
 
 function readMockPeerIdFromSdp(sdp: string) {
@@ -772,7 +831,13 @@ async function installReconnectCallRoutes(
   return counters;
 }
 
-async function installCallStartRoutes(page: Page, options: { failOffer?: boolean } = {}) {
+async function installCallStartRoutes(page: Page, options: CallStartRouteOptions = {}) {
+  const counters: StartupRouteCounters = {
+    startCount: 0,
+    offerCount: 0,
+    endCount: 0,
+    requestOrder: []
+  };
   await installCallDebugEventRoute(page);
   const character = makeCharacter({
     id: characterId,
@@ -818,6 +883,8 @@ async function installCallStartRoutes(page: Page, options: { failOffer?: boolean
   });
   await page.route('**/api/calls/start', async (route: Route) => {
     expect(route.request().method()).toBe('POST');
+    counters.startCount += 1;
+    counters.requestOrder.push('start');
     await fulfillJson(route, {
       call_id: 'call-start-01',
       session_id: 'rtc-call-start-01',
@@ -826,6 +893,11 @@ async function installCallStartRoutes(page: Page, options: { failOffer?: boolean
     }, 201);
   });
   await page.route('**/api/calls/*/offer', async (route) => {
+    counters.offerCount += 1;
+    counters.requestOrder.push('offer');
+    if (options.offerGate) {
+      await options.offerGate;
+    }
     if (options.failOffer) {
       await fulfillJson(
         route,
@@ -849,8 +921,11 @@ async function installCallStartRoutes(page: Page, options: { failOffer?: boolean
     });
   });
   await page.route('**/api/calls/*/end', async (route) => {
+    counters.endCount += 1;
+    counters.requestOrder.push('end');
     await fulfillJson(route, { call_id: 'call-start-01', session_id: 'rtc-call-start-01', reason: 'setup_failed' });
   });
+  return counters;
 }
 
 async function installMultiTurnCallRoutes(page: Page) {

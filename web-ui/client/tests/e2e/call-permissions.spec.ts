@@ -12,18 +12,20 @@ test('microphone denial shows public recovery copy and retry action', async ({ c
   });
   await installBlockedCallMicrophone(page);
   await context.grantPermissions([], { origin: 'http://127.0.0.1:4173' });
-  await installPermissionRoutes(page);
+  const counters = await installPermissionRoutes(page);
 
   await page.goto(`/chat/${threadId}`);
   await page.getByRole('button', { name: 'Start call' }).click();
 
   await expect(page.getByText(micBlockedCopy)).toBeVisible();
   await expect(page.getByRole('button', { name: 'Retry Microphone' })).toBeVisible();
+  expect(counters.startCount).toBe(0);
   await expect(page.getByText(/DOMException|NotAllowedError|Traceback|stack trace/i)).toHaveCount(0);
   assertNoBrowserErrors();
 });
 
 async function installPermissionRoutes(page: Page) {
+  const counters = { startCount: 0 };
   await page.route(`**/api/threads/${threadId}`, async (route) => {
     await fulfillJson(route, makeThreadDetail({
       id: threadId,
@@ -36,6 +38,7 @@ async function installPermissionRoutes(page: Page) {
     await route.fulfill({ status: 204 });
   });
   await page.route('**/api/calls/start', async (route) => {
+    counters.startCount += 1;
     await fulfillJson(route, {
       detail: {
         code: 'microphone_blocked',
@@ -43,4 +46,5 @@ async function installPermissionRoutes(page: Page) {
       }
     }, 403);
   });
+  return counters;
 }

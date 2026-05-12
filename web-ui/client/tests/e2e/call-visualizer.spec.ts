@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import {
   fulfillJson,
@@ -23,7 +23,8 @@ test('voice visualizer reflects Listening, Understanding, Composing, and Speakin
   await expect(visualizer).toBeVisible();
   await expect(visualizer.getByText('Listening')).toBeVisible();
   await expect(visualizer).toHaveAttribute('data-call-state', 'listening');
-  await expect(visualizer).toHaveAttribute('data-listening-rms', /0\.[1-9]/);
+  await expect.poll(() => readNumericAttribute(visualizer, 'data-listening-rms')).toBeGreaterThan(0);
+  expect(await readNumericAttribute(visualizer, 'data-listening-rms')).toBeLessThanOrEqual(1);
 
   await expect(visualizer.getByText('Understanding')).toBeVisible();
   await expect(visualizer).toHaveAttribute('data-call-state', 'understanding');
@@ -33,9 +34,17 @@ test('voice visualizer reflects Listening, Understanding, Composing, and Speakin
 
   await expect(visualizer.getByText('Speaking')).toBeVisible();
   await expect(visualizer).toHaveAttribute('data-call-state', 'speaking');
-  await expect(visualizer).toHaveAttribute('data-speaking-rms', /0\.[1-9]/);
+  await expect.poll(() => readNumericAttribute(visualizer, 'data-speaking-rms')).toBeGreaterThan(0);
+  expect(await readNumericAttribute(visualizer, 'data-speaking-rms')).toBeLessThanOrEqual(1);
   assertNoBrowserErrors();
 });
+
+async function readNumericAttribute(
+  locator: Locator,
+  attributeName: string
+) {
+  return Number(await locator.getAttribute(attributeName));
+}
 
 async function installVisualizerRoutes(page: Page) {
   await page.route(`**/api/threads/${threadId}`, async (route) => {
