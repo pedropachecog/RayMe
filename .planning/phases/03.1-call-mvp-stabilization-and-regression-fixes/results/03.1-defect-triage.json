@@ -173,34 +173,42 @@
   "deferred_out_of_scope": [
     {
       "name": "VAD-driven barge-in",
+      "context_decisions": ["D-21", "D-24"],
       "reason": "Phase 4 call-feel capability; not required for current MVP stabilization."
     },
     {
       "name": "echo-loop mitigation",
+      "context_decisions": ["D-21", "D-24"],
       "reason": "Phase 4 call-feel capability; not required for current MVP stabilization."
     },
     {
       "name": "TTFA target optimization",
+      "context_decisions": ["D-21", "D-24"],
       "reason": "Phase 4 call-feel capability; Phase 03.1 only smokes current engines."
     },
     {
       "name": "advanced call-feel tuning",
+      "context_decisions": ["D-21", "D-24"],
       "reason": "Phase 4 scope; not part of reconnect/drop/writeback stabilization."
     },
     {
       "name": "full visualizer polish",
+      "context_decisions": ["D-21", "D-24"],
       "reason": "Phase 4 or later UI polish; MVP state preservation only."
     },
     {
       "name": "new in-call features",
+      "context_decisions": ["D-21", "D-24"],
       "reason": "Feature expansion is excluded from the stabilization phase."
     },
     {
       "name": "redesigned user-visible reconnect feature",
+      "context_decisions": ["D-16", "D-21", "D-24"],
       "reason": "D-16 limits this phase to stabilizing existing recovery/backfill behavior."
     },
     {
       "name": "broad call UI redesign",
+      "context_decisions": ["D-23", "D-24"],
       "reason": "D-23 limits UI changes to small recovery/status/copy fixes."
     }
   ],
