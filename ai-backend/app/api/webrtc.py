@@ -753,15 +753,20 @@ async def _receive_audio_track(
                 for attempt in range(10):
                     await asyncio.sleep(0.5)
                     if session.state in {"ended", "failed"}:
-                        break
+                        return
                     ice_state = getattr(pc, "iceConnectionState", "?")
-                    if ice_state == "completed" or ice_state == "connected":
+                    conn_state = getattr(pc, "connectionState", "?")
+                    if (
+                        ice_state in {"completed", "connected"}
+                        or conn_state == "connected"
+                    ):
                         reconnected = True
                         logger.info(
                             "[rayme-call] track.recv.reconnected session=%s "
-                            "ice=%s after=%.1fs",
+                            "ice=%s conn=%s after=%.1fs",
                             session.session_id,
                             ice_state,
+                            conn_state,
                             (attempt + 1) * 0.5,
                         )
                         break
