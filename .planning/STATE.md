@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: ready_to_plan
-stopped_at: Phase 03.1 context gathered
-last_updated: "2026-05-12T03:17:24.637Z"
+status: ready_to_execute
+stopped_at: Phase 03.1 planned
+last_updated: "2026-05-12T11:48:55.323Z"
 progress:
-  total_phases: 10
-  completed_phases: 8
-  total_plans: 87
+  total_phases: 11
+  completed_phases: 7
+  total_plans: 94
   completed_plans: 87
-  percent: 80
+  percent: 93
 ---
 
 ## Phase Status
@@ -53,6 +53,7 @@ progress:
 - Phase 03 plan 03-11 completed on 2026-05-11: live OMEN-PC desktop call acceptance passed at deployed commit `e48e2ce57cc31a30e7df97c1f0ea9215c136dc45`, with secure LAN HTTPS, current GPU `/health`, server-side mute frame-drop evidence, durable call writeback, and a 5-minute stability hold recorded in `OMEN-PC-LIVE-EVIDENCE.md`.
 - Phase 03 plan 03-12 completed on 2026-05-12: Android Chrome product-owner acceptance was approved, the final Phase 3 smoke sweep passed, and `call-summary.spec.ts` now mocks teardown telemetry routes so the browser error guard remains clean.
 - Phase 03 complete on 2026-05-12: First Working Call MVP has local automated evidence, live OMEN-PC desktop evidence, server-side mute/stability evidence, and physical Android Chrome approval.
+- Phase 03.1 planned on 2026-05-12: seven verified plans now cover evidence-first defect triage, AI backend lifecycle hardening, Web UI server call facade/writeback hardening, client helper and browser call-route stabilization, focused local regression evidence, canonical OMEN live dual-engine verification, and Android Chrome product-owner acceptance.
 - Phase 07 plan 07-01 completed on 2026-05-11: RED AI backend VoxCPM2 contracts now cover roster metadata, CUDA-only adapter loading, bounded synthesis options, 48 kHz output, sanitized errors, and engine-scoped degradation.
 - Phase 07 plan 07-02 completed on 2026-05-11: RED Web UI server/client contracts now cover durable VoxCPM2 voice metadata, conditional Voice Lab controls, fallback roster copy, missing-transcript warning, and preview/test-play payload behavior.
 - Phase 07 plan 07-03 completed on 2026-05-11: RED call-flow contracts now cover saved VoxCPM2 metadata forwarding into real playback, bounded WebRTC speak options, sanitized `call_tts_failed`, and unchanged interrupt behavior.
