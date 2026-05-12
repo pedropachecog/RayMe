@@ -289,11 +289,11 @@ Plans:
 **Goal:** Stabilize the already-shipped Phase 3 call MVP before Phase 4 by fixing evidence-backed defects and brittle edges in call startup, negotiation, reconnect/drop/backfill, mute, interrupt, end-call, TTS playback smoke, durable writeback, diagnostics, local regression coverage, OMEN live desktop verification, and Android acceptance for touched mobile-sensitive paths.
 **Requirements:** REQ-40, REQ-47, REQ-48, REQ-49, REQ-50, REQ-63, REQ-A0, REQ-A1, plus Phase 8 dual-engine live-call coverage for `voxcpm2` preferred/default and `f5` fallback.
 **Depends on:** Phase 3
-**Plans:** 1/7 plans executed
+**Plans:** 2/7 plans executed
 
 Plans:
 - [x] 03.1-01-PLAN.md - Wave 0 evidence-first defect triage, open phone-call debug coverage, Phase 03.1 evidence scaffold, dual-engine live smoke contract, and Phase 4 scope exclusions
-- [ ] 03.1-02-PLAN.md - AI backend call lifecycle stabilization for mute, reconnect/drop/backfill, interrupt, end, and dual-engine TTS playback
+- [x] 03.1-02-PLAN.md - AI backend call lifecycle stabilization for mute, reconnect/drop/backfill, interrupt, end, and dual-engine TTS playback
 - [ ] 03.1-03-PLAN.md - Web UI server call facade stabilization for same-origin controls, prompt context, diagnostics, and durable writeback
 - [ ] 03.1-04-PLAN.md - Client helper/unit stabilization for same-origin wrappers, mic/audio helpers, missing-chunks reconnect backfill, and call state
 - [ ] 03.1-05-PLAN.md - Browser call route/component stabilization for startup, reconnect PCM continuity, controls, visualizer states, and mobile layout
