@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready_to_execute
-stopped_at: Completed 03.1-05-PLAN.md
-last_updated: "2026-05-12T14:45:14.492Z"
+stopped_at: Completed 03.1-06-PLAN.md
+last_updated: "2026-05-12T15:09:17.996Z"
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 94
-  completed_plans: 92
-  percent: 98
+  completed_plans: 93
+  percent: 99
 ---
 
 ## Phase Status
@@ -59,6 +59,7 @@ progress:
 - Phase 03.1 plan 03.1-03 completed on 2026-05-12: Web UI server call facade regressions now cover same-origin unsafe routes, reconnect-audio no-persistence behavior, `_webrtc_timeout` backfill proxying, bounded debug diagnostics, sliding-window prompt context, and VoxCPM2/F5 route ownership.
 - Phase 03.1 plan 03.1-04 completed on 2026-05-12: Client call helper regressions now cover Android-safe mic capture, same-origin reconnect/event recovery wrappers, server/local mute split, button interrupt cleanup, and contiguous delayed reconnect PCM tail selection.
 - Phase 03.1 plan 03.1-05 completed on 2026-05-12: Browser call route regressions now cover startup gating, reconnect-tail selected-offset continuity, permission denial, exact terminal failure copy, MVP visualizer states, and mobile 44px controls; route startup stays Connecting until WebRTC offer completion and reconnect tails remain contiguous from the previous sent boundary.
+- Phase 03.1 plan 03.1-06 completed on 2026-05-12: focused local stabilization evidence passed across AI backend pytest, Web UI server pytest, client unit tests, desktop Chromium call specs, and mobile Chromium call spec; sanitized JSON artifacts now prove mute drops, reconnect outcome, missing-chunks offset continuity, and durable writeback counts.
 - Phase 07 plan 07-01 completed on 2026-05-11: RED AI backend VoxCPM2 contracts now cover roster metadata, CUDA-only adapter loading, bounded synthesis options, 48 kHz output, sanitized errors, and engine-scoped degradation.
 - Phase 07 plan 07-02 completed on 2026-05-11: RED Web UI server/client contracts now cover durable VoxCPM2 voice metadata, conditional Voice Lab controls, fallback roster copy, missing-transcript warning, and preview/test-play payload behavior.
 - Phase 07 plan 07-03 completed on 2026-05-11: RED call-flow contracts now cover saved VoxCPM2 metadata forwarding into real playback, bounded WebRTC speak options, sanitized `call_tts_failed`, and unchanged interrupt behavior.
@@ -94,6 +95,8 @@ progress:
 - Phase 03.1-04 reconnect backfill policy: delayed client selections with a prior `startMs` resume contiguously from that boundary instead of reapplying the latest-window cap.
 - Phase 03.1-05 startup gating policy: browser call startup stays in a Connecting panel until microphone capture and same-origin WebRTC offer completion, so live controls render only after the listening state is actually active.
 - Phase 03.1-05 reconnect-tail policy: delayed browser reconnect tails may pad small recorder scheduling gaps with silence so selected PCM ranges remain contiguous from the previous sent boundary and positive backfill gaps are rejected by Playwright.
+- Phase 03.1-06 evidence policy: local stabilization proof is committed as bounded JSON summaries and sanitized evidence text only; raw logs, transcript dumps, local paths, tracebacks, and secrets stay out of committed artifacts.
+- Phase 03.1-06 acceptance policy: Android product-owner acceptance remains required after OMEN desktop verification because the stabilized baseline includes call startup, microphone/media behavior, mobile layout, and playback-sensitive call paths.
 - Phase 08-01 streaming adapter policy: VoxCPM2 streaming stays internal to the AI backend through `TtsAudioChunk` and `TtsStreamingAdapter`.
 - Phase 08-01 no-fallback policy: `VoxCpm2TtsAdapter.stream()` calls `generate_streaming()` directly and rejects empty streams instead of falling back to `runtime.generate()`.
 - Phase 08-02 call-session streaming policy: VoxCPM2 live call playback uses `adapter.stream()` only for `voxcpm2` adapters with a callable stream method.
@@ -230,8 +233,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-05-12T14:45:14.446Z
-Stopped at: Completed 03.1-05-PLAN.md
+Last session: 2026-05-12T15:09:17.956Z
+Stopped at: Completed 03.1-06-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
