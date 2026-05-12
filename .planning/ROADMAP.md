@@ -292,13 +292,13 @@ Plans:
 **Plans:** 7 plans
 
 Plans:
-- [ ] 03.1-01-PLAN.md - Wave 0 evidence-first defect triage, Phase 03.1 evidence scaffold, dual-engine live smoke contract, and Phase 4 scope exclusions
+- [ ] 03.1-01-PLAN.md - Wave 0 evidence-first defect triage, open phone-call debug coverage, Phase 03.1 evidence scaffold, dual-engine live smoke contract, and Phase 4 scope exclusions
 - [ ] 03.1-02-PLAN.md - AI backend call lifecycle stabilization for mute, reconnect/drop/backfill, interrupt, end, and dual-engine TTS playback
 - [ ] 03.1-03-PLAN.md - Web UI server call facade stabilization for same-origin controls, prompt context, diagnostics, and durable writeback
-- [ ] 03.1-04-PLAN.md - Client helper/unit stabilization for same-origin wrappers, mic/audio helpers, reconnect backfill, and call state
-- [ ] 03.1-05-PLAN.md - Browser call route/component stabilization for startup, reconnect, controls, visualizer states, and mobile layout
-- [ ] 03.1-06-PLAN.md - Focused local call regression baseline and runtime-sensitive evidence artifacts
-- [ ] 03.1-07-PLAN.md - Canonical OMEN deployment, dual-engine live desktop smoke, and Android Chrome product-owner acceptance
+- [ ] 03.1-04-PLAN.md - Client helper/unit stabilization for same-origin wrappers, mic/audio helpers, missing-chunks reconnect backfill, and call state
+- [ ] 03.1-05-PLAN.md - Browser call route/component stabilization for startup, reconnect PCM continuity, controls, visualizer states, and mobile layout
+- [ ] 03.1-06-PLAN.md - Focused local call regression baseline, missing-chunks proof, and runtime-sensitive evidence artifacts
+- [ ] 03.1-07-PLAN.md - Canonical OMEN deployment, dual-engine live desktop smoke, and Android Chrome product-owner missing-chunks acceptance
 
 ### Phase 4: Call Feel (the load-bearing phase)
 
