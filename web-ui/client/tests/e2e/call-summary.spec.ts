@@ -1,6 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 
-import { fulfillJson, installBrowserErrorGuard, installMockCallMedia } from './helpers/acceptance';
+import {
+  fulfillJson,
+  installBrowserErrorGuard,
+  installCallDebugEventRoute,
+  installMockCallMedia
+} from './helpers/acceptance';
 import { makeThreadDetail } from './helpers/fixtures';
 
 const threadId = 'call-summary-thread';
@@ -10,6 +15,7 @@ test('ending a call returns chronological call_start speech and call_end rows to
 }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
   await installMockCallMedia(page);
+  await installCallDebugEventRoute(page);
   await installSummaryRoutes(page);
 
   await page.goto(`/chat/${threadId}`);
@@ -68,6 +74,13 @@ async function installSummaryRoutes(page: Page) {
       session_id: 'rtc-call-summary-01',
       answer: { type: 'answer', sdp: 'v=0\r\n' },
       event_channel: 'rayme-events'
+    });
+  });
+  await page.route('**/api/calls/*/events/recover', async (route) => {
+    await fulfillJson(route, {
+      call_id: 'call-summary-01',
+      session_id: 'rtc-call-summary-01',
+      events: []
     });
   });
 }
