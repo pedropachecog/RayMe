@@ -29,8 +29,9 @@ export function selectReconnectAudioBackfill(
     limitToMaxWindow?: boolean;
   }
 ): LocalMicPcmSelection | null {
+  const shouldLimitToMaxWindow = limitToMaxWindow !== false && startMs <= 0;
   const boundedStartMs =
-    limitToMaxWindow === false ? startMs : Math.max(startMs, endMs - maxDurationMs);
+    shouldLimitToMaxWindow ? Math.max(startMs, endMs - maxDurationMs) : startMs;
   const selectedChunks = chunks.filter(
     (chunk) => chunk.endMs > boundedStartMs && chunk.startMs < endMs
   );
