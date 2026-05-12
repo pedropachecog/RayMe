@@ -1,0 +1,77 @@
+{
+  "phase": "4",
+  "phase_name": "Call Feel (the load-bearing phase)",
+  "timestamp": "2026-05-12T02:44:20Z",
+  "areas_completed": [
+    "Barge-in feel and false-positive tolerance"
+  ],
+  "areas_remaining": [
+    "Echo-loop mitigation on laptop speakers",
+    "Latency and TTS chunking behavior",
+    "Live captions and visualizer polish",
+    "VAD tuning controls and acceptance evidence"
+  ],
+  "decisions": {
+    "Barge-in feel and false-positive tolerance": [
+      {
+        "question": "When you genuinely interrupt RayMe mid-sentence, what should happen?",
+        "answer": "Brief duck-then-cut",
+        "options_presented": [
+          "Immediate hard cut",
+          "Brief duck-then-cut",
+          "Conservative cut only",
+          "You decide"
+        ]
+      },
+      {
+        "question": "How should RayMe treat short back-channel sounds while the AI is speaking, like mm-hmm, yeah, breath, or chair noise?",
+        "answer": "Agent discretion; tiny acknowledgments should not automatically cancel, but planning may tune the exact rule.",
+        "options_presented": [
+          "Duck only, don't cancel",
+          "Ignore back-channels completely",
+          "Cancel on any clear vocal sound",
+          "You decide"
+        ]
+      },
+      {
+        "question": "What should count as a real barge-in?",
+        "answer": "Speech duration plus confident word plus energy gate",
+        "options_presented": [
+          "Speech duration + confident word + energy gate",
+          "Speech duration + energy only",
+          "Word confidence only",
+          "You decide"
+        ]
+      },
+      {
+        "question": "Once barge-in fires, how deep should cancellation go?",
+        "answer": "Agent discretion on exact cancellation sequencing, bounded by the requirement that cancellation reaches browser playback, AI-backend TTS work, and the Web UI LLM stream enough to prove GPU drop and wasted-token logging. Client-only fake interrupt is not acceptable.",
+        "options_presented": [
+          "Full LIFO cancel",
+          "Audio-first cancel",
+          "Generation-safe cancel",
+          "You decide"
+        ]
+      }
+    ]
+  },
+  "deferred_ideas": [],
+  "canonical_refs": [
+    ".planning/ROADMAP.md",
+    ".planning/REQUIREMENTS.md",
+    ".planning/PROJECT.md",
+    ".planning/STATE.md",
+    ".planning/OPERATING-NOTES.md",
+    ".planning/phases/03-first-working-call-mvp/03-CONTEXT.md",
+    "docs/stitch/DESIGN.md",
+    "docs/stitch/screens/voice-call-true-dark.md",
+    "docs/stitch/html/voice-call-true-dark.html",
+    "ai-backend/app/call/session.py",
+    "web-ui/server/app/api/calls.py",
+    "web-ui/server/app/domain/call_service.py",
+    "web-ui/client/src/routes/call/[threadId]/+page.svelte",
+    "web-ui/client/src/lib/components/call/VoiceVisualizer.svelte",
+    "web-ui/client/src/lib/components/call/CallTranscript.svelte",
+    "web-ui/client/src/lib/components/settings/VadSettingsPanel.svelte"
+  ]
+}

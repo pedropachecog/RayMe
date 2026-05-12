@@ -205,6 +205,7 @@ progress:
 - Plan 00-07.2 completed: benchmarked native Windows vs WSL runtime permutations before Phase 0 writeback.
 - 2026-04-23 TTS follow-up: shared chunking has been implemented and the Windows plus WSL matrix reran. Manual listening is partially scored but sufficient to close the spike with caveats: keep all engines, avoid raw latency-only defaults, tune F5 long-form stretch/duration, retest LuxTTS with better references, and keep Chatterbox optimized long-form while avoiding baseline/raw long-form.
 - Phase 01.1 inserted after Phase 1: UI acceptance and regression test hardening. Reason: Phase 1 live LAN/Android acceptance exposed UI workflows that existed but were not adequately agent-tested before product-owner testing. Future manual user testing must be treated as acceptance after agent-run API/browser/deployed verification, not first-line QA.
+- Phase 03.1 inserted after Phase 3: Call MVP stabilization and regression fixes (URGENT)
 - Phase 7 added: Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations.
 - Phase 8 added: Wire VoxCPM2 streaming chunks into live RayMe call playback.
 

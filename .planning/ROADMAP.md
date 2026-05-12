@@ -284,6 +284,16 @@ Plans:
 
 ---
 
+### Phase 03.1: Call MVP stabilization and regression fixes (INSERTED)
+
+**Goal:** [Urgent work - to be planned]
+**Requirements**: TBD
+**Depends on:** Phase 3
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 03.1 to break down)
+
 ### Phase 4: Call Feel (the load-bearing phase)
 
 **Goal:** Turn the Phase-3 MVP call into something that actually feels like a phone call: streaming TTS with <500 ms TTFA target, VAD-driven barge-in with LIFO cancel that reaches the GPU, live bidirectional captions, echo-loop mitigated on laptop speakers. This phase is the reason the product exists.
