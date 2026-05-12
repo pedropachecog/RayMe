@@ -443,6 +443,21 @@ def test_mute_stops_server_consumption() -> None:
     assert session.stats()["muted"] is True
 
 
+def test_muted_raw_bytes_drop_returns_false_without_vad_or_stt() -> None:
+    vad = ScriptedVadAdapter()
+    stt = ScriptedSttAdapter()
+    session, _ = _new_session(vad_adapter=vad, stt_adapter=stt)
+
+    _run(session.set_muted(True))
+    accepted = _run(session.handle_inbound_audio_frame(b"raw-muted-pcm"))
+
+    assert accepted is False
+    assert vad.frames == []
+    assert stt.calls == []
+    assert session.stats()["incoming_audio_frames"] == 1
+    assert session.stats()["dropped_audio_frames"] == 1
+
+
 def test_inbound_audio_emits_user_final_after_vad_end() -> None:
     vad = ScriptedVadAdapter()
     stt = ScriptedSttAdapter()
@@ -736,6 +751,39 @@ def test_final_reconnect_backfill_can_finalize_turn_without_replacement_frame() 
     assert [event["type"] for event in events] == ["state", "user_final"]
     assert stt.calls == [[pre_pcm, gap_pcm]]
     assert session.state == "thinking"
+
+
+def test_final_reconnect_backfill_queues_recoverable_user_final_once() -> None:
+    vad = ScriptedVadAdapter()
+    stt = ScriptedSttAdapter()
+    channel = ScriptedDataChannel(ready_state="closed")
+    session, _ = _new_session(
+        vad_adapter=vad,
+        stt_adapter=stt,
+        data_channel=channel,
+    )
+
+    pre_pcm = np.full(320, 1000, dtype=np.int16).tobytes()
+    gap_pcm = np.full(320, 2000, dtype=np.int16).tobytes()
+
+    assert _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(pre_pcm))) is None
+    backfill = _run(
+        session.backfill_reconnect_audio(
+            pcm=gap_pcm,
+            sample_rate=16000,
+            channels=1,
+            backfill_id="gap-final-drain",
+            reason="connection_failed",
+            attempt=1,
+            final=True,
+        )
+    )
+
+    assert backfill["event"]["type"] == "user_final"
+    drained = session.drain_undelivered_events()
+    assert [event["type"] for event in drained] == ["user_final"]
+    assert drained[0]["text"] == "hello from mic"
+    assert session.drain_undelivered_events() == []
 
 
 def test_reconnect_audio_backfill_ignores_duplicate_ids() -> None:

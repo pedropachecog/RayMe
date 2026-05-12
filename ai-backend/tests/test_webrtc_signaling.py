@@ -567,30 +567,54 @@ def test_webrtc_speak_rejects_unbounded_voxcpm2_options_with_sanitized_422(
     assert "model-cache" not in invalid.text
 
 
-def test_webrtc_speak_failure_returns_fixed_call_tts_failed_code(stub_webrtc: None) -> None:
-    client = _client(model_manager=ScriptedModelManager(ScriptedTtsAdapter(fail=True)))
-    session_id = "call-session-1"
-    client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
-
-    response = client.post(
-        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
-        json={
+@pytest.mark.parametrize("engine_id", ["voxcpm2", "f5"])
+def test_webrtc_speak_failure_returns_fixed_call_tts_failed_code_for_dual_engines(
+    stub_webrtc: None,
+    engine_id: str,
+) -> None:
+    if engine_id == "voxcpm2":
+        manager = ScriptedModelManager(
+            adapters={"voxcpm2": ScriptedStreamingTtsAdapter(fail="before_first_audio")}
+        )
+        payload = {
             "turn_id": "ai-turn-fail",
             "text": "Hello from AI.",
             "voice_id": "voice-1",
-            "engine_id": "f5",
+            "engine_id": engine_id,
             "final_chunk": True,
-        },
+            "reference_audio_base64": "cmVhbC1zYW1wbGU=",
+        }
+    else:
+        manager = ScriptedModelManager(ScriptedTtsAdapter(fail=True))
+        payload = {
+            "turn_id": "ai-turn-fail",
+            "text": "Hello from AI.",
+            "voice_id": "voice-1",
+            "engine_id": engine_id,
+            "final_chunk": True,
+        }
+
+    client = _client(model_manager=manager)
+    session_id = "call-session-1"
+    client.post(
+        "/webrtc/offer",
+        json={**_offer_payload(session_id=session_id), "engine_id": engine_id},
+    )
+
+    response = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json=payload,
     )
 
     assert response.status_code == 502
     assert response.json()["detail"] == {
         "code": "call_tts_failed",
         "message": "Speech playback failed",
-        "engine_id": "f5",
+        "engine_id": engine_id,
     }
     assert "raw model failure" not in response.text
     assert "Traceback" not in response.text
+    assert "File " not in response.text
     assert "/home/" not in response.text
     assert r"C:\\" not in response.text
     assert "model-cache" not in response.text
@@ -877,6 +901,121 @@ def test_receive_audio_track_recovers_from_transient_live_ice_recv_errors() -> N
     assert recv_calls >= 4
     assert incoming_frames == 1
     assert state == "ended"
+
+
+def test_receive_audio_track_connection_state_reconnects_without_connection_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from app.call.session import CallSession
+    from app.call.tracks import PcmAudioFrame
+
+    class TransientDisconnectedError(Exception):
+        pass
+
+    class ReconnectingInboundTrack:
+        kind = "audio"
+        id = "inbound-connection-reconnects"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def recv(self) -> Any:
+            self.calls += 1
+            if self.calls == 1:
+                raise TransientDisconnectedError("connection temporarily disconnected")
+            return PcmAudioFrame(
+                pcm=(b"\x00\x20" * 320),
+                sample_rate=16000,
+                channels=1,
+            )
+
+    class ReconnectingPeerConnection:
+        connectionState = "disconnected"
+        iceConnectionState = "new"
+        close_calls = 0
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    class EndingCallSession(CallSession):
+        async def handle_inbound_audio_frame(self, frame: Any) -> Any:
+            result = await super().handle_inbound_audio_frame(frame)
+            self.state = "ended"
+            return result
+
+    async def fake_sleep(_delay: float) -> None:
+        peer.connectionState = "connected"
+
+    peer = ReconnectingPeerConnection()
+    monkeypatch.setattr(webrtc_module.asyncio, "sleep", fake_sleep)
+
+    async def _run_test() -> tuple[int, int, str, str | None, int]:
+        session = EndingCallSession(
+            session_id="test-connection-state-reconnects",
+            peer_connection=peer,
+            vad_adapter=None,
+            stt_adapter=None,
+        )
+        track = ReconnectingInboundTrack()
+        await webrtc_module._receive_audio_track(session, track, peer)
+        return (
+            track.calls,
+            session.incoming_audio_frames,
+            session.state,
+            session.end_reason,
+            peer.close_calls,
+        )
+
+    recv_calls, incoming_frames, state, end_reason, close_calls = asyncio.run(_run_test())
+
+    assert recv_calls == 2
+    assert incoming_frames == 1
+    assert state == "ended"
+    assert end_reason is None
+    assert close_calls == 0
+
+
+def test_receive_audio_track_closed_state_records_connection_failed() -> None:
+    import asyncio
+
+    from app.call.session import CallSession
+
+    class ClosedTrackError(Exception):
+        pass
+
+    class ClosedInboundTrack:
+        kind = "audio"
+        id = "inbound-closed"
+
+        async def recv(self) -> Any:
+            raise ClosedTrackError("track closed")
+
+    class ClosedPeerConnection:
+        connectionState = "closed"
+        iceConnectionState = "closed"
+        close_calls = 0
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    async def _run_test() -> tuple[str, str | None, int]:
+        peer = ClosedPeerConnection()
+        session = CallSession(
+            session_id="test-closed-state-connection-failed",
+            peer_connection=peer,
+            vad_adapter=None,
+            stt_adapter=None,
+        )
+        await webrtc_module._receive_audio_track(session, ClosedInboundTrack(), peer)
+        return session.state, session.end_reason, peer.close_calls
+
+    state, end_reason, close_calls = asyncio.run(_run_test())
+
+    assert state == "failed"
+    assert end_reason == "connection_failed"
+    assert close_calls == 1
 
 
 def test_receive_audio_track_exits_when_peer_connection_is_superseded() -> None:
