@@ -1,0 +1,17 @@
+{
+  "phase": "03.1-call-mvp-stabilization-and-regression-fixes",
+  "source": "web-ui/client/tests/e2e/call-summary.spec.ts::ending a call returns chronological call_start speech and call_end rows to the thread",
+  "required_message_kinds": [
+    "call_start",
+    "user_speech",
+    "ai_speech",
+    "call_end"
+  ],
+  "minimum_counts": {
+    "call_start": 1,
+    "user_speech": 1,
+    "ai_speech": 1,
+    "call_end": 1
+  },
+  "status": "passed"
+}
