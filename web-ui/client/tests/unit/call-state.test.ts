@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { backfillCallReconnectAudio, recoverCallEvents } from '../../src/lib/api/calls';
 import { createCallStore } from '../../src/lib/call/store.svelte';
 
 const callId = 'call-01';
@@ -14,6 +15,10 @@ function createDeferred() {
 }
 
 describe('call state machine', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('moves through connecting, listening, thinking, speaking, interrupted, ended, and failed states', async () => {
     const store = createCallStore({ callId, threadId });
 
@@ -119,5 +124,70 @@ describe('call state machine', () => {
     store.setServerMuted(false);
     expect(store.serverMuted).toBe(false);
     expect(localTrack.enabled).toBe(false);
+  });
+});
+
+describe('client call API wrappers', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function installFetch(payload: Record<string, unknown> = {}) {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => payload
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    return fetchMock;
+  }
+
+  function lastRequest(fetchMock: ReturnType<typeof installFetch>) {
+    const [url, init] = fetchMock.mock.calls.at(-1) ?? [];
+    return { url: String(url), init: init as RequestInit };
+  }
+
+  it('posts reconnect audio backfill through the same-origin call wrapper', async () => {
+    const fetchMock = installFetch({
+      call_id: 'call/a',
+      session_id: 'rtc-1',
+      status: 'accepted'
+    });
+
+    await backfillCallReconnectAudio('call/a', {
+      session_id: 'rtc-1',
+      pcm_b64: 'AAAA',
+      sample_rate: 16000,
+      channels: 1
+    });
+
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/calls/call%2Fa/reconnect-audio',
+      init: { method: 'POST' }
+    });
+    expect(JSON.parse(lastRequest(fetchMock).init.body as string)).toMatchObject({
+      session_id: 'rtc-1',
+      pcm_b64: 'AAAA',
+      sample_rate: 16000,
+      channels: 1
+    });
+  });
+
+  it('posts event recovery through the same-origin call wrapper', async () => {
+    const fetchMock = installFetch({
+      call_id: 'call/a',
+      session_id: 'rtc-1',
+      events: []
+    });
+
+    await recoverCallEvents('call/a', 'rtc-1');
+
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/calls/call%2Fa/events/recover',
+      init: { method: 'POST' }
+    });
+    expect(JSON.parse(lastRequest(fetchMock).init.body as string)).toEqual({
+      session_id: 'rtc-1'
+    });
   });
 });

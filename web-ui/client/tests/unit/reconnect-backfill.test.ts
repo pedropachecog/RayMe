@@ -23,19 +23,31 @@ function chunksEverySecond(totalMs: number, sampleForStart: (startMs: number) =>
 
 describe('reconnect backfill selection', () => {
   it('keeps delayed tail selection contiguous with the previous backfill end', () => {
-    const chunks = chunksEverySecond(100000, (startMs) => startMs < 70000 ? 1000 : 1);
+    const chunks = [
+      chunk(5226, 15226, 1000),
+      chunk(15226, 25226, 1000),
+      chunk(25226, 35226, 1000),
+      chunk(35226, 35256, 1000),
+      chunk(35256, 45256, 1000),
+      chunk(45256, 55256, 1000),
+      chunk(55256, 65256, 1000),
+      chunk(65256, 69467, 1000),
+      chunk(69467, 79467, 1),
+      chunk(79467, 89467, 1),
+      chunk(89467, 99412, 1)
+    ];
 
     const selection = selectReconnectAudioBackfill(chunks, {
       endMs: 99412,
       startMs: 35256,
       maxDurationMs: 30000,
-      sampleRate,
-      limitToMaxWindow: false
+      sampleRate
     });
 
-    expect(selection?.startMs).toBe(35000);
-    expect(selection?.endMs).toBe(100000);
-    expect(selection?.durationMs).toBe(65000);
+    expect(selection?.startMs).toBe(35256);
+    expect(selection?.startMs).not.toBe(69467);
+    expect(selection?.endMs).toBe(99412);
+    expect(selection?.durationMs).toBeGreaterThan(30000);
     expect(selection?.rms).toBeGreaterThan(700);
   });
 

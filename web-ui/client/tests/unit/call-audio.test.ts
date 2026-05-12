@@ -1,10 +1,11 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createCallRmsMeter,
   ensureRemoteCallAudioAudible,
   getOutputPickerUnavailableCopy,
   keepCallMicrophoneTracksLive,
+  requestCallMicrophone,
   unlockCallAudioContext
 } from '../../src/lib/call/audio';
 
@@ -12,6 +13,10 @@ const outputPickerUnavailableCopy =
   'Output selection is not available in this browser. RayMe will use the browser default output.';
 
 describe('call audio helpers', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('unlocks the call AudioContext with resume and a one-sample silent buffer', async () => {
     const source = {
       connect: vi.fn(),
@@ -34,6 +39,22 @@ describe('call audio helpers', () => {
     expect(source.connect).toHaveBeenCalledWith(audioContext.destination);
     expect(source.start).toHaveBeenCalledTimes(1);
     expect(result.state).toBe('running');
+  });
+
+  it('requests microphone capture with Android-safe browser constraints', async () => {
+    const stream = { getAudioTracks: () => [] } as unknown as MediaStream;
+    const getUserMedia = vi.fn(async () => stream);
+    vi.stubGlobal('navigator', { mediaDevices: { getUserMedia } });
+
+    await expect(requestCallMicrophone()).resolves.toBe(stream);
+
+    expect(getUserMedia).toHaveBeenCalledWith({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
   });
 
   it('exposes unsupported output picker copy from the UI contract', () => {
