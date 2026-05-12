@@ -340,8 +340,22 @@ Post-`a325c35` deployed browser smoke:
 
 ## Android Product-Owner Acceptance
 
-- Android Chrome product-owner acceptance: pending
+- Android Chrome product-owner acceptance: approved
+- Approved at: `2026-05-12T00:54:22Z`
+- Product-owner response: `approved`
 - Manual target URL: `https://192.168.1.199:8443`
+- Secure context / Chrome lock: passed by product-owner approval.
+- Start Call from chat thread: passed by product-owner approval.
+- Microphone permission prompt/grant: passed by product-owner approval.
+- AudioContext/audio playback starts from tap: passed by product-owner approval.
+- Two separate user turns in the same call: passed by product-owner approval.
+- Two AI audio responses heard: passed by product-owner approval.
+- Mute/Unmute: passed by product-owner approval.
+- End Call: passed by product-owner approval.
+- Thread scrollback after return: passed by product-owner approval with
+  `call_start`, two `user_speech`, two `ai_speech`, and `call_end` visible.
+- Runtime TTS setting during acceptance window: `tts_default_engine=f5`,
+  `resident_tts_engine=f5`; VoxCPM2 was available but idle.
 - Preconditions currently met: Web UI and AI backend are deployed on
   `OMEN-PC`, HTTPS listeners are up, CUDA STT/F5 residency is visible through
   `/health`, the call route now requests microphone capture before starting
