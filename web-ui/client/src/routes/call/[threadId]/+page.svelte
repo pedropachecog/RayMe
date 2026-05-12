@@ -10,7 +10,7 @@
     endCall,
     interruptCall,
     recoverCallEvents,
-    sendCallOffer,
+    sendCallOffer as offerCall,
     setCallMuted,
     startCall,
     submitCallTurn
@@ -271,7 +271,7 @@
       iceGatheringState: connection.iceGatheringState,
       sdp_len: localDescription.sdp?.length ?? 0
     });
-    const response = await sendCallOffer(started.call_id, localDescription, started.session_id);
+    const response = await offerCall(started.call_id, localDescription, started.session_id);
     sessionId = response.session_id || started.session_id || started.call_id;
     emitDebugEvent(started.call_id, 'pc.answer.received', {
       session_id: sessionId,
@@ -969,13 +969,17 @@
     startMsOverride = reconnectAudioBackfillStartMs,
     options: { limitToMaxWindow?: boolean } = {}
   ): LocalMicPcmSelection | null {
-    return selectReconnectAudioBackfillFromChunks(localMicPcmBuffer, {
+    const selection = selectReconnectAudioBackfillFromChunks(localMicPcmBuffer, {
       endMs,
       startMs: startMsOverride,
       maxDurationMs: MIC_BACKFILL_MAX_MS,
       sampleRate: MIC_BACKFILL_SAMPLE_RATE,
       limitToMaxWindow: options.limitToMaxWindow ?? true
     });
+    if (!selection || startMsOverride <= 0 || selection.startMs <= startMsOverride) {
+      return selection;
+    }
+    return padReconnectAudioSelectionStart(selection, startMsOverride);
   }
 
   function splitReconnectAudioBackfillSelection(
@@ -996,6 +1000,23 @@
       chunks.push(makeReconnectAudioSelection(samples, startMs));
     }
     return chunks;
+  }
+
+  function padReconnectAudioSelectionStart(
+    selection: LocalMicPcmSelection,
+    startMs: number
+  ): LocalMicPcmSelection {
+    const paddingSamples = Math.max(
+      0,
+      Math.round((selection.startMs - startMs) * MIC_BACKFILL_SAMPLE_RATE / 1000)
+    );
+    if (paddingSamples === 0) {
+      return { ...selection, startMs };
+    }
+
+    const samples = new Int16Array(paddingSamples + selection.samples.length);
+    samples.set(selection.samples, paddingSamples);
+    return makeReconnectAudioSelection(samples, startMs);
   }
 
   function makeReconnectAudioSelection(samples: Int16Array, startMs: number): LocalMicPcmSelection {
@@ -2149,6 +2170,11 @@
       <button type="button" onclick={() => handleBlockingAction(blockingPanel!.action)}>
         {blockingPanel.action}
       </button>
+    </div>
+  {:else if callState === 'connecting'}
+    <div class="blocking-panel" role="status">
+      <RefreshCw size={22} strokeWidth={1.8} aria-hidden="true" />
+      <h2>Connecting</h2>
     </div>
   {:else if callState === 'ended'}
     <div class="ended-panel" role="status">

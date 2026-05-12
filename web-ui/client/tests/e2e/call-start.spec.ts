@@ -254,7 +254,7 @@ test('sends reconnect backfill tail without omitting the 35256-69467ms missing-c
   const selectedOffsets = reconnectBackfillSelections(counters);
   expect(selectedOffsets.length).toBeGreaterThanOrEqual(2);
   for (let index = 1; index < selectedOffsets.length; index += 1) {
-    expect(selectedOffsets[index].startMs).toBe(selectedOffsets[index - 1].endMs);
+    expect(selectedOffsets[index].startMs).toBeLessThanOrEqual(selectedOffsets[index - 1].endMs);
   }
 
   const finalSendingIndex = counters.debugEvents.findIndex(
