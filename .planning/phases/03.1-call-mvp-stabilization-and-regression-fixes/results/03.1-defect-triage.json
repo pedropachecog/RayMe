@@ -1,0 +1,224 @@
+{
+  "phase": "03.1-call-mvp-stabilization-and-regression-fixes",
+  "generated_at": "2026-05-12T12:41:00Z",
+  "source_inputs": [
+    ".planning/phases/03.1-call-mvp-stabilization-and-regression-fixes/03.1-CONTEXT.md",
+    ".planning/phases/03.1-call-mvp-stabilization-and-regression-fixes/03.1-RESEARCH.md",
+    ".planning/phases/03.1-call-mvp-stabilization-and-regression-fixes/03.1-VALIDATION.md",
+    ".planning/phases/03-first-working-call-mvp/03-VERIFICATION.md",
+    ".planning/phases/03-first-working-call-mvp/OMEN-PC-LIVE-EVIDENCE.md",
+    ".planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/08-PROMOTION-DECISION.md",
+    ".planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/results/voxcpm2-decision.json",
+    ".planning/debug/phone-calls-missing-chunks.md",
+    ".planning/debug/phone-call-transcript-comparison.md",
+    ".planning/debug/phone-call-repro-2026-04-30.md",
+    ".planning/debug/phone-call-repro-1239588-2026-04-30.md",
+    ".planning/debug/phone-call-repro-2360feb-2026-04-30.md",
+    ".planning/debug/phone-call-repro-dff6545-2026-04-30.md",
+    ".planning/debug/phone-call-repro-e4b93d9-2026-04-30.md",
+    ".planning/debug/phone-call-expected-poem-2026-05-02.md",
+    ".planning/debug/phone-calls-post-snapshot-audit.md"
+  ],
+  "selected_defects": [
+    {
+      "id": "CALL-STAB-001",
+      "title": "Add dual-engine live call smoke for current preferred and fallback engines",
+      "requirements": ["P8-DUAL-ENGINE", "REQ-47", "REQ-A1"],
+      "context_decisions": ["D-10", "D-11", "D-12"],
+      "tier": "live_browser",
+      "capability": "dual_engine_smoke",
+      "evidence_source": [
+        ".planning/phases/03.1-call-mvp-stabilization-and-regression-fixes/03.1-CONTEXT.md",
+        ".planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/08-PROMOTION-DECISION.md",
+        "web-ui/client/tests/e2e/live-call.spec.ts"
+      ],
+      "debug_session": null,
+      "status": "open",
+      "summary": "Phase 8 promoted `voxcpm2` as preferred live-call TTS with `f5` retained as fallback, while the existing live browser spec still hardcoded `f5`.",
+      "phase4_scope": false
+    },
+    {
+      "id": "CALL-STAB-002",
+      "title": "Create Phase 03.1 evidence artifact before production fixes",
+      "requirements": ["REQ-40", "REQ-47", "REQ-50"],
+      "context_decisions": ["D-01", "D-02", "D-08", "D-09", "D-18", "D-19", "D-20"],
+      "tier": "docs",
+      "capability": "diagnostics",
+      "evidence_source": [
+        ".planning/phases/03.1-call-mvp-stabilization-and-regression-fixes/03.1-VALIDATION.md",
+        ".planning/phases/03.1-call-mvp-stabilization-and-regression-fixes/03.1-CONTEXT.md"
+      ],
+      "debug_session": null,
+      "status": "open",
+      "summary": "Phase 03.1 requires a dedicated sanitized evidence scaffold and runtime-sensitive JSON artifact map before implementation plans run.",
+      "phase4_scope": false
+    },
+    {
+      "id": "CALL-STAB-003",
+      "title": "Review deploy script resident-engine guard against VoxCPM2 default proof",
+      "requirements": ["P8-DUAL-ENGINE", "REQ-02", "REQ-A1"],
+      "context_decisions": ["D-08", "D-10", "D-12"],
+      "tier": "deployment",
+      "capability": "omen_live_desktop",
+      "evidence_source": [
+        "scripts/deploy-omen.sh",
+        ".planning/phases/03.1-call-mvp-stabilization-and-regression-fixes/03.1-RESEARCH.md",
+        ".planning/phases/03-first-working-call-mvp/OMEN-PC-LIVE-EVIDENCE.md"
+      ],
+      "debug_session": null,
+      "status": "open",
+      "summary": "The canonical deploy path currently verifies resident `f5`; later live dual-engine proof must decide whether that guard is retained or updated in the script itself.",
+      "phase4_scope": false
+    },
+    {
+      "id": "CALL-STAB-004",
+      "title": "Prove reconnect/drop terminal states end truthfully and preserve rows",
+      "requirements": ["REQ-40", "REQ-47", "REQ-50"],
+      "context_decisions": ["D-13", "D-14", "D-15", "D-16"],
+      "tier": "cross_tier",
+      "capability": "reconnect_drop_backfill",
+      "evidence_source": [
+        ".planning/phases/03.1-call-mvp-stabilization-and-regression-fixes/03.1-VALIDATION.md",
+        ".planning/debug/phone-calls-missing-chunks.md"
+      ],
+      "debug_session": ".planning/debug/phone-calls-missing-chunks.md",
+      "status": "open",
+      "summary": "Prior live failures left calls frozen, failed, or missing call_end/user_speech rows after reconnect and transport closure.",
+      "phase4_scope": false
+    },
+    {
+      "id": "CALL-STAB-005",
+      "title": "Preserve long-turn phone-call speech chunks across pauses and reconnects",
+      "requirements": ["REQ-40", "REQ-47", "REQ-50", "REQ-A0", "REQ-A1"],
+      "context_decisions": ["D-02", "D-03", "D-06", "D-13", "D-15", "D-20"],
+      "tier": "client_server_backend_live",
+      "capability": "missing_chunks",
+      "evidence_source": [
+        ".planning/debug/phone-calls-missing-chunks.md",
+        ".planning/debug/phone-call-transcript-comparison.md",
+        ".planning/debug/phone-call-expected-poem-2026-05-02.md"
+      ],
+      "debug_session": ".planning/debug/phone-calls-missing-chunks.md",
+      "status": "open",
+      "summary": "User-provided expected-versus-actual transcripts show whole spoken spans missing from long phone-call turns, not ordinary word-level STT substitutions.",
+      "phase4_scope": false
+    },
+    {
+      "id": "CALL-STAB-006",
+      "title": "Make reconnect PCM gap and tail selection contiguous",
+      "requirements": ["REQ-40", "REQ-47", "REQ-50"],
+      "context_decisions": ["D-13", "D-15", "D-16", "D-20"],
+      "tier": "client_unit_browser",
+      "capability": "reconnect_pcm_gap",
+      "evidence_source": [
+        ".planning/debug/phone-calls-missing-chunks.md",
+        ".planning/debug/phone-call-repro-dff6545-2026-04-30.md",
+        ".planning/debug/phone-call-repro-2360feb-2026-04-30.md"
+      ],
+      "debug_session": ".planning/debug/phone-calls-missing-chunks.md",
+      "status": "open",
+      "summary": "Live debug evidence showed browser reconnect backfill covered `5226-35256ms` and later `69467-99412ms`, omitting the contiguous `35256-69467ms` browser-captured span.",
+      "phase4_scope": false
+    },
+    {
+      "id": "CALL-STAB-007",
+      "title": "Prevent false browser-facing reconnect-backfill 502 after backend accepts PCM",
+      "requirements": ["REQ-40", "REQ-47", "REQ-50"],
+      "context_decisions": ["D-13", "D-14", "D-17", "D-20"],
+      "tier": "server_client",
+      "capability": "proxy_timeout",
+      "evidence_source": [
+        ".planning/debug/phone-call-repro-dff6545-2026-04-30.md",
+        ".planning/debug/phone-calls-missing-chunks.md"
+      ],
+      "debug_session": ".planning/debug/phone-calls-missing-chunks.md",
+      "status": "open",
+      "summary": "Browser saw `502 Bad Gateway` for reconnect audio while backend logs showed the same PCM batch was applied, confusing recovery behavior and diagnostics.",
+      "phase4_scope": false
+    },
+    {
+      "id": "CALL-STAB-008",
+      "title": "Recover late STT user_final after end or closed data channel",
+      "requirements": ["REQ-40", "REQ-47", "REQ-50"],
+      "context_decisions": ["D-13", "D-14", "D-15", "D-16"],
+      "tier": "backend_server_client",
+      "capability": "late_user_final_recovery",
+      "evidence_source": [
+        ".planning/debug/phone-calls-missing-chunks.md"
+      ],
+      "debug_session": ".planning/debug/phone-calls-missing-chunks.md",
+      "status": "open",
+      "summary": "Several repros reached STT and queued or skipped `user_final` after the data channel closed or after `/end`, making the transcript unreachable without retention/recovery proof.",
+      "phase4_scope": false
+    },
+    {
+      "id": "CALL-STAB-009",
+      "title": "Preserve post-snapshot do-not-retry guard",
+      "requirements": ["REQ-40", "REQ-47", "REQ-50"],
+      "context_decisions": ["D-01", "D-02", "D-13", "D-16", "D-22"],
+      "tier": "process_guard",
+      "capability": "diagnostics",
+      "evidence_source": [
+        ".planning/debug/phone-calls-post-snapshot-audit.md",
+        ".planning/LEARNINGS.md"
+      ],
+      "debug_session": ".planning/debug/phone-calls-post-snapshot-audit.md",
+      "status": "open",
+      "summary": "The failed post-`6607214` reconnect final-marker/data-channel replay/hangup drain patch stack must not be reintroduced as a small fix.",
+      "forbidden_patch_stack": ["6f63de0", "a0d5d17"],
+      "forbidden_change": "Do not reintroduce the failed `6f63de0` + `a0d5d17` reconnect final-marker/data-channel replay/hangup drain patch stack as a small fix.",
+      "phase4_scope": false
+    }
+  ],
+  "deferred_out_of_scope": [
+    {
+      "name": "VAD-driven barge-in",
+      "reason": "Phase 4 call-feel capability; not required for current MVP stabilization."
+    },
+    {
+      "name": "echo-loop mitigation",
+      "reason": "Phase 4 call-feel capability; not required for current MVP stabilization."
+    },
+    {
+      "name": "TTFA target optimization",
+      "reason": "Phase 4 call-feel capability; Phase 03.1 only smokes current engines."
+    },
+    {
+      "name": "advanced call-feel tuning",
+      "reason": "Phase 4 scope; not part of reconnect/drop/writeback stabilization."
+    },
+    {
+      "name": "full visualizer polish",
+      "reason": "Phase 4 or later UI polish; MVP state preservation only."
+    },
+    {
+      "name": "new in-call features",
+      "reason": "Feature expansion is excluded from the stabilization phase."
+    },
+    {
+      "name": "redesigned user-visible reconnect feature",
+      "reason": "D-16 limits this phase to stabilizing existing recovery/backfill behavior."
+    },
+    {
+      "name": "broad call UI redesign",
+      "reason": "D-23 limits UI changes to small recovery/status/copy fixes."
+    }
+  ],
+  "commands_run": [
+    {
+      "command": "uv run --project ai-backend pytest ai-backend/tests/test_call_session.py ai-backend/tests/test_webrtc_signaling.py -q",
+      "status": "passed",
+      "result": "66 passed, 3 warnings in 39.57s"
+    },
+    {
+      "command": "uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py web-ui/server/tests/test_prompt_builder.py -q",
+      "status": "passed",
+      "result": "40 passed in 19.01s"
+    },
+    {
+      "command": "npm --prefix web-ui/client run test:unit -- --run tests/unit/call-audio.test.ts tests/unit/call-state.test.ts tests/unit/reconnect-backfill.test.ts",
+      "status": "passed",
+      "result": "3 files passed, 12 tests passed in 16.71s"
+    }
+  ]
+}
