@@ -362,3 +362,32 @@ Post-`a325c35` deployed browser smoke:
   browser negotiation, local microphone metering starts immediately after
   permission is granted, and local automated Phase 3 suites passed before
   deployment.
+
+## Final Phase 3 Verification Sweep
+
+Completed at: `2026-05-12T01:05:13Z`
+
+Final Phase 3 verification sweep: passed.
+
+Command:
+
+```text
+uv run --project ai-backend pytest ai-backend/tests/test_call_session.py ai-backend/tests/test_webrtc_signaling.py -q && uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py web-ui/server/tests/test_prompt_builder.py -q && npm --prefix web-ui/client run test:e2e -- tests/e2e/call-start.spec.ts tests/e2e/call-summary.spec.ts --project=desktop-chromium
+```
+
+Result:
+
+```text
+66 passed, 3 warnings in 26.91s
+40 passed in 18.49s
+16 passed (1.4m)
+```
+
+Final result: passed.
+
+Caveat resolved during sweep: the first run exposed that
+`call-summary.spec.ts` did not mock the app's teardown `_debug/event` and
+`events/recover` calls, producing 404 console errors under the browser error
+guard. Commit `345bda4` added those mocked routes, the isolated
+`call-summary.spec.ts` rerun passed, and the full final sweep above then exited
+0.

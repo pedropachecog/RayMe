@@ -276,7 +276,7 @@ Plans:
 - [x] 03-09-PLAN.md - Full Phase 3 MVP call loop wiring across browser, Web UI server, and AI backend
 - [x] 03-10-PLAN.md - Full local Phase 3 automated acceptance and Playwright evidence
 - [x] 03-11-PLAN.md - OMEN-PC live LAN call acceptance and evidence
-- [ ] 03-12-PLAN.md - Physical Android Chrome product-owner acceptance and Phase 3 evidence closure
+- [x] 03-12-PLAN.md - Physical Android Chrome product-owner acceptance and Phase 3 evidence closure
 
 **UI hint:** yes
 
