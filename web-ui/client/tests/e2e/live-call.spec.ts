@@ -46,6 +46,9 @@ test.use({
   }
 });
 
+// The live suite mutates one OMEN runtime and exercises one GPU-backed call path.
+test.describe.configure({ mode: 'serial' });
+
 for (const liveTtsEngine of liveTtsEngines) {
   test(`live OMEN-PC browser call completes two user to AI cycles with ${liveTtsEngine}`, async ({
     page,
