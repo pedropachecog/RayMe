@@ -618,7 +618,8 @@ async def record_call_debug_event(
         except (TypeError, ValueError):
             detail_serialized = "<unserializable>"
     if len(detail_serialized) > 800:
-        detail_serialized = detail_serialized[:800] + "...<truncated>"
+        truncation_marker = "...<truncated>"
+        detail_serialized = detail_serialized[: 800 - len(truncation_marker)] + truncation_marker
     logger.info(
         "[browser-call] event=%s call=%s session=%s detail=%s",
         payload.event,
