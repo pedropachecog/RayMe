@@ -5,11 +5,13 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import logging
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -37,6 +39,16 @@ class CallFixture:
 
 
 _TEST_VOICE_BLOB_DIR: Path | None = None
+UNSAFE_CALL_ROUTE_SUFFIXES = [
+    "/offer",
+    "/mute",
+    "/interrupt",
+    "/turns",
+    "/reconnect-audio",
+    "/events/recover",
+    "/end",
+    "/_debug/event",
+]
 
 
 class ScriptedCallBackend:
@@ -394,6 +406,103 @@ def test_foreign_origin_rejected_for_unsafe_call_controls(call_fixture: CallFixt
     assert _public_error_code(response) == "call_origin_not_allowed"
 
 
+@pytest.mark.parametrize("route_suffix", UNSAFE_CALL_ROUTE_SUFFIXES)
+def test_foreign_origin_rejected_for_every_unsafe_call_route(
+    call_fixture: CallFixture,
+    route_suffix: str,
+) -> None:
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}{route_suffix}",
+        json=_unsafe_call_payload(route_suffix, started["session_id"]),
+        headers={"Origin": "https://attacker.invalid"},
+    )
+
+    assert response.status_code == 403
+    assert _public_error_code(response) == "call_origin_not_allowed"
+
+
+def test_foreign_origin_rejected_for_start_route(call_fixture: CallFixture) -> None:
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+
+    response = call_fixture.client.post(
+        "/api/calls/start",
+        json={"thread_id": thread_id},
+        headers={"Origin": "https://attacker.invalid"},
+    )
+
+    assert response.status_code == 403
+    assert _public_error_code(response) == "call_origin_not_allowed"
+
+
+def test_debug_event_truncates_detail_and_is_behavior_neutral(
+    call_fixture: CallFixture,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    before_rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    before_backend_calls = _backend_call_snapshot(call_fixture.backend)
+    long_debug_value = "debug-detail-" * 80
+
+    with caplog.at_level(logging.INFO, logger="app.api.calls"):
+        response = call_fixture.client.post(
+            f"/api/calls/{started['call_id']}/_debug/event",
+            json={
+                "event": "pc.connectionstatechange",
+                "session_id": started["session_id"],
+                "detail": {"phase": "failed", "raw": long_debug_value},
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id)) == before_rows
+    assert _backend_call_snapshot(call_fixture.backend) == before_backend_calls
+    detail_logs = [
+        record.args[3]
+        for record in caplog.records
+        if record.name == "app.api.calls" and record.getMessage().startswith("[browser-call]")
+    ]
+    assert detail_logs
+    assert len(str(detail_logs[-1])) <= 800
+    assert "truncated" in str(detail_logs[-1])
+    assert long_debug_value not in str(detail_logs[-1])
+
+
+async def test_ai_backend_client_backfill_uses_webrtc_timeout_path() -> None:
+    from app.domain.ai_backend_client import AiBackendClient
+
+    class CapturingHttpClient:
+        def __init__(self) -> None:
+            self.requests: list[dict[str, object]] = []
+
+        async def request(self, method: str, url: str, **kwargs: object) -> httpx.Response:
+            self.requests.append({"method": method, "url": url, **kwargs})
+            return httpx.Response(
+                200,
+                json={"session_id": "rtc-call-1", "status": "accepted", "frames": 2},
+            )
+
+    http_client = CapturingHttpClient()
+    ai_client = AiBackendClient(
+        http_client=http_client,  # type: ignore[arg-type]
+        timeout=5.0,
+        webrtc_timeout=30.0,
+    )
+
+    result = await ai_client.backfill_call_audio(
+        "https://ai.local:9443",
+        "rtc-call-1",
+        {"pcm_b64": "AA==", "sample_rate": 16000, "channels": 1, "final": True},
+    )
+
+    assert result["status"] == "accepted"
+    assert http_client.requests[0]["timeout"] == 30.0
+
+
 def test_offer_failure_returns_backend_public_detail(call_fixture: CallFixture) -> None:
     call_fixture.backend.fail_offer = True
     thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
@@ -635,6 +744,28 @@ def test_voxcpm2_call_voice_reference_forwards_mode_and_style(
         {key: voice_reference.get(key) for key in expected_voxcpm2_fields},
         {key: speak_payload.get(key) for key in expected_voxcpm2_fields},
     ) == (expected_voxcpm2_fields, expected_voxcpm2_fields)
+
+
+def test_f5_call_turn_uses_standard_turns_route_without_engine_route(
+    call_fixture: CallFixture,
+) -> None:
+    call_fixture.completion.token_sequences = [["F5 call reply."]]
+    thread_id = asyncio.run(_insert_f5_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-f5",
+            "text": "Use the saved F5 voice.",
+            "source": "user_final",
+        },
+    )
+
+    assert response.status_code == 200
+    assert call_fixture.backend.speak_calls[-1]["payload"]["engine_id"] == "f5"
+    assert not any("voxcpm2" in getattr(route, "path", "") for route in call_fixture.app.routes)
 
 
 def test_voxcpm2_call_tts_failure_is_sanitized_and_truthful(
@@ -970,6 +1101,23 @@ async def _insert_voxcpm2_thread_with_character_and_voice(sessionmaker: async_se
     )
 
 
+async def _insert_f5_thread_with_character_and_voice(sessionmaker: async_sessionmaker) -> str:
+    character_id = "char_f5_call_ready"
+    voice_id = f"voice_{character_id}"
+    await _insert_voice(
+        sessionmaker,
+        voice_id=voice_id,
+        default_engine="f5",
+        reference_transcript="Saved F5 transcript.",
+    )
+    await _insert_character(sessionmaker, character_id=character_id, default_voice_id=voice_id)
+    return await _insert_thread(
+        sessionmaker,
+        character_id=character_id,
+        thread_id="thread_f5_call_ready",
+    )
+
+
 async def _insert_character_with_voice(
     sessionmaker: async_sessionmaker,
     *,
@@ -1119,6 +1267,54 @@ def _public_error_message(response: Any) -> str | None:
     if isinstance(detail, dict):
         return detail.get("message")
     return None
+
+
+def _unsafe_call_payload(route_suffix: str, session_id: str) -> dict[str, Any]:
+    if route_suffix == "/offer":
+        return {
+            "session_id": session_id,
+            "offer": {"type": "offer", "sdp": "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"},
+        }
+    if route_suffix == "/mute":
+        return {"session_id": session_id, "muted": True}
+    if route_suffix == "/interrupt":
+        return {"session_id": session_id, "reason": "button"}
+    if route_suffix == "/turns":
+        return {
+            "session_id": session_id,
+            "turn_id": "turn-origin-check",
+            "text": "This should be rejected before call state changes.",
+            "source": "user_final",
+        }
+    if route_suffix == "/reconnect-audio":
+        return {
+            "session_id": session_id,
+            "pcm_b64": "AA==",
+            "sample_rate": 16000,
+            "channels": 1,
+            "backfill_id": "origin-check",
+        }
+    if route_suffix == "/events/recover":
+        return {"session_id": session_id}
+    if route_suffix == "/end":
+        return {"session_id": session_id, "reason": "hangup"}
+    if route_suffix == "/_debug/event":
+        return {
+            "event": "origin-check",
+            "session_id": session_id,
+            "detail": {"route": route_suffix},
+        }
+    raise AssertionError(f"Unhandled unsafe call route suffix: {route_suffix}")
+
+
+def _backend_call_snapshot(backend: ScriptedCallBackend) -> dict[str, list[dict[str, Any]]]:
+    return {
+        "created_sessions": [dict(item) for item in backend.created_sessions],
+        "offer_calls": [dict(item) for item in backend.offer_calls],
+        "backfill_calls": [dict(item) for item in backend.backfill_calls],
+        "speak_calls": [dict(item) for item in backend.speak_calls],
+        "interrupt_calls": [dict(item) for item in backend.interrupt_calls],
+    }
 
 
 def _sse_events(text: str) -> list[dict[str, Any]]:
