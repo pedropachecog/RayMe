@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready_to_execute
-stopped_at: Completed 03.1-02-PLAN.md
-last_updated: "2026-05-12T13:27:47.583Z"
+stopped_at: Completed 03.1-03-PLAN.md
+last_updated: "2026-05-12T13:47:05.237Z"
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 94
-  completed_plans: 89
-  percent: 95
+  completed_plans: 90
+  percent: 96
 ---
 
 ## Phase Status
@@ -56,6 +56,7 @@ progress:
 - Phase 03.1 planned on 2026-05-12: seven verified plans now cover open phone-call debug sessions as mandatory source evidence, missing-chunks reconnect PCM continuity, AI backend lifecycle hardening, Web UI server call facade/writeback hardening, client helper and browser call-route stabilization, focused local regression plus missing-chunks evidence, canonical OMEN live dual-engine verification, and Android Chrome product-owner missing-chunks acceptance.
 - Phase 03.1 plan 03.1-01 completed on 2026-05-12: evidence-backed CALL-STAB triage, sanitized evidence scaffolding, dual-engine live-call smoke coverage, and Phase 4 scope exclusions are now locked for stabilization.
 - Phase 03.1 plan 03.1-02 completed on 2026-05-12: AI backend call lifecycle regressions now cover mute drops, reconnect backfill recovery, late event drain, receive-loop terminal/recovered transport states, and dual-engine TTS failure sanitization.
+- Phase 03.1 plan 03.1-03 completed on 2026-05-12: Web UI server call facade regressions now cover same-origin unsafe routes, reconnect-audio no-persistence behavior, `_webrtc_timeout` backfill proxying, bounded debug diagnostics, sliding-window prompt context, and VoxCPM2/F5 route ownership.
 - Phase 07 plan 07-01 completed on 2026-05-11: RED AI backend VoxCPM2 contracts now cover roster metadata, CUDA-only adapter loading, bounded synthesis options, 48 kHz output, sanitized errors, and engine-scoped degradation.
 - Phase 07 plan 07-02 completed on 2026-05-11: RED Web UI server/client contracts now cover durable VoxCPM2 voice metadata, conditional Voice Lab controls, fallback roster copy, missing-transcript warning, and preview/test-play payload behavior.
 - Phase 07 plan 07-03 completed on 2026-05-11: RED call-flow contracts now cover saved VoxCPM2 metadata forwarding into real playback, bounded WebRTC speak options, sanitized `call_tts_failed`, and unchanged interrupt behavior.
@@ -86,6 +87,8 @@ progress:
 - TTS v1 roster: `F5-TTS`, `XTTS v2`, `Qwen3-TTS 0.6B-Base`, and `VoxCPM2`.
 - Phase 03.1-02 receive-loop policy: disconnected backend audio receive loops recover when either ICE returns to connected/completed or aggregate peer `connectionState` returns to connected; failed/closed transports still record `connection_failed`.
 - Phase 03.1-02 TTS failure policy: `/webrtc/speak` continues returning fixed public `call_tts_failed` details with `engine_id` for both `voxcpm2` and `f5`, without traceback, local path, or model-cache disclosure.
+- Phase 03.1-03 diagnostics policy: browser call debug events are behavior-neutral, logged only, write no DB rows, call no AI backend method, and cap serialized detail to 800 characters including the truncation marker.
+- Phase 03.1-03 route ownership policy: VoxCPM2 and F5 call turns continue through the existing same-origin `/api/calls/{call_id}/turns` route; no engine-specific call route is added.
 - Phase 08-01 streaming adapter policy: VoxCPM2 streaming stays internal to the AI backend through `TtsAudioChunk` and `TtsStreamingAdapter`.
 - Phase 08-01 no-fallback policy: `VoxCpm2TtsAdapter.stream()` calls `generate_streaming()` directly and rejects empty streams instead of falling back to `runtime.generate()`.
 - Phase 08-02 call-session streaming policy: VoxCPM2 live call playback uses `adapter.stream()` only for `voxcpm2` adapters with a callable stream method.
@@ -222,8 +225,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-05-12T13:27:47.540Z
-Stopped at: Completed 03.1-02-PLAN.md
+Last session: 2026-05-12T13:46:44.781Z
+Stopped at: Completed 03.1-03-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
