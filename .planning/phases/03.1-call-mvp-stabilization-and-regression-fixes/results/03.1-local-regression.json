@@ -1,0 +1,74 @@
+{
+  "phase": "03.1-call-mvp-stabilization-and-regression-fixes",
+  "commit": "dd491d4",
+  "generated_at": "2026-05-12T14:57:07Z",
+  "commands": [
+    {
+      "name": "ai-backend-call",
+      "command": "uv run --project ai-backend pytest ai-backend/tests/test_call_session.py ai-backend/tests/test_webrtc_signaling.py -q",
+      "status": "passed",
+      "summary": "71 passed, 3 warnings; covers backend call session mute/drop, reconnect recovery, WebRTC signaling, event drain, and dual-engine TTS failure sanitizer regressions.",
+      "touched_requirements": [
+        "REQ-47",
+        "REQ-50",
+        "REQ-A0",
+        "P8-DUAL-ENGINE"
+      ]
+    },
+    {
+      "name": "web-ui-server-call",
+      "command": "uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py web-ui/server/tests/test_prompt_builder.py -q",
+      "status": "passed",
+      "summary": "52 passed; covers same-origin call facade behavior, reconnect-audio timeout proxying, durable call writeback, and prompt context windowing.",
+      "touched_requirements": [
+        "REQ-40",
+        "REQ-47",
+        "REQ-50",
+        "REQ-63"
+      ]
+    },
+    {
+      "name": "client-call-unit",
+      "command": "npm --prefix web-ui/client run test:unit -- --run tests/unit/call-audio.test.ts tests/unit/call-state.test.ts tests/unit/reconnect-backfill.test.ts",
+      "status": "passed",
+      "summary": "3 files and 15 tests passed; includes the delayed reconnect-tail regression that prevents omitting the forbidden 35256-69467ms microphone span.",
+      "touched_requirements": [
+        "REQ-40",
+        "REQ-47",
+        "REQ-48",
+        "REQ-50",
+        "REQ-A0",
+        "REQ-A1"
+      ]
+    },
+    {
+      "name": "desktop-call-playwright",
+      "command": "npm --prefix web-ui/client run test:e2e -- tests/e2e/call-start.spec.ts tests/e2e/call-toolbar.spec.ts tests/e2e/call-permissions.spec.ts tests/e2e/call-visualizer.spec.ts tests/e2e/call-summary.spec.ts --project=desktop-chromium",
+      "status": "passed",
+      "summary": "20 passed; covers startup gating, permission denial, reconnect recovery, reconnect-tail offsets, toolbar controls, visualizer states, and call summary writeback.",
+      "touched_requirements": [
+        "REQ-40",
+        "REQ-47",
+        "REQ-48",
+        "REQ-49",
+        "REQ-50",
+        "REQ-A0",
+        "REQ-A1"
+      ]
+    },
+    {
+      "name": "mobile-call-playwright",
+      "command": "npm --prefix web-ui/client run test:e2e -- tests/e2e/call-mobile.spec.ts --project=mobile-chromium",
+      "status": "passed",
+      "summary": "1 passed; verifies mobile call controls remain visible above bottom navigation with 44px touch-target coverage.",
+      "touched_requirements": [
+        "REQ-48",
+        "REQ-49",
+        "REQ-A0",
+        "REQ-A1"
+      ]
+    }
+  ],
+  "overall_status": "passed",
+  "android_acceptance_required": true
+}
