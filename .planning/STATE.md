@@ -3,8 +3,8 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready_to_plan
-stopped_at: Completed 03-12-PLAN.md
-last_updated: "2026-05-12T01:05:13Z"
+stopped_at: Phase 03.1 context gathered
+last_updated: "2026-05-12T03:17:24.637Z"
 progress:
   total_phases: 10
   completed_phases: 8
@@ -217,8 +217,8 @@ progress:
 
 ## Session Continuity
 
-Last session: 2026-05-11T19:17:26.261Z
-Stopped at: Completed 08-06-PLAN.md
-Resume file: None
+Last session: 2026-05-12T03:16:41.310Z
+Stopped at: Phase 03.1 context gathered
+Resume file: .planning/phases/03.1-call-mvp-stabilization-and-regression-fixes/03.1-CONTEXT.md
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
