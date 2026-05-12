@@ -1,0 +1,37 @@
+{
+  "phase": "03.1-call-mvp-stabilization-and-regression-fixes",
+  "source": "phone-calls-missing-chunks",
+  "debug_sessions": [
+    "phone-calls-missing-chunks.md",
+    "phone-call-transcript-comparison.md",
+    "phone-call-expected-poem-2026-05-02.md"
+  ],
+  "expected_reference": {
+    "file": "phone-call-expected-poem-2026-05-02.md",
+    "sanitized_summary": "Expected long-turn reference includes beginning, middle, and ending sections; raw transcript text is intentionally not copied into this artifact."
+  },
+  "backfill_batches": [
+    {
+      "source": "phone-calls-missing-chunks.md",
+      "historical_gap": "35256-69467ms",
+      "prior_covered_ranges": [
+        "5226-35256ms",
+        "69467-99412ms"
+      ]
+    },
+    {
+      "source": "web-ui/client/tests/unit/reconnect-backfill.test.ts",
+      "assertion": "delayed tail selection starts at 35256ms and not 69467ms",
+      "selected_range": "35256-99412ms"
+    },
+    {
+      "source": "web-ui/client/tests/e2e/call-start.spec.ts",
+      "assertion": "reconnect selected offsets have no positive gaps before setRemoteDescription",
+      "selected_range": "contiguous delayed tail"
+    }
+  ],
+  "no_offset_gaps": true,
+  "forbidden_gap": "35256-69467ms",
+  "long_turn_middle_preserved": true,
+  "status": "passed"
+}
