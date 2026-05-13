@@ -31,6 +31,8 @@ type ReconnectRouteOptions = {
   recoverEvents?: Array<Record<string, unknown>>;
   offerDelayMs?: number;
   failOfferFrom?: number;
+  turnStreamGate?: Promise<void>;
+  turnStreamEvents?: Array<Record<string, unknown>>;
 };
 
 type StartupRouteCounters = {
@@ -512,6 +514,80 @@ test('recovers queued turn and ends when terminal media reconnect fails', async 
   assertNoBrowserErrors();
 });
 
+test('keeps recovered turn response live when terminal reconnect offer fails before audio starts', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+    allowConsoleErrors: [/Failed to load resource: the server responded with a status of 502/]
+  });
+  await installMockCallMedia(page);
+  let deliverLiveResponse = () => {};
+  const turnStreamGate = new Promise<void>((resolve) => {
+    deliverLiveResponse = resolve;
+  });
+  const counters = await installReconnectCallRoutes(page, {
+    failOfferFrom: 3,
+    turnStreamGate,
+    turnStreamEvents: [
+      {
+        type: 'ai_audio_started',
+        session_id: 'rtc-call-reconnect-01',
+        turn_id: 'user-turn-active-response',
+        audio: { duration_ms: 1200, samples: 19200 }
+      },
+      {
+        type: 'ai_token',
+        turn_id: 'user-turn-active-response',
+        text: 'Live response after recovery.'
+      },
+      {
+        type: 'ai_done',
+        turn_id: 'user-turn-active-response'
+      }
+    ]
+  });
+
+  await startReconnectCall(page, counters);
+
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await expect.poll(() => counters.offerCount).toBe(2);
+  await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.ok')).toBe(1);
+
+  await emitLatestMockDataChannelEvent(page, {
+    type: 'user_final',
+    session_id: 'rtc-call-reconnect-01',
+    turn_id: 'user-turn-active-response',
+    text: 'Recovered long-turn speech.'
+  });
+  await expect.poll(() => counters.turnCount).toBe(1);
+  await expect(page.getByText('Recovered long-turn speech.')).toBeVisible();
+
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await expect.poll(() => counters.offerCount).toBe(3);
+  await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.failed')).toBe(1);
+  await page.waitForTimeout(100);
+
+  const heldResponseMedia = await getMockCallMediaSnapshot(page);
+  expect(
+    heldResponseMedia.peers.some(
+      (peer) => peer.remoteDescriptionType === 'answer' && !peer.closed
+    )
+  ).toBe(true);
+  expect(counters.endCount).toBe(0);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+
+  deliverLiveResponse();
+  await expect(page.getByText('Live response after recovery.')).toBeVisible();
+  await expect.poll(() => debugEventCount(counters, 'call.ai_audio_started')).toBe(1);
+  const responseIndex = counters.requestOrder.indexOf('turn_response');
+  expect(responseIndex).toBeGreaterThan(counters.requestOrder.indexOf('turn'));
+  const endIndex = counters.requestOrder.indexOf('end');
+  if (endIndex >= 0) {
+    expect(endIndex).toBeGreaterThan(responseIndex);
+  }
+  assertNoBrowserErrors();
+});
+
 test('shows a call notice in the transcript when /turns returns a type=error SSE event', async ({
   page
 }) => {
@@ -583,6 +659,17 @@ async function setCurrentMockPeerIceState(page: Page, iceConnectionState: RTCIce
     },
     { iceConnectionState }
   );
+}
+
+async function emitLatestMockDataChannelEvent(page: Page, event: Record<string, unknown>) {
+  await page.evaluate((event) => {
+    const target = window as Window & {
+      __raymeMockDataChannels?: Array<{
+        emitMockMessage?: (data: string) => void;
+      }>;
+    };
+    target.__raymeMockDataChannels?.at(-1)?.emitMockMessage?.(JSON.stringify(event));
+  }, event);
 }
 
 async function getMockCallMediaSnapshot(page: Page): Promise<MockCallMediaSnapshot> {
@@ -843,10 +930,15 @@ async function installReconnectCallRoutes(
     counters.turnCount += 1;
     counters.requestOrder.push('turn');
     counters.turns.push(route.request().postDataJSON() as Record<string, unknown>);
+    if (options.turnStreamGate) {
+      await options.turnStreamGate;
+    }
+    counters.requestOrder.push('turn_response');
+    const streamEvents = options.turnStreamEvents ?? [{ type: 'ai_done' }];
     await route.fulfill({
       status: 200,
       contentType: 'text/event-stream',
-      body: [`data: ${JSON.stringify({ type: 'ai_done' })}`, '', ''].join('\n')
+      body: streamEvents.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')
     });
   });
   await page.route('**/api/calls/*/end', async (route) => {

@@ -1,7 +1,7 @@
 ---
-status: investigating
+status: verifying
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-13T16:40:37Z
+updated: 2026-05-13T17:30:54Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -9,10 +9,27 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 
 ## Current Focus
 
-hypothesis: "The active product bug is premature terminal cleanup: the call enters failed/end cleanup while a recovered long-turn `/turns` response is still in progress. The reverted `6faf893` patch only suppressed post-end generation and did not make the call stay alive."
-test: "Next RED test must reproduce recovered `user_final` starting `/turns`, a reconnect `/offer` failure, and terminal cleanup attempting to `/end` before the response stream delivers live `ai_audio_started`/`ai_done`."
-expecting: "A correct fix prevents premature `/end` and failed UI while the recovered long-turn response is still in flight, or keeps a bounded response-delivery recovery path alive."
-next_action: "Do not patch product code until the process guardrails from `.planning/forensics/report-20260513-163852.md` are recorded. Then write the upstream no-premature-end regression before any implementation."
+user_goal_preservation: "The user must still be able to see and hear the generated response for a recovered long turn; the fix must keep the call live long enough for that response instead of cancelling, hiding, dropping, or rejecting it."
+hypothesis: "Terminal reconnect failure posts `/end` and shows the failed blocking panel because `failTerminalMediaReconnect()` has no liveness guard for an active `/turns` response stream; additionally, browser reconnect offer failure was closing the last answered peer before a replacement answer existed."
+test: "`npm run test:e2e -- call-start.spec.ts -g \"keeps recovered turn response live when terminal reconnect offer fails before audio starts\"` from `web-ui/client`."
+expecting: "Before the fix the focused test fails with `endCount=1` while the `/turns` stream is gated, and with no open answered peer after strengthening the playback assertion. After the fix, `endCount` stays `0`, no alert is shown, an answered peer remains open, and the live response is displayed after `ai_audio_started`/`ai_done`."
+next_action: "Commit and deploy the verified runtime fix through `scripts/deploy-omen.sh`, then require physical Android long-message acceptance."
+reasoning_checkpoint:
+  hypothesis: "Terminal reconnect cleanup ends the call too early because `failTerminalMediaReconnect()` always runs `cleanupTerminalFailedCall()` and applies failed UI even when `activeTurnAbort`/`activeTurnReader` indicate an in-flight `/turns` response."
+  confirming_evidence:
+    - "The RED Playwright test holds `/api/calls/*/turns` before `ai_audio_started`/`ai_done` and observes `/api/calls/*/end` already posted (`endCount=1`)."
+    - "`submitUserTurn()` starts an `AbortController` and stream reader for `/turns`; `failTerminalMediaReconnect()` and `cleanupTerminalFailedCall()` do not consult that state before ending."
+    - "The forensic report and OMEN logs show the recovered long-turn transcript reached `/turns`, LLM generation began, then terminal reconnect cleanup posted `/end` before the response could play/show live."
+  falsification_test: "If the focused Playwright test still posts `/end` before the gated `/turns` stream delivers, or if the response is not visible after releasing the gate, this hypothesis/fix is wrong."
+  fix_rationale: "Delay terminal `/end` and failed UI while a turn response stream is active, and make browser reconnect replacement transactional so a failed `/offer` does not close the last answered peer/audio path. This addresses the premature state transition and playback path instead of suppressing post-end work."
+  blind_spots: "The browser test mocks media and SSE timing; real Android/OMEN verification is still required after deployment, but the regression now covers both no-premature-end and keeping an answered peer open."
+tdd_checkpoint:
+  test_file: "web-ui/client/tests/e2e/call-start.spec.ts"
+  test_name: "keeps recovered turn response live when terminal reconnect offer fails before audio starts"
+  command: "npm run test:e2e -- call-start.spec.ts -g \"keeps recovered turn response live when terminal reconnect offer fails before audio starts\""
+  status: "green"
+  failure_output: "Expected counters.endCount to be 0 before live response delivery; received 1 at call-start.spec.ts:570 in both desktop-chromium and mobile-chromium."
+  green_output: "Focused test passed after client liveness guard, transactional browser reconnect replacement, and SSE fixture framing correction: 2 passed in desktop-chromium and mobile-chromium. Full serialized call-start spec passed: 36 passed."
 checkpoint:
   type: process-forensics
   rollback_commit: `3800391b9a445963f4d1d2aefefbed5f2a5e482f`
@@ -56,6 +73,46 @@ evidence_files:
   - .planning/debug/phone-call-expected-poem-2026-05-02.md
 
 ## Investigation Evidence
+
+- timestamp: 2026-05-13T17:05:28Z
+  checked: Focused TDD RED baseline before product-code changes.
+  found: `npm run test:e2e -- call-start.spec.ts -g "keeps recovered turn response live when terminal reconnect offer fails before audio starts"` failed in both desktop and mobile Chromium at `call-start.spec.ts:570`; expected `counters.endCount` to be `0`, received `1`.
+  implication: The current client still posts `/end` while the recovered long-turn `/turns` response stream is gated before `ai_audio_started`/`ai_done`; the green fix must change the terminal reconnect liveness path.
+
+- timestamp: 2026-05-13T17:09:58Z
+  checked: First GREEN attempt after adding the active turn response guard.
+  found: The focused test no longer failed at the premature `/end` assertion. It advanced to response delivery, then failed waiting for `Live response after recovery.`; the page snapshot showed the terminal failed panel. The test route currently serializes multiple SSE events as adjacent `data:` lines without blank-line event separators, so the client sees one malformed event instead of `ai_audio_started`, `ai_token`, and `ai_done`.
+  implication: The product-code liveness guard moved the failure past the original boundary. The test fixture must emit valid SSE frames before the response-delivery assertion can verify the fix.
+
+- timestamp: 2026-05-13T17:12:18Z
+  checked: Focused GREEN verification after correcting mocked SSE framing.
+  found: `npm run test:e2e -- call-start.spec.ts -g "keeps recovered turn response live when terminal reconnect offer fails before audio starts"` passed in both mobile and desktop Chromium: 2 passed. The test verified no `/end` and no alert while `/turns` was gated, then showed `Live response after recovery.` and observed `call.ai_audio_started`.
+  implication: The active turn response liveness guard satisfies the RED boundary without cancelling or suppressing the response.
+
+- timestamp: 2026-05-13T17:15:38Z
+  checked: Adjacent browser reconnect/hangup regression verification and client build hygiene.
+  found: Adjacent Playwright command for terminal reconnect limit, terminal queued-turn recovery, pending/in-flight/stalled reconnect backfill hangup cases passed: 10 passed across desktop and mobile Chromium. `npm run build` from `web-ui/client` passed. `git diff --check` passed.
+  implication: The client liveness guard did not regress existing terminal reconnect cleanup or user hangup backfill behavior, and the Svelte production build accepts the change.
+
+- timestamp: 2026-05-13T17:22:12Z
+  checked: Strengthened playback-path regression after reviewing the first GREEN diff.
+  found: Added an assertion to `keeps recovered turn response live when terminal reconnect offer fails before audio starts` requiring at least one already-answered peer to remain open while the recovered `/turns` stream is gated. The test failed in both desktop and mobile Chromium with that assertion false.
+  implication: The first GREEN attempt was insufficient for the user's full goal. It kept `/end` from firing but `reconnectBrowserMedia()` had already closed the last answered peer/audio path before the replacement `/offer` failed, risking visible text without playable voice.
+
+- timestamp: 2026-05-13T17:25:44Z
+  checked: Focused GREEN verification after transactional browser reconnect replacement.
+  found: `connectBrowserMedia()` now supports preserving the existing peer until a replacement answer is applied; `reconnectBrowserMedia()` uses that path and restores the previous peer/data channel if the replacement `/offer` fails. The strengthened focused test passed in both desktop and mobile Chromium: 2 passed.
+  implication: Terminal reconnect failure no longer wins while the active response is in flight, and a failed replacement offer no longer destroys the last answered media path before the response can show/play.
+
+- timestamp: 2026-05-13T17:30:54Z
+  checked: Full browser route regression verification after the stronger fix.
+  found: Adjacent reconnect/hangup grep passed: 14 passed across desktop and mobile Chromium. Full serialized `npm run test:e2e -- call-start.spec.ts --workers=1` passed: 36 passed. `npm run build` from `web-ui/client` passed. `git diff --check` passed.
+  implication: The transactional reconnect plus active response liveness guard is stable across call startup, reconnect, backfill, hangup, error, and mobile route coverage; runtime deployment is the next step.
+
+- timestamp: 2026-05-13T17:00:36Z
+  checked: Upstream RED browser regression for the active product bug.
+  found: Added `keeps recovered turn response live when terminal reconnect offer fails before audio starts` in `web-ui/client/tests/e2e/call-start.spec.ts`. The test starts a call, successfully reconnects once, emits a recovered long-turn `user_final` through the live data channel so `/turns` begins, holds the `/turns` SSE before `ai_audio_started`/`ai_done`, then forces the next reconnect `/offer` to return 502. Focused Playwright failed in both desktop and mobile Chromium because `counters.endCount` was already `1` while the response stream was still gated.
+  implication: The RED test proves the correct upstream boundary. Current client cleanup ends the call before the recovered response can show/play live; a valid green fix must delay or gate terminal `/end`/failed UI around the active response stream, not suppress generation after end.
 
 - timestamp: 2026-05-13T16:40:37Z
   checked: Process failure after user challenged `6faf893` as solving the wrong problem.
@@ -864,15 +921,13 @@ evidence_files:
 
 ## Resolution
 
-root_cause: In the fresh Android acceptance failure at deployed commit `2d00461`, the latest failed call `call_2018a74d029c467eb173f6a012719663` / `rtc_127ff57be7024045b1c8ac3307afbbde` recovered and persisted the full long user turn, but terminal media cleanup posted `/end` while `/turns` LLM generation was still in flight. The invalid `6faf893` follow-up treated post-end generation as the defect and suppressed it, but the active product defect is earlier: the call should not enter terminal `/end`/failed cleanup while a recovered long-turn response is still active.
-fix: No product fix is currently accepted. `6faf89378bc55943c4588d31ec0b303a3607ffa3` (`fix(call): stop post-end response playback`) was reverted by `3800391b9a445963f4d1d2aefefbed5f2a5e482f` and redeployed through `scripts/deploy-omen.sh`. Durable process guardrails were added in `.planning/forensics/report-20260513-163852.md`, `.planning/OPERATING-NOTES.md`, and `.planning/LEARNINGS.md`.
-verification: Rollback deployment completed on OMEN at `3800391b9a445963f4d1d2aefefbed5f2a5e482f`. The next product fix is blocked until a RED regression proves the upstream no-premature-end behavior: terminal cleanup must not post `/end` or enter failed UI while a recovered long-turn `/turns` response is in flight.
+root_cause: In the fresh Android acceptance failure at deployed commit `2d00461`, the latest failed call `call_2018a74d029c467eb173f6a012719663` / `rtc_127ff57be7024045b1c8ac3307afbbde` recovered and persisted the full long user turn, but terminal media cleanup posted `/end` while `/turns` LLM generation was still in flight. The active product defect was earlier than post-end generation: `failTerminalMediaReconnect()` ended the call and showed failed UI without checking whether a recovered long-turn response stream was active, and browser reconnect offer failure could close the last answered peer/audio path before a replacement answer existed.
+fix: Added a client-side active turn response guard in `web-ui/client/src/routes/call/[threadId]/+page.svelte`. Terminal reconnect cleanup now waits for any active `/turns` stream before recovering/ending, waits again after recovery in case recovered events start a turn, and holds terminal cleanup through a bounded response-visible/playback grace based on `ai_audio_started` duration. Browser reconnect replacement is also transactional: the existing answered peer/data channel stays in place until a replacement answer is applied, and a failed replacement offer restores the previous peer instead of destroying the live playback path. The fix does not abort or suppress the response stream.
+verification: Focused TDD test passed after the fix: `npm run test:e2e -- call-start.spec.ts -g "keeps recovered turn response live when terminal reconnect offer fails before audio starts"` returned 2 passed across desktop and mobile Chromium. Strengthened playback-path assertion first failed when no answered peer remained open, then passed after transactional reconnect. Adjacent reconnect/hangup grep passed: 14 passed. Full serialized `npm run test:e2e -- call-start.spec.ts --workers=1` passed: 36 passed. `npm run build` from `web-ui/client` passed. `git diff --check` passed.
 files_changed:
-  - .planning/forensics/report-20260513-163852.md
-  - .planning/OPERATING-NOTES.md
-  - .planning/LEARNINGS.md
+  - web-ui/client/src/routes/call/[threadId]/+page.svelte
+  - web-ui/client/tests/e2e/call-start.spec.ts
   - .planning/debug/phone-calls-missing-chunks.md
-  - .planning/phases/03.1-call-mvp-stabilization-and-regression-fixes/03.1-EVIDENCE.md
 
 ## Prior Fix History
 

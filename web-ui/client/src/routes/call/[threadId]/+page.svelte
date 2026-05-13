@@ -60,6 +60,21 @@
     peak?: number;
   }
 
+  interface ActiveTurnResponseResult {
+    delivered: boolean;
+    audioDurationMs: number;
+  }
+
+  interface ActiveTurnResponseGuard {
+    turnId: string;
+    startedAt: number;
+    delivered: boolean;
+    audioDurationMs: number;
+    settled: boolean;
+    promise: Promise<ActiveTurnResponseResult>;
+    resolve: (result: ActiveTurnResponseResult) => void;
+  }
+
   type CallTurnStreamEvent =
     | { type: 'ai_token'; turn_id?: string; text?: string }
     | { type: 'ai_audio_started'; turn_id?: string; session_id?: string; audio?: CallAudioStats | null }
@@ -84,6 +99,7 @@
   const handledUserFinalTurnIds = new Set<string>();
   let activeTurnAbort: AbortController | null = null;
   let activeTurnReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let activeTurnResponseGuard: ActiveTurnResponseGuard | null = null;
   let localMediaStream: MediaStream | null = null;
   let peerConnection: RTCPeerConnection | null = null;
   let eventsChannel: RTCDataChannel | null = null;
@@ -130,6 +146,9 @@
   const MIC_BACKFILL_BATCH_MAX_MS = 10000;
   const MISSED_CALL_EVENTS_RECOVERY_RETRY_MS = 2000;
   const TERMINAL_RECONNECT_BACKFILL_WAIT_MS = 2000;
+  const TERMINAL_RECONNECT_ACTIVE_RESPONSE_WAIT_MS = 120000;
+  const TERMINAL_RECONNECT_RESPONSE_VISIBLE_GRACE_MS = 1500;
+  const TERMINAL_RECONNECT_RESPONSE_PLAYBACK_MAX_MS = 60000;
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'RayMe');
@@ -212,7 +231,10 @@
 
   async function connectBrowserMedia(
     started: { call_id: string; session_id?: string | null },
-    options: { beforeRemoteDescription?: () => Promise<void> } = {}
+    options: {
+      beforeRemoteDescription?: () => Promise<void>;
+      preserveExistingUntilConnected?: boolean;
+    } = {}
   ) {
     if (!localMediaStream) {
       return;
@@ -222,12 +244,20 @@
       throw new CallApiError('This browser cannot start a real WebRTC call.', 400, 'webrtc_offer_failed');
     }
 
-    peerConnection?.close();
+    const previousConnection = peerConnection;
+    const previousEventsChannel = eventsChannel;
+    const preserveExisting =
+      options.preserveExistingUntilConnected === true && previousConnection !== null;
+    if (!preserveExisting) {
+      previousConnection?.close();
+    }
+
     const connection = new RTCPeerConnection();
     peerConnection = connection;
     attachPeerConnectionDebug(connection, started.call_id);
-    eventsChannel = connection.createDataChannel('rayme-events');
-    attachCallEventChannel(eventsChannel, started.call_id, 'browser-created');
+    const candidateEventsChannel = connection.createDataChannel('rayme-events');
+    eventsChannel = candidateEventsChannel;
+    attachCallEventChannel(candidateEventsChannel, started.call_id, 'browser-created');
     connection.ondatachannel = (event) => {
       emitDebugEvent(started.call_id, 'pc.ondatachannel', {
         label: event.channel.label,
@@ -260,35 +290,51 @@
       connection.addTrack(track, localMediaStream);
     }
 
-    const offer = await connection.createOffer();
-    await connection.setLocalDescription(offer);
-    emitDebugEvent(started.call_id, 'pc.setLocalDescription', {
-      type: offer.type,
-      sdp_len: offer.sdp?.length ?? 0
-    });
-    await waitForIceGathering(connection);
-    const localDescription = connection.localDescription ?? offer;
-    emitDebugEvent(started.call_id, 'pc.offer.sending', {
-      iceGatheringState: connection.iceGatheringState,
-      sdp_len: localDescription.sdp?.length ?? 0
-    });
-    const response = await offerCall(started.call_id, localDescription, started.session_id);
-    sessionId = response.session_id || started.session_id || started.call_id;
-    emitDebugEvent(started.call_id, 'pc.answer.received', {
-      session_id: sessionId,
-      has_answer: Boolean(response.answer),
-      answer_sdp_len: response.answer?.sdp?.length ?? 0
-    });
-    if (options.beforeRemoteDescription) {
-      await options.beforeRemoteDescription();
-    }
-    if (response.answer) {
-      await connection.setRemoteDescription(response.answer);
-      emitDebugEvent(started.call_id, 'pc.setRemoteDescription.done', {
-        signalingState: connection.signalingState,
-        iceConnectionState: connection.iceConnectionState,
-        connectionState: connection.connectionState
+    try {
+      const offer = await connection.createOffer();
+      await connection.setLocalDescription(offer);
+      emitDebugEvent(started.call_id, 'pc.setLocalDescription', {
+        type: offer.type,
+        sdp_len: offer.sdp?.length ?? 0
       });
+      await waitForIceGathering(connection);
+      const localDescription = connection.localDescription ?? offer;
+      emitDebugEvent(started.call_id, 'pc.offer.sending', {
+        iceGatheringState: connection.iceGatheringState,
+        sdp_len: localDescription.sdp?.length ?? 0
+      });
+      const response = await offerCall(started.call_id, localDescription, started.session_id);
+      sessionId = response.session_id || started.session_id || started.call_id;
+      emitDebugEvent(started.call_id, 'pc.answer.received', {
+        session_id: sessionId,
+        has_answer: Boolean(response.answer),
+        answer_sdp_len: response.answer?.sdp?.length ?? 0
+      });
+      if (options.beforeRemoteDescription) {
+        await options.beforeRemoteDescription();
+      }
+      if (response.answer) {
+        await connection.setRemoteDescription(response.answer);
+        emitDebugEvent(started.call_id, 'pc.setRemoteDescription.done', {
+          signalingState: connection.signalingState,
+          iceConnectionState: connection.iceConnectionState,
+          connectionState: connection.connectionState
+        });
+      }
+      if (preserveExisting && previousConnection && previousConnection !== connection) {
+        previousConnection.close();
+      }
+    } catch (error) {
+      if (preserveExisting) {
+        if (peerConnection === connection) {
+          peerConnection = previousConnection;
+        }
+        if (eventsChannel === candidateEventsChannel) {
+          eventsChannel = previousEventsChannel;
+        }
+        connection.close();
+      }
+      throw error;
     }
   }
 
@@ -498,17 +544,10 @@
     });
 
     try {
-      detachRemoteAudio();
-      eventsChannel?.close?.();
-      eventsChannel = null;
-      failedConnection.close();
-      if (peerConnection === failedConnection) {
-        peerConnection = null;
-      }
-
       await connectBrowserMedia(
         { call_id: callId, session_id: sessionId },
         {
+          preserveExistingUntilConnected: true,
           beforeRemoteDescription: () =>
             flushReconnectAudioBackfill(debugCallId, reason, reconnectAttempt)
         }
@@ -573,7 +612,17 @@
       } catch {
         // Recovery below still has a chance to drain already-queued events.
       }
+      await waitForActiveTurnResponseBeforeTerminalCleanup(
+        debugCallId,
+        reason,
+        'before_recover'
+      );
       await recoverMissedCallEvents(debugCallId, reason);
+      await waitForActiveTurnResponseBeforeTerminalCleanup(
+        debugCallId,
+        reason,
+        'after_recover'
+      );
       try {
         await endCall(requestCallId, requestSessionId, 'connection_failed');
       } catch {
@@ -1563,6 +1612,10 @@
     }
 
     if (event.type === 'ai_audio_started') {
+      markActiveTurnResponseDelivered(
+        event.turn_id ?? undefined,
+        event.audio?.duration_ms ?? undefined
+      );
       emitDebugEvent(callId, 'call.ai_audio_started', {
         turn_id: event.turn_id ?? null,
         audio: event.audio ?? null,
@@ -1655,6 +1708,7 @@
 
     cancelActiveTurnStream();
     activeTurnAbort = new AbortController();
+    const responseGuard = startActiveTurnResponseGuard(event.turn_id);
 
     try {
       const response = await submitCallTurn(
@@ -1673,6 +1727,7 @@
         callState = 'failed';
       }
     } finally {
+      finishActiveTurnResponseGuard(responseGuard);
       activeTurnAbort = null;
       activeTurnReader = null;
     }
@@ -1725,11 +1780,13 @@
 
   function handleTurnStreamEvent(event: CallTurnStreamEvent) {
     if (event.type === 'ai_token' && event.text) {
+      markActiveTurnResponseDelivered(event.turn_id);
       appendAiText(event.text, event.turn_id);
       return;
     }
 
     if (event.type === 'ai_audio_started') {
+      markActiveTurnResponseDelivered(event.turn_id, event.audio?.duration_ms);
       emitDebugEvent(callId, 'call.ai_audio_started', {
         turn_id: event.turn_id ?? null,
         audio: event.audio ?? null,
@@ -1821,10 +1878,127 @@
   }
 
   function cancelActiveTurnStream() {
+    if (activeTurnResponseGuard) {
+      finishActiveTurnResponseGuard(activeTurnResponseGuard);
+    }
     activeTurnAbort?.abort();
     activeTurnReader?.cancel().catch(() => undefined);
     activeTurnAbort = null;
     activeTurnReader = null;
+  }
+
+  function startActiveTurnResponseGuard(turnId: string): ActiveTurnResponseGuard {
+    let resolveGuard: (result: ActiveTurnResponseResult) => void = () => undefined;
+    const guard: ActiveTurnResponseGuard = {
+      turnId,
+      startedAt: performance.now(),
+      delivered: false,
+      audioDurationMs: 0,
+      settled: false,
+      promise: new Promise<ActiveTurnResponseResult>((resolve) => {
+        resolveGuard = resolve;
+      }),
+      resolve: (result: ActiveTurnResponseResult) => resolveGuard(result)
+    };
+    activeTurnResponseGuard = guard;
+    return guard;
+  }
+
+  function finishActiveTurnResponseGuard(guard: ActiveTurnResponseGuard) {
+    if (guard.settled) {
+      return;
+    }
+    guard.settled = true;
+    guard.resolve({
+      delivered: guard.delivered,
+      audioDurationMs: guard.audioDurationMs
+    });
+    if (activeTurnResponseGuard === guard) {
+      activeTurnResponseGuard = null;
+    }
+  }
+
+  function markActiveTurnResponseDelivered(turnId?: string, audioDurationMs?: number) {
+    const guard = activeTurnResponseGuard;
+    if (!guard) {
+      return;
+    }
+    if (turnId && guard.turnId && turnId !== guard.turnId) {
+      return;
+    }
+    guard.delivered = true;
+    if (typeof audioDurationMs === 'number' && Number.isFinite(audioDurationMs)) {
+      guard.audioDurationMs = Math.max(guard.audioDurationMs, Math.max(0, audioDurationMs));
+    }
+  }
+
+  async function waitForActiveTurnResponseBeforeTerminalCleanup(
+    debugCallId: string,
+    reason: string,
+    phase: string
+  ) {
+    const guard = activeTurnResponseGuard;
+    if (!guard) {
+      return;
+    }
+    emitDebugEvent(debugCallId, 'call.turn_response.terminal_wait.start', {
+      reason,
+      phase,
+      turnId: guard.turnId,
+      elapsedMs: Math.round(performance.now() - guard.startedAt)
+    });
+
+    let timeoutId = 0;
+    const timeoutResult = new Promise<{ status: 'timeout' }>((resolve) => {
+      timeoutId = window.setTimeout(
+        () => resolve({ status: 'timeout' }),
+        TERMINAL_RECONNECT_ACTIVE_RESPONSE_WAIT_MS
+      );
+    });
+    const result = await Promise.race([
+      guard.promise.then((value) => ({ status: 'done' as const, value })),
+      timeoutResult
+    ]);
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+
+    if (result.status === 'timeout') {
+      emitDebugEvent(debugCallId, 'call.turn_response.terminal_wait.timeout', {
+        reason,
+        phase,
+        turnId: guard.turnId,
+        timeoutMs: TERMINAL_RECONNECT_ACTIVE_RESPONSE_WAIT_MS
+      });
+      return;
+    }
+
+    const playbackGraceMs = result.value.delivered
+      ? Math.min(
+          Math.max(
+            result.value.audioDurationMs,
+            TERMINAL_RECONNECT_RESPONSE_VISIBLE_GRACE_MS
+          ),
+          TERMINAL_RECONNECT_RESPONSE_PLAYBACK_MAX_MS
+        )
+      : 0;
+    emitDebugEvent(debugCallId, 'call.turn_response.terminal_wait.done', {
+      reason,
+      phase,
+      turnId: guard.turnId,
+      delivered: result.value.delivered,
+      audioDurationMs: result.value.audioDurationMs,
+      playbackGraceMs
+    });
+    if (playbackGraceMs > 0) {
+      await delay(playbackGraceMs);
+    }
+  }
+
+  function delay(ms: number) {
+    return new Promise<void>((resolve) => {
+      window.setTimeout(resolve, ms);
+    });
   }
 
   function markLastAiTurnInterrupted() {
