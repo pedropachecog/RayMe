@@ -583,11 +583,6 @@ async def end_call(
     try:
         session_id = service.session_for_call(call_id)
         _reject_mismatched_session(session_id, payload.session_id if payload else None)
-        task = _ACTIVE_LLM_TURNS.pop(call_id, None)
-        if task is not None:
-            cancel = getattr(task, "cancel", None)
-            if callable(cancel):
-                cancel()
         endpoint_settings = await SettingsService(session, runtime_settings).read()
         try:
             await _end_call(backend, endpoint_settings.ai_backend_url, session_id, reason)

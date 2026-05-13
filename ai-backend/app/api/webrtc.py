@@ -287,21 +287,6 @@ async def speak_session(
     payload: SpeakRequest,
 ) -> dict[str, Any]:
     session = _session_or_404(request, session_id)
-    if session.ended_at is not None or session.state in {"ended", "failed"}:
-        logger.info(
-            "[rayme-call] speak.rejected_ended session=%s turn=%s state=%s",
-            session_id,
-            payload.turn_id,
-            session.state,
-        )
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail={
-                "code": "call_tts_failed",
-                "message": "Speech playback failed",
-                "engine_id": payload.engine_id,
-            },
-        )
     try:
         _reject_oversized_reference_audio(payload.reference_audio_b64)
         adapter = _tts_adapter(request, payload.engine_id)
