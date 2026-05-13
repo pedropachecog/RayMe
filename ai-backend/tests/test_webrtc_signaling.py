@@ -349,6 +349,35 @@ def test_webrtc_speak_synthesizes_with_exact_engine_and_emits_done(stub_webrtc: 
     assert payload["event"]["turn_id"] == "ai-turn-1"
 
 
+def test_webrtc_speak_rejects_ended_session_without_synthesis(stub_webrtc: None) -> None:
+    adapter = ScriptedTtsAdapter()
+    manager = ScriptedModelManager(adapter)
+    client = _client(model_manager=manager)
+    session_id = "call-session-ended-speak"
+    client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+    end_response = client.post(END_ROUTE_TEMPLATE.format(session_id=session_id))
+
+    response = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={
+            "turn_id": "ai-turn-after-end",
+            "text": "This should not be synthesized.",
+            "voice_id": "voice-1",
+            "engine_id": "f5",
+            "final_chunk": True,
+        },
+    )
+
+    assert end_response.status_code == 200
+    assert response.status_code == 502
+    assert response.json()["detail"] == {
+        "code": "call_tts_failed",
+        "message": "Speech playback failed",
+        "engine_id": "f5",
+    }
+    assert adapter.calls == []
+
+
 def test_webrtc_speak_accepts_bounded_voxcpm2_options(stub_webrtc: None) -> None:
     adapter = ScriptedTtsAdapter()
     manager = ScriptedModelManager(adapters={"voxcpm2": adapter})

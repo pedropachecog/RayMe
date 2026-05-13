@@ -1024,6 +1024,29 @@ def test_interrupt_cancels_server_generation_and_ai_backend_session(
     ]
 
 
+def test_end_cancels_server_generation_before_call_end(
+    call_fixture: CallFixture,
+) -> None:
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    calls_module = importlib.import_module("app.api.calls")
+    scripted_task = ScriptedCancelableTask()
+    calls_module._ACTIVE_LLM_TURNS[started["call_id"]] = scripted_task
+
+    try:
+        response = call_fixture.client.post(
+            f"/api/calls/{started['call_id']}/end",
+            json={"session_id": started["session_id"], "reason": "connection_failed"},
+        )
+    finally:
+        calls_module._ACTIVE_LLM_TURNS.pop(started["call_id"], None)
+
+    assert response.status_code == 200
+    assert scripted_task.cancel_calls == 1
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert rows[-1] == ("call_end", "event", "Call ended")
+
+
 def _install_test_dependencies(
     app: FastAPI,
     sessionmaker: async_sessionmaker,
