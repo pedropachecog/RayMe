@@ -100,6 +100,17 @@ as durable context, not one-off preferences.
   not feedback to smooth over. Add or update durable tests/evidence, then add a
   brief note to `.planning/LEARNINGS.md` identifying the false assumption, the
   missing verification layer, and the guard that now prevents recurrence.
+- If a user-visible bug is that a workflow fails before completing the expected
+  success path, do not accept a fix that only cancels, rejects, hides, drops, or
+  suppresses work after the failure. First write the user-goal preservation
+  sentence: "The user must still be able to ..." Then make the first RED test
+  assert the earliest wrong state transition or control-flow edge. Negative
+  cleanup tests such as "do not generate after end" are allowed only as
+  secondary guardrails, never as acceptance proof for "the call should not end."
+- Before deploying any live-call debug fix, compare the diff against the user's
+  expected behavior. If the patch removes a behavior the user expected to happen
+  successfully, or only prevents a misleading artifact after failure, stop and
+  re-target the upstream failure boundary.
 - If the user reports that a GSD workflow skipped discussion, confirmation, or
   approval, treat that as an incident. Invalidate any affected canonical
   artifacts, record the false assumption in `.planning/LEARNINGS.md`, and add a

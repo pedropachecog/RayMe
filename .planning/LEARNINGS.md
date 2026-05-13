@@ -99,6 +99,45 @@ Before telling the user a workflow is ready, report the exact evidence:
 If that evidence does not exist yet, keep working instead of asking the user to
 find the next failure.
 
+## 2026-05-13: Post-End Call Suppression Was Mistaken For A Call-Liveness Fix
+
+### What Went Wrong
+
+- The Android call failure after `2d00461` was that a recovered long user turn
+  produced a full transcript and AI response only after the live call had
+  already failed.
+- The deployed `6faf893` patch cancelled Web UI generation on `/end` and
+  rejected AI backend `/speak` after an ended/failed session.
+- That suppressed the misleading post-end response artifact, but it did not
+  address the user's required behavior: the call should not fail before RayMe
+  shows and plays the generated response.
+- The patch was reverted by `3800391` and deployed through
+  `scripts/deploy-omen.sh`.
+
+### False Assumptions
+
+- "Generated after `call_end`" was treated as the defect instead of evidence of
+  an earlier premature terminal-cleanup defect.
+- Tests that prove cancellation/rejection after `/end` were treated as
+  sufficient even though they could never prove the call stays alive.
+- A cleanup consistency fix was presented as ready for product-owner acceptance
+  without explicitly checking whether it preserved the original success path.
+
+### Guards Added
+
+- Forensic report:
+  `.planning/forensics/report-20260513-163852.md`
+- Operating rule: before deploying a user-visible debug fix, write the
+  user-goal preservation sentence and reject any patch that only cancels,
+  rejects, hides, drops, or suppresses work after the failure.
+- Test rule: the first RED regression must assert the earliest wrong state
+  transition or control-flow edge. For this call issue, that means proving
+  terminal cleanup does not post `/end` or enter failed UI while a recovered
+  `user_final` turn stream is active.
+- Negative cleanup tests such as "do not generate after end" can be secondary
+  guardrails only; they cannot satisfy acceptance for "the call should not
+  end."
+
 ## 2026-05-01: Post-Snapshot Reconnect Patch Stack Regressed Phone Calls
 
 ### What Went Wrong
