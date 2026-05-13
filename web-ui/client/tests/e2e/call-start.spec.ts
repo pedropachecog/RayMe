@@ -27,6 +27,7 @@ type ReconnectRouteCounters = {
 type ReconnectRouteOptions = {
   backfillDelayMs?: number;
   failBackfill?: boolean;
+  hangBackfillFrom?: number;
   recoverEvents?: Array<Record<string, unknown>>;
   offerDelayMs?: number;
   failOfferFrom?: number;
@@ -311,6 +312,26 @@ test('awaits in-flight reconnect backfill before ending without duplicate drain'
   expect(counters.backfills[1]).toMatchObject({ batch_index: 2, final: true });
   expect(counters.requestOrder.lastIndexOf('backfill')).toBeLessThan(
     counters.requestOrder.indexOf('end')
+  );
+  assertNoBrowserErrors();
+});
+
+test('ends when the final reconnect backfill request stalls during hangup', async ({ page }) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  const counters = await installReconnectCallRoutes(page, { hangBackfillFrom: 2 });
+
+  await startReconnectCall(page, counters);
+  await page.waitForTimeout(700);
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+
+  await expect.poll(() => counters.backfillCount).toBe(2);
+  await page.getByRole('button', { name: 'End Call' }).click();
+
+  expect(counters.backfills[1]).toMatchObject({ final: true });
+  await expect.poll(() => counters.endCount, { timeout: 5000 }).toBe(1);
+  expect(counters.requestOrder.indexOf('end')).toBeGreaterThan(
+    counters.requestOrder.indexOf('backfill')
   );
   assertNoBrowserErrors();
 });
@@ -701,6 +722,7 @@ async function installReconnectCallRoutes(
   page: Page,
   options: ReconnectRouteOptions = {}
 ) {
+  const hangingBackfillResolvers: Array<() => void> = [];
   const counters: ReconnectRouteCounters = {
     offerCount: 0,
     backfillCount: 0,
@@ -784,6 +806,11 @@ async function installReconnectCallRoutes(
     if (options.backfillDelayMs && counters.backfillCount === 1) {
       await new Promise((resolve) => setTimeout(resolve, options.backfillDelayMs));
     }
+    if (options.hangBackfillFrom && counters.backfillCount >= options.hangBackfillFrom) {
+      await new Promise<void>((resolve) => {
+        hangingBackfillResolvers.push(resolve);
+      });
+    }
     if (options.failBackfill) {
       await fulfillJson(route, {
         detail: {
@@ -825,6 +852,9 @@ async function installReconnectCallRoutes(
   await page.route('**/api/calls/*/end', async (route) => {
     counters.endCount += 1;
     counters.requestOrder.push('end');
+    while (hangingBackfillResolvers.length > 0) {
+      hangingBackfillResolvers.shift()?.();
+    }
     await fulfillJson(route, { call_id: 'call-reconnect-01', session_id: 'rtc-call-reconnect-01', reason: 'hangup' });
   });
 

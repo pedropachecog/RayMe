@@ -129,6 +129,7 @@
   const MIC_BACKFILL_MAX_MS = 30000;
   const MIC_BACKFILL_BATCH_MAX_MS = 10000;
   const MISSED_CALL_EVENTS_RECOVERY_RETRY_MS = 2000;
+  const TERMINAL_RECONNECT_BACKFILL_WAIT_MS = 2000;
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'RayMe');
@@ -563,11 +564,11 @@
     const requestSessionId = sessionId;
     terminalReconnectCleanupPromise = (async () => {
       try {
-        await flushReconnectAudioBackfill(
+        await waitForTerminalReconnectAudioBackfill(
           debugCallId,
           reconnectAudioBackfillReason ?? 'failed',
           Math.max(mediaReconnectAttempts, 1),
-          { awaitFinal: true }
+          'connection_failed'
         );
       } catch {
         // Recovery below still has a chance to drain already-queued events.
@@ -582,6 +583,55 @@
       terminalReconnectCleanupPromise = null;
     });
     await terminalReconnectCleanupPromise;
+  }
+
+  async function waitForTerminalReconnectAudioBackfill(
+    debugCallId: string,
+    reason: MediaReconnectReason,
+    attempt: number,
+    phase: string
+  ) {
+    const flushResult = flushReconnectAudioBackfill(
+      debugCallId,
+      reason,
+      attempt,
+      { awaitFinal: true }
+    ).then(
+      () => ({ status: 'done' as const }),
+      (error) => ({ status: 'failed' as const, error })
+    );
+    let timeoutId = 0;
+    const timeoutResult = new Promise<{ status: 'timeout' }>((resolve) => {
+      timeoutId = window.setTimeout(
+        () => resolve({ status: 'timeout' }),
+        TERMINAL_RECONNECT_BACKFILL_WAIT_MS
+      );
+    });
+
+    const result = await Promise.race([flushResult, timeoutResult]);
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+    if (result.status === 'timeout') {
+      emitDebugEvent(debugCallId, 'mic.reconnect_backfill.terminal_timeout', {
+        reason,
+        attempt,
+        phase,
+        timeoutMs: TERMINAL_RECONNECT_BACKFILL_WAIT_MS,
+        backfillId: reconnectAudioBackfillId
+      });
+      return;
+    }
+    if (result.status === 'failed') {
+      emitDebugEvent(debugCallId, 'mic.reconnect_backfill.terminal_failed', {
+        reason,
+        attempt,
+        phase,
+        name: (result.error as Error)?.name ?? 'unknown',
+        message: (result.error as Error)?.message ?? ''
+      });
+      throw result.error;
+    }
   }
 
   function clearMediaReconnectTimer() {
@@ -1826,7 +1876,11 @@
       backfillId: reconnectAudioBackfillId,
       bufferedChunks: localMicPcmBuffer.length
     });
-    await flushReconnectAudioBackfill(callId, reason, attempt, { awaitFinal: true });
+    try {
+      await waitForTerminalReconnectAudioBackfill(callId, reason, attempt, 'hangup');
+    } catch {
+      // Hangup must still recover/end when reconnect backfill itself fails.
+    }
     await recoverMissedCallEvents(callId, 'hangup_flush');
   }
 

@@ -553,11 +553,23 @@ class CallSession:
         *,
         final: bool,
     ) -> bool:
-        if not final or not self._turn_frames:
+        if not self._turn_frames:
             return False
-        if end_of_turn:
-            return True
-        return self._speech_seen and self._silence_ms >= self._call_end_silence_ms()
+        if final:
+            if end_of_turn:
+                return True
+            return self._speech_seen and self._silence_ms >= self._call_end_silence_ms()
+        return (
+            self._speech_seen
+            and self._silence_ms >= self._nonfinal_reconnect_backfill_silence_ms()
+        )
+
+    def _nonfinal_reconnect_backfill_silence_ms(self) -> int:
+        return max(
+            self._call_end_silence_ms(),
+            self._call_media_reconnect_grace_ms(),
+            3000,
+        )
 
     async def finalize_user_turn(self) -> dict[str, Any] | None:
         if not self._turn_frames:

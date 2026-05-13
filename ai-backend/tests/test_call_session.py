@@ -753,6 +753,41 @@ def test_final_reconnect_backfill_can_finalize_turn_without_replacement_frame() 
     assert session.state == "thinking"
 
 
+def test_nonfinal_reconnect_backfill_with_extended_silence_finalizes_turn(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = 0.0
+    monkeypatch.setattr(session_module.time, "monotonic", lambda: now)
+
+    stt = ScriptedSttAdapter()
+    channel = ScriptedDataChannel(ready_state="closed")
+    settings = AiBackendSettings(call_vad_end_silence_ms=700, call_media_reconnect_grace_ms=5000)
+    session, _ = _new_session(stt_adapter=stt, data_channel=channel, settings=settings)
+
+    speech_pcm = np.full(320, 2500, dtype=np.int16).tobytes()
+    silence_pcm = np.zeros(320, dtype=np.int16).tobytes()
+
+    assert _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(speech_pcm))) is None
+    session.mark_media_reconnect_pending()
+    session.start_media_reconnect_grace_if_pending()
+
+    backfill = _run(
+        session.backfill_reconnect_audio(
+            pcm=b"".join([silence_pcm for _ in range(260)]),
+            sample_rate=16000,
+            channels=1,
+            backfill_id="gap-nonfinal-extended-silence",
+            reason="failed",
+            attempt=1,
+            final=False,
+        )
+    )
+
+    assert backfill["event"]["type"] == "user_final"
+    assert stt.calls, "STT must run when reconnect backfill already contains terminal silence"
+    assert session.drain_undelivered_events()[0]["type"] == "user_final"
+
+
 def test_final_reconnect_backfill_queues_recoverable_user_final_once() -> None:
     vad = ScriptedVadAdapter()
     stt = ScriptedSttAdapter()
