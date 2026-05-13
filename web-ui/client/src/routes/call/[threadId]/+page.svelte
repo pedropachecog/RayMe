@@ -136,6 +136,7 @@
   let remoteAudioNonZeroLogged = false;
 
   const MEDIA_RECONNECT_DISCONNECTED_GRACE_MS = 2500;
+  const MEDIA_RECONNECT_RETRY_DELAY_MS = 1000;
   const MEDIA_RECONNECT_MAX_ATTEMPTS = 2;
   const MEDIA_RECONNECT_MIC_DIAG_MS = 7000;
   const MEDIA_RECONNECT_MIC_DIAG_INTERVAL_MS = 500;
@@ -524,6 +525,9 @@
     if (!sessionId) {
       guardSkips.push('missing_session_id');
     }
+    if (callState === 'ended' || callState === 'failed') {
+      guardSkips.push(`terminal_state_${callState}`);
+    }
     if (guardSkips.length > 0) {
       emitMediaReconnectGuardSkip(failedConnection, debugCallId, reason, 'start', guardSkips);
       return;
@@ -575,10 +579,71 @@
       });
       if (mediaReconnectAttempts >= MEDIA_RECONNECT_MAX_ATTEMPTS) {
         await failTerminalMediaReconnect(debugCallId, 'media_reconnect_failed');
+      } else {
+        scheduleBrowserMediaReconnectRetry(debugCallId, reason, reconnectAttempt);
       }
     } finally {
       mediaReconnecting = false;
     }
+  }
+
+  function scheduleBrowserMediaReconnectRetry(
+    debugCallId: string,
+    reason: MediaReconnectReason,
+    failedAttempt: number
+  ) {
+    if (mediaReconnectTimer) {
+      emitDebugEvent(debugCallId, 'pc.media_reconnect.retry_skip', {
+        reason,
+        failedAttempt,
+        cause: 'timer_pending'
+      });
+      return;
+    }
+    emitDebugEvent(debugCallId, 'pc.media_reconnect.retry_scheduled', {
+      reason,
+      failedAttempt,
+      delayMs: MEDIA_RECONNECT_RETRY_DELAY_MS,
+      attempts: mediaReconnectAttempts
+    });
+    mediaReconnectTimer = window.setTimeout(() => {
+      mediaReconnectTimer = 0;
+      const connection = peerConnection;
+      const guardSkips: string[] = [];
+      if (!connection) {
+        guardSkips.push('missing_peer');
+      }
+      if (!localMediaStream) {
+        guardSkips.push('missing_local_media');
+      }
+      if (!callId) {
+        guardSkips.push('missing_call_id');
+      }
+      if (!sessionId) {
+        guardSkips.push('missing_session_id');
+      }
+      if (callState === 'ended' || callState === 'failed') {
+        guardSkips.push(`terminal_state_${callState}`);
+      }
+      if (guardSkips.length > 0 || !connection) {
+        emitDebugEvent(debugCallId, 'pc.media_reconnect.retry_skip', {
+          reason,
+          failedAttempt,
+          causes: guardSkips
+        });
+        return;
+      }
+      if (isBrowserMediaConnected(connection)) {
+        clearReconnectAudioBackfill();
+        emitLocalMicReconnectDiagnostic(debugCallId, {
+          phase: 'retry_cancelled_connected',
+          reason,
+          attempts: mediaReconnectAttempts
+        });
+        return;
+      }
+      void reconnectBrowserMedia(connection, debugCallId, reason);
+    }, MEDIA_RECONNECT_RETRY_DELAY_MS);
   }
 
   async function failTerminalMediaReconnect(debugCallId: string, reason: string) {

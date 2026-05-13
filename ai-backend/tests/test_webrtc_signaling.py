@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import asyncio
 import math
+from concurrent.futures import CancelledError as FutureCancelledError
 from io import BytesIO
 from typing import Any
 
@@ -284,6 +285,76 @@ def test_failed_reconnect_offer_preserves_existing_session_media(
     assert session.peer_connection is original_peer
     assert session.outbound_audio_track is original_track
     assert original_peer.close_calls == 0
+
+
+def test_cancelled_reconnect_offer_preserves_existing_session_media(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    peers: list[Any] = []
+    tracks: list[Any] = []
+
+    class TrackingPeerConnection(StubPeerConnection):
+        def __init__(self) -> None:
+            super().__init__()
+            self.close_calls = 0
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    class TrackingAudioTrack:
+        kind = "audio"
+
+        def __init__(self) -> None:
+            self.chunks: list[bytes] = []
+
+        async def enqueue(self, chunk: bytes, *, preroll_seconds: float = 0.0) -> float:
+            self.chunks.append(chunk)
+            return 0.1
+
+    def create_peer_connection(_offer: Any) -> TrackingPeerConnection:
+        peer = TrackingPeerConnection()
+        peers.append(peer)
+        return peer
+
+    def attach_outbound_audio_track(peer_connection: TrackingPeerConnection) -> TrackingAudioTrack:
+        track = TrackingAudioTrack()
+        tracks.append(track)
+        peer_connection.addTrack(track)
+        return track
+
+    negotiate_calls = 0
+
+    async def negotiate_answer(_peer_connection: Any, _offer: Any) -> dict[str, str]:
+        nonlocal negotiate_calls
+        negotiate_calls += 1
+        if negotiate_calls == 2:
+            raise asyncio.CancelledError()
+        return {
+            "type": "answer",
+            "sdp": "v=0\r\no=- 1 1 IN IP4 127.0.0.1\r\ns=RayMe test answer\r\nt=0 0\r\n",
+        }
+
+    monkeypatch.setattr(webrtc_module, "_create_peer_connection", create_peer_connection)
+    monkeypatch.setattr(webrtc_module, "_attach_outbound_audio_track", attach_outbound_audio_track)
+    monkeypatch.setattr(webrtc_module, "_negotiate_answer", negotiate_answer)
+
+    client = _client()
+    session_id = "reconnect-cancel-preserve-session"
+    first = client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+    assert first.status_code == 200
+    session = client.app.state.call_session_manager.get_session(session_id)
+    original_peer = session.peer_connection
+    original_track = session.outbound_audio_track
+
+    with pytest.raises((asyncio.CancelledError, FutureCancelledError)):
+        client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+
+    assert len(peers) == 2
+    assert len(tracks) == 2
+    assert session.peer_connection is original_peer
+    assert session.outbound_audio_track is original_track
+    assert original_peer.close_calls == 0
+    assert peers[1].close_calls == 1
 
 
 def test_webrtc_mute_control_returns_session_state(stub_webrtc: None) -> None:

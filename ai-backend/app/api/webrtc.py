@@ -202,6 +202,26 @@ async def create_webrtc_offer_answer(
             int((time.monotonic() - negotiate_started) * 1000),
         )
         raise
+    except asyncio.CancelledError:
+        if existing_session is not None:
+            _restore_failed_offer_session(
+                existing_session,
+                peer_connection,
+                previous_peer_connection,
+                previous_outbound_audio_track,
+                previous_state,
+                previous_end_reason,
+                previous_ended_at,
+            )
+        else:
+            await manager.remove_session(payload.session_id)
+        await _close_peer_connection(peer_connection)
+        logger.info(
+            "[rayme-call] offer.cancelled session=%s elapsed_ms=%d",
+            payload.session_id,
+            int((time.monotonic() - negotiate_started) * 1000),
+        )
+        raise
     except Exception as exc:
         if existing_session is not None:
             _restore_failed_offer_session(

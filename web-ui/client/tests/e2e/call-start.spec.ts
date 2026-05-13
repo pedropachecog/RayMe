@@ -30,6 +30,7 @@ type ReconnectRouteOptions = {
   hangBackfillFrom?: number;
   recoverEvents?: Array<Record<string, unknown>>;
   offerDelayMs?: number;
+  failOfferNumbers?: number[];
   failOfferFrom?: number;
   turnStreamGate?: Promise<void>;
   turnStreamEvents?: Array<Record<string, unknown>>;
@@ -231,6 +232,27 @@ test('re-offers with a new peer instead of ending when browser peer connection f
   expect(micReconnectDiagPhases).toContain('scheduled');
   expect(micReconnectDiagPhases).toContain('start');
   expect(micReconnectDiagPhases).toContain('ok');
+  assertNoBrowserErrors();
+});
+
+test('retries when the first replacement offer fails during media reconnect', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+    allowConsoleErrors: [/Failed to load resource: the server responded with a status of 502/]
+  });
+  await installMockCallMedia(page);
+  const counters = await installReconnectCallRoutes(page, { failOfferNumbers: [2] });
+
+  await startReconnectCall(page, counters);
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+
+  await expect.poll(() => counters.offerCount).toBe(2);
+  await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.failed')).toBe(1);
+  await expect.poll(() => counters.offerCount, { timeout: 5000 }).toBe(3);
+  await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.ok')).toBe(1);
+  expect(counters.endCount).toBe(0);
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
   assertNoBrowserErrors();
 });
 
@@ -870,7 +892,10 @@ async function installReconnectCallRoutes(
     if (options.offerDelayMs && counters.offerCount > 1) {
       await new Promise((resolve) => setTimeout(resolve, options.offerDelayMs));
     }
-    if (options.failOfferFrom && counters.offerCount >= options.failOfferFrom) {
+    if (
+      options.failOfferNumbers?.includes(counters.offerCount) ||
+      (options.failOfferFrom && counters.offerCount >= options.failOfferFrom)
+    ) {
       await fulfillJson(route, {
         detail: {
           code: 'webrtc_offer_failed',
