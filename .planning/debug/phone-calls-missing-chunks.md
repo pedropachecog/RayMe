@@ -1,7 +1,7 @@
 ---
 status: awaiting_human_verify
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-02T17:11:52Z
+updated: 2026-05-13T13:38:56Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -9,20 +9,16 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 
 ## Current Focus
 
-hypothesis: "Confirmed: delayed browser reconnect-tail selection reused the initial 30s latest-window cap, so the latest call dropped the unsent `35256-69467ms` microphone span before backend STT."
-test: "User repeats the same phone-call poem repro against OMEN commit `b71fcdd`."
-expecting: "Reconnect backfill debug events should no longer show a gap between consecutive selected offsets after the first backfill set; the recovered transcript should include the previously omitted final poem section, and recovery should not wait on a latest-window silent-only tail."
-next_action: "Await human verification: user should run one clean phone-call repro and report whether the transcript is complete, whether the failed banner appears, and how long transcription takes after they stop speaking."
-
 reasoning_checkpoint:
-  hypothesis: "Reconnect tail selection drops speech because it reuses the initial `MIC_BACKFILL_MAX_MS` latest-window cap after initial backfill upload/reoffer work has delayed `performance.now`; when `endMs - max` moves past `reconnectAudioBackfillLastEndMs`, the intervening microphone chunks are omitted before the backend sees them."
+  hypothesis: "The Android long-turn freeze and hangup deadlock are caused by a lost/stalled reconnect finalization path: browser hangup waits indefinitely for the reconnect final backfill before posting `/end`, and backend VAD refuses to finalize already received reconnect audio unless a final marker arrives."
   confirming_evidence:
-    - "Latest browser logs for `call_54dc73...` sent offsets `5226-35256ms`, then next sent `69467-99412ms`; no request covered `35256-69467ms`."
-    - "Backend logs for `rtc_db972...` received exactly those speech and silent batches, then STT produced the partial 607-character transcript from `frames=2509`."
-    - "RED unit regression `reconnect-backfill.test.ts` expected tail start `35000` but current selector returned `69000`, reproducing the gap."
-  falsification_test: "If the selector cap is not the mechanism, making tail selection contiguous from the previous end would not make the regression pass or would still leave browser debug offsets with a gap between consecutive reconnect backfill batches."
-  fix_rationale: "The first reconnect selection still needs a bounded pre-roll, but once backfill has started, tail selection must resume from `reconnectAudioBackfillLastEndMs` so every buffered microphone chunk is either sent or intentionally skipped by a later explicit rule. Increasing the rolling buffer keeps delayed tail chunks available until the final catch-up selection runs."
-  blind_spots: "This does not fix the underlying WebRTC transport drop or the no-receiver TTS path after terminal failure; it fixes the current first transcript-loss boundary and should reduce wasted silent recovery, but live latency still needs human verification."
+    - "OMEN logs for `rtc_49587f27d43244e6b6d78a69fb1e56f1` show backend accepted second-turn reconnect audio through `turn_frames=3862`, `speech_seen=True`, and `silence_ms=8398`, but every batch was `final=false` and no `stt.begin`/`user_final` followed."
+    - "Web UI logs for `call_9c6f0bf7e12a469882374f3ab570937e` show no `/events/recover` and no `/end` after the Android hangup; the browser-side stalled-final-backfill regression fails with `endCount=0`."
+    - "Backend RED regression `test_nonfinal_reconnect_backfill_with_extended_silence_finalizes_turn` fails with missing `event`, proving non-final reconnect backfill cannot currently finalize even with extended silence."
+  falsification_test: "After the fix, the two RED regressions must pass: stalled final backfill still lets End Call post `/end`, and non-final reconnect backfill with extended silence returns/queues `user_final`; if either remains failing, this mechanism is incomplete."
+  fix_rationale: "Bound browser terminal cleanup waits so `/end` cannot be blocked by a stuck reconnect backfill, and allow backend reconnect backfill to finalize after an extended silence threshold even without a final marker, so already received Android long-turn audio can become a recoverable `user_final`."
+  blind_spots: "Local tests cannot reproduce the physical Android Chrome network/browser process failure exactly; a deployed OMEN physical Android retest is still required after automated/live verification."
+next_action: "Await physical Android Chrome retest of deployed commit `2d00461f6d233338fb6562446874a466945e1b9b` using the long-turn phone-call checklist."
 
 ## Rollback Anchor
 
@@ -60,6 +56,71 @@ evidence_files:
   - .planning/debug/phone-call-expected-poem-2026-05-02.md
 
 ## Investigation Evidence
+
+- timestamp: 2026-05-13T13:12:02Z
+  checked: Session rehydration before fresh Android failure investigation.
+  found: Loaded the active debug session, Phase 03.1 evidence/results, post-snapshot do-not-retry guard, project operating notes/learnings, session-start protocol, and 03.1-07 plan. Local branch is `main` at `57ea978357673b040c8258aed378878482640453`; pre-existing dirty files are this debug session and `03.1-EVIDENCE.md`, containing the Android failure notes from the checkpoint. No project-local `.claude/skills` or `.agents/skills` were found.
+  implication: Investigation must treat the new Android failure as unresolved live evidence on top of the existing Phase 03.1 proof, preserve the existing uncommitted evidence updates, and avoid the forbidden post-snapshot reconnect/final-marker/data-channel replay stack.
+
+- timestamp: 2026-05-13T13:12:49Z
+  checked: Debug knowledge base and OMEN SSH aliases.
+  found: `.planning/debug/knowledge-base.md` is absent, so there is no prior resolved-pattern candidate to test first. `ssh rayme-pmpg whoami` returned `omen-pc\pmpg`; `ssh rayme-ssh whoami` returned `omen-pc\rayme-ssh`.
+  implication: Proceed with fresh evidence collection through the required OMEN alias `rayme-pmpg`; no known-pattern shortcut is available.
+
+- timestamp: 2026-05-13T13:13:34Z
+  checked: OMEN runtime baseline after failed Android acceptance.
+  found: OMEN checkout is `85bbacc919c83d1b486883e616156b2d8778c3f5` with no reported repo dirt. `GET /webrtc/status` returns `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, and `active_sessions=2`. Scheduled tasks `RayMePhase1AI` and `RayMePhase1Web` are running and point to canonical `C:\Users\pmpg\rayme\start-ai-backend.cmd` and `C:\Users\pmpg\rayme\start-web-ui.cmd`.
+  implication: The failed Android call ran against the intended deployed commit and canonical launchers. The two still-active backend sessions are fresh evidence for a cleanup/session-lifetime boundary and must be correlated with latest call rows/logs.
+
+- timestamp: 2026-05-13T13:17:13Z
+  checked: Copied OMEN artifact snapshot for the failed Android acceptance.
+  found: Copied `rayme.sqlite3`, `ai-backend.run.log`, and `web-ui.run.log` to `/tmp/rayme-phone-debug-85bbacc-android-fail-2026-05-13/`. The newest primary failed call is `call_9c6f0bf7e12a469882374f3ab570937e` / `rtc_49587f27d43244e6b6d78a69fb1e56f1` on `thread_27fab4e0328c4eb2a953cad0d2f0688a`; a later reload/start attempt is `call_7e1daa08075f4ca3984c1a13d568a14a` / `rtc_b2a8b7e5a0404d80bfef4eee8f8543b6`. SQLite persisted the primary `call_start`, first short `user_speech` (`Hey, can you hear me?`), and first `ai_speech`, but no long second-turn `user_speech` and no `call_end` for either May 13 call.
+  implication: The user report maps to durable storage: the first short turn succeeded, the longer turn did not reach persisted transcript, and hangup/end cleanup did not persist.
+
+- timestamp: 2026-05-13T13:17:13Z
+  checked: Web UI and browser debug events for primary Android call `call_9c6f0bf7e12a469882374f3ab570937e`.
+  found: Browser logs show `/start`, initial `/offer`, datachannel open, remote audio unmuted, first `user_final` received, `/turns` persisted, and AI audio played with nonzero remote-audio samples. During the second long user turn, the peer/datachannel failed. The browser sent reconnect-audio backfill batches covering approximately `-48..55242ms` with speech-level RMS through batch 5 and lower RMS batch 6, all with `final=false`; the sixth browser fetch failed with `TypeError Failed to fetch`. There is no `/api/calls/call_9c6f0bf7e12a469882374f3ab570937e/events/recover` and no `/api/calls/call_9c6f0bf7e12a469882374f3ab570937e/end` in the Web UI log.
+  implication: Audio capture and reconnect backfill transmission progressed much further than the previously fixed offset-gap failure, but terminal recovery/end did not run for the primary Android failure.
+
+- timestamp: 2026-05-13T13:17:13Z
+  checked: AI backend logs for primary Android session `rtc_49587f27d43244e6b6d78a69fb1e56f1`.
+  found: Backend VAD/STT handled the first short turn and emitted `user_final`. For the second turn, VAD saw speech before media failure, then accepted reconnect backfill batches through `turn_frames=3862`. The final accepted batch logged `speech_seen=True` and `silence_ms=8398`, but `final=false`; no `vad.end_of_turn`, no `stt.begin`, and no `user_final` followed. Later `/events/drain` returned only a queued `failed` event, and no backend `/webrtc/sessions/rtc_49587f27d43244e6b6d78a69fb1e56f1/end` was logged.
+  implication: The first proven boundary is after backend received substantial second-turn audio but before terminal finalization/end: without a final marker or `/end`, backend retained non-final VAD state and the UI stayed stuck.
+
+- timestamp: 2026-05-13T13:21:46Z
+  checked: Client and backend reconnect/hangup code paths.
+  found: `hangup()` calls `drainReconnectAudioBackfillBeforeHangup()` before `/end`; that drain awaits `flushReconnectAudioBackfill(..., { awaitFinal: true })` with no timeout. Terminal reconnect cleanup has the same await before recover/end. Separately, backend `_should_finalize_after_reconnect_backfill()` returns `False` whenever `final` is false, even if VAD has speech and `_silence_ms` is already above the call end threshold. Existing browser tests cover successful/failed completed backfill, but not a stalled final backfill; existing backend tests cover final reconnect backfill, but not non-final backfill containing enough silence to end the turn.
+  implication: The Android log shape has a concrete mechanism to test locally: a final reconnect backfill that never completes can deadlock browser hangup before `/end`, and the backend will not finalize the already received long-turn audio without that final marker.
+
+- timestamp: 2026-05-13T13:26:31Z
+  checked: Focused RED regressions for the fresh Android failure mechanism.
+  found: Added a browser regression where the second/final reconnect-audio request is held open and the user clicks End Call; `npm run test:e2e -- call-start.spec.ts -g "ends when the final reconnect backfill request stalls during hangup"` fails in desktop and mobile Chromium with `endCount=0`. Added backend regression `test_nonfinal_reconnect_backfill_with_extended_silence_finalizes_turn`; `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q -k "nonfinal_reconnect_backfill_with_extended_silence"` fails with `KeyError: 'event'`.
+  implication: The code-level mechanism is confirmed: browser cleanup can deadlock before `/end` on a stalled final backfill, and backend reconnect backfill cannot produce a transcript from non-final audio even after long terminal silence.
+
+- timestamp: 2026-05-13T13:29:26Z
+  checked: Focused post-fix regressions.
+  found: Implemented a bounded browser terminal reconnect-backfill wait and backend non-final reconnect-backfill extended-silence finalization. The previously RED browser test now passes in desktop and mobile Chromium: `2 passed`. The previously RED backend test now passes: `1 passed, 46 deselected`.
+  implication: The proven local failure boundaries are fixed. Broader call lifecycle/reconnect regression coverage is required before committing and deploying.
+
+- timestamp: 2026-05-13T13:33:16Z
+  checked: Broader post-fix regression verification.
+  found: `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py -q` passed: 47 passed. `uv run --project ai-backend pytest ai-backend/tests/test_webrtc_signaling.py -q` passed: 25 passed, 3 warnings. `uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py -q -k "recover or reconnect_audio or end"` passed: 21 passed, 22 deselected. Full `npm run test:e2e -- call-start.spec.ts` passed: 34 passed. `npm run build` passed. `git diff --check` passed.
+  implication: The fix is stable across adjacent backend session lifecycle, WebRTC signaling, Web UI call facade, browser reconnect/hangup flows, and Svelte production build; it is ready for atomic commit and canonical OMEN deployment.
+
+- timestamp: 2026-05-13T13:34:20Z
+  checked: Atomic code commit.
+  found: Committed `2d00461f6d233338fb6562446874a466945e1b9b` (`fix(call): finalize stalled reconnect backfill`) with only `ai-backend/app/call/session.py`, `ai-backend/tests/test_call_session.py`, `web-ui/client/src/routes/call/[threadId]/+page.svelte`, and `web-ui/client/tests/e2e/call-start.spec.ts`. The only remaining local dirty files are this debug session and pre-existing Phase 03.1 evidence notes.
+  implication: The verified fix is isolated in one code/test commit and ready to push/deploy through the canonical OMEN path.
+
+- timestamp: 2026-05-13T13:38:56Z
+  checked: Push, canonical OMEN deployment, and post-deploy readiness.
+  found: Pushed `main` from `85bbacc` to `2d00461`. `scripts/deploy-omen.sh` fast-forwarded OMEN to `2d00461f6d233338fb6562446874a466945e1b9b`, verified CUDA runtime (`torch 2.10.0+cu126`, CUDA 12.6, NVIDIA GeForce RTX 3060), built the web client, recreated canonical `RayMePhase1AI` / `RayMePhase1Web` scheduled tasks, started listeners on `192.168.1.199:9443` and `192.168.1.199:8443`, and reported `OMEN deploy complete`. Read-only post-deploy checks show OMEN checkout at `2d00461` with no git status output, `/webrtc/status` returns `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, `active_sessions=0`, and scheduled tasks are running with `Task To Run` set to `C:\Users\pmpg\rayme\start-ai-backend.cmd` and `C:\Users\pmpg\rayme\start-web-ui.cmd`.
+  implication: The fix is deployed through the only approved path and ready for physical Android Chrome product-owner acceptance. Generic `/health` remains `status=degraded` because the current resident TTS engine is `f5`, but call-specific WebRTC readiness is green.
+
+- timestamp: 2026-05-13T13:09:05Z
+  checked: Android product-owner acceptance after Phase 03.1 OMEN live dual-engine evidence.
+  found: User reports the physical Android Chrome call listened to a short message, then froze on a longer message of about one minute. After choosing to hang up, the call remained stuck in the call UI. The long-turn freeze is a regression against this session's missing-chunks target; the hangup freeze is a new hang-up deadlock failure mode unless logs prove the exact path existed before.
+  implication: Phase 03.1 plan `03.1-07` must remain incomplete. Android acceptance is failed, not approved. The next investigation must inspect fresh OMEN artifacts from deployed commit `85bbacc919c83d1b486883e616156b2d8778c3f5` and must not mark the phase complete until long-turn and hangup cleanup pass on the physical device.
 
 - timestamp: 2026-05-02T17:11:52Z
   checked: Canonical OMEN deployment and post-deploy readiness for `b71fcdd`.
@@ -758,13 +819,14 @@ evidence_files:
 
 ## Resolution
 
-root_cause: In the latest post-`74450da` repro `call_54dc73bdeb1144549c77667b557ce2a6` / `rtc_db972418f201449c88667141c6fafda6`, the browser reconnect-backfill selector dropped a contiguous middle microphone-buffer span before backend STT. Browser logs show backfill covered `5226-35256ms`, then later `69467-99412ms`; nothing covered `35256-69467ms`. This happened because delayed tail selection reused the initial `MIC_BACKFILL_MAX_MS` latest-window cap and the 35s rolling PCM buffer could no longer retain the older unsent middle span.
-fix: Factor reconnect backfill selection into a tested client helper. Keep the initial reconnect selection capped to the latest 30s pre-roll, but make tail selection contiguous from `reconnectAudioBackfillLastEndMs` without reapplying the latest-window cap. Increase the browser rolling microphone PCM buffer to 180s so delayed reconnect cleanup can still send the unsent span. Committed as `b71fcdd` and deployed to OMEN via `scripts/deploy-omen.sh`.
-verification: RED unit regression `reconnect-backfill.test.ts` failed before the fix because delayed tail selection returned start `69000` instead of `35000`; it passed after the fix. Focused reconnect Playwright passed: 10 passed. `npm run build` passed. Full `npm run test:e2e -- call-start.spec.ts` passed: 30 passed. Full `npm run test:unit` passed: 90 passed. `git diff --check` passed. Post-deploy `/webrtc/status` is ready with `active_sessions=0`, and OMEN scheduled tasks point to canonical launchers.
+root_cause: In the fresh Android acceptance failure at deployed commit `85bbacc`, the primary call `call_9c6f0bf7e12a469882374f3ab570937e` / `rtc_49587f27d43244e6b6d78a69fb1e56f1` accepted the first short turn, then lost terminal progress on the second long turn. Browser logs show reconnect backfill batches reached about 55 seconds of audio but all were `final=false`; no `/events/recover` and no `/end` followed the Android hangup. Backend logs show those non-final batches reached `turn_frames=3862`, `speech_seen=True`, and `silence_ms=8398`, but `_should_finalize_after_reconnect_backfill()` required `final=true`, so no STT/user_final was emitted. Browser hangup could also wait indefinitely on the stalled final reconnect-backfill promise before posting `/end`.
+fix: Added bounded browser waiting for terminal reconnect-backfill drain so hangup/terminal cleanup can still recover and post `/end` if the final backfill request stalls. Added backend non-final reconnect-backfill extended-silence finalization so already received reconnect audio can produce a recoverable `user_final` even when Android never delivers the final marker. Committed as `2d00461` (`fix(call): finalize stalled reconnect backfill`).
+verification: RED browser regression failed before the fix with `endCount=0` when the final reconnect-backfill request stalled; it passed after the fix in desktop and mobile Chromium. RED backend regression failed before the fix with missing `event` for non-final extended-silence backfill; it passed after the fix. Broader checks passed: `test_call_session.py` 47 passed, `test_webrtc_signaling.py` 25 passed with 3 warnings, Web UI call facade recover/reconnect/end tests 21 passed, full client `call-start.spec.ts` 34 passed, `npm run build`, and `git diff --check`. Deployed via `scripts/deploy-omen.sh`; post-deploy `/webrtc/status` is ready with `active_sessions=0`, and OMEN scheduled tasks point to canonical launchers.
 files_changed:
-  - web-ui/client/src/lib/call/reconnectBackfill.ts
+  - ai-backend/app/call/session.py
+  - ai-backend/tests/test_call_session.py
   - web-ui/client/src/routes/call/[threadId]/+page.svelte
-  - web-ui/client/tests/unit/reconnect-backfill.test.ts
+  - web-ui/client/tests/e2e/call-start.spec.ts
   - .planning/debug/phone-calls-missing-chunks.md
 
 ## Prior Fix History
