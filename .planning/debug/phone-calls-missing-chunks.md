@@ -1,7 +1,7 @@
 ---
 status: verifying
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-13T18:15:48Z
+updated: 2026-05-13T18:19:54Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -13,7 +13,7 @@ user_goal_preservation: "The user must still be able to see and hear the generat
 hypothesis: "The latest Android stall is a reconnect-offer cancellation/retry failure. The backend mutates the live session to the replacement peer before `offer.answered`; if the Web UI request is cancelled/times out, `asyncio.CancelledError` bypasses the restore path. On the browser side, a first replacement `/offer` failure below the max-attempt limit logs failure but does not schedule the next reconnect attempt, leaving the call visually listening on a dead media path."
 test: "`uv run --project ai-backend pytest ai-backend/tests/test_webrtc_signaling.py -q -k \"cancelled_reconnect_offer_preserves_existing_session_media or failed_reconnect_offer_preserves_existing_session_media\"` and `npm run test:e2e -- call-start.spec.ts -g \"retries when the first replacement offer fails during media reconnect\"`."
 expecting: "Before the fix, browser `offerCount` stalls at the failed first reconnect offer and backend cancellation leaves `session.peer_connection`/`outbound_audio_track` pointing at the replacement objects. After the fix, the browser retries or terminal-cleans deterministically, and cancelled backend negotiation restores the previous peer/track and closes the abandoned replacement."
-next_action: "Commit, push, deploy through `scripts/deploy-omen.sh`, then request physical Android Chrome retest of the same two-short-turns plus long-poem flow."
+next_action: "Physical Android Chrome retest at `https://192.168.1.199:8443`: run the same two short exchanges, then the long poem/message, and verify the call retries/reconnects instead of going inert and that the assistant response appears and plays live."
 reasoning_checkpoint:
   hypothesis: "Terminal reconnect cleanup ends the call too early because `failTerminalMediaReconnect()` always runs `cleanupTerminalFailedCall()` and applies failed UI even when `activeTurnAbort`/`activeTurnReader` indicate an in-flight `/turns` response."
   confirming_evidence:
@@ -125,6 +125,11 @@ evidence_files:
   found: Added browser regression `retries when the first replacement offer fails during media reconnect`; it failed in desktop and mobile Chromium because `offerCount` stayed at 2 instead of retrying to 3. Added backend regression `test_cancelled_reconnect_offer_preserves_existing_session_media`; it failed because cancelled replacement negotiation left `session.peer_connection` on the replacement peer. Fixed browser retry scheduling for nonterminal replacement-offer failure and added a terminal-state guard in `reconnectBrowserMedia()`. Fixed backend `asyncio.CancelledError` handling in `/webrtc/offer` so the previous peer/track/session state is restored and the abandoned replacement peer is closed before re-raising cancellation. Focused tests now pass.
   verification: "`ai-backend/tests/test_webrtc_signaling.py`: 26 passed, 3 warnings; `ai-backend/tests/test_call_session.py`: 47 passed; serialized `web-ui/client` `call-start.spec.ts`: 38 passed; `npm run build`: passed; `git diff --check`: passed."
   implication: The latest proven stall mechanism is fixed locally without suppressing generation or post-end visibility. Physical Android Chrome acceptance is still required after canonical OMEN deployment.
+
+- timestamp: 2026-05-13T18:19:54Z
+  checked: Push, canonical OMEN deployment, and post-deploy readiness for reconnect-offer cancellation/retry fix.
+  found: Pushed `51e672ff4624b1d6aba2183829d0c4b285668e6c` (`fix(call): retry cancelled reconnect offers`) to `origin/main`. `scripts/deploy-omen.sh` fast-forwarded OMEN to that commit, verified the CUDA runtime, built the web client, recreated the canonical `RayMePhase1AI` and `RayMePhase1Web` scheduled tasks, and reported `OMEN deploy complete`. Post-deploy OMEN checkout is `51e672ff4624b1d6aba2183829d0c4b285668e6c` with no git status output. `/webrtc/status` returned `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, `active_sessions=0`. Scheduled tasks are running and point to `C:\Users\pmpg\rayme\start-ai-backend.cmd` and `C:\Users\pmpg\rayme\start-web-ui.cmd`.
+  implication: The fix for the latest verified Android stall boundary is live through the approved deployment path. Generic `/health` remains degraded because resident TTS is `f5`, but call-specific WebRTC readiness is green.
 
 - timestamp: 2026-05-13T17:00:36Z
   checked: Upstream RED browser regression for the active product bug.
