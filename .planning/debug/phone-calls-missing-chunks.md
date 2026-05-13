@@ -1,7 +1,7 @@
 ---
 status: verifying
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-13T17:30:54Z
+updated: 2026-05-13T17:36:31Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -13,7 +13,7 @@ user_goal_preservation: "The user must still be able to see and hear the generat
 hypothesis: "Terminal reconnect failure posts `/end` and shows the failed blocking panel because `failTerminalMediaReconnect()` has no liveness guard for an active `/turns` response stream; additionally, browser reconnect offer failure was closing the last answered peer before a replacement answer existed."
 test: "`npm run test:e2e -- call-start.spec.ts -g \"keeps recovered turn response live when terminal reconnect offer fails before audio starts\"` from `web-ui/client`."
 expecting: "Before the fix the focused test fails with `endCount=1` while the `/turns` stream is gated, and with no open answered peer after strengthening the playback assertion. After the fix, `endCount` stays `0`, no alert is shown, an answered peer remains open, and the live response is displayed after `ai_audio_started`/`ai_done`."
-next_action: "Commit and deploy the verified runtime fix through `scripts/deploy-omen.sh`, then require physical Android long-message acceptance."
+next_action: "Physical Android Chrome retest at `https://192.168.1.199:8443`: run a couple short exchanges, then the long poem/message, and verify the generated assistant response appears and plays in the live call."
 reasoning_checkpoint:
   hypothesis: "Terminal reconnect cleanup ends the call too early because `failTerminalMediaReconnect()` always runs `cleanupTerminalFailedCall()` and applies failed UI even when `activeTurnAbort`/`activeTurnReader` indicate an in-flight `/turns` response."
   confirming_evidence:
@@ -31,11 +31,12 @@ tdd_checkpoint:
   failure_output: "Expected counters.endCount to be 0 before live response delivery; received 1 at call-start.spec.ts:570 in both desktop-chromium and mobile-chromium."
   green_output: "Focused test passed after client liveness guard, transactional browser reconnect replacement, and SSE fixture framing correction: 2 passed in desktop-chromium and mobile-chromium. Full serialized call-start spec passed: 36 passed."
 checkpoint:
-  type: process-forensics
+  type: android-acceptance-needed
   rollback_commit: `3800391b9a445963f4d1d2aefefbed5f2a5e482f`
-  deployed_commit: `3800391b9a445963f4d1d2aefefbed5f2a5e482f`
+  deployed_commit: `56c4ab7fdff91ec337a446fed676e967fa78cbd1`
   forensics_report: `.planning/forensics/report-20260513-163852.md`
   guardrail: "Symptom-suppression patches cannot satisfy call-liveness acceptance."
+  verification_required: "Physical Android Chrome must confirm live response delivery; local/browser mocks are not final acceptance."
 
 ## Rollback Anchor
 
@@ -108,6 +109,11 @@ evidence_files:
   checked: Full browser route regression verification after the stronger fix.
   found: Adjacent reconnect/hangup grep passed: 14 passed across desktop and mobile Chromium. Full serialized `npm run test:e2e -- call-start.spec.ts --workers=1` passed: 36 passed. `npm run build` from `web-ui/client` passed. `git diff --check` passed.
   implication: The transactional reconnect plus active response liveness guard is stable across call startup, reconnect, backfill, hangup, error, and mobile route coverage; runtime deployment is the next step.
+
+- timestamp: 2026-05-13T17:36:31Z
+  checked: Commit, push, canonical OMEN deployment, and post-deploy readiness for the valid call-liveness fix.
+  found: Committed and pushed `56c4ab7fdff91ec337a446fed676e967fa78cbd1` (`fix(call): keep recovered response live through reconnect failure`). `scripts/deploy-omen.sh` fast-forwarded OMEN to that commit, built the web client, recreated canonical `RayMePhase1AI` and `RayMePhase1Web` scheduled tasks, and reported `OMEN deploy complete`. Post-deploy OMEN checkout is `56c4ab7fdff91ec337a446fed676e967fa78cbd1` with no git status output. `/webrtc/status` returned `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, `active_sessions=0`. Scheduled tasks are running and point to `C:\Users\pmpg\rayme\start-ai-backend.cmd` and `C:\Users\pmpg\rayme\start-web-ui.cmd`.
+  implication: The valid upstream liveness fix is live on OMEN through the approved deployment path. Physical Android Chrome acceptance is now required; generic `/health` remains degraded because resident TTS is `f5`, but call-specific WebRTC readiness is green.
 
 - timestamp: 2026-05-13T17:00:36Z
   checked: Upstream RED browser regression for the active product bug.
@@ -923,7 +929,7 @@ evidence_files:
 
 root_cause: In the fresh Android acceptance failure at deployed commit `2d00461`, the latest failed call `call_2018a74d029c467eb173f6a012719663` / `rtc_127ff57be7024045b1c8ac3307afbbde` recovered and persisted the full long user turn, but terminal media cleanup posted `/end` while `/turns` LLM generation was still in flight. The active product defect was earlier than post-end generation: `failTerminalMediaReconnect()` ended the call and showed failed UI without checking whether a recovered long-turn response stream was active, and browser reconnect offer failure could close the last answered peer/audio path before a replacement answer existed.
 fix: Added a client-side active turn response guard in `web-ui/client/src/routes/call/[threadId]/+page.svelte`. Terminal reconnect cleanup now waits for any active `/turns` stream before recovering/ending, waits again after recovery in case recovered events start a turn, and holds terminal cleanup through a bounded response-visible/playback grace based on `ai_audio_started` duration. Browser reconnect replacement is also transactional: the existing answered peer/data channel stays in place until a replacement answer is applied, and a failed replacement offer restores the previous peer instead of destroying the live playback path. The fix does not abort or suppress the response stream.
-verification: Focused TDD test passed after the fix: `npm run test:e2e -- call-start.spec.ts -g "keeps recovered turn response live when terminal reconnect offer fails before audio starts"` returned 2 passed across desktop and mobile Chromium. Strengthened playback-path assertion first failed when no answered peer remained open, then passed after transactional reconnect. Adjacent reconnect/hangup grep passed: 14 passed. Full serialized `npm run test:e2e -- call-start.spec.ts --workers=1` passed: 36 passed. `npm run build` from `web-ui/client` passed. `git diff --check` passed.
+verification: Focused TDD test passed after the fix: `npm run test:e2e -- call-start.spec.ts -g "keeps recovered turn response live when terminal reconnect offer fails before audio starts"` returned 2 passed across desktop and mobile Chromium. Strengthened playback-path assertion first failed when no answered peer remained open, then passed after transactional reconnect. Adjacent reconnect/hangup grep passed: 14 passed. Full serialized `npm run test:e2e -- call-start.spec.ts --workers=1` passed: 36 passed. `npm run build` from `web-ui/client` passed. `git diff --check` passed. OMEN deployed commit `56c4ab7fdff91ec337a446fed676e967fa78cbd1` via `scripts/deploy-omen.sh`; `/webrtc/status` is ready with `active_sessions=0`. Physical Android Chrome acceptance remains pending.
 files_changed:
   - web-ui/client/src/routes/call/[threadId]/+page.svelte
   - web-ui/client/tests/e2e/call-start.spec.ts
