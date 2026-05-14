@@ -175,7 +175,10 @@ async def create_webrtc_offer_answer(
                 session.end_reason = None
                 session.ended_at = None
             session.mark_media_reconnect_pending()
-            session.mark_peer_connection_pending(peer_connection)
+            session.mark_peer_connection_pending(
+                peer_connection,
+                outbound_audio_track=outbound_audio_track,
+            )
             session.thread_id = payload.thread_id
             session.voice_id = payload.voice_id
             session.engine_id = payload.engine_id
@@ -201,16 +204,6 @@ async def create_webrtc_offer_answer(
             )
         _attach_peer_handlers(peer_connection, session)
         answer = await _negotiate_answer(peer_connection, payload.offer)
-        if (
-            existing_session is not None
-            and previous_peer_connection is not None
-            and previous_peer_connection is not peer_connection
-        ):
-            session.accept_pending_peer_connection(
-                peer_connection,
-                outbound_audio_track=outbound_audio_track,
-            )
-            await _close_peer_connection(previous_peer_connection)
     except HTTPException:
         if existing_session is not None:
             _restore_failed_offer_session(
@@ -640,6 +633,45 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
 
     keepalive_task: asyncio.Task | None = None
 
+    async def accept_pending_peer_if_connected(source: str) -> None:
+        if not session.is_peer_connection_pending(peer_connection):
+            return
+        connection_state = getattr(peer_connection, "connectionState", None)
+        ice_state = getattr(peer_connection, "iceConnectionState", None)
+        if connection_state != "connected" and ice_state not in {"connected", "completed"}:
+            return
+        previous_peer_connection = session.accept_pending_peer_connection(peer_connection)
+        logger.info(
+            "[rayme-call] peer.pending.accepted session=%s source=%s conn=%s ice=%s",
+            session.session_id,
+            source,
+            connection_state,
+            ice_state,
+        )
+        if (
+            previous_peer_connection is not None
+            and previous_peer_connection is not peer_connection
+        ):
+            await _close_peer_connection(previous_peer_connection)
+
+    async def discard_failed_pending_peer(source: str) -> bool:
+        if not session.is_peer_connection_pending(peer_connection):
+            return False
+        connection_state = getattr(peer_connection, "connectionState", None)
+        ice_state = getattr(peer_connection, "iceConnectionState", None)
+        if connection_state not in {"failed", "closed"} and ice_state not in {"failed", "closed"}:
+            return False
+        session.discard_pending_peer_connection(peer_connection)
+        logger.info(
+            "[rayme-call] peer.pending.discarded session=%s source=%s conn=%s ice=%s",
+            session.session_id,
+            source,
+            connection_state,
+            ice_state,
+        )
+        await _close_peer_connection(peer_connection)
+        return True
+
     @peer_connection.on("datachannel")
     def on_datachannel(channel: Any) -> None:
         nonlocal keepalive_task
@@ -722,6 +754,9 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
             session.session_id,
             state,
         )
+        if await discard_failed_pending_peer("connectionstatechange"):
+            return
+        await accept_pending_peer_if_connected("connectionstatechange")
         await session.handle_connection_state_change()
 
     @peer_connection.on("iceconnectionstatechange")
@@ -732,6 +767,9 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
             session.session_id,
             state,
         )
+        if await discard_failed_pending_peer("iceconnectionstatechange"):
+            return
+        await accept_pending_peer_if_connected("iceconnectionstatechange")
 
     @peer_connection.on("icegatheringstatechange")
     async def on_icegatheringstatechange() -> None:
@@ -859,6 +897,22 @@ async def _receive_audio_track(
         frame_count += 1
         consecutive_live_recv_errors = 0
         if frame_count == 1:
+            if (
+                peer_connection is not None
+                and session.is_peer_connection_pending(peer_connection)
+            ):
+                previous_peer_connection = session.accept_pending_peer_connection(
+                    peer_connection
+                )
+                logger.info(
+                    "[rayme-call] peer.pending.accepted session=%s source=first_audio_frame",
+                    session.session_id,
+                )
+                if (
+                    previous_peer_connection is not None
+                    and previous_peer_connection is not peer_connection
+                ):
+                    await _close_peer_connection(previous_peer_connection)
             session.start_media_reconnect_grace_if_pending()
             logger.info(
                 "[rayme-call] track.recv.first_frame session=%s sample_rate=%s "

@@ -33,8 +33,8 @@
   import VoiceVisualizer from '$lib/components/call/VoiceVisualizer.svelte';
   import StatusChip from '$lib/components/StatusChip.svelte';
 
-  type ActiveCallState = Extract<CallStateName, 'connecting' | 'listening' | 'understanding' | 'thinking' | 'speaking' | 'interrupted' | 'ended' | 'failed'>;
-  type VisualState = Extract<CallStateName, 'listening' | 'understanding' | 'thinking' | 'speaking'>;
+  type ActiveCallState = Extract<CallStateName, 'connecting' | 'listening' | 'understanding' | 'thinking' | 'rehearsing' | 'speaking' | 'interrupted' | 'ended' | 'failed'>;
+  type VisualState = Extract<CallStateName, 'listening' | 'understanding' | 'thinking' | 'rehearsing' | 'speaking'>;
   type BlockingAction = 'Retry Microphone' | 'Open Character' | 'Choose Voice' | 'Open Settings' | 'Return to Thread';
 
   interface BlockingPanel {
@@ -77,6 +77,7 @@
 
   type CallTurnStreamEvent =
     | { type: 'ai_token'; turn_id?: string; text?: string }
+    | { type: 'state'; turn_id?: string; state: string }
     | { type: 'ai_audio_started'; turn_id?: string; session_id?: string; audio?: CallAudioStats | null }
     | { type: 'ai_done'; turn_id?: string }
     | { type: 'error'; turn_id?: string; code?: string; message?: string };
@@ -119,6 +120,8 @@
   let reconnectAudioBackfillReason: MediaReconnectReason | null = null;
   let reconnectAudioBackfillFlushPromise: Promise<void> | null = null;
   let reconnectAudioBackfillFinalPromise: Promise<void> | null = null;
+  let reconnectAudioBackfillPromotedState = false;
+  let reconnectAudioBackfillAwaitingFinalResponse = false;
   let terminalReconnectCleanupPromise: Promise<void> | null = null;
   let localMicMeterFrame = 0;
   let localMicRawRms: number | null = null;
@@ -155,7 +158,7 @@
   const characterName = $derived(thread?.character_name ?? 'RayMe');
   const title = $derived(thread?.title?.trim() || characterName);
   const visualState = $derived<VisualState>(
-    callState === 'understanding' || callState === 'thinking' || callState === 'speaking'
+    callState === 'understanding' || callState === 'thinking' || callState === 'rehearsing' || callState === 'speaking'
       ? callState
       : 'listening'
   );
@@ -322,6 +325,9 @@
           connectionState: connection.connectionState
         });
       }
+      if (preserveExisting) {
+        await waitForBrowserMediaConnected(connection, started.call_id);
+      }
       if (preserveExisting && previousConnection && previousConnection !== connection) {
         previousConnection.close();
       }
@@ -356,6 +362,7 @@
         clearMediaReconnectTimer();
         mediaReconnectAttempts = 0;
         clearReconnectAudioBackfill();
+        restoreReconnectBackfillPromotedState();
         emitLocalMicReconnectDiagnostic(debugCallId, {
           phase: 'recovered',
           reason: 'disconnected',
@@ -385,6 +392,7 @@
         clearMediaReconnectTimer();
         mediaReconnectAttempts = 0;
         clearReconnectAudioBackfill();
+        restoreReconnectBackfillPromotedState();
         emitLocalMicReconnectDiagnostic(debugCallId, {
           phase: 'recovered',
           reason: 'failed',
@@ -493,6 +501,7 @@
       mediaReconnectTimer = 0;
       if (isBrowserMediaConnected(connection)) {
         clearReconnectAudioBackfill();
+        restoreReconnectBackfillPromotedState();
         emitLocalMicReconnectDiagnostic(debugCallId, {
           phase: 'schedule_cancelled_connected',
           reason,
@@ -556,7 +565,13 @@
             flushReconnectAudioBackfill(debugCallId, reason, reconnectAttempt)
         }
       );
-      applyCallState('listening');
+      if (
+        !reconnectAudioBackfillPromotedState ||
+        !reconnectAudioBackfillAwaitingFinalResponse ||
+        callState !== 'understanding'
+      ) {
+        applyCallState('listening');
+      }
       emitDebugEvent(debugCallId, 'pc.media_reconnect.ok', {
         attempt: reconnectAttempt
       });
@@ -635,6 +650,7 @@
       }
       if (isBrowserMediaConnected(connection)) {
         clearReconnectAudioBackfill();
+        restoreReconnectBackfillPromotedState();
         emitLocalMicReconnectDiagnostic(debugCallId, {
           phase: 'retry_cancelled_connected',
           reason,
@@ -836,6 +852,10 @@
     reconnectAudioBackfillBatchIndex = 0;
     reconnectAudioBackfillId = `${debugCallId || 'call'}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
     reconnectAudioBackfillReason = reason;
+    if (callState === 'listening') {
+      applyCallState('understanding');
+      reconnectAudioBackfillPromotedState = true;
+    }
     emitDebugEvent(debugCallId, 'mic.reconnect_backfill.start', {
       reason,
       backfillId: reconnectAudioBackfillId,
@@ -855,6 +875,22 @@
     reconnectAudioBackfillReason = null;
     reconnectAudioBackfillFlushPromise = null;
     reconnectAudioBackfillFinalPromise = null;
+  }
+
+  function restoreReconnectBackfillPromotedState() {
+    if (reconnectAudioBackfillPromotedState && callState === 'understanding') {
+      applyCallState('listening');
+    }
+    reconnectAudioBackfillPromotedState = false;
+    reconnectAudioBackfillAwaitingFinalResponse = false;
+  }
+
+  function finishReconnectBackfillFinalResponse(hasEvent: boolean) {
+    reconnectAudioBackfillAwaitingFinalResponse = false;
+    reconnectAudioBackfillPromotedState = false;
+    if (!hasEvent && callState === 'understanding') {
+      applyCallState('listening');
+    }
   }
 
   async function flushReconnectAudioBackfill(
@@ -908,6 +944,7 @@
         bufferedChunks: localMicPcmBuffer.length
       });
       reconnectAudioBackfillBatchIndex += 1;
+      reconnectAudioBackfillAwaitingFinalResponse = true;
       const finalPromise = trackReconnectAudioBackfillFinalPromise(sendReconnectAudioBackfillBatch({
         debugCallId,
         requestCallId,
@@ -951,6 +988,7 @@
       { limitToMaxWindow: false }
     );
     const tailChunks = tailSelection ? splitReconnectAudioBackfillSelection(tailSelection) : [];
+    reconnectAudioBackfillAwaitingFinalResponse = true;
     const finalPromise = trackReconnectAudioBackfillFinalPromise((async () => {
       if (tailChunks.length === 0) {
         reconnectAudioBackfillBatchIndex += 1;
@@ -1079,6 +1117,9 @@
       if (response.event) {
         await handleCallDataEvent(response.event);
       }
+      if (final) {
+        finishReconnectBackfillFinalResponse(Boolean(response.event));
+      }
     } catch (error) {
       emitDebugEvent(debugCallId, 'mic.reconnect_backfill.failed', {
         reason,
@@ -1096,6 +1137,9 @@
       });
       await recoverMissedCallEvents(debugCallId, 'reconnect_backfill_failed');
       queueMissedCallEventsRecovery(debugCallId, 'reconnect_backfill_failed_retry');
+      if (final) {
+        finishReconnectBackfillFinalResponse(false);
+      }
     }
   }
 
@@ -1554,6 +1598,53 @@
     });
   }
 
+  function waitForBrowserMediaConnected(
+    connection: RTCPeerConnection,
+    debugCallId: string,
+    timeoutMs = 7000
+  ): Promise<void> {
+    if (isBrowserMediaConnected(connection)) {
+      return Promise.resolve();
+    }
+
+    return new Promise((resolve, reject) => {
+      const cleanup = () => {
+        window.clearTimeout(timeout);
+        connection.removeEventListener('connectionstatechange', handleStateChange);
+        connection.removeEventListener('iceconnectionstatechange', handleStateChange);
+      };
+      const handleStateChange = () => {
+        if (isBrowserMediaConnected(connection)) {
+          cleanup();
+          resolve();
+          return;
+        }
+        if (
+          connection.connectionState === 'failed' ||
+          connection.connectionState === 'closed' ||
+          connection.iceConnectionState === 'failed' ||
+          connection.iceConnectionState === 'closed'
+        ) {
+          cleanup();
+          reject(new Error('Replacement media did not connect'));
+        }
+      };
+      const timeout = window.setTimeout(() => {
+        cleanup();
+        emitDebugEvent(debugCallId, 'pc.media_connect.timeout', {
+          connectionState: connection.connectionState,
+          iceConnectionState: connection.iceConnectionState,
+          timeoutMs
+        });
+        reject(new Error('Replacement media timed out before connecting'));
+      }, timeoutMs);
+
+      connection.addEventListener('connectionstatechange', handleStateChange);
+      connection.addEventListener('iceconnectionstatechange', handleStateChange);
+      handleStateChange();
+    });
+  }
+
   async function unlockAudioForCall() {
     try {
       const AudioContextCtor =
@@ -1616,6 +1707,7 @@
       normalized === 'listening' ||
       normalized === 'understanding' ||
       normalized === 'thinking' ||
+      normalized === 'rehearsing' ||
       normalized === 'speaking' ||
       normalized === 'interrupted' ||
       normalized === 'ended' ||
@@ -1757,6 +1849,8 @@
       }
     ];
     activeAiText = '';
+    reconnectAudioBackfillPromotedState = false;
+    reconnectAudioBackfillAwaitingFinalResponse = false;
     applyCallState('thinking');
   }
 
@@ -1855,6 +1949,11 @@
     if (event.type === 'ai_token' && event.text) {
       markActiveTurnResponseDelivered(event.turn_id);
       appendAiText(event.text, event.turn_id);
+      return;
+    }
+
+    if (event.type === 'state') {
+      applyCallState(event.state);
       return;
     }
 
@@ -2426,6 +2525,9 @@
     if (state === 'thinking') {
       return 'Composing';
     }
+    if (state === 'rehearsing') {
+      return 'Rehearsing';
+    }
     if (state === 'speaking') {
       return 'Speaking';
     }
@@ -2490,7 +2592,7 @@
         stateLabel={callControlStateLabel}
         ready={callState === 'listening' && canUseToolbar}
         disabled={!canUseToolbar}
-        interruptEnabled={callState === 'understanding' || callState === 'thinking' || callState === 'speaking'}
+        interruptEnabled={callState === 'understanding' || callState === 'thinking' || callState === 'rehearsing' || callState === 'speaking'}
         endEnabled={!ending}
         inputPickerSupported={false}
         outputPickerSupported={false}

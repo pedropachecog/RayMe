@@ -182,6 +182,7 @@ export type CallStateName =
   | 'listening'
   | 'understanding'
   | 'thinking'
+  | 'rehearsing'
   | 'speaking'
   | 'interrupted'
   | 'ended'

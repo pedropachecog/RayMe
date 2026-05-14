@@ -197,12 +197,22 @@ export async function installMockCallMedia(page: Page) {
       async setRemoteDescription(description: RTCSessionDescriptionInit) {
         this.remoteDescription = description;
         this.dispatchRemoteTrack();
+        this.connectionState = 'connected';
+        this.iceConnectionState = 'connected';
       }
 
       addEventListener(eventName: string, handler: (event: Event) => void) {
         const handlers = this.listeners.get(eventName) ?? [];
         handlers.push(handler);
         this.listeners.set(eventName, handlers);
+      }
+
+      removeEventListener(eventName: string, handler: (event: Event) => void) {
+        const handlers = this.listeners.get(eventName) ?? [];
+        this.listeners.set(
+          eventName,
+          handlers.filter((current) => current !== handler)
+        );
       }
 
       close() {

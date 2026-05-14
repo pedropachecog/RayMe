@@ -369,9 +369,26 @@ def test_inflight_reconnect_offer_does_not_steal_active_session_media(
         def __init__(self) -> None:
             super().__init__()
             self.close_calls = 0
+            self.iceConnectionState = "new"
+            self.handlers: dict[str, Any] = {}
+
+        def on(self, event_name: str) -> Any:
+            def decorator(handler: Any) -> Any:
+                self.handlers[event_name] = handler
+                return handler
+
+            return decorator
 
         async def close(self) -> None:
             self.close_calls += 1
+
+        async def emit_connected(self) -> None:
+            self.connectionState = "connected"
+            self.iceConnectionState = "connected"
+            handler = self.handlers["connectionstatechange"]
+            result = handler()
+            if asyncio.iscoroutine(result):
+                await result
 
     class TrackingAudioTrack:
         kind = "audio"
@@ -447,6 +464,13 @@ def test_inflight_reconnect_offer_does_not_steal_active_session_media(
     assert not thread.is_alive()
     assert errors == []
     assert responses[0].status_code == 200
+    assert session.peer_connection is original_peer
+    assert session.outbound_audio_track is original_track
+    assert peers[1] in session._pending_peer_connections
+    assert original_peer.close_calls == 0
+
+    asyncio.run(peers[1].emit_connected())
+
     assert session.peer_connection is peers[1]
     assert session.outbound_audio_track is tracks[1]
     assert original_peer.close_calls == 1

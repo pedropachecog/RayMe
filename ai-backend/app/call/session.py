@@ -163,6 +163,7 @@ class CallSession:
         self._reconnect_live_frame_hold_frames: list[PcmAudioFrame] = []
         self._pending_peer_connections: list[Any] = []
         self._pending_data_channels: list[tuple[Any, Any]] = []
+        self._pending_outbound_audio_tracks: list[tuple[Any, Any]] = []
 
     @property
     def active_ai_turn(self) -> Any | None:
@@ -175,7 +176,7 @@ class CallSession:
     async def handle_inbound_audio_frame(self, frame: Any) -> dict[str, Any] | bool | None:
         self.incoming_audio_frames += 1
         was_raw_bytes = isinstance(frame, bytes)
-        if self.muted or self.state in {"ended", "failed", "speaking"}:
+        if self.muted or self.state in {"ended", "failed", "rehearsing", "speaking"}:
             self.dropped_audio_frames += 1
             if self.incoming_audio_frames % 100 == 0:
                 logger.info(
@@ -189,12 +190,12 @@ class CallSession:
                 )
             return False if was_raw_bytes else None
 
-        # During understanding/thinking states the AI is transcribing or
-        # generating. Accepting inbound audio during this window causes ambient
+        # During understanding/thinking/rehearsing states the AI is transcribing,
+        # generating text, or preparing voice. Accepting inbound audio during this window causes ambient
         # noise to accumulate in the turn buffer, which Whisper then
         # hallucinates (e.g. "thank you" from room-tone silence). Drop frames
         # so the next turn starts clean.
-        if self.state in {"understanding", "thinking"}:
+        if self.state in {"understanding", "thinking", "rehearsing"}:
             self.dropped_audio_frames += 1
             return False if was_raw_bytes else None
 
@@ -273,9 +274,26 @@ class CallSession:
             int(CALL_RECONNECT_BACKFILL_HOLD_SECONDS * 1000),
         )
 
-    def mark_peer_connection_pending(self, peer_connection: Any) -> None:
+    def mark_peer_connection_pending(
+        self,
+        peer_connection: Any,
+        *,
+        outbound_audio_track: Any | None = None,
+    ) -> None:
         if peer_connection not in self._pending_peer_connections:
             self._pending_peer_connections.append(peer_connection)
+        if outbound_audio_track is not None:
+            self._pending_outbound_audio_tracks = [
+                (peer, track)
+                for peer, track in self._pending_outbound_audio_tracks
+                if peer is not peer_connection
+            ]
+            self._pending_outbound_audio_tracks.append(
+                (peer_connection, outbound_audio_track)
+            )
+
+    def is_peer_connection_pending(self, peer_connection: Any) -> bool:
+        return peer_connection in self._pending_peer_connections
 
     def is_peer_connection_active_or_pending(self, peer_connection: Any) -> bool:
         return (
@@ -301,14 +319,23 @@ class CallSession:
         peer_connection: Any,
         *,
         outbound_audio_track: Any | None = None,
-    ) -> None:
+    ) -> Any | None:
+        previous_peer_connection = (
+            self.peer_connection if self.peer_connection is not peer_connection else None
+        )
         self.peer_connection = peer_connection
+        if outbound_audio_track is None:
+            for peer, track in self._pending_outbound_audio_tracks:
+                if peer is peer_connection:
+                    outbound_audio_track = track
+                    break
         if outbound_audio_track is not None:
             self.outbound_audio_track = outbound_audio_track
         for peer, channel in list(self._pending_data_channels):
             if peer is peer_connection:
                 self.data_channel = channel
         self.discard_pending_peer_connection(peer_connection)
+        return previous_peer_connection
 
     def discard_pending_peer_connection(self, peer_connection: Any) -> None:
         self._pending_peer_connections = [
@@ -317,6 +344,11 @@ class CallSession:
         self._pending_data_channels = [
             (peer, channel)
             for peer, channel in self._pending_data_channels
+            if peer is not peer_connection
+        ]
+        self._pending_outbound_audio_tracks = [
+            (peer, track)
+            for peer, track in self._pending_outbound_audio_tracks
             if peer is not peer_connection
         ]
 
@@ -345,7 +377,7 @@ class CallSession:
                 "duration_ms": 0,
                 "state": self.state,
             }
-        if self.muted or self.state in {"ended", "speaking", "understanding", "thinking"}:
+        if self.muted or self.state in {"ended", "speaking", "understanding", "thinking", "rehearsing"}:
             logger.info(
                 "[rayme-call] reconnect_audio.backfill.skip session=%s "
                 "state=%s muted=%s bytes=%d reason=%s attempt=%s "
@@ -849,7 +881,7 @@ class CallSession:
         voxcpm2_denoise: bool = True,
     ) -> dict[str, Any]:
         self._cancelled_ai_turns.discard(turn_id)
-        self.state = "thinking"
+        self.state = "rehearsing"
         current_task = asyncio.current_task()
         if current_task is not None:
             self.active_turn_task = current_task

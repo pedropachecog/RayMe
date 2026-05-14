@@ -19,7 +19,7 @@ describe('call state machine', () => {
     vi.unstubAllGlobals();
   });
 
-  it('moves through connecting, listening, thinking, speaking, interrupted, ended, and failed states', async () => {
+  it('moves through connecting, listening, thinking, rehearsing, speaking, interrupted, ended, and failed states', async () => {
     const store = createCallStore({ callId, threadId });
 
     expect(store.state).toBe('connecting');
@@ -29,6 +29,9 @@ describe('call state machine', () => {
 
     store.userSpeechFinalized({ text: 'Are you there?' });
     expect(store.state).toBe('thinking');
+
+    store.markRehearsing();
+    expect(store.state).toBe('rehearsing');
 
     store.aiSpeechStarted({ text: 'I am here.' });
     expect(store.state).toBe('speaking');

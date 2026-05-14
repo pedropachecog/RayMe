@@ -35,6 +35,7 @@ export interface CallStore {
   startConnecting: () => void;
   markListening: () => void;
   markThinking: () => void;
+  markRehearsing: () => void;
   markSpeaking: (event?: AiSpeechStarted) => void;
   interruptAiTurn: (options?: { source?: 'button' | 'server' }) => void;
   setServerMuted: (muted: boolean) => void;
@@ -58,6 +59,7 @@ const CALL_STATES: CallStateName[] = [
   'listening',
   'understanding',
   'thinking',
+  'rehearsing',
   'speaking',
   'interrupted',
   'ended',
@@ -111,6 +113,10 @@ export function createCallStore(options: CallStoreOptions = {}): CallStore {
     },
     markThinking() {
       state = 'thinking';
+      errorMessage = null;
+    },
+    markRehearsing() {
+      state = 'rehearsing';
       errorMessage = null;
     },
     markSpeaking(event?: AiSpeechStarted) {

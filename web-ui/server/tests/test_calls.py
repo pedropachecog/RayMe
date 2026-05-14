@@ -669,8 +669,10 @@ def test_two_turns_stream_tokens_and_write_exact_speech_rows_before_call_end(
     assert second.status_code == 200
     first_events = _sse_events(first.text)
     second_events = _sse_events(second.text)
-    assert [event["type"] for event in first_events] == ["ai_token", "ai_token", "ai_done"]
-    assert [event["type"] for event in second_events] == ["ai_token", "ai_token", "ai_done"]
+    assert [event["type"] for event in first_events] == ["ai_token", "ai_token", "state", "ai_done"]
+    assert [event["type"] for event in second_events] == ["ai_token", "ai_token", "state", "ai_done"]
+    assert first_events[2] == {"type": "state", "turn_id": "turn-1", "state": "rehearsing"}
+    assert second_events[2] == {"type": "state", "turn_id": "turn-2", "state": "rehearsing"}
     assert "".join(event.get("text", "") for event in first_events) == "First AI answer."
     assert "".join(event.get("text", "") for event in second_events) == "Second AI answer."
 

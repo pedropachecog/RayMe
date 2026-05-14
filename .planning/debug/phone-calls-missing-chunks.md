@@ -1,7 +1,7 @@
 ---
 status: verifying
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-14T00:38:53Z
+updated: 2026-05-14T22:06:00Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -10,10 +10,10 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 ## Current Focus
 
 user_goal_preservation: "The user must still be able to see and hear the generated response for a recovered long turn; the fix must keep the call live long enough for that response instead of cancelling, hiding, dropping, rejecting, or enqueueing it onto a dead media path."
-hypothesis: "The latest Android stall at deployed commit `51e672f` is a backend replacement-offer transaction bug plus a frontend terminal-state bug. The long turn reaches STT, LLM, and TTS, but a second in-flight replacement `/offer` can stage a new backend peer/track and data channel before negotiation succeeds; when that candidate fails or never answers, the generated TTS is queued to a dead replacement track while data-channel events are skipped closed. Separately, late state/data-channel events can revive a call UI after `ended`/`failed`/hangup."
-test: "`uv run --project ai-backend pytest ai-backend/tests/test_webrtc_signaling.py -q -k \"inflight_reconnect_offer or failed_reconnect_offer_preserves_existing_session_media or cancelled_reconnect_offer_preserves_existing_session_media\"`, full `ai-backend/tests/test_webrtc_signaling.py`, `npm run test:e2e -- call-start.spec.ts -g \"does not revive an ended call\"`, and full serialized `npm run test:e2e -- call-start.spec.ts --workers=1`."
-expecting: "Before the backend fix, an in-flight replacement offer can make `session.peer_connection`/`outbound_audio_track` point at the candidate before `offer.answered`. After the fix, candidates are pending until negotiation succeeds; failed/cancelled/in-flight candidates cannot steal the active media path. Before the frontend fix, a late `state=listening` event can hide the ended panel; after the fix, nonterminal state transitions are ignored once ending or terminal."
-next_action: "Physical Android Chrome retest at `https://192.168.1.199:8443`: two short exchanges, the long poem/message, verify live response text and voice playback, verify hangup/Return to Thread do not return to a dead call, and verify the poem transcript has no omitted span of 3+ words."
+hypothesis: "The latest Android stall at deployed commit `bfa294f` is still a backend replacement-media activation bug plus UI state ambiguity. STT, LLM, and TTS complete, but the backend accepts the replacement peer/track before the replacement media is actually connected, so TTS can queue onto a track with `recv_count=0`. The UI also reports `Composing` during TTS and can look fake-listening during long reconnect/STT work."
+test: "`uv run --project ai-backend pytest ai-backend/tests/test_call_session.py ai-backend/tests/test_webrtc_signaling.py -q`, `uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py -q`, `npm run test:unit -- call-state.test.ts`, `npm run test:e2e -- call-visualizer.spec.ts`, `npm run test:e2e -- call-start.spec.ts --workers=1`, `npm run build`, and `git diff --check`."
+expecting: "Before the backend fix, an answered replacement `/offer` immediately makes the backend candidate authoritative. After the fix, replacement peer/track/data-channel objects stay pending until the replacement connection reaches connected/completed or receives its first audio frame; only then does it replace the active media path. The UI now separates `Composing` text generation from `Rehearsing` TTS generation and shows `Understanding` during reconnect backfill/STT instead of fake-listening."
+next_action: "Commit, deploy through `scripts/deploy-omen.sh`, then physical Android Chrome retest at `https://192.168.1.199:8443`: two short exchanges, the long poem/message, verify live response text and voice playback, verify hangup/Return to Thread do not return to a dead call, and verify the poem transcript has no omitted span of 3+ normalized words."
 reasoning_checkpoint:
   hypothesis: "Terminal reconnect cleanup ends the call too early because `failTerminalMediaReconnect()` always runs `cleanupTerminalFailedCall()` and applies failed UI even when `activeTurnAbort`/`activeTurnReader` indicate an in-flight `/turns` response."
   confirming_evidence:
@@ -74,6 +74,26 @@ evidence_files:
   - .planning/debug/phone-call-expected-poem-2026-05-02.md
 
 ## Investigation Evidence
+
+- timestamp: 2026-05-14T21:34:33Z
+  checked: Independent verification of latest Android Chrome repro after deployed commit `bfa294fcaed8148961ad7654cfba6e838df80e44`.
+  found: Copied OMEN `rayme.sqlite3`, `web-ui.run.log`, and `ai-backend.run.log` to `/tmp/rayme-phone-debug-bfa294f-android-latest-20260514T213433Z/`. Latest call is `call_194c47dbb71b41a1a9f8f8b842b688b3` / `rtc_e167f32fca64468096e10f56b012c795` on `thread_52544a9c8441431e9ffc4b1208fb8f37`. SQLite persisted two successful short exchanges, then the long poem `user_speech` at sequence 6, an AI response at sequence 7, late user speech `Okay. Okay.` at sequence 8, a second AI response at sequence 9, and `call_end` at sequence 10.
+  implication: The user report is independently confirmed. The long-turn response was generated and persisted, but it was not delivered live as audible call playback.
+
+- timestamp: 2026-05-14T21:34:33Z
+  checked: Playback/media boundary for latest call `call_194c47dbb71b41a1a9f8f8b842b688b3`.
+  found: Web logs show reconnect backfill and a replacement reconnect attempt, then `mic.keep_live prevState=listening nextState=thinking`. The server generated the long response quickly (`llm.first_token` around 698 ms, `llm.done` around 4165 ms). The backend enqueued TTS (`wav_bytes=1378796`) but logged `track.wait_until_idle.timeout recv_count=0 queue_size=1 buffer_size=0`; data-channel `user_final` and `ai_audio_started` were skipped because the channel was closed. The browser received `ai_audio_started` via the turn stream with `speakingRms=0`, entered `speaking`, then returned to `listening`, so the UI treated the response as delivered while no receiver consumed the audio.
+  implication: The remaining live-delivery bug is not "no generated response"; it is generated audio being queued onto a replacement media path that the browser is not consuming.
+
+- timestamp: 2026-05-14T21:34:33Z
+  checked: Poem transcript fidelity with normalized word-to-word comparison against `.planning/debug/phone-call-expected-poem-2026-05-02.md`.
+  found: Expected normalized word count is 153; latest actual normalized word count is 141. The transcript omits a contiguous expected 12-word phrase around `waiting / as for a gift / snow to begin / which it...`. Misheard individual words remain acceptable under the user's accent tolerance, but this omitted 3+ word span fails acceptance.
+  implication: Transcript completeness remains a separate acceptance gate. Future verification must compare normalized words to normalized words, not LLM tokens.
+
+- timestamp: 2026-05-14T22:06:00Z
+  checked: Local fix and verification for pending-media activation plus state-label ambiguity.
+  found: Backend WebRTC replacement offers now leave candidate peer/track/data-channel objects pending after answer negotiation and only activate them when the candidate reaches connected/completed or receives its first audio frame; pending failures are discarded without stealing the active outbound track. Frontend reconnect now waits for replacement browser media to connect before closing the previous browser peer, preserves `Understanding` while final reconnect backfill/STT is pending, restores `Listening` when recovery is canceled/no turn is produced, and introduces distinct `Composing` (text generation) and `Rehearsing` (TTS generation) states before `Speaking`. Verification passed: backend call/session signaling suite 74 passed, web call facade suite 43 passed, unit call-state suite 6 passed, visualizer e2e 2 passed, full serialized call-start e2e 40 passed, client production build passed, and `git diff --check` passed.
+  implication: The latest proven media activation and UI-state mechanisms are fixed locally. Commit, canonical OMEN deployment, and physical Android acceptance remain required.
 
 - timestamp: 2026-05-13T17:05:28Z
   checked: Focused TDD RED baseline before product-code changes.
@@ -143,7 +163,7 @@ evidence_files:
 
 - timestamp: 2026-05-14T00:16:36Z
   checked: Poem transcript fidelity against `.planning/debug/phone-call-expected-poem-2026-05-02.md`.
-  found: Expected poem token count was 154; the latest STT transcript token count was 146. Misheard words are present and acceptable under the user's accent tolerance, but the diff includes at least one omitted/contracted 3-word expected span and one omitted/contracted 6-word expected span. This fails the user's threshold that an omitted span of 3+ words is not acceptable.
+  found: Expected poem normalized word count was 154; the latest STT transcript normalized word count was 146. Misheard words are present and acceptable under the user's accent tolerance, but the diff includes at least one omitted/contracted 3-word expected span and one omitted/contracted 6-word expected span. This fails the user's threshold that an omitted span of 3+ words is not acceptable.
   implication: Transcript fidelity remains a separate unresolved acceptance item even if transport/playback is fixed. Current evidence does not yet prove whether those omissions are caused by STT recognition under accent/noise or by subtle audio loss before STT; acceptance must compare the full poem transcript after the transport fix.
 
 - timestamp: 2026-05-14T00:33:40Z

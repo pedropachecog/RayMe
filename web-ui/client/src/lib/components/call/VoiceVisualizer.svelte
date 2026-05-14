@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { CallStateName } from '$lib/api/types';
 
-  export let state: Extract<CallStateName, 'listening' | 'understanding' | 'thinking' | 'speaking'> = 'listening';
+  export let state: Extract<CallStateName, 'listening' | 'understanding' | 'thinking' | 'rehearsing' | 'speaking'> = 'listening';
   export let listeningRms: number | null | undefined = undefined;
   export let speakingRms: number | null | undefined = undefined;
 
@@ -23,13 +23,17 @@
     return Math.max(0, Math.min(1, value));
   }
 
-  function labelForState(nextState: typeof state): 'Listening' | 'Understanding' | 'Composing' | 'Speaking' {
+  function labelForState(nextState: typeof state): 'Listening' | 'Understanding' | 'Composing' | 'Rehearsing' | 'Speaking' {
     if (nextState === 'understanding') {
       return 'Understanding';
     }
 
     if (nextState === 'thinking') {
       return 'Composing';
+    }
+
+    if (nextState === 'rehearsing') {
+      return 'Rehearsing';
     }
 
     if (nextState === 'speaking') {
@@ -44,7 +48,7 @@
       return [0.34, 0.48, 0.62, 0.78, 0.62, 0.48, 0.34];
     }
 
-    if (nextState === 'thinking') {
+    if (nextState === 'thinking' || nextState === 'rehearsing') {
       return [0.38, 0.56, 0.74, 0.92, 0.74, 0.56, 0.38];
     }
 
@@ -59,6 +63,7 @@
 <section
   class:understanding={state === 'understanding'}
   class:thinking={state === 'thinking'}
+  class:rehearsing={state === 'rehearsing'}
   class:metered={meterAvailable}
   class="voice-visualizer"
   data-testid="voice-visualizer"
@@ -81,9 +86,11 @@
         ? 'Transcribing speech'
         : state === 'thinking'
           ? 'Generating a response'
-          : meterAvailable
-            ? 'Live audio energy'
-            : 'Live audio fallback'}
+          : state === 'rehearsing'
+            ? 'Preparing voice'
+            : meterAvailable
+              ? 'Live audio energy'
+              : 'Live audio fallback'}
     </span>
   </div>
 
@@ -111,7 +118,8 @@
   }
 
   .voice-visualizer.understanding,
-  .voice-visualizer.thinking {
+  .voice-visualizer.thinking,
+  .voice-visualizer.rehearsing {
     background:
       radial-gradient(circle at 50% 44%, rgba(182, 160, 255, 0.22), transparent 34%),
       linear-gradient(135deg, rgba(182, 160, 255, 0.12), rgba(112, 170, 255, 0.08)),
@@ -134,7 +142,8 @@
   }
 
   .understanding .pulse-field span,
-  .thinking .pulse-field span {
+  .thinking .pulse-field span,
+  .rehearsing .pulse-field span {
     background: linear-gradient(135deg, rgba(182, 160, 255, 0.16), rgba(112, 170, 255, 0.1));
     box-shadow: 0 0 68px rgba(182, 160, 255, 0.24);
     animation-name: thinking-shimmer;
@@ -202,7 +211,8 @@
   }
 
   .understanding .waveform span,
-  .thinking .waveform span {
+  .thinking .waveform span,
+  .rehearsing .waveform span {
     background: linear-gradient(135deg, #b6a0ff 0%, #70aaff 100%);
     box-shadow: 0 0 22px rgba(182, 160, 255, 0.32);
   }

@@ -406,6 +406,13 @@ async def create_call_turn(
             )
             if visible_text:
                 message = await service.record_ai_speech(call_id, visible_text)
+                yield _sse(
+                    {
+                        "type": "state",
+                        "turn_id": payload.turn_id,
+                        "state": "rehearsing",
+                    }
+                )
                 # Block the SSE stream until TTS synthesis completes and audio
                 # is enqueued to the WebRTC outbound track. This keeps the
                 # browser in 'speaking' state (SSE stream active), which
