@@ -1,7 +1,7 @@
 ---
 status: verifying
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-14T00:33:40Z
+updated: 2026-05-14T00:38:53Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -13,7 +13,7 @@ user_goal_preservation: "The user must still be able to see and hear the generat
 hypothesis: "The latest Android stall at deployed commit `51e672f` is a backend replacement-offer transaction bug plus a frontend terminal-state bug. The long turn reaches STT, LLM, and TTS, but a second in-flight replacement `/offer` can stage a new backend peer/track and data channel before negotiation succeeds; when that candidate fails or never answers, the generated TTS is queued to a dead replacement track while data-channel events are skipped closed. Separately, late state/data-channel events can revive a call UI after `ended`/`failed`/hangup."
 test: "`uv run --project ai-backend pytest ai-backend/tests/test_webrtc_signaling.py -q -k \"inflight_reconnect_offer or failed_reconnect_offer_preserves_existing_session_media or cancelled_reconnect_offer_preserves_existing_session_media\"`, full `ai-backend/tests/test_webrtc_signaling.py`, `npm run test:e2e -- call-start.spec.ts -g \"does not revive an ended call\"`, and full serialized `npm run test:e2e -- call-start.spec.ts --workers=1`."
 expecting: "Before the backend fix, an in-flight replacement offer can make `session.peer_connection`/`outbound_audio_track` point at the candidate before `offer.answered`. After the fix, candidates are pending until negotiation succeeds; failed/cancelled/in-flight candidates cannot steal the active media path. Before the frontend fix, a late `state=listening` event can hide the ended panel; after the fix, nonterminal state transitions are ignored once ending or terminal."
-next_action: "Finish production build/diff verification, commit the transactional backend candidate-media fix and terminal-state UI guard, deploy only through `scripts/deploy-omen.sh`, then run physical Android Chrome retest at `https://192.168.1.199:8443`: two short exchanges, the long poem/message, verify live response text and voice playback, verify hangup/Return to Thread do not return to a dead call, and verify the poem transcript has no omitted span of 3+ words."
+next_action: "Physical Android Chrome retest at `https://192.168.1.199:8443`: two short exchanges, the long poem/message, verify live response text and voice playback, verify hangup/Return to Thread do not return to a dead call, and verify the poem transcript has no omitted span of 3+ words."
 reasoning_checkpoint:
   hypothesis: "Terminal reconnect cleanup ends the call too early because `failTerminalMediaReconnect()` always runs `cleanupTerminalFailedCall()` and applies failed UI even when `activeTurnAbort`/`activeTurnReader` indicate an in-flight `/turns` response."
   confirming_evidence:
@@ -150,6 +150,11 @@ evidence_files:
   checked: Local fix and focused verification for latest multi-bug repro.
   found: Backend WebRTC replacement offers now stage peer/track/data-channel objects as pending and only swap `session.peer_connection`/`outbound_audio_track` after negotiation succeeds; failed or cancelled candidates are discarded and cannot steal the active media path. Frontend call state now ignores nonterminal state transitions while ending or already terminal, so late data-channel events cannot revive an ended/failed call UI. Added backend regression `test_inflight_reconnect_offer_does_not_steal_active_session_media` and frontend regression `does not revive an ended call when a late data channel state event arrives`. Focused backend command passed: 3 passed, 24 deselected. Full `ai-backend/tests/test_webrtc_signaling.py` passed: 27 passed, 3 warnings. Focused Playwright command passed in desktop and mobile Chromium: 2 passed. Full serialized `call-start.spec.ts` passed: 40 passed.
   implication: The latest proven live-delivery and dead-call-UI mechanisms are fixed locally. Production build, diff hygiene, commit/deploy, and physical Android acceptance are still pending.
+
+- timestamp: 2026-05-14T00:38:53Z
+  checked: Commit, push, canonical OMEN deployment, and post-deploy readiness for the replacement-media transaction fix.
+  found: `npm run build` from `web-ui/client` passed and `git diff --check` passed. Committed and pushed `bfa294fcaed8148961ad7654cfba6e838df80e44` (`fix(call): stage replacement media until answered`). `scripts/deploy-omen.sh` fast-forwarded OMEN to that runtime fix, verified CUDA runtime, built the web client, recreated canonical `RayMePhase1AI` and `RayMePhase1Web` scheduled tasks, and reported `OMEN deploy complete`. Post-deploy `/webrtc/status` returned `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, and `active_sessions=0`; OMEN checkout was clean at `bfa294fcaed8148961ad7654cfba6e838df80e44`. Generic `/health` remained `degraded` because resident TTS is `f5`.
+  implication: The latest runtime fix is live on OMEN through the approved deployment path. Physical Android Chrome acceptance is the remaining gate, including live response playback, clean hangup/thread return, and full poem transcript comparison.
 
 - timestamp: 2026-05-13T17:00:36Z
   checked: Upstream RED browser regression for the active product bug.
