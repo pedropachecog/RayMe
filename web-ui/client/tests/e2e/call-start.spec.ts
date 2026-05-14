@@ -169,6 +169,33 @@ test('streams two user to AI cycles in one call and reaches the ended state', as
   assertNoBrowserErrors();
 });
 
+test('does not revive an ended call when a late data channel state event arrives', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  const counters = await installCallStartRoutes(page);
+
+  await page.goto(`/chat/${threadId}`);
+  await page.getByRole('button', { name: 'Start call' }).click();
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+
+  await page.getByRole('button', { name: 'End Call' }).click();
+  await expect(page.getByRole('status').getByText('Call ended')).toBeVisible();
+  await expect.poll(() => counters.endCount).toBe(1);
+
+  await emitLatestMockDataChannelEvent(page, {
+    type: 'state',
+    session_id: 'rtc-call-start-01',
+    state: 'listening'
+  });
+
+  await expect(page.getByRole('status').getByText('Call ended')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'End Call' })).toHaveCount(0);
+  await expect(page.getByTestId('voice-visualizer')).toHaveCount(0);
+  assertNoBrowserErrors();
+});
+
 test('re-offers with a new peer instead of ending when browser peer connection fails', async ({
   page
 }) => {

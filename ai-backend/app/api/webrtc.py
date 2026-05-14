@@ -141,6 +141,9 @@ async def create_webrtc_offer_answer(
     previous_outbound_audio_track = (
         existing_session.outbound_audio_track if existing_session is not None else None
     )
+    previous_data_channel = (
+        existing_session.data_channel if existing_session is not None else None
+    )
     previous_state = existing_session.state if existing_session is not None else None
     previous_end_reason = (
         existing_session.end_reason if existing_session is not None else None
@@ -162,18 +165,40 @@ async def create_webrtc_offer_answer(
 
     negotiate_started = time.monotonic()
     try:
-        session = await manager.create_session(
-            session_id=payload.session_id,
-            thread_id=payload.thread_id,
-            voice_id=payload.voice_id,
-            engine_id=payload.engine_id,
-            prompt_messages=[message.model_dump() for message in payload.prompt_messages],
-            peer_connection=peer_connection,
-            vad_adapter=_vad_adapter(request),
-            stt_adapter=_stt_adapter(request),
-            outbound_audio_track=outbound_audio_track,
-            close_previous_peer=False,
-        )
+        if existing_session is not None:
+            session = existing_session
+            if (
+                session.state == "failed"
+                and session.end_reason == "connection_failed"
+            ):
+                session.state = "listening"
+                session.end_reason = None
+                session.ended_at = None
+            session.mark_media_reconnect_pending()
+            session.mark_peer_connection_pending(peer_connection)
+            session.thread_id = payload.thread_id
+            session.voice_id = payload.voice_id
+            session.engine_id = payload.engine_id
+            session.prompt_messages = [
+                message.model_dump() for message in payload.prompt_messages
+            ]
+            session.vad_adapter = _vad_adapter(request)
+            session.stt_adapter = _stt_adapter(request)
+        else:
+            session = await manager.create_session(
+                session_id=payload.session_id,
+                thread_id=payload.thread_id,
+                voice_id=payload.voice_id,
+                engine_id=payload.engine_id,
+                prompt_messages=[
+                    message.model_dump() for message in payload.prompt_messages
+                ],
+                peer_connection=peer_connection,
+                vad_adapter=_vad_adapter(request),
+                stt_adapter=_stt_adapter(request),
+                outbound_audio_track=outbound_audio_track,
+                close_previous_peer=False,
+            )
         _attach_peer_handlers(peer_connection, session)
         answer = await _negotiate_answer(peer_connection, payload.offer)
         if (
@@ -181,6 +206,10 @@ async def create_webrtc_offer_answer(
             and previous_peer_connection is not None
             and previous_peer_connection is not peer_connection
         ):
+            session.accept_pending_peer_connection(
+                peer_connection,
+                outbound_audio_track=outbound_audio_track,
+            )
             await _close_peer_connection(previous_peer_connection)
     except HTTPException:
         if existing_session is not None:
@@ -189,6 +218,7 @@ async def create_webrtc_offer_answer(
                 peer_connection,
                 previous_peer_connection,
                 previous_outbound_audio_track,
+                previous_data_channel,
                 previous_state,
                 previous_end_reason,
                 previous_ended_at,
@@ -209,6 +239,7 @@ async def create_webrtc_offer_answer(
                 peer_connection,
                 previous_peer_connection,
                 previous_outbound_audio_track,
+                previous_data_channel,
                 previous_state,
                 previous_end_reason,
                 previous_ended_at,
@@ -229,6 +260,7 @@ async def create_webrtc_offer_answer(
                 peer_connection,
                 previous_peer_connection,
                 previous_outbound_audio_track,
+                previous_data_channel,
                 previous_state,
                 previous_end_reason,
                 previous_ended_at,
@@ -549,14 +581,17 @@ def _restore_failed_offer_session(
     failed_peer_connection: Any,
     previous_peer_connection: Any,
     previous_outbound_audio_track: Any,
+    previous_data_channel: Any,
     previous_state: str | None,
     previous_end_reason: str | None,
     previous_ended_at: Any,
 ) -> None:
+    session.discard_pending_peer_connection(failed_peer_connection)
     if session.peer_connection is failed_peer_connection:
         session.peer_connection = previous_peer_connection
     if previous_outbound_audio_track is not None:
         session.outbound_audio_track = previous_outbound_audio_track
+    session.data_channel = previous_data_channel
     if previous_state is not None:
         session.state = previous_state
     session.end_reason = previous_end_reason
@@ -617,7 +652,7 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
             ready,
         )
         if label == RAYME_EVENTS_CHANNEL:
-            session.data_channel = channel
+            session.set_data_channel_for_peer(peer_connection, channel)
 
             def start_keepalive() -> None:
                 nonlocal keepalive_task
@@ -731,7 +766,10 @@ async def _receive_audio_track(
     frame_count = 0
     consecutive_live_recv_errors = 0
     while session.state not in {"ended", "failed"}:
-        if peer_connection is not None and session.peer_connection is not peer_connection:
+        if (
+            peer_connection is not None
+            and not session.is_peer_connection_active_or_pending(peer_connection)
+        ):
             logger.info(
                 "[rayme-call] track.recv.superseded session=%s frames=%d",
                 session.session_id,
@@ -742,7 +780,10 @@ async def _receive_audio_track(
             frame = await track.recv()
         except Exception as exc:
             exc_name = exc.__class__.__name__
-            if peer_connection is not None and session.peer_connection is not peer_connection:
+            if (
+                peer_connection is not None
+                and not session.is_peer_connection_active_or_pending(peer_connection)
+            ):
                 logger.info(
                     "[rayme-call] track.recv.superseded session=%s frames=%d "
                     "after_exc=%s",

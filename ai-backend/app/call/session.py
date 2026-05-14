@@ -161,6 +161,8 @@ class CallSession:
         self._reconnect_live_frame_hold_until = 0.0
         self._reconnect_live_frame_hold_logged = False
         self._reconnect_live_frame_hold_frames: list[PcmAudioFrame] = []
+        self._pending_peer_connections: list[Any] = []
+        self._pending_data_channels: list[tuple[Any, Any]] = []
 
     @property
     def active_ai_turn(self) -> Any | None:
@@ -270,6 +272,53 @@ class CallSession:
             grace_ms,
             int(CALL_RECONNECT_BACKFILL_HOLD_SECONDS * 1000),
         )
+
+    def mark_peer_connection_pending(self, peer_connection: Any) -> None:
+        if peer_connection not in self._pending_peer_connections:
+            self._pending_peer_connections.append(peer_connection)
+
+    def is_peer_connection_active_or_pending(self, peer_connection: Any) -> bool:
+        return (
+            peer_connection is self.peer_connection
+            or peer_connection in self._pending_peer_connections
+        )
+
+    def set_data_channel_for_peer(self, peer_connection: Any, data_channel: Any) -> None:
+        if peer_connection is self.peer_connection:
+            self.data_channel = data_channel
+            return
+        if peer_connection not in self._pending_peer_connections:
+            return
+        self._pending_data_channels = [
+            (peer, channel)
+            for peer, channel in self._pending_data_channels
+            if peer is not peer_connection
+        ]
+        self._pending_data_channels.append((peer_connection, data_channel))
+
+    def accept_pending_peer_connection(
+        self,
+        peer_connection: Any,
+        *,
+        outbound_audio_track: Any | None = None,
+    ) -> None:
+        self.peer_connection = peer_connection
+        if outbound_audio_track is not None:
+            self.outbound_audio_track = outbound_audio_track
+        for peer, channel in list(self._pending_data_channels):
+            if peer is peer_connection:
+                self.data_channel = channel
+        self.discard_pending_peer_connection(peer_connection)
+
+    def discard_pending_peer_connection(self, peer_connection: Any) -> None:
+        self._pending_peer_connections = [
+            peer for peer in self._pending_peer_connections if peer is not peer_connection
+        ]
+        self._pending_data_channels = [
+            (peer, channel)
+            for peer, channel in self._pending_data_channels
+            if peer is not peer_connection
+        ]
 
     async def backfill_reconnect_audio(
         self,

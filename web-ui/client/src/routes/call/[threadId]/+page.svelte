@@ -1622,11 +1622,19 @@
       normalized === 'failed' ||
       normalized === 'connecting'
     ) {
+      const nextIsTerminal = normalized === 'ended' || normalized === 'failed';
+      const currentIsTerminal = callState === 'ended' || callState === 'failed' || ending;
+      if (currentIsTerminal && !nextIsTerminal) {
+        return;
+      }
       const prevState = callState;
       callState = normalized;
       keepMicrophoneSenderLive(prevState, normalized);
       syncRemoteAudioAudibility();
     } else {
+      if (callState === 'ended' || callState === 'failed' || ending) {
+        return;
+      }
       callState = 'listening';
       keepMicrophoneSenderLive(undefined, 'listening');
       syncRemoteAudioAudibility();

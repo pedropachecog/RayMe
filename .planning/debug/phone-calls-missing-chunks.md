@@ -1,7 +1,7 @@
 ---
 status: verifying
 created: 2026-04-29T19:18:06Z
-updated: 2026-05-13T18:19:54Z
+updated: 2026-05-14T00:33:40Z
 trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe misses whole chunks of long turns."
 ---
 
@@ -9,11 +9,11 @@ trigger: "Phone calls fail to transcribe the whole content of user speech; RayMe
 
 ## Current Focus
 
-user_goal_preservation: "The user must still be able to see and hear the generated response for a recovered long turn; the fix must keep the call live long enough for that response instead of cancelling, hiding, dropping, or rejecting it."
-hypothesis: "The latest Android stall is a reconnect-offer cancellation/retry failure. The backend mutates the live session to the replacement peer before `offer.answered`; if the Web UI request is cancelled/times out, `asyncio.CancelledError` bypasses the restore path. On the browser side, a first replacement `/offer` failure below the max-attempt limit logs failure but does not schedule the next reconnect attempt, leaving the call visually listening on a dead media path."
-test: "`uv run --project ai-backend pytest ai-backend/tests/test_webrtc_signaling.py -q -k \"cancelled_reconnect_offer_preserves_existing_session_media or failed_reconnect_offer_preserves_existing_session_media\"` and `npm run test:e2e -- call-start.spec.ts -g \"retries when the first replacement offer fails during media reconnect\"`."
-expecting: "Before the fix, browser `offerCount` stalls at the failed first reconnect offer and backend cancellation leaves `session.peer_connection`/`outbound_audio_track` pointing at the replacement objects. After the fix, the browser retries or terminal-cleans deterministically, and cancelled backend negotiation restores the previous peer/track and closes the abandoned replacement."
-next_action: "Physical Android Chrome retest at `https://192.168.1.199:8443`: run the same two short exchanges, then the long poem/message, and verify the call retries/reconnects instead of going inert and that the assistant response appears and plays live."
+user_goal_preservation: "The user must still be able to see and hear the generated response for a recovered long turn; the fix must keep the call live long enough for that response instead of cancelling, hiding, dropping, rejecting, or enqueueing it onto a dead media path."
+hypothesis: "The latest Android stall at deployed commit `51e672f` is a backend replacement-offer transaction bug plus a frontend terminal-state bug. The long turn reaches STT, LLM, and TTS, but a second in-flight replacement `/offer` can stage a new backend peer/track and data channel before negotiation succeeds; when that candidate fails or never answers, the generated TTS is queued to a dead replacement track while data-channel events are skipped closed. Separately, late state/data-channel events can revive a call UI after `ended`/`failed`/hangup."
+test: "`uv run --project ai-backend pytest ai-backend/tests/test_webrtc_signaling.py -q -k \"inflight_reconnect_offer or failed_reconnect_offer_preserves_existing_session_media or cancelled_reconnect_offer_preserves_existing_session_media\"`, full `ai-backend/tests/test_webrtc_signaling.py`, `npm run test:e2e -- call-start.spec.ts -g \"does not revive an ended call\"`, and full serialized `npm run test:e2e -- call-start.spec.ts --workers=1`."
+expecting: "Before the backend fix, an in-flight replacement offer can make `session.peer_connection`/`outbound_audio_track` point at the candidate before `offer.answered`. After the fix, candidates are pending until negotiation succeeds; failed/cancelled/in-flight candidates cannot steal the active media path. Before the frontend fix, a late `state=listening` event can hide the ended panel; after the fix, nonterminal state transitions are ignored once ending or terminal."
+next_action: "Finish production build/diff verification, commit the transactional backend candidate-media fix and terminal-state UI guard, deploy only through `scripts/deploy-omen.sh`, then run physical Android Chrome retest at `https://192.168.1.199:8443`: two short exchanges, the long poem/message, verify live response text and voice playback, verify hangup/Return to Thread do not return to a dead call, and verify the poem transcript has no omitted span of 3+ words."
 reasoning_checkpoint:
   hypothesis: "Terminal reconnect cleanup ends the call too early because `failTerminalMediaReconnect()` always runs `cleanupTerminalFailedCall()` and applies failed UI even when `activeTurnAbort`/`activeTurnReader` indicate an in-flight `/turns` response."
   confirming_evidence:
@@ -32,11 +32,11 @@ tdd_checkpoint:
   green_output: "Focused test passed after client liveness guard, transactional browser reconnect replacement, and SSE fixture framing correction: 2 passed in desktop-chromium and mobile-chromium. Full serialized call-start spec passed: 36 passed."
 checkpoint:
   type: android-acceptance-needed
-  rollback_commit: `3800391b9a445963f4d1d2aefefbed5f2a5e482f`
-  deployed_commit: `56c4ab7fdff91ec337a446fed676e967fa78cbd1`
+  rollback_commit: `7929e703fcc82eba5017d85aaf0ca98bfe16c03b`
+  deployed_commit: `51e672ff4624b1d6aba2183829d0c4b285668e6c`
   forensics_report: `.planning/forensics/report-20260513-163852.md`
   guardrail: "Symptom-suppression patches cannot satisfy call-liveness acceptance."
-  verification_required: "Physical Android Chrome must confirm live response delivery; local/browser mocks are not final acceptance."
+  verification_required: "Physical Android Chrome must confirm live response delivery, clean hangup/thread return, and no omitted 3+ word poem transcript spans; local/browser mocks are not final acceptance."
 
 ## Rollback Anchor
 
@@ -130,6 +130,26 @@ evidence_files:
   checked: Push, canonical OMEN deployment, and post-deploy readiness for reconnect-offer cancellation/retry fix.
   found: Pushed `51e672ff4624b1d6aba2183829d0c4b285668e6c` (`fix(call): retry cancelled reconnect offers`) to `origin/main`. `scripts/deploy-omen.sh` fast-forwarded OMEN to that commit, verified the CUDA runtime, built the web client, recreated the canonical `RayMePhase1AI` and `RayMePhase1Web` scheduled tasks, and reported `OMEN deploy complete`. Post-deploy OMEN checkout is `51e672ff4624b1d6aba2183829d0c4b285668e6c` with no git status output. `/webrtc/status` returned `status=ready`, `live_call_ready=true`, `media_transport_ready=true`, `active_sessions=0`. Scheduled tasks are running and point to `C:\Users\pmpg\rayme\start-ai-backend.cmd` and `C:\Users\pmpg\rayme\start-web-ui.cmd`.
   implication: The fix for the latest verified Android stall boundary is live through the approved deployment path. Generic `/health` remains degraded because resident TTS is `f5`, but call-specific WebRTC readiness is green.
+
+- timestamp: 2026-05-14T00:16:36Z
+  checked: Independent verification of latest Android Chrome repro after deployed commit `51e672ff4624b1d6aba2183829d0c4b285668e6c`.
+  found: Copied OMEN `rayme.sqlite3`, `web-ui.run.log`, and `ai-backend.run.log` to `/tmp/rayme-phone-debug-51e672f-android-latest-20260514T001636Z/`. OMEN `/webrtc/status` reported `active_sessions=1`, confirming a leaked/still-active backend session. Latest call is `call_51e671a6f7d246a588388e7273b7b707` / `rtc_cda2132f1f5a447b88d13b64338793a8` on `thread_27fab4e0328c4eb2a953cad0d2f0688a`. SQLite persisted two successful short user/AI exchanges, then the long `user_speech` at sequence 30 and AI `ai_speech` at sequence 31, then `call_end` at sequence 32, then a late user `Stop it.` and AI response at sequences 33-34 after call end.
+  implication: The user report is independently confirmed. The long turn did reach STT, LLM, TTS, and persistence, but it was not delivered live. Audio was still being recovered/captured around and after call end, so this is multiple bugs rather than one missing-generation bug.
+
+- timestamp: 2026-05-14T00:16:36Z
+  checked: Transport and playback boundary for latest call `call_51e671a6f7d246a588388e7273b7b707`.
+  found: First replacement offer during long-turn reconnect succeeded and reconnect backfill finalized STT with `transcript_len=835`. A second replacement `/offer` started while the long-turn response path was active; the Web UI saw `502 Bad Gateway` for that offer, and the AI backend logged `offer.received` without a matching `offer.answered`. Backend still generated and enqueued TTS, but `ai_audio_started`/`ai_done` were skipped because the data channel was closed, and the outbound audio track timed out with `recv_count=0` and `queue_size=1`. Browser debug also recorded `call.ai_audio_started` from the turn stream with `speakingRms=0`, so the client believed the response had been delivered while no live receiver was playing it.
+  implication: The first live failure is not STT, LLM, or TTS generation. It is the candidate replacement media path becoming authoritative before the replacement offer is successfully answered, leaving generated audio queued to a dead track/channel.
+
+- timestamp: 2026-05-14T00:16:36Z
+  checked: Poem transcript fidelity against `.planning/debug/phone-call-expected-poem-2026-05-02.md`.
+  found: Expected poem token count was 154; the latest STT transcript token count was 146. Misheard words are present and acceptable under the user's accent tolerance, but the diff includes at least one omitted/contracted 3-word expected span and one omitted/contracted 6-word expected span. This fails the user's threshold that an omitted span of 3+ words is not acceptable.
+  implication: Transcript fidelity remains a separate unresolved acceptance item even if transport/playback is fixed. Current evidence does not yet prove whether those omissions are caused by STT recognition under accent/noise or by subtle audio loss before STT; acceptance must compare the full poem transcript after the transport fix.
+
+- timestamp: 2026-05-14T00:33:40Z
+  checked: Local fix and focused verification for latest multi-bug repro.
+  found: Backend WebRTC replacement offers now stage peer/track/data-channel objects as pending and only swap `session.peer_connection`/`outbound_audio_track` after negotiation succeeds; failed or cancelled candidates are discarded and cannot steal the active media path. Frontend call state now ignores nonterminal state transitions while ending or already terminal, so late data-channel events cannot revive an ended/failed call UI. Added backend regression `test_inflight_reconnect_offer_does_not_steal_active_session_media` and frontend regression `does not revive an ended call when a late data channel state event arrives`. Focused backend command passed: 3 passed, 24 deselected. Full `ai-backend/tests/test_webrtc_signaling.py` passed: 27 passed, 3 warnings. Focused Playwright command passed in desktop and mobile Chromium: 2 passed. Full serialized `call-start.spec.ts` passed: 40 passed.
+  implication: The latest proven live-delivery and dead-call-UI mechanisms are fixed locally. Production build, diff hygiene, commit/deploy, and physical Android acceptance are still pending.
 
 - timestamp: 2026-05-13T17:00:36Z
   checked: Upstream RED browser regression for the active product bug.
