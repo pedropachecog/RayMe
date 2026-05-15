@@ -215,6 +215,10 @@ progress:
 
 ## Accumulated Context
 
+### Pending Todos
+
+- 2026-05-15: Promote VoxCPM2 defaults and saved voice engine editing (`.planning/todos/pending/2026-05-15-promote-voxcpm2-defaults-and-saved-voice-engine-editing.md`)
+
 ### Roadmap Evolution
 
 - Plan 00-07.1 inserted into `00-measurement-gate`: benchmark TTS attention/optimization backends per engine before final writeback.
