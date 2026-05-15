@@ -622,7 +622,8 @@ def test_webrtc_speak_returns_streaming_tts_playback_metrics_for_voxcpm2(
     assert started_event["type"] == "ai_audio_started"
     started_playback = started_event["tts_playback"]
     assert started_playback["streaming_used"] is True
-    assert started_playback["chunk_count_at_start"] == 1
+    assert started_playback["chunk_count_at_start"] == 2
+    assert started_playback["buffered_until_complete"] is False
     assert "total_generation_ms" not in started_playback
     assert "total_playback_ms" not in started_playback
 
@@ -687,8 +688,7 @@ def test_webrtc_speak_streaming_failure_keeps_fixed_public_error(
 
     assert event["type"] == "failed"
     assert event["code"] == "call_tts_failed"
-    assert event["ai_audio_started_event"]["tts_playback"]["streaming_used"] is True
-    assert event["ai_audio_started_event"]["tts_playback"]["chunk_count_at_start"] == 1
+    assert "ai_audio_started_event" not in event
     assert event["tts_playback_final"]["streaming_used"] is True
     assert event["tts_playback_final"]["chunk_count"] == 1
 

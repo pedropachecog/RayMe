@@ -174,6 +174,51 @@ class ScriptedStreamingTtsAdapter:
         self.stream_completed.set()
 
 
+class SlowStreamingTtsAdapter:
+    engine_id = "voxcpm2"
+
+    def __init__(self) -> None:
+        self.requests: list[Any] = []
+        self.first_chunk_yielded = threading.Event()
+        self.second_chunk_yielded = threading.Event()
+        self.release_completion = threading.Event()
+        self.stream_completed = threading.Event()
+
+    def synthesize(self, payload: Any) -> dict[str, Any]:
+        raise AssertionError("whole synthesis fallback was used")
+
+    def stream(self, request: Any) -> Any:
+        self.requests.append(request)
+        self.first_chunk_yielded.set()
+        yield TtsAudioChunk(
+            engine_id=self.engine_id,
+            chunk_index=0,
+            wav_bytes=SCRIPTED_WAV_BYTES,
+            sample_rate=24000,
+            duration_ms=120,
+            generated_at_ms=25.0,
+        )
+        self.second_chunk_yielded.set()
+        yield TtsAudioChunk(
+            engine_id=self.engine_id,
+            chunk_index=1,
+            wav_bytes=SCRIPTED_WAV_BYTES,
+            sample_rate=24000,
+            duration_ms=120,
+            generated_at_ms=300.0,
+        )
+        yield TtsAudioChunk(
+            engine_id=self.engine_id,
+            chunk_index=2,
+            wav_bytes=SCRIPTED_WAV_BYTES,
+            sample_rate=24000,
+            duration_ms=120,
+            generated_at_ms=360.0,
+        )
+        self.release_completion.wait()
+        self.stream_completed.set()
+
+
 class ScriptedInboundAudioFrame:
     def __init__(self, pcm: bytes) -> None:
         self.pcm = pcm
@@ -1176,29 +1221,31 @@ def test_voxcpm2_streaming_speak_enqueues_first_chunk_before_stream_completion()
             )
         )
         try:
+            assert await asyncio.to_thread(adapter.first_chunk_yielded.wait, 1.0)
+            assert track.chunks == []
+            adapter.release_second_chunk.set()
+
             await _wait_for_async_event_or_task(
                 audio_started,
                 speech,
                 label="VoxCPM2 first streamed audio event",
             )
 
-            assert len(track.chunks) == 1
-            assert track.preroll_seconds == [CALL_TTS_AUDIO_PREROLL_SECONDS]
+            assert len(track.chunks) == 2
+            assert track.preroll_seconds == [CALL_TTS_AUDIO_PREROLL_SECONDS, 0.0]
             assert adapter.requests
-            assert not adapter.stream_completed.is_set()
-            assert not speech.done()
             assert [event["type"] for event in events] == ["ai_audio_started"]
 
             playback = events[0]["tts_playback"]
             assert playback["streaming_used"] is True
             assert playback["fallback_used"] is False
             assert playback["whole_wav_fallback_used"] is False
-            assert playback["chunk_count_at_start"] == 1
+            assert playback["chunk_count_at_start"] == 2
             assert playback["first_chunk_generated_ms"] == 25.0
+            assert playback["buffered_until_complete"] is False
             assert "total_generation_ms" not in playback
             assert "total_playback_ms" not in playback
 
-            adapter.release_second_chunk.set()
             return await speech
         finally:
             adapter.release_second_chunk.set()
@@ -1209,6 +1256,56 @@ def test_voxcpm2_streaming_speak_enqueues_first_chunk_before_stream_completion()
 
     assert event["type"] == "ai_done"
     assert [item["type"] for item in events] == ["ai_audio_started", "ai_done"]
+
+
+def test_voxcpm2_slow_stream_buffers_until_complete_before_playback() -> None:
+    events: list[dict[str, Any]] = []
+
+    async def scenario() -> tuple[dict[str, Any], ObservableStreamingOutboundAudioTrack]:
+        track = ObservableStreamingOutboundAudioTrack()
+        adapter = SlowStreamingTtsAdapter()
+        session, _ = _new_session(
+            tts_adapter=adapter,
+            outbound_audio_track=track,
+            event_sink=events.append,
+        )
+        speech = asyncio.create_task(
+            session.speak_text(
+                "ai-turn-voxcpm2-slow-stream",
+                "Hello from slow streamed VoxCPM2.",
+                "voice-voxcpm2",
+                "voxcpm2",
+                final_chunk=True,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="Real VoxCPM2 reference text.",
+                reference_audio_content_type="audio/wav",
+            )
+        )
+        try:
+            assert await asyncio.to_thread(adapter.second_chunk_yielded.wait, 1.0)
+            await asyncio.sleep(0)
+            assert track.chunks == []
+            assert events == []
+            assert not speech.done()
+
+            adapter.release_completion.set()
+            return await speech, track
+        finally:
+            adapter.release_completion.set()
+            if not speech.done():
+                speech.cancel()
+
+    event, track = _run(scenario())
+
+    assert event["type"] == "ai_done"
+    assert [item["type"] for item in events] == ["ai_audio_started", "ai_done"]
+    assert track.chunks == [SCRIPTED_WAV_BYTES, SCRIPTED_WAV_BYTES, SCRIPTED_WAV_BYTES]
+    assert track.preroll_seconds == [CALL_TTS_AUDIO_PREROLL_SECONDS, 0.0, 0.0]
+    playback = events[0]["tts_playback"]
+    assert playback["buffered_until_complete"] is True
+    assert playback["chunk_count_at_start"] == 3
+    assert playback["inter_chunk_gaps_ms"] == [275.0, 60.0]
+    assert event["tts_playback_final"]["buffered_until_complete"] is True
 
 
 def test_voxcpm2_streaming_speak_returns_one_done_event_for_final_turn() -> None:
@@ -1235,12 +1332,12 @@ def test_voxcpm2_streaming_speak_returns_one_done_event_for_final_turn() -> None
             )
         )
         try:
+            adapter.release_second_chunk.set()
             await _wait_for_async_event_or_task(
                 track.first_chunk_enqueued,
                 speech,
                 label="VoxCPM2 first streamed chunk enqueue",
             )
-            adapter.release_second_chunk.set()
             return await speech, track
         finally:
             adapter.release_second_chunk.set()
@@ -1255,6 +1352,8 @@ def test_voxcpm2_streaming_speak_returns_one_done_event_for_final_turn() -> None
     assert track.preroll_seconds == [CALL_TTS_AUDIO_PREROLL_SECONDS, 0.0]
     assert event["type"] == "ai_done"
     assert event["ai_audio_started_event"]["tts_playback"]["streaming_used"] is True
+    assert event["ai_audio_started_event"]["tts_playback"]["chunk_count_at_start"] == 2
+    assert event["ai_audio_started_event"]["tts_playback"]["buffered_until_complete"] is False
     final_playback = event["tts_playback_final"]
     assert final_playback["streaming_used"] is True
     assert final_playback["fallback_used"] is False
@@ -1289,13 +1388,13 @@ def test_interrupt_after_first_voxcpm2_stream_chunk_discards_late_chunks() -> No
             )
         )
         try:
+            adapter.release_second_chunk.set()
             await _wait_for_async_event_or_task(
                 track.first_chunk_enqueued,
                 speech,
                 label="VoxCPM2 first streamed chunk enqueue",
             )
             await session.interrupt()
-            adapter.release_second_chunk.set()
             try:
                 await speech
             except asyncio.CancelledError:
@@ -1308,8 +1407,8 @@ def test_interrupt_after_first_voxcpm2_stream_chunk_discards_late_chunks() -> No
 
     track = _run(scenario())
 
-    assert track.chunks == [SCRIPTED_WAV_BYTES]
-    assert track.preroll_seconds == [CALL_TTS_AUDIO_PREROLL_SECONDS]
+    assert track.chunks == [SCRIPTED_WAV_BYTES, SCRIPTED_WAV_BYTES]
+    assert track.preroll_seconds == [CALL_TTS_AUDIO_PREROLL_SECONDS, 0.0]
     assert track.stop_calls == 1
     assert [item["type"] for item in events] == ["ai_audio_started", "interrupted"]
     assert "ai_done" not in [item["type"] for item in events]

@@ -99,6 +99,38 @@ Before telling the user a workflow is ready, report the exact evidence:
 If that evidence does not exist yet, keep working instead of asking the user to
 find the next failure.
 
+## 2026-05-15: VoxCPM2 First-Audio Evidence Hid Choppy Live Playback
+
+### What Went Wrong
+
+- Phase 8 evidence proved VoxCPM2 produced earlier first audio than F5, but it
+  did not prove that streamed chunks arrived fast enough for continuous
+  realtime WebRTC playout.
+- In the live call, VoxCPM2 generated repeated ~160 ms chunks roughly every
+  ~280 ms, so the outbound track drained each chunk and inserted silence before
+  the next chunk arrived.
+- Voice Lab preview sounded fine because it used whole-result synthesis, while
+  the call path played slow streamed chunks immediately.
+
+### False Assumptions
+
+- Lower first-audio latency was treated as sufficient for live-call playback
+  quality.
+- A streaming API was assumed to be realtime-capable without checking
+  inter-chunk gap versus playable chunk duration.
+- Browser RMS diagnostics were available, but there was no regression that
+  rejected backend stream underflow before user testing.
+
+### Guards Added
+
+- `CallSession` now checks streamed chunk continuity before starting playback.
+  Slow streams buffer until complete and expose `buffered_until_complete` in
+  playback metrics.
+- Regression added:
+  `ai-backend/tests/test_call_session.py::test_voxcpm2_slow_stream_buffers_until_complete_before_playback`
+- WebRTC playback metrics tests now assert startup chunk count and buffering
+  semantics so first-audio evidence cannot stand in for smooth-playback proof.
+
 ## 2026-05-13: Post-End Call Suppression Was Mistaken For A Call-Liveness Fix
 
 ### What Went Wrong

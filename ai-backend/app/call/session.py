@@ -46,6 +46,8 @@ EventSink = Callable[[dict[str, Any]], Awaitable[None] | None]
 
 CALL_TTS_AUDIO_PREROLL_SECONDS = 0.25
 CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS = 0.75
+CALL_TTS_STREAM_START_MIN_CHUNKS = 2
+CALL_TTS_STREAM_SLOW_GAP_RATIO = 1.15
 CALL_RECONNECT_BACKFILL_HOLD_SECONDS = 12.0
 CALL_RECONNECT_BACKFILL_MAX_OVERLAP_SECONDS = 30.0
 CALL_RECONNECT_BACKFILL_MIN_OVERLAP_FRAMES = 25
@@ -1061,6 +1063,9 @@ class CallSession:
         playback_seconds = 0.0
         generated_at_values: list[float] = []
         inter_chunk_gaps_ms: list[float] = []
+        pending_chunks: list[dict[str, Any]] = []
+        playback_started = False
+        buffered_until_complete = False
         producer_task: asyncio.Task[Any] | None = None
 
         def elapsed_ms() -> float:
@@ -1078,7 +1083,63 @@ class CallSession:
                 "total_generation_ms": round(total_generation_ms, 1),
                 "total_playback_ms": round(playback_seconds * 1000, 1),
                 "inter_chunk_gaps_ms": list(inter_chunk_gaps_ms),
+                "buffered_until_complete": buffered_until_complete,
             }
+
+        def streamed_chunks_are_slower_than_realtime() -> bool:
+            if len(pending_chunks) < CALL_TTS_STREAM_START_MIN_CHUNKS or not inter_chunk_gaps_ms:
+                return False
+            previous_chunk = pending_chunks[-2]
+            previous_playback_ms = float(previous_chunk["playback_seconds"]) * 1000.0
+            latest_gap_ms = inter_chunk_gaps_ms[-1]
+            allowed_gap_ms = previous_playback_ms * CALL_TTS_STREAM_SLOW_GAP_RATIO
+            return latest_gap_ms > allowed_gap_ms
+
+        async def enqueue_stream_chunk(chunk: dict[str, Any], *, first: bool) -> None:
+            nonlocal playback_seconds
+            playback_seconds += await self._queue_outbound_audio(
+                bytes(chunk["wav_bytes"]),
+                preroll_seconds=CALL_TTS_AUDIO_PREROLL_SECONDS if first else 0.0,
+            )
+
+        async def start_playback_from_buffer() -> None:
+            nonlocal audio_started_event, playback_started
+            if playback_started or not pending_chunks:
+                return
+
+            first_chunk = pending_chunks[0]
+            for index, chunk in enumerate(pending_chunks):
+                await enqueue_stream_chunk(chunk, first=index == 0)
+
+            first_chunk_enqueued_ms = elapsed_ms()
+            self.state = "speaking"
+            ai_audio_started_ms = elapsed_ms()
+            buffered_audio_ms = round(
+                sum(float(chunk["playback_seconds"]) for chunk in pending_chunks) * 1000,
+                1,
+            )
+            audio_started_event = simple_event(
+                AI_AUDIO_STARTED_EVENT,
+                session_id=self.session_id,
+                turn_id=turn_id,
+                voice_id=voice_id,
+                engine_id=engine_id,
+                audio=dict(first_chunk["audio_stats"]),
+                tts_playback={
+                    "streaming_used": True,
+                    "fallback_used": False,
+                    "whole_wav_fallback_used": False,
+                    "first_chunk_generated_ms": first_chunk["generated_at_ms"],
+                    "first_chunk_enqueued_ms": first_chunk_enqueued_ms,
+                    "ai_audio_started_ms": ai_audio_started_ms,
+                    "chunk_count_at_start": len(pending_chunks),
+                    "inter_chunk_gaps_ms": list(inter_chunk_gaps_ms),
+                    "buffered_until_complete": buffered_until_complete,
+                    "start_buffered_audio_ms": buffered_audio_ms,
+                },
+            )
+            playback_started = True
+            await self.emit_event(audio_started_event)
 
         try:
             request = self._build_tts_synthesis_input(
@@ -1132,45 +1193,39 @@ class CallSession:
                     )
                 generated_at_values.append(generated_at_ms)
 
-                preroll_seconds = CALL_TTS_AUDIO_PREROLL_SECONDS if chunk_count == 0 else 0.0
                 audio_stats = audio_stats_for_wav_bytes(
                     wav_bytes,
                     target_sample_rate=int(getattr(self.outbound_audio_track, "sample_rate", 48000)),
                 )
-                playback_seconds += await self._queue_outbound_audio(
-                    wav_bytes,
-                    preroll_seconds=preroll_seconds,
+                pending_chunks.append(
+                    {
+                        "wav_bytes": wav_bytes,
+                        "generated_at_ms": generated_at_ms,
+                        "audio_stats": audio_stats,
+                        "playback_seconds": float(audio_stats.get("duration_ms", 0.0)) / 1000.0,
+                    }
                 )
                 chunk_count += 1
 
-                if chunk_count == 1:
-                    first_chunk_enqueued_ms = elapsed_ms()
-                    self.state = "speaking"
-                    ai_audio_started_ms = elapsed_ms()
-                    audio_started_event = simple_event(
-                        AI_AUDIO_STARTED_EVENT,
-                        session_id=self.session_id,
-                        turn_id=turn_id,
-                        voice_id=voice_id,
-                        engine_id=engine_id,
-                        audio=audio_stats,
-                        tts_playback={
-                            "streaming_used": True,
-                            "fallback_used": False,
-                            "whole_wav_fallback_used": False,
-                            "first_chunk_generated_ms": generated_at_ms,
-                            "first_chunk_enqueued_ms": first_chunk_enqueued_ms,
-                            "ai_audio_started_ms": ai_audio_started_ms,
-                            "chunk_count_at_start": 1,
-                            "inter_chunk_gaps_ms": list(inter_chunk_gaps_ms),
-                        },
-                    )
-                    await self.emit_event(audio_started_event)
+                if not playback_started:
+                    if buffered_until_complete:
+                        continue
+                    if streamed_chunks_are_slower_than_realtime():
+                        buffered_until_complete = True
+                        continue
+                    if len(pending_chunks) >= CALL_TTS_STREAM_START_MIN_CHUNKS:
+                        await start_playback_from_buffer()
+                    continue
+
+                await enqueue_stream_chunk(pending_chunks[-1], first=False)
 
             if producer_task is not None:
                 await producer_task
             if chunk_count == 0:
                 raise ValueError("VoxCPM2 streaming synthesis failed")
+
+            if not playback_started:
+                await start_playback_from_buffer()
 
             if turn_id in self._cancelled_ai_turns:
                 self.state = "listening"
