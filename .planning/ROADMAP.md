@@ -552,3 +552,14 @@ Plans:
 ---
 
 *Roadmap derived 2026-04-17 from requirements + research synthesis. Next: `/gsd-plan-phase 8`.*
+
+### Phase 08.1: Live-call streaming invariant incident repair and prevention (INSERTED)
+
+**Goal:** Repair the bad post-Phase-8 buffering fix and make RayMe's live-call streaming invariant executable in code, tests, planning docs, and deployment handoff gates.
+
+**Requirements:** Preserve Phase 8 VoxCPM2 live-call streaming; forbid full-response/full-TTS buffering before first playback in live calls; record the incident as a recurrence guard.
+**Depends on:** Phase 8
+**Plans:** 1 plan
+
+Plans:
+- [ ] 08.1-01-PLAN.md - Remove full-message live-call TTS buffering and install streaming/GSD invariant guardrails (Wave 1)

@@ -34,12 +34,16 @@ require_contains() {
 }
 
 cmd_start() {
+  require_file "AGENTS.md"
   require_file ".planning/PROJECT.md"
   require_file ".planning/STATE.md"
   require_file ".planning/OPERATING-NOTES.md"
   require_file ".planning/LEARNINGS.md"
   require_file ".planning/SESSION-START.md"
+  require_file ".planning/LIVE-CALL-INVARIANTS.md"
 
+  require_contains "AGENTS.md" "RayMe Live-Call Invariant"
+  require_contains "AGENTS.md" "Do not ship quick fixes outside GSD"
   require_contains ".planning/OPERATING-NOTES.md" "pre-handoff verification checklist"
   require_contains ".planning/OPERATING-NOTES.md" "product-owner acceptance"
   require_contains ".planning/OPERATING-NOTES.md" "must never auto-select defaults"
@@ -48,21 +52,27 @@ cmd_start() {
   require_contains ".planning/OPERATING-NOTES.md" "Do not ask \"Skip\", \"Use existing context as-is\", \"View it\""
   require_contains ".planning/OPERATING-NOTES.md" "scripts/deploy-omen.sh"
   require_contains ".planning/OPERATING-NOTES.md" "GPU acceleration is mandatory"
+  require_contains ".planning/OPERATING-NOTES.md" "RayMe's live-call invariant is non-negotiable"
+  require_contains ".planning/OPERATING-NOTES.md" "GSD is the default execution structure"
   require_contains ".planning/LEARNINGS.md" "False Assumptions"
   require_contains ".planning/LEARNINGS.md" "Interactive GSD Discussion Was Replaced By Inferred Defaults"
   require_contains ".planning/LEARNINGS.md" "Standing Handoff Rule"
+  require_contains ".planning/LEARNINGS.md" "Full-Stream Buffering Violated The Phone-Call Invariant"
   require_contains ".planning/SESSION-START.md" "Required Reads"
   require_contains ".planning/SESSION-START.md" "Handoff Gate"
   require_contains ".planning/SESSION-START.md" "Interactive Workflow Rule"
   require_contains ".planning/SESSION-START.md" "Show the recommendation first"
   require_contains ".planning/SESSION-START.md" "Do not insert \"Skip\", \"Use existing context as-is\", \"View it\""
+  require_contains ".planning/SESSION-START.md" "LIVE-CALL-INVARIANTS.md"
+  require_contains ".planning/LIVE-CALL-INVARIANTS.md" "NEVER wait for full assistant response generation or full TTS stream completion before first playback"
+  require_contains ".planning/LIVE-CALL-INVARIANTS.md" "Always GSD for non-trivial product changes"
 
   if [[ -f ".planning/.continue-here.md" ]]; then
     fail "unresolved checkpoint exists: .planning/.continue-here.md"
   fi
 
   echo "operational-check: start gate passed"
-  echo "Read next: .planning/PROJECT.md, .planning/STATE.md, .planning/OPERATING-NOTES.md, .planning/LEARNINGS.md"
+  echo "Read next: .planning/PROJECT.md, .planning/STATE.md, .planning/OPERATING-NOTES.md, .planning/LEARNINGS.md, .planning/LIVE-CALL-INVARIANTS.md"
 }
 
 cmd_handoff() {

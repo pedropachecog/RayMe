@@ -8,6 +8,10 @@ RayMe is a self-hosted web app that lets you have AI conversations that feel lik
 
 It must feel like an actual phone call with an AI — low-latency full-duplex audio with real barge-in, not a chatbot with audio bolted on. Everything else (voice fidelity, character depth, UI polish) is secondary to call feel.
 
+Live calls must remain live. A fix that waits for the full assistant response
+or full TTS generation before first playback is not an acceptable phone-call
+fix; it turns RayMe into generated-audio playback and violates the core value.
+
 ## Requirements
 
 ### Validated
@@ -25,6 +29,9 @@ It must feel like an actual phone call with an AI — low-latency full-duplex au
 - [ ] English-only system in v1 (Spanish-accented English speakers still supported)
 - [ ] A "chat" thread holds typed messages AND call transcripts interleaved
 - [ ] Calls run full-duplex with barge-in via VAD
+- [ ] Live-call TTS begins playback before full TTS stream completion; bounded
+      jitter/startup buffering is allowed, full-response generate-then-play is
+      not
 - [ ] Live captions show both user STT and AI response text during a call
 - [ ] TTS playback uses a shared best-in-class chunk planner for every engine, including non-streaming engines and engines with token limits
 - [ ] Text chat and call from a character can be started/resumed from the same thread
@@ -69,6 +76,9 @@ It must feel like an actual phone call with an AI — low-latency full-duplex au
 - **Hardware**: AI backend runs on a single NVIDIA RTX 3060 (12 GB VRAM) — STT, TTS, and VAD model choices must fit inside that budget simultaneously.
 - **Latency**: End-to-end turn latency (user stops speaking → AI starts speaking) must be low enough to feel like a phone call — the entire stack is budgeted against this.
 - **TTS chunking**: Long-form TTS must be segmented by a shared planner that respects model-specific token/character limits, prefers natural sentence boundaries, avoids tiny fragments, and measures first-chunk latency, total stitched playback time, and inter-chunk gaps.
+- **Live-call streaming**: Live-call TTS/STT/WebRTC fixes must preserve early
+  playback, listening recovery, and interrupt/barge-in. Do not trade call feel
+  for full-response buffering.
 - **Topology**: Three endpoints (Web UI, AI backend, LLM) must be independently configurable and connectable over LAN. No assumption that they share a host.
 - **LLM contract**: The LLM must be reachable via an OpenAI-compatible Chat Completions API (streaming).
 - **Browsers**: Must work on desktop Chrome and Chrome on Android, including mic capture, output routing, and full-duplex streaming.

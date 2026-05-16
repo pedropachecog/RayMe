@@ -1,5 +1,22 @@
 # Agent Instructions
 
+## RayMe Live-Call Invariant
+
+RayMe is a live phone-call simulator, not a generated-audio player.
+
+- Read `.planning/LIVE-CALL-INVARIANTS.md` before touching call, TTS, STT,
+  VAD, WebRTC, reconnect, call UI, or deployment behavior.
+- NEVER fix a live-call bug by waiting for the full assistant response or full
+  TTS stream to finish before first playback, unless the user explicitly asks
+  for a named non-live mode.
+- Smoothness fixes may use bounded jitter/startup buffering, but they must
+  preserve early playback, listening recovery, and interrupt/barge-in behavior.
+- Any live-call TTS change must include a regression proving first playback
+  starts before stream completion for a slow stream, plus tests that reject
+  whole-synthesis fallback on the VoxCPM2 streaming path.
+- Non-trivial product regressions, incident repairs, and deployments must follow
+  GSD artifacts and verification gates. Do not ship quick fixes outside GSD.
+
 ## OMEN Deployment
 
 **The only correct way to deploy to OMEN is `scripts/deploy-omen.sh`.**

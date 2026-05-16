@@ -623,7 +623,7 @@ def test_webrtc_speak_returns_streaming_tts_playback_metrics_for_voxcpm2(
     started_playback = started_event["tts_playback"]
     assert started_playback["streaming_used"] is True
     assert started_playback["chunk_count_at_start"] == 2
-    assert started_playback["buffered_until_complete"] is False
+    assert "buffered_until_complete" not in started_playback
     assert "total_generation_ms" not in started_playback
     assert "total_playback_ms" not in started_playback
 

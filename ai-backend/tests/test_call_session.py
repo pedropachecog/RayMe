@@ -1190,7 +1190,7 @@ def test_speak_text_holds_speaking_after_track_drains(monkeypatch: Any) -> None:
     assert 0.08 not in sleeps
 
 
-def test_voxcpm2_streaming_speak_enqueues_first_chunk_before_stream_completion() -> None:
+def test_voxcpm2_streaming_speak_buffers_bounded_startup_chunks_without_final_metrics() -> None:
     events: list[dict[str, Any]] = []
 
     async def scenario() -> dict[str, Any]:
@@ -1242,7 +1242,7 @@ def test_voxcpm2_streaming_speak_enqueues_first_chunk_before_stream_completion()
             assert playback["whole_wav_fallback_used"] is False
             assert playback["chunk_count_at_start"] == 2
             assert playback["first_chunk_generated_ms"] == 25.0
-            assert playback["buffered_until_complete"] is False
+            assert "buffered_until_complete" not in playback
             assert "total_generation_ms" not in playback
             assert "total_playback_ms" not in playback
 
@@ -1258,16 +1258,24 @@ def test_voxcpm2_streaming_speak_enqueues_first_chunk_before_stream_completion()
     assert [item["type"] for item in events] == ["ai_audio_started", "ai_done"]
 
 
-def test_voxcpm2_slow_stream_buffers_until_complete_before_playback() -> None:
+def test_voxcpm2_slow_stream_starts_playback_before_stream_completion(monkeypatch: Any) -> None:
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.2)
     events: list[dict[str, Any]] = []
 
     async def scenario() -> tuple[dict[str, Any], ObservableStreamingOutboundAudioTrack]:
+        audio_started = asyncio.Event()
+
+        def sink(event: dict[str, Any]) -> None:
+            events.append(event)
+            if event["type"] == "ai_audio_started":
+                audio_started.set()
+
         track = ObservableStreamingOutboundAudioTrack()
         adapter = SlowStreamingTtsAdapter()
         session, _ = _new_session(
             tts_adapter=adapter,
             outbound_audio_track=track,
-            event_sink=events.append,
+            event_sink=sink,
         )
         speech = asyncio.create_task(
             session.speak_text(
@@ -1283,9 +1291,18 @@ def test_voxcpm2_slow_stream_buffers_until_complete_before_playback() -> None:
         )
         try:
             assert await asyncio.to_thread(adapter.second_chunk_yielded.wait, 1.0)
-            await asyncio.sleep(0)
-            assert track.chunks == []
-            assert events == []
+            await _wait_for_async_event_or_task(
+                audio_started,
+                speech,
+                label="VoxCPM2 slow stream starts before completion",
+            )
+            assert not adapter.stream_completed.is_set()
+            assert track.chunks
+            assert events and events[0]["type"] == "ai_audio_started"
+            playback = events[0]["tts_playback"]
+            assert "buffered_until_complete" not in playback
+            assert playback["startup_buffered_chunks"] >= 2
+            assert playback["chunk_count_at_start"] >= 2
             assert not speech.done()
 
             adapter.release_completion.set()
@@ -1301,11 +1318,9 @@ def test_voxcpm2_slow_stream_buffers_until_complete_before_playback() -> None:
     assert [item["type"] for item in events] == ["ai_audio_started", "ai_done"]
     assert track.chunks == [SCRIPTED_WAV_BYTES, SCRIPTED_WAV_BYTES, SCRIPTED_WAV_BYTES]
     assert track.preroll_seconds == [CALL_TTS_AUDIO_PREROLL_SECONDS, 0.0, 0.0]
-    playback = events[0]["tts_playback"]
-    assert playback["buffered_until_complete"] is True
-    assert playback["chunk_count_at_start"] == 3
-    assert playback["inter_chunk_gaps_ms"] == [275.0, 60.0]
-    assert event["tts_playback_final"]["buffered_until_complete"] is True
+    assert event["tts_playback_final"]["streaming_used"] is True
+    assert event["tts_playback_final"]["chunk_count"] == 3
+    assert event["tts_playback_final"]["inter_chunk_gaps_ms"] == [275.0, 60.0]
 
 
 def test_voxcpm2_streaming_speak_returns_one_done_event_for_final_turn() -> None:
@@ -1353,7 +1368,7 @@ def test_voxcpm2_streaming_speak_returns_one_done_event_for_final_turn() -> None
     assert event["type"] == "ai_done"
     assert event["ai_audio_started_event"]["tts_playback"]["streaming_used"] is True
     assert event["ai_audio_started_event"]["tts_playback"]["chunk_count_at_start"] == 2
-    assert event["ai_audio_started_event"]["tts_playback"]["buffered_until_complete"] is False
+    assert "buffered_until_complete" not in event["ai_audio_started_event"]["tts_playback"]
     final_playback = event["tts_playback_final"]
     assert final_playback["streaming_used"] is True
     assert final_playback["fallback_used"] is False

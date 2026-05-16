@@ -79,6 +79,7 @@ progress:
 - Phase 08 plan 08-04 completed on 2026-05-11: Phase 8 evidence tooling now records repeated warm F5/VoxCPM2 call samples from immediate `ai_audio_started_event.tts_playback` metrics and rejects fallback, carrier-mixing, raw leaks, or slower-than-F5 medians before decision writeback.
 - Phase 08 plan 08-05 completed on 2026-05-11: OMEN dirty Phase 07 evidence changes were preserved on a dedicated branch before canonical deployment, CUDA VoxCPM2 runtime/VRAM evidence was regenerated at commit `6b69aeb98434678f4aa1853953a710f8b9b0f905`, and live repeated warm call-flow evidence proved VoxCPM2 median first-audio `762.7 ms` beat F5 `948.0 ms`.
 - Phase 08 completed on 2026-05-11: VoxCPM2 live call playback now consumes streaming chunks and same-run warm median first-audio beat F5; VoxCPM2 is the preferred/default live-call TTS engine.
+- Phase 08.1 planned on 2026-05-16: urgent incident repair now covers removal of the invalid full-response live-call TTS buffering fix, bounded live-stream startup buffering only, executable tests that reject generate-then-play call fixes, and durable GSD/live-call invariant guardrails.
 
 ## Current Decisions
 
@@ -111,6 +112,7 @@ progress:
 - Phase 08-05 live evidence result: on OMEN commit `6b69aeb98434678f4aa1853953a710f8b9b0f905`, VoxCPM2 warm live call TTFA median was `762.7 ms` versus F5 `948.0 ms`, with `voxcpm2_beats_f5: true`, streaming used, and whole-WAV fallback false.
 - Phase 08-05 evidence hygiene policy: live call-flow evidence must use sanitized reference source labels and must not include absolute local reference-audio paths.
 - Phase 08-06 final VoxCPM2 live-call decision: VoxCPM2 is promoted as the preferred/default live-call TTS engine, with F5 retained as fallback/comparator, after `--decision-ready` verified Phase 8 same-run live streaming evidence.
+- Phase 08.1 live-call invariant: live-call TTS/STT/WebRTC fixes must preserve phone-call behavior. They may use bounded jitter/startup buffering, but must never wait for full assistant response generation or full TTS stream completion before first playback unless an explicitly named non-live mode is being built.
 - TTS future implementation policy: keep all measured engine paths available, including `LuxTTS`, `Chatterbox Turbo`, and `TADA 1B`; use quality evaluations to choose defaults, labels, warnings, and retesting priorities.
 - TTS long-form implementation: shared engine-agnostic chunk planner is now implemented in the scenario harness; raw whole-generation fallback rows are no longer the only comparison.
 - TTS quality notes: Spike 003 is closed as `PASS_WITH_CAVEATS`. LuxTTS optimized is very fast but has current user-sample quality failures; Chatterbox Turbo baseline long-form is gibberish, while optimized long-form normal and seed 1337 are fine on the listened long samples; TADA Windows optimized long is acceptable while WSL is caution; XTTS/F5 long samples need sample/tuning caveats.
@@ -228,6 +230,7 @@ progress:
 - Phase 03.1 inserted after Phase 3: Call MVP stabilization and regression fixes (URGENT)
 - Phase 7 added: Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations.
 - Phase 8 added: Wire VoxCPM2 streaming chunks into live RayMe call playback.
+- Phase 08.1 inserted after Phase 8: Live-call streaming invariant incident repair and prevention (URGENT)
 
 ### Phase 0 Completion Notes
 

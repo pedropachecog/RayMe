@@ -99,7 +99,7 @@ Before telling the user a workflow is ready, report the exact evidence:
 If that evidence does not exist yet, keep working instead of asking the user to
 find the next failure.
 
-## 2026-05-15: VoxCPM2 First-Audio Evidence Hid Choppy Live Playback
+## 2026-05-15: VoxCPM2 First-Audio Evidence Hid Choppy Live Playback, Then Full-Stream Buffering Violated The Phone-Call Invariant
 
 ### What Went Wrong
 
@@ -111,6 +111,10 @@ find the next failure.
   the next chunk arrived.
 - Voice Lab preview sounded fine because it used whole-result synthesis, while
   the call path played slow streamed chunks immediately.
+- The first attempted fix, commit `1806eb0`, buffered slow streams until
+  completion before playback. That avoided underrun but turned RayMe's live call
+  into generate-then-play and left the UI stuck in `Rehearsing` for long
+  messages.
 
 ### False Assumptions
 
@@ -120,16 +124,27 @@ find the next failure.
   inter-chunk gap versus playable chunk duration.
 - Browser RMS diagnostics were available, but there was no regression that
   rejected backend stream underflow before user testing.
+- Smoothness was treated as allowed to override live phone-call behavior.
+- Passing tests for "buffer until complete" were treated as valid even though
+  they encoded the wrong product invariant.
 
 ### Guards Added
 
-- `CallSession` now checks streamed chunk continuity before starting playback.
-  Slow streams buffer until complete and expose `buffered_until_complete` in
-  playback metrics.
+- `CallSession` uses bounded live startup buffering only. It must not wait for
+  full TTS stream completion before first playback in a live call.
 - Regression added:
-  `ai-backend/tests/test_call_session.py::test_voxcpm2_slow_stream_buffers_until_complete_before_playback`
-- WebRTC playback metrics tests now assert startup chunk count and buffering
-  semantics so first-audio evidence cannot stand in for smooth-playback proof.
+  `ai-backend/tests/test_call_session.py::test_voxcpm2_slow_stream_starts_playback_before_stream_completion`
+- WebRTC playback metrics tests reject the old `buffered_until_complete` live
+  call metric and preserve the separation between immediate first-audio metrics
+  and final playback metrics.
+- Repository invariant added:
+  `.planning/LIVE-CALL-INVARIANTS.md`
+- Startup guard added:
+  `scripts/operational-check.sh start` now fails if the live-call/GSD invariant
+  documents are missing or weakened.
+- Operating rule: non-trivial product regressions, incident repairs, and
+  deployments use GSD artifacts before implementation. No unplanned quick fixes
+  for call, AI runtime, deployment, or user-visible workflows.
 
 ## 2026-05-13: Post-End Call Suppression Was Mistaken For A Call-Liveness Fix
 

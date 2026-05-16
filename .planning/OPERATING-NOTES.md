@@ -50,6 +50,14 @@ as durable context, not one-off preferences.
   substitutes.
 - When the user points out a sequencing or architecture mistake, correct the
   underlying approach and update durable docs; do not just patch the symptom.
+- RayMe's live-call invariant is non-negotiable: calls are live phone calls,
+  not generated-audio playback. For call, TTS, STT, VAD, WebRTC, reconnect, and
+  call UI work, read `.planning/LIVE-CALL-INVARIANTS.md` before editing. Do not
+  fix smoothness, failure, or state issues by waiting for full assistant
+  response generation or full TTS stream completion before first playback.
+- For non-trivial regressions, incident repair, and deployment, GSD is the default execution structure.
+  Create or update the relevant phase/plan/debug/
+  learning/evidence artifact before implementation, then verify before handoff.
 - Subagents must never run `codex`, `claude`, or another agent CLI from the
   shell to work around missing nested-subagent capability. If a workflow needs a
   specialist agent, the main agent must spawn that specialist directly and
@@ -107,6 +115,11 @@ as durable context, not one-off preferences.
   assert the earliest wrong state transition or control-flow edge. Negative
   cleanup tests such as "do not generate after end" are allowed only as
   secondary guardrails, never as acceptance proof for "the call should not end."
+- If a live-call audio bug is that playback is choppy, late, missing, or stuck
+  in `Rehearsing`, do not accept a fix that buffers the full response or full
+  TTS stream before first playback. The first regression must prove first
+  playback starts before stream completion on a slow stream, and any buffering
+  must be bounded.
 - Before deploying any live-call debug fix, compare the diff against the user's
   expected behavior. If the patch removes a behavior the user expected to happen
   successfully, or only prevents a misleading artifact after failure, stop and

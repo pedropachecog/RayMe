@@ -13,7 +13,9 @@ Read these files first, in this order:
    Android, Playwright, and cleanup.
 4. `.planning/LEARNINGS.md` - repeated mistakes, false assumptions, and
    recurrence guards.
-5. The active phase `PLAN.md`/`SUMMARY.md` files relevant to the request.
+5. `.planning/LIVE-CALL-INVARIANTS.md` - non-negotiable live-call and GSD
+   incident-repair rules.
+6. The active phase `PLAN.md`/`SUMMARY.md` files relevant to the request.
 
 Do not rely on conversational memory for any of those points after context has
 been cleared.
@@ -41,6 +43,17 @@ browser UI, identify the required verification layers before editing:
 - live OMEN deployment through `scripts/deploy-omen.sh`,
 - GPU runtime checks for AI models,
 - Android product-owner acceptance only after agent verification.
+
+If the work touches calls, TTS, STT, VAD, WebRTC, reconnect, or call UI, first
+write the live-call preservation sentence. The change must preserve early
+playback, listening recovery, and interrupt/barge-in behavior. Reject any
+live-call fix that waits for full assistant response generation or full TTS
+stream completion before first playback.
+
+If the work is a non-trivial product regression, incident repair, or deployment,
+use GSD structure before implementation: update or create the relevant phase,
+plan, debug record, learning, or evidence artifact. Do not ship an unplanned
+quick fix and then ask the user to discover whether it preserved the product.
 
 ## Interactive Workflow Rule
 
