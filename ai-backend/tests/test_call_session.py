@@ -1234,6 +1234,10 @@ def test_voxcpm2_streaming_speak_buffers_bounded_startup_chunks_without_final_me
             assert len(track.chunks) == 2
             assert track.preroll_seconds == [CALL_TTS_AUDIO_PREROLL_SECONDS, 0.0]
             assert adapter.requests
+            request = adapter.requests[0]
+            assert request.voxcpm2_inference_timesteps == 4
+            assert request.voxcpm2_normalize is False
+            assert request.voxcpm2_denoise is False
             assert [event["type"] for event in events] == ["ai_audio_started"]
 
             playback = events[0]["tts_playback"]
@@ -1321,6 +1325,8 @@ def test_voxcpm2_slow_stream_starts_playback_before_stream_completion(monkeypatc
     assert event["tts_playback_final"]["streaming_used"] is True
     assert event["tts_playback_final"]["chunk_count"] == 3
     assert event["tts_playback_final"]["inter_chunk_gaps_ms"] == [275.0, 60.0]
+    assert event["tts_playback_final"]["under_realtime_generation"] is True
+    assert event["tts_playback_final"]["realtime_generation_ratio"] < 1.05
 
 
 def test_voxcpm2_streaming_speak_returns_one_done_event_for_final_turn() -> None:
@@ -1376,6 +1382,8 @@ def test_voxcpm2_streaming_speak_returns_one_done_event_for_final_turn() -> None
     assert final_playback["chunk_count"] == 2
     assert final_playback["total_generation_ms"] >= 75.0
     assert final_playback["total_playback_ms"] > 0
+    assert "realtime_generation_ratio" in final_playback
+    assert "under_realtime_generation" in final_playback
     assert final_playback["inter_chunk_gaps_ms"] == [50.0]
 
 

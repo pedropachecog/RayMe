@@ -49,6 +49,9 @@ CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS = 0.75
 CALL_TTS_STREAM_START_MIN_CHUNKS = 2
 CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS = 0.75
 CALL_TTS_STREAM_MAX_STARTUP_BUFFER_SECONDS = 1.25
+VOXCPM2_LIVE_MAX_INFERENCE_TIMESTEPS = 4
+VOXCPM2_LIVE_NORMALIZE = False
+VOXCPM2_LIVE_DENOISE = False
 CALL_RECONNECT_BACKFILL_HOLD_SECONDS = 12.0
 CALL_RECONNECT_BACKFILL_MAX_OVERLAP_SECONDS = 30.0
 CALL_RECONNECT_BACKFILL_MIN_OVERLAP_FRAMES = 25
@@ -63,6 +66,21 @@ def _voxcpm2_options_for_engine(engine_id: str, options: dict[str, Any]) -> dict
     if engine_id != "voxcpm2":
         return {}
     return dict(options)
+
+
+def _voxcpm2_live_stream_options(engine_id: str, options: dict[str, Any]) -> dict[str, Any]:
+    voxcpm2_options = _voxcpm2_options_for_engine(engine_id, options)
+    if not voxcpm2_options:
+        return {}
+    live_options = dict(voxcpm2_options)
+    requested_timesteps = int(live_options.get("voxcpm2_inference_timesteps") or 10)
+    live_options["voxcpm2_inference_timesteps"] = min(
+        requested_timesteps,
+        VOXCPM2_LIVE_MAX_INFERENCE_TIMESTEPS,
+    )
+    live_options["voxcpm2_normalize"] = VOXCPM2_LIVE_NORMALIZE
+    live_options["voxcpm2_denoise"] = VOXCPM2_LIVE_DENOISE
+    return live_options
 
 
 def _voxcpm2_call_text_options(adapter: Any, engine_id: str, options: dict[str, Any]) -> dict[str, Any]:
@@ -1062,6 +1080,7 @@ class CallSession:
         audio_started_event: dict[str, Any] | None = None
         chunk_count = 0
         playback_seconds = 0.0
+        generated_audio_seconds = 0.0
         generated_at_values: list[float] = []
         inter_chunk_gaps_ms: list[float] = []
         pending_chunks: list[dict[str, Any]] = []
@@ -1074,13 +1093,21 @@ class CallSession:
 
         def final_metrics(total_generation_ms: float | None = None) -> dict[str, Any]:
             generation_ms = elapsed_ms() if total_generation_ms is None else total_generation_ms
+            generated_audio_ms = round(generated_audio_seconds * 1000, 1)
+            total_playback_ms = round(playback_seconds * 1000, 1)
+            realtime_generation_ratio = 0.0
+            if generation_ms > 0:
+                realtime_generation_ratio = round(generated_audio_ms / generation_ms, 3)
             return {
                 "streaming_used": True,
                 "fallback_used": False,
                 "whole_wav_fallback_used": False,
                 "chunk_count": chunk_count,
                 "total_generation_ms": round(generation_ms, 1),
-                "total_playback_ms": round(playback_seconds * 1000, 1),
+                "total_playback_ms": total_playback_ms,
+                "generated_audio_ms": generated_audio_ms,
+                "realtime_generation_ratio": realtime_generation_ratio,
+                "under_realtime_generation": realtime_generation_ratio < 1.05,
                 "inter_chunk_gaps_ms": list(inter_chunk_gaps_ms),
             }
 
@@ -1182,7 +1209,7 @@ class CallSession:
                 reference_audio_b64=reference_audio_b64,
                 reference_transcript=reference_transcript,
                 reference_audio_content_type=reference_audio_content_type,
-                voxcpm2_options=voxcpm2_options,
+                voxcpm2_options=_voxcpm2_live_stream_options(engine_id, voxcpm2_options),
             )
             loop = asyncio.get_running_loop()
 
@@ -1234,14 +1261,16 @@ class CallSession:
                     wav_bytes,
                     target_sample_rate=int(getattr(self.outbound_audio_track, "sample_rate", 48000)),
                 )
+                chunk_playback_seconds = float(audio_stats.get("duration_ms", 0.0)) / 1000.0
                 pending_chunks.append(
                     {
                         "wav_bytes": wav_bytes,
                         "generated_at_ms": generated_at_ms,
                         "audio_stats": audio_stats,
-                        "playback_seconds": float(audio_stats.get("duration_ms", 0.0)) / 1000.0,
+                        "playback_seconds": chunk_playback_seconds,
                     }
                 )
+                generated_audio_seconds += chunk_playback_seconds
                 chunk_count += 1
 
                 if not playback_started:

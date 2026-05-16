@@ -559,8 +559,9 @@ Plans:
 
 **Requirements:** Preserve Phase 8 VoxCPM2 live-call streaming; forbid full-response/full-TTS buffering before first playback in live calls; record the incident as a recurrence guard.
 **Depends on:** Phase 8
-**Plans:** 2 plans
+**Plans:** 3 plans
 
 Plans:
 - [ ] 08.1-01-PLAN.md - Remove full-message live-call TTS buffering and install streaming/GSD invariant guardrails (Wave 1)
 - [ ] 08.1-02-PLAN.md - Isolate VoxCPM2 native runtime crashes and hangs from the AI backend process (Wave 1)
+- [ ] 08.1-03-PLAN.md - Measure and enforce VoxCPM2 realtime live-call viability to eliminate sustained stutter (Wave 1)

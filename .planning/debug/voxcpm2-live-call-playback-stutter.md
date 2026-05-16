@@ -1,7 +1,7 @@
 ---
 status: fixing
 created: 2026-05-15T20:00:08.530Z
-updated: 2026-05-16T00:00:00.000Z
+updated: 2026-05-16T14:45:00.000Z
 trigger: "User created a new VoxCPM2 voice; Voice Lab preview sounded fine, but live call playback was extremely choppy on two short exchanges: less than a second of audio, a few milliseconds of silence, then playback resumes repeatedly."
 ---
 
@@ -10,10 +10,10 @@ trigger: "User created a new VoxCPM2 voice; Voice Lab preview sounded fine, but 
 ## Current Focus
 
 user_goal_preservation: "RayMe must play the generated AI response audibly and smoothly during the call. Fixes must not suppress generation, hide text, avoid VoxCPM2, or silently fall back to the wrong engine."
-hypothesis: "Confirmed root cause: live VoxCPM2 streaming chunks can arrive slower than realtime playback. The invalid `1806eb0` fix buffered slow streams until completion, which removed stutter only by violating RayMe's live phone-call invariant."
+hypothesis: "Confirmed root cause: live VoxCPM2 streaming chunks can arrive slower than realtime playback. Bounded startup buffering gives a few clean seconds, then the buffer drains and the outbound track underruns."
 test: "`uv run --project ai-backend pytest ai-backend/tests/test_call_session.py ai-backend/tests/test_webrtc_signaling.py -q`, `uv run --project ai-backend pytest ai-backend/tests -q`, `scripts/operational-check.sh start`, `git diff --check`, canonical OMEN deploy, and physical Android retest with the same newly created VoxCPM2 voice."
 expecting: "CallSession uses bounded live startup buffering only: first playback starts before slow stream completion, later chunks continue streaming, immediate first-audio metrics remain separate from final playback metrics, and no live-call code path reports or depends on `buffered_until_complete`."
-next_action: "Finish Phase 08.1 incident repair, run full backend and startup verification, commit, push, deploy through `scripts/deploy-omen.sh`, then ask the user to retest."
+next_action: "Determine a product-correct smoothing strategy that preserves live-call behavior without waiting for full response/full TTS completion."
 
 ## Symptoms
 
@@ -43,3 +43,15 @@ reproduction: Create a new voice in Voice Lab with engine `voxcpm2`, verify prev
   checked: Phase 08.1 incident repair plan and focused backend regressions.
   found: Inserted Phase 08.1, added `08.1-01-PLAN.md`, replaced full-stream buffering with bounded live startup buffering, and added `test_voxcpm2_slow_stream_starts_playback_before_stream_completion`. Focused verification passed: `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py ai-backend/tests/test_webrtc_signaling.py -q` -> 75 passed, 3 warnings.
   implication: The bad full-response buffering behavior is removed locally. Full backend verification, startup guard, commit, push, OMEN deploy, and user retest remain required.
+- timestamp: 2026-05-16T14:45:00Z
+  checked: User retest after deployed commit `a9cc40b` and OMEN AI/web log tails.
+  found: User reports VoxCPM2 playback now reads about a sentence or a few seconds correctly, then stutters every time. AI backend stayed alive after worker containment, but logs for `rtc_5acc52b13fa045b0a27cb020835bc81e` show repeated 160 ms chunks (`wav_bytes=15404`, `samples=7680`, `duration_ms=160`) being enqueued. After the turn, `tts.playback_wait expected_ms=15290 timeout_ms=17290` completed false, and the browser entered reconnect/backfill behavior. This is consistent with bounded startup buffer draining while generation remains slower than realtime.
+  implication: Worker isolation fixed the process-death regression but did not solve sustained playback underrun. Increasing startup buffer alone only delays the failure; a product-correct fix must either make the generated audio supply faster/smoother or change chunking/planning while preserving early playback and not waiting for full response/full TTS completion.
+- timestamp: 2026-05-16T15:05:00Z
+  checked: OMEN VoxCPM2 live-profile benchmark using the user's `Bill short voxcpm` reference asset and transcript.
+  found: Current saved call profile (`inference_timesteps=10`, transcript-guided, normalize false, denoise false) generated 5920 ms of playable audio in 16132.4 ms: realtime ratio `0.367`. Lowering timesteps improved throughput: `8` -> `0.689`, `6` -> `0.827`, `4` -> `0.993` on the first medium run. A second sweep at timesteps `4` produced ratios around `0.984-1.018` depending on text/mode/cfg, with first chunk around 250-320 ms after warmup.
+  implication: The user-created profile is not live-viable at timesteps 10. Live calls need a forced low-latency VoxCPM2 profile capped at timesteps 4 with denoise/normalize off, plus metrics that expose realtime generation ratio and under-realtime streams. This is still only barely realtime, so future evidence must verify actual call smoothness; it is not safe to promote larger buffers as the fix.
+- timestamp: 2026-05-16T15:25:00Z
+  checked: Local low-latency live profile cap and underrun metric regression.
+  found: `CallSession` now caps VoxCPM2 live streaming calls to `voxcpm2_inference_timesteps <= 4`, `voxcpm2_normalize=false`, and `voxcpm2_denoise=false`, while leaving non-call synthesis/preview settings untouched. Final streaming metrics now include `generated_audio_ms`, `realtime_generation_ratio`, and `under_realtime_generation` based on generated chunk audio duration rather than preroll-inflated playback wait time. Focused verification passed: `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py ai-backend/tests/test_tts_voxcpm2.py ai-backend/tests/test_webrtc_signaling.py -q` -> 88 passed, 3 warnings. Full backend verification passed: `uv run --project ai-backend pytest ai-backend/tests -q` -> 139 passed, 3 warnings.
+  implication: Local fix is ready to commit and deploy. Because timesteps 4 is only slightly above realtime in measured profiles, OMEN retest remains required to confirm audible smoothness.
