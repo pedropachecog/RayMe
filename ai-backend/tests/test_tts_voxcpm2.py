@@ -4,6 +4,7 @@ import importlib
 import importlib.machinery
 import importlib.util
 import math
+import queue
 import sys
 import types
 from pathlib import Path
@@ -90,27 +91,116 @@ class ScriptedVoxCpmRuntime:
         yield from self.streaming_chunks
 
 
-def test_voxcpm2_adapter_uses_cuda_guard_and_runtime_loader(monkeypatch: pytest.MonkeyPatch) -> None:
+class ScriptedWorkerProcess:
+    def __init__(self, *, crash_on: str | None = None, hang_on: str | None = None) -> None:
+        self.returncode: int | None = None
+        self.ops: list[str] = []
+        self.stdout = self.ScriptedStdout()
+        self.stdin = self.ScriptedStdin(self)
+        self.crash_on = crash_on
+        self.hang_on = hang_on
+        self.terminated = False
+        self.killed = False
+
+    class ScriptedStdout:
+        def __init__(self) -> None:
+            self.lines: queue.Queue[str | None] = queue.Queue()
+
+        def __iter__(self) -> Any:
+            return self
+
+        def __next__(self) -> str:
+            line = self.lines.get()
+            if line is None:
+                raise StopIteration
+            return line
+
+    class ScriptedStdin:
+        def __init__(self, process: "ScriptedWorkerProcess") -> None:
+            self.process = process
+            self.closed = False
+
+        def write(self, line: str) -> int:
+            module = _voxcpm2_module()
+            assert line.startswith(module.WORKER_REQUEST_PREFIX)
+            payload = json_loads(line[len(module.WORKER_REQUEST_PREFIX) :])
+            op = payload["op"]
+            self.process.ops.append(op)
+            if self.process.hang_on == op:
+                return len(line)
+            if self.process.crash_on == op:
+                self.process.returncode = 3221225477
+                self.process.stdout.lines.put(None)
+                return len(line)
+            if op == "load":
+                self.process.stdout.lines.put(module.WORKER_READY_PREFIX + "{}\n")
+            elif op == "stream":
+                self.process.stdout.lines.put(
+                    module.WORKER_CHUNK_PREFIX
+                    + (
+                        '{"chunk_index":0,"wav_b64":"UklGRg==","sample_rate":48000,'
+                        '"duration_ms":20.0,"generated_at_ms":12.5,'
+                        '"warning_codes":[],"warnings":[]}'
+                    )
+                    + "\n"
+                )
+                self.process.stdout.lines.put(module.WORKER_DONE_PREFIX + '{"chunk_count":1}\n')
+            elif op == "synthesize":
+                self.process.stdout.lines.put(
+                    module.WORKER_RESULT_PREFIX
+                    + (
+                        '{"wav_b64":"UklGRg==","sample_rate":48000,'
+                        '"duration_ms":20.0,"warning_codes":[],"warnings":[]}'
+                    )
+                    + "\n"
+                )
+            return len(line)
+
+        def flush(self) -> None:
+            return None
+
+        def close(self) -> None:
+            self.closed = True
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self.returncode = -15
+        self.stdout.lines.put(None)
+
+    def kill(self) -> None:
+        self.killed = True
+        self.returncode = -9
+        self.stdout.lines.put(None)
+
+    def wait(self, timeout: float | None = None) -> int:
+        self.returncode = self.returncode if self.returncode is not None else 0
+        return self.returncode
+
+
+def json_loads(raw: str) -> Any:
+    import json
+
+    return json.loads(raw)
+
+
+def test_voxcpm2_adapter_loads_cuda_worker_in_production_path(monkeypatch: pytest.MonkeyPatch) -> None:
     voxcpm2_module = _voxcpm2_module()
-    calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
     cuda_guard_calls: list[str] = []
-
-    class ScriptedVoxCPM:
-        @classmethod
-        def from_pretrained(cls, *args: Any, **kwargs: Any) -> ScriptedVoxCpmRuntime:
-            assert "device" not in kwargs
-            calls.append((args, kwargs))
-            return ScriptedVoxCpmRuntime()
-
-    fake_voxcpm = types.ModuleType("voxcpm")
-    fake_voxcpm.VoxCPM = ScriptedVoxCPM
-    monkeypatch.setitem(sys.modules, "voxcpm", fake_voxcpm)
+    processes: list[ScriptedWorkerProcess] = []
     original_find_spec = importlib.util.find_spec
 
     def fake_find_spec(name: str, *args: Any, **kwargs: Any) -> Any:
         if name == "voxcpm":
             return importlib.machinery.ModuleSpec("voxcpm", loader=None)
         return original_find_spec(name, *args, **kwargs)
+
+    def process_factory(*_args: Any, **_kwargs: Any) -> ScriptedWorkerProcess:
+        process = ScriptedWorkerProcess()
+        processes.append(process)
+        return process
 
     monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
     monkeypatch.setattr(
@@ -119,16 +209,65 @@ def test_voxcpm2_adapter_uses_cuda_guard_and_runtime_loader(monkeypatch: pytest.
         lambda component: cuda_guard_calls.append(component),
     )
 
-    adapter = voxcpm2_module.VoxCpm2TtsAdapter()
+    adapter = voxcpm2_module.VoxCpm2TtsAdapter(process_factory=process_factory)
     adapter.load()
 
     assert adapter.required_modules == ("voxcpm",)
     assert voxcpm2_module.REQUIRED_PACKAGE == "voxcpm==2.0.2"
     assert voxcpm2_module.MODEL_ID == "openbmb/VoxCPM2"
-    assert cuda_guard_calls == ["VoxCPM2", "VoxCPM2"]
-    assert calls
-    assert calls[0][0] == ("openbmb/VoxCPM2",)
-    assert calls[0][1]["load_denoiser"] is False
+    assert cuda_guard_calls == ["VoxCPM2"]
+    assert processes[0].ops == ["load"]
+
+
+def test_voxcpm2_worker_stream_crash_is_recoverable_without_generate_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    voxcpm2_module = _voxcpm2_module()
+    process = ScriptedWorkerProcess(crash_on="stream")
+    original_find_spec = importlib.util.find_spec
+
+    def fake_find_spec(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "voxcpm":
+            return importlib.machinery.ModuleSpec("voxcpm", loader=None)
+        return original_find_spec(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+    monkeypatch.setattr(voxcpm2_module, "require_torch_cuda_runtime", lambda _component: None)
+    adapter = voxcpm2_module.VoxCpm2TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
+    adapter.load()
+
+    with pytest.raises(ValueError, match="streaming synthesis failed"):
+        list(adapter.stream(_request()))
+
+    assert process.ops == ["load", "stream"]
+    assert "synthesize" not in process.ops
+
+
+def test_voxcpm2_worker_stream_timeout_stops_hung_worker_without_generate_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    voxcpm2_module = _voxcpm2_module()
+    process = ScriptedWorkerProcess(hang_on="stream")
+    original_find_spec = importlib.util.find_spec
+
+    def fake_find_spec(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "voxcpm":
+            return importlib.machinery.ModuleSpec("voxcpm", loader=None)
+        return original_find_spec(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+    monkeypatch.setattr(voxcpm2_module, "require_torch_cuda_runtime", lambda _component: None)
+    monkeypatch.setattr(voxcpm2_module, "WORKER_STREAM_EVENT_TIMEOUT_SECONDS", 0.01)
+
+    adapter = voxcpm2_module.VoxCpm2TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
+    adapter.load()
+
+    with pytest.raises(ValueError, match="worker timed out"):
+        list(adapter.stream(_request()))
+
+    assert process.ops == ["load", "stream"]
+    assert "synthesize" not in process.ops
+    assert process.terminated is True
 
 
 def test_voxcpm2_cuda_guard_rejects_missing_device_evidence() -> None:

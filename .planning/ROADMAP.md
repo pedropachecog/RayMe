@@ -555,11 +555,12 @@ Plans:
 
 ### Phase 08.1: Live-call streaming invariant incident repair and prevention (INSERTED)
 
-**Goal:** Repair the bad post-Phase-8 buffering fix and make RayMe's live-call streaming invariant executable in code, tests, planning docs, and deployment handoff gates.
+**Goal:** Repair the bad post-Phase-8 buffering fix, contain the follow-on VoxCPM2 native crash regression, and make RayMe's live-call streaming invariant executable in code, tests, planning docs, and deployment handoff gates.
 
 **Requirements:** Preserve Phase 8 VoxCPM2 live-call streaming; forbid full-response/full-TTS buffering before first playback in live calls; record the incident as a recurrence guard.
 **Depends on:** Phase 8
-**Plans:** 1 plan
+**Plans:** 2 plans
 
 Plans:
 - [ ] 08.1-01-PLAN.md - Remove full-message live-call TTS buffering and install streaming/GSD invariant guardrails (Wave 1)
+- [ ] 08.1-02-PLAN.md - Isolate VoxCPM2 native runtime crashes and hangs from the AI backend process (Wave 1)
