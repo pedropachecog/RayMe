@@ -18,9 +18,11 @@ from app.domain import message_actions
 from app.domain.llm_stream import ChatCompletionSettings
 from app.domain.message_actions import MessageGenerationContext, SqlAlchemyMessageActionRepository
 from app.domain.prompt_builder import SqlAlchemyPromptRepository, build_prompt_context
+from app.domain.settings_service import SETTINGS_KEY
 from app.domain.thread_service import ThreadService
 from app.main import create_app
 from app.storage.models import (
+    AppSetting,
     Base,
     Character,
     Message,
@@ -448,6 +450,34 @@ def test_regenerate_route_uses_server_settings_and_replaces_without_appending_ai
     assert rows[-1].sequence == 2
 
 
+@pytest.mark.parametrize("disable_thinking", [True, False])
+def test_message_action_routes_forward_qwen_disable_thinking_setting(
+    message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
+    *,
+    disable_thinking: bool,
+) -> None:
+    client, sessionmaker, scripted_client = message_action_client
+    scripted_client.tokens = ["Regenerated server response"]
+    ids = asyncio.run(_create_action_thread(sessionmaker))
+    asyncio.run(
+        _write_endpoint_settings(
+            sessionmaker,
+            llm_model="unsloth/Qwen3.5-27B",
+            llm_disable_thinking=disable_thinking,
+        )
+    )
+
+    response = client.post(f"/api/messages/{ids['ai']}/regenerate")
+
+    assert response.status_code == 200
+    assert scripted_client.requests[0]["settings"] == ChatCompletionSettings(
+        base_url="http://server-llm.local/v1",
+        model="unsloth/Qwen3.5-27B",
+        api_key="server-secret",
+        disable_thinking=disable_thinking,
+    )
+
+
 def test_swipe_route_generates_selected_alternate_and_future_context_excludes_unselected(
     message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
 ) -> None:
@@ -649,6 +679,25 @@ async def _create_prior_branch_thread(sessionmaker: async_sessionmaker) -> dict[
         )
         await session.commit()
         return {"thread": thread_id, "target_ai": "ai-target"}
+
+
+async def _write_endpoint_settings(
+    sessionmaker: async_sessionmaker,
+    *,
+    llm_model: str,
+    llm_disable_thinking: bool,
+) -> None:
+    async with sessionmaker() as session:
+        session.add(
+            AppSetting(
+                key=SETTINGS_KEY,
+                value_json={
+                    "llm_model": llm_model,
+                    "llm_disable_thinking": llm_disable_thinking,
+                },
+            )
+        )
+        await session.commit()
 
 
 async def _insert_character(session: object, *, character_id: str) -> None:
