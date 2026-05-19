@@ -266,6 +266,7 @@ def test_send_endpoint_streams_tokens_persists_final_once_and_emits_done_shape(
         base_url="http://server-llm.local/v1",
         model="server-model",
         api_key="server-secret",
+        disable_thinking=True,
     )
     prompt_text = "\n".join(message["content"] for message in request["messages"])
     assert "Say hello" in prompt_text

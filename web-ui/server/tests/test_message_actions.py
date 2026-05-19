@@ -443,6 +443,7 @@ def test_regenerate_route_uses_server_settings_and_replaces_without_appending_ai
         base_url="http://server-llm.local/v1",
         model="server-model",
         api_key="server-secret",
+        disable_thinking=True,
     )
 
     rows = asyncio.run(_messages_for_thread(sessionmaker, ids["thread"]))

@@ -205,6 +205,7 @@ async def _completion_settings(
         base_url=endpoint_settings.llm_base_url,
         api_key=endpoint_settings.llm_api_key,
         model=endpoint_settings.llm_model,
+        disable_thinking=endpoint_settings.llm_disable_thinking,
     )
 
 
