@@ -69,6 +69,7 @@ async def send_chat_message(
         base_url=endpoint_settings.llm_base_url,
         api_key=endpoint_settings.llm_api_key,
         model=endpoint_settings.llm_model,
+        disable_thinking=endpoint_settings.llm_disable_thinking,
     )
     prompt_messages = await build_prompt_context(
         thread_id,

@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: ready_to_execute
 stopped_at: Completed 03.1-06-PLAN.md
-last_updated: "2026-05-13T16:40:00.979Z"
+last_updated: "2026-05-19T17:10:58Z"
 progress:
   total_phases: 11
   completed_phases: 7
@@ -225,6 +225,12 @@ progress:
 
 - 2026-05-15: Promote VoxCPM2 defaults and saved voice engine editing (`.planning/todos/pending/2026-05-15-promote-voxcpm2-defaults-and-saved-voice-engine-editing.md`)
 
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260519-nnw | make the setting about disabling thinking in qwen also affect the chat | 2026-05-19 | 4f70221 | [260519-nnw-make-the-setting-about-disabling-thinkin](./quick/260519-nnw-make-the-setting-about-disabling-thinkin/) |
+
 ### Roadmap Evolution
 
 - Plan 00-07.1 inserted into `00-measurement-gate`: benchmark TTS attention/optimization backends per engine before final writeback.
@@ -244,6 +250,7 @@ progress:
 
 ## Session Continuity
 
+Last activity: 2026-05-19 - Completed quick task 260519-nnw: make the setting about disabling thinking in qwen also affect the chat
 Last session: 2026-05-13T16:40:00.946Z
 Stopped at: Completed 03.1-06-PLAN.md
 Resume file: None

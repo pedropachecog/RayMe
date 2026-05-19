@@ -23,9 +23,17 @@ from app.domain.llm_stream import (
     stream_chat_completion,
     token_event,
 )
+from app.domain.settings_service import SETTINGS_KEY
 from app.domain.thread_service import ThreadService
 from app.main import create_app
-from app.storage.models import Base, Character, Message, MessageAlternateShape, ThreadMessageShape
+from app.storage.models import (
+    AppSetting,
+    Base,
+    Character,
+    Message,
+    MessageAlternateShape,
+    ThreadMessageShape,
+)
 from app.storage.session import create_engine
 
 
@@ -258,6 +266,7 @@ def test_send_endpoint_streams_tokens_persists_final_once_and_emits_done_shape(
         base_url="http://server-llm.local/v1",
         model="server-model",
         api_key="server-secret",
+        disable_thinking=True,
     )
     prompt_text = "\n".join(message["content"] for message in request["messages"])
     assert "Say hello" in prompt_text
@@ -269,6 +278,33 @@ def test_send_endpoint_streams_tokens_persists_final_once_and_emits_done_shape(
         ("user_text", "user", "Say hello"),
         ("ai_text", "assistant", "Hello"),
     ]
+
+
+@pytest.mark.parametrize("disable_thinking", [True, False])
+def test_send_endpoint_forwards_qwen_disable_thinking_setting(
+    chat_client: tuple[TestClient, async_sessionmaker, ScriptedStreamingClient],
+    *,
+    disable_thinking: bool,
+) -> None:
+    client, sessionmaker, scripted_client = chat_client
+    thread_id = asyncio.run(_create_thread(sessionmaker))
+    asyncio.run(
+        _write_endpoint_settings(
+            sessionmaker,
+            llm_model="unsloth/Qwen3.5-27B",
+            llm_disable_thinking=disable_thinking,
+        )
+    )
+
+    response = client.post(f"/api/chat/{thread_id}/send", json={"content": "Say hello"})
+
+    assert response.status_code == 200
+    assert scripted_client.requests[0]["settings"] == ChatCompletionSettings(
+        base_url="http://server-llm.local/v1",
+        model="unsloth/Qwen3.5-27B",
+        api_key="server-secret",
+        disable_thinking=disable_thinking,
+    )
 
 
 def test_send_endpoint_keeps_user_message_but_no_partial_ai_on_upstream_failure(
@@ -337,6 +373,25 @@ async def _create_thread(sessionmaker: async_sessionmaker) -> str:
         return (await ThreadService(session).create_thread(character_id="char_stream"))[
             "thread_id"
         ]
+
+
+async def _write_endpoint_settings(
+    sessionmaker: async_sessionmaker,
+    *,
+    llm_model: str,
+    llm_disable_thinking: bool,
+) -> None:
+    async with sessionmaker() as session:
+        session.add(
+            AppSetting(
+                key=SETTINGS_KEY,
+                value_json={
+                    "llm_model": llm_model,
+                    "llm_disable_thinking": llm_disable_thinking,
+                },
+            )
+        )
+        await session.commit()
 
 
 async def _messages_for_thread(sessionmaker: async_sessionmaker, thread_id: str) -> list[Message]:
