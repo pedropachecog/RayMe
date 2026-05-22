@@ -4,8 +4,14 @@ import { fileURLToPath } from 'node:url';
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { fulfillJson, installBrowserErrorGuard } from './helpers/acceptance';
-import { makeCharacter } from './helpers/fixtures';
+import {
+  fulfillJson,
+  fulfillSse,
+  installBrowserErrorGuard,
+  installCallDebugEventRoute,
+  installMockCallMedia
+} from './helpers/acceptance';
+import { makeCharacter, makeThreadDetail } from './helpers/fixtures';
 
 /**
  * Captures README screenshots from the LIVE running SvelteKit client.
@@ -132,6 +138,94 @@ test.describe('README live screenshots', () => {
     await expect(page.getByTestId('character-card-readme-aster')).toBeVisible();
 
     await captureScreenshot(page, 'gallery.png');
+    await expectNoBrowserErrors();
+  });
+
+  test('captures the live call screen', async ({ page }) => {
+    const expectNoBrowserErrors = installBrowserErrorGuard(page);
+
+    const callThreadId = 'readme-call-thread';
+    const callThread = makeThreadDetail({
+      id: callThreadId,
+      character_id: galleryCharacter.id,
+      title: 'Evening check-in with Aster',
+      character_name: 'Aster',
+      character_portrait_url: null,
+      character_portrait_asset_id: null,
+      character_portrait_storage_path: null,
+      messages: []
+    });
+
+    const exchanges = [
+      {
+        userText: "Hey Aster -- I'm finally trying a real call instead of texting.",
+        aiText: "It's so good to actually hear your voice. Take your time -- I'm listening."
+      },
+      {
+        userText: 'Honestly, the live captions make this feel a lot less nerve-wracking.',
+        aiText: "That's exactly why they're here. Whenever you're ready, just keep talking."
+      }
+    ];
+
+    await installMockCallMedia(page);
+    await installCallDebugEventRoute(page);
+
+    await page.route('**/api/threads/*', async (route) => {
+      await fulfillJson(route, callThread);
+    });
+    await page.route('**/api/characters/*/portrait**', async (route) => {
+      await route.fulfill({ status: 204 });
+    });
+    await page.route('**/api/calls/start', async (route) => {
+      await fulfillJson(
+        route,
+        {
+          call_id: 'readme-call-01',
+          session_id: 'rtc-readme-call-01',
+          thread_id: callThreadId,
+          state: 'listening',
+          events: exchanges.map((exchange, index) => ({
+            type: 'user_final',
+            session_id: 'rtc-readme-call-01',
+            turn_id: `readme-turn-${index + 1}`,
+            text: exchange.userText
+          }))
+        },
+        201
+      );
+    });
+    await page.route('**/api/calls/*/offer', async (route) => {
+      await fulfillJson(route, {
+        call_id: 'readme-call-01',
+        session_id: 'rtc-readme-call-01',
+        answer: { type: 'answer', sdp: 'v=0\r\n' },
+        event_channel: 'rayme-events'
+      });
+    });
+    let turnIndex = 0;
+    await page.route('**/api/calls/*/turns', async (route) => {
+      const exchange = exchanges[Math.min(turnIndex, exchanges.length - 1)];
+      const turnId = `readme-turn-${turnIndex + 1}`;
+      turnIndex += 1;
+      await fulfillSse(route, [
+        { type: 'ai_audio_started', turn_id: turnId, audio: { duration_ms: 1800, samples: 28800 } },
+        { type: 'ai_token', turn_id: turnId, text: exchange.aiText },
+        { type: 'ai_done', turn_id: turnId }
+      ]);
+    });
+    await page.route('**/api/calls/*/end', async (route) => {
+      await fulfillJson(route, { state: 'ended' });
+    });
+
+    await page.setViewportSize(DESKTOP_VIEWPORT);
+    await page.goto(`/chat/${callThreadId}`);
+    await page.getByRole('button', { name: 'Start call' }).click();
+
+    await expect(page.getByTestId('voice-visualizer')).toBeVisible();
+    await expect(page.getByText(exchanges[0].userText)).toBeVisible();
+    await expect(page.getByText(exchanges[exchanges.length - 1].aiText)).toBeVisible();
+
+    await captureScreenshot(page, 'call.png');
     await expectNoBrowserErrors();
   });
 });

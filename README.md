@@ -3,7 +3,7 @@
 **A self-hosted live phone-call simulator for AI characters** — full-duplex voice
 calls with barge-in and live captions, not a generated-audio player.
 
-![RayMe home](docs/screenshots/home.png)
+![RayMe live call](docs/screenshots/call.png)
 
 ## What it is
 
@@ -20,6 +20,8 @@ texting and calling the same character without losing the conversation.
 The phone-call framing is load-bearing. A fix that waits for the full assistant
 response or full TTS generation before first playback is explicitly not an
 acceptable call experience — live calls must stay live.
+
+![RayMe home](docs/screenshots/home.png)
 
 ![Character gallery](docs/screenshots/gallery.png)
 
