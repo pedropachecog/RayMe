@@ -4,6 +4,7 @@ import importlib
 import importlib.machinery
 import importlib.util
 import math
+import os
 import queue
 import sys
 import types
@@ -217,6 +218,33 @@ def test_voxcpm2_adapter_loads_cuda_worker_in_production_path(monkeypatch: pytes
     assert voxcpm2_module.MODEL_ID == "openbmb/VoxCPM2"
     assert cuda_guard_calls == ["VoxCPM2"]
     assert processes[0].ops == ["load"]
+
+
+def test_voxcpm2_worker_spawn_sanitizes_invalid_pythonhashseed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    voxcpm2_module = _voxcpm2_module()
+    captured_envs: list[dict[str, str]] = []
+    original_find_spec = importlib.util.find_spec
+
+    def fake_find_spec(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "voxcpm":
+            return importlib.machinery.ModuleSpec("voxcpm", loader=None)
+        return original_find_spec(name, *args, **kwargs)
+
+    def process_factory(*_args: Any, **kwargs: Any) -> ScriptedWorkerProcess:
+        captured_envs.append(dict(kwargs["env"]))
+        return ScriptedWorkerProcess()
+
+    monkeypatch.setenv("PYTHONHASHSEED", str(2**63 - 1))
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+    monkeypatch.setattr(voxcpm2_module, "require_torch_cuda_runtime", lambda _component: None)
+
+    adapter = voxcpm2_module.VoxCpm2TtsAdapter(process_factory=process_factory)
+    adapter.load()
+
+    assert os.environ["PYTHONHASHSEED"] == str(2**63 - 1)
+    assert captured_envs[0]["PYTHONHASHSEED"] == "random"
 
 
 def test_voxcpm2_worker_stream_crash_is_recoverable_without_generate_fallback(

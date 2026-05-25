@@ -4,6 +4,7 @@ import base64
 import enum
 import importlib
 import math
+import os
 from dataclasses import asdict, is_dataclass
 from pathlib import Path
 from typing import Any
@@ -525,6 +526,33 @@ def test_f5_adapter_uses_runtime_infer_and_returns_wav_bytes() -> None:
     assert result.sample_rate == 24_000
     assert result.duration_ms and result.duration_ms > 0
     assert result.wav_bytes.startswith(b"RIFF")
+
+
+def test_f5_adapter_restores_pythonhashseed_after_infer(monkeypatch: pytest.MonkeyPatch) -> None:
+    f5_module = importlib.import_module("app.models.tts_f5")
+    registry_module = importlib.import_module("app.models.tts_registry")
+    F5TtsAdapter = getattr(f5_module, "F5TtsAdapter")
+    TtsSynthesisInput = getattr(registry_module, "TtsSynthesisInput")
+
+    class HashSeedMutatingRuntime:
+        def infer(self, *_args: Any, **_kwargs: Any) -> tuple[Any, int, None]:
+            os.environ["PYTHONHASHSEED"] = str(2**63 - 1)
+            sample_rate = 24_000
+            t = np.linspace(0, 0.02, int(sample_rate * 0.02), endpoint=False)
+            return (0.1 * np.sin(2 * math.pi * 440 * t), sample_rate, None)
+
+    monkeypatch.delenv("PYTHONHASHSEED", raising=False)
+    adapter = F5TtsAdapter(runtime_factory=HashSeedMutatingRuntime)
+
+    adapter.synthesize(
+        TtsSynthesisInput(
+            text="Generated RayMe audio.",
+            reference_audio=b"scripted-reference-wav",
+            reference_transcript="Reference transcript.",
+        )
+    )
+
+    assert "PYTHONHASHSEED" not in os.environ
 
 
 def test_f5_adapter_load_builds_runtime_before_first_synthesis() -> None:

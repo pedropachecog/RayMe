@@ -2,7 +2,7 @@
 status: local_verified_pending_deploy
 trigger: "playback is not working at all. it shows there was an error."
 created: "2026-05-25T00:00:00Z"
-updated: "2026-05-25T17:30:00Z"
+updated: "2026-05-25T18:23:00Z"
 ---
 
 # Debug Session: Live Call Speech Playback Failed
@@ -22,20 +22,16 @@ Live-call TTS must begin playing early available assistant audio after a generat
 
 ## Current Focus
 
-- hypothesis: VoxCPM2 live-call playback fails because the deployed AI backend has permanently marked `voxcpm2` unavailable after an engine load failure; later calls are allowed to generate text, but `/webrtc/speak` raises `TTS engine unavailable` before any TTS chunk can stream.
-- test: local verification passed in the parent session; deployment/real-call verification is required on OMEN.
-- expecting: after deploying through `scripts/deploy-omen.sh`, a transient VoxCPM2 load failure should no longer permanently disable live-call TTS until AI backend restart; if the underlying worker load failure is deterministic, logs should now show retry attempts and the engine will fail again rather than stay stale-unavailable.
-- next_action: commit the local fix, deploy through `scripts/deploy-omen.sh`, then verify OMEN health and the original live-call playback flow.
 - reasoning_checkpoint:
-    hypothesis: "A single VoxCPM2 load failure makes live-call playback fail persistently because ModelManager marks the engine unavailable with reason `engine load failed` and never retries that transient worker-load state."
+    hypothesis: "F5 synthesis mutates `os.environ['PYTHONHASHSEED']` to a random value larger than Python's valid child-interpreter range, and the VoxCPM2 worker inherits that poisoned environment, so the worker fails before it can emit the ready protocol line."
     confirming_evidence:
-      - "OMEN `/health` reports `voxcpm2` as `available=false`, `state=unavailable`, `unavailable_reason=engine load failed` while F5 is resident."
-      - "Failing OMEN call logs show voice reference OK and LLM done, then `/webrtc/speak` returns 502 with no preceding `tts.enqueue` or `ai_audio_started`."
-      - "AI backend logs for VoxCPM2 preview show `ValueError: TTS engine unavailable` from `ModelManager.switch_tts_engine`."
-    falsification_test: "If `switch_tts_engine('voxcpm2')` can retry and successfully load an adapter after a prior load failure, the permanent-unavailable mechanism is removed; if calls still fail before chunks with the engine available, this hypothesis is incomplete."
-    fix_rationale: "Allowing retries only for sanitized load-failure unavailable states lets the supervised worker recover from transient native/load failures without restarting the backend, while preserving startup self-test unavailability for missing packages/unsupported engines."
-    blind_spots: "The original worker load exception is sanitized and not present in the public response; if the current OMEN load failure is deterministic, the retry will expose/fail it again rather than make VoxCPM2 playable until the runtime issue is fixed."
-- tdd_checkpoint:
+      - "OMEN standalone manager switch succeeds after F5 load-only but reproduces the deployed `_queue.Empty`/`VoxCPM2 worker timed out` failure after two F5 syntheses."
+      - "A diagnostic post-F5 worker probe with stderr merged into captured output exits immediately with `Fatal Python error: config_init_hash_seed: PYTHONHASHSEED must be \"random\" or an integer in range [0; 4294967295]`."
+      - "The installed F5 helper `seed_everything(seed)` writes `os.environ['PYTHONHASHSEED'] = str(seed)`, and F5 `infer(seed=None)` chooses `random.randint(0, sys.maxsize)`, which can exceed Python's valid hash-seed range."
+    falsification_test: "After F5 synthesis mutates PYTHONHASHSEED to an invalid value, a regression should prove F5 restores the previous environment and VoxCPM2 worker spawning sanitizes any invalid inherited value; if the post-F5 OMEN worker still fails with the same fatal hash-seed error, the fix is incomplete."
+    fix_rationale: "Restoring PYTHONHASHSEED after F5 inference removes the parent-process environment poisoning at the source; sanitizing the VoxCPM2 worker environment prevents any future invalid inherited value from killing the child interpreter before the ready protocol."
+    blind_spots: "Local tests cannot load the real Windows CUDA VoxCPM2 worker, so deployed verification is still required after parent review/deploy; the fix does not alter VoxCPM2 streaming timing or whole-synthesis fallback behavior."
+- next_action: commit and deploy through `scripts/deploy-omen.sh`, then rerun the Phase 8 direct call-flow evidence against OMEN to confirm VoxCPM2 `/webrtc/speak` produces `tts.enqueue` and `ai_audio_started`.
 
 ## Evidence
 
@@ -87,6 +83,54 @@ Live-call TTS must begin playing early available assistant audio after a generat
   checked: Parent-session verification after adding non-retry guard
   found: Added `test_startup_self_test_failure_remains_unavailable_without_retry` so the retry path remains limited to load failures. Parent-run checks passed: model-manager suite 8 passed, call-session VoxCPM2/queued audio 10 passed, WebRTC VoxCPM2/failure/audio-started 5 passed, web call VoxCPM2/error/audio-started 4 passed, full AI backend suite 141 passed with 3 dependency warnings, and `git diff --check` passed.
   implication: The patch fixes stale transient load-failure state without retrying startup self-test failures, and preserves the required live-call streaming regressions.
+- timestamp: 2026-05-25T17:45:00Z
+  checked: Canonical OMEN deploy and post-deploy health
+  found: `scripts/deploy-omen.sh` deployed commit `f1e9c3aa4162c31a8939475165b2d498ccc08b5f`, verified CUDA Torch `2.10.0+cu126` on RTX 3060, restarted canonical scheduled tasks, and reported AI/web listeners healthy enough for live calls. Immediately after deploy, `/health` showed `voxcpm2` as `available=true`, `state=idle`, `unavailable_reason=null`.
+  implication: The stale-unavailable state was cleared by deployment, and the first fix is deployed, but this does not prove VoxCPM2 can load or stream audio.
+- timestamp: 2026-05-25T17:45:00Z
+  checked: Deployed Phase 8 direct call-flow evidence
+  found: Running `08-run-call-flow-evidence.py --warm-samples 1` against OMEN failed at the VoxCPM2 speak call with `call_tts_failed` status 502. AI logs show `ModelManager.switch_tts_engine("voxcpm2")` attempted `adapter.load()`, then `tts_voxcpm2._iter_worker_lines()` raised `ValueError("VoxCPM2 worker timed out")` after `_queue.Empty`; no `tts.enqueue` or `ai_audio_started` occurred for VoxCPM2. Post-failure `/health` shows `voxcpm2` unavailable with `unavailable_reason: engine load failed`.
+  implication: The original `Speech playback failed` symptom remains reproducible after deployment. The first fix changed stale retry behavior but the active root cause is now the deterministic VoxCPM2 worker load timeout before first audio.
+- timestamp: 2026-05-25T17:49:00Z
+  checked: VoxCPM2 worker/load implementation and historical OMEN runtime evidence
+  found: `VoxCpm2TtsAdapter.load()` sends a worker `load` request and waits `WORKER_LOAD_TIMEOUT_SECONDS = 180.0` for a `WORKER_READY_PREFIX` line. Historical OMEN standalone runtime smoke loaded `openbmb/VoxCPM2` in about 19.3-23.5 seconds on the RTX 3060, and prior Phase 8 live-call evidence produced VoxCPM2 first audio around 0.76-0.80 seconds after warmup with streaming enabled and no whole-wav fallback.
+  implication: A blanket "180 seconds is too short for VoxCPM2 model load" hypothesis is weak. The remaining failure is specific to the deployed live worker-load context after F5/STT backend startup or to the worker protocol/resource boundary, not normal VoxCPM2 cold-load duration.
+- timestamp: 2026-05-25T17:51:00Z
+  checked: Read-only deployed health, VRAM, process list, and AI log tail after failed OMEN call-flow
+  found: AI health remains degraded with `voxcpm2` unavailable for `engine load failed`, `resident_tts_engine` back to `f5`, and reported VRAM around 2948.5 MB used / 8051.5 MB headroom; `nvidia-smi` reports about 2771 MB used / 9340 MB free. The AI log tail shows F5 calls enqueue audio successfully, then the first VoxCPM2 warmup `/webrtc/speak` fails from `_queue.Empty` in `_iter_worker_lines()` after waiting for worker readiness; no VoxCPM2 worker diagnostic output appears because the subprocess stderr is discarded and stdout is reserved for protocol.
+  implication: The backend survives and GPU memory is not stuck after the timeout, but current logs cannot distinguish a hung worker load from blocked/hidden third-party worker output. Need a direct OMEN manager-switch probe to reproduce or eliminate the non-HTTP engine-switch path.
+- timestamp: 2026-05-25T17:55:00Z
+  checked: Read-only OMEN standalone `ModelManager.startup(); switch_tts_engine("voxcpm2")` probe using the deployed venv while the live backend was running
+  found: After one quoting-only failed attempt that loaded F5 but did not run the switch, the base64-encoded probe loaded F5 in about 16.5 seconds and then switched to VoxCPM2 successfully in about 36.3 seconds. The probe ended with `resident_tts_engine: voxcpm2` and health-reported VRAM around 9413.7 MB used.
+  implication: The worker subprocess and a plain F5-load-to-VoxCPM2 switch can succeed on OMEN under current deployment. The failing condition is narrower: likely F5 synthesis/call-session state in the long-lived backend before switching, or a call-path-specific worker/protocol interaction.
+- timestamp: 2026-05-25T17:59:00Z
+  checked: Read-only OMEN standalone probe that starts a manager, runs two F5 syntheses with the Phase 8 reference/text, then switches to VoxCPM2
+  found: The probe reproduced the deployed failure outside HTTP. F5 startup took about 19.3 seconds; the two F5 syntheses succeeded in about 2037 ms and 654 ms; then `manager.switch_tts_engine("voxcpm2")` timed out in `_iter_worker_lines()` after `_queue.Empty`, matching the deployed call-flow stack.
+  implication: The remaining bug is specifically caused by F5 synthesis state before the VoxCPM2 worker load. Plain timeout tuning is not the fix; the switch must release F5 inference/CUDA resources before spawning/loading the VoxCPM2 worker.
+- timestamp: 2026-05-25T18:07:00Z
+  checked: OMEN post-F5 release probes before switching to VoxCPM2
+  found: Explicit `f5.unload()`, `gc.collect()`, `torch.cuda.empty_cache()`, and `torch.cuda.ipc_collect()` still timed out. Clearing F5 module-level caches (`mel_basis_cache`, `hann_window_cache`, `_ref_audio_cache`, `_ref_text_cache`) still timed out. Moving F5 `ema_model` and `vocoder` to CPU before unload plus CUDA cleanup also still timed out.
+  implication: The root cause is not a simple Python reference, global cache, or allocator-cache leak. Need worker-side observability because production currently discards stderr and reports every silent post-F5 worker hang as the same parent-side `_queue.Empty` timeout.
+- timestamp: 2026-05-25T18:11:00Z
+  checked: OMEN post-F5 diagnostic worker probe with stderr merged into captured output
+  found: After two F5 syntheses, directly starting `app.models.tts_voxcpm2_worker` with a load request exited in 37.4 ms with `Fatal Python error: config_init_hash_seed: PYTHONHASHSEED must be "random" or an integer in range [0; 4294967295]`. The installed F5 code calls `seed_everything(seed)` during `infer()`, and that function sets `os.environ["PYTHONHASHSEED"] = str(seed)`; `infer(seed=None)` chooses `random.randint(0, sys.maxsize)`.
+  implication: Confirmed root cause: F5 synthesis poisons the process environment with an invalid `PYTHONHASHSEED`, and the VoxCPM2 Python worker inherits it. Production hides the worker fatal error because stderr is discarded, so the parent reports a readiness timeout instead of the real child-interpreter startup failure.
+- timestamp: 2026-05-25T18:15:00Z
+  checked: RED/green regressions for hash-seed poisoning
+  found: Added `test_f5_adapter_restores_pythonhashseed_after_infer` and `test_voxcpm2_worker_spawn_sanitizes_invalid_pythonhashseed`. Both failed before the fix: F5 left `PYTHONHASHSEED=9223372036854775807`, and VoxCPM2 passed that value into the worker env. After the fix, both focused tests passed.
+  implication: The confirmed parent-environment poisoning now has direct regression coverage at the F5 source and a defensive guard at the VoxCPM2 worker boundary.
+- timestamp: 2026-05-25T18:19:00Z
+  checked: Local focused and broad verification
+  found: Passed `test_tts_voxcpm2.py` (14 tests), `test_tts_registry.py` (20 tests), call-session VoxCPM2/queued-audio subset (10 tests), WebRTC VoxCPM2/failure/audio-started subset (5 tests), model-manager tests (8 tests), web call VoxCPM2/error/audio-started subset (4 tests), full AI backend suite (143 tests, 3 dependency warnings), and `git diff --check`.
+  implication: The fix preserves existing live-call streaming regressions, including slow-stream first playback before stream completion and VoxCPM2 no whole-synthesis fallback coverage, while preventing the confirmed worker environment poisoning.
+- timestamp: 2026-05-25T18:22:00Z
+  checked: Read-only OMEN mechanism probe after manually clearing F5-poisoned `PYTHONHASHSEED`
+  found: In the deployed venv, two real F5 syntheses set `PYTHONHASHSEED` to invalid value `7358197106145542751`. Clearing that env var before `manager.switch_tts_engine("voxcpm2")` made the same post-F5 switch complete in about 32.6 seconds with `resident_tts_engine: voxcpm2`.
+  implication: This validates the fix mechanism against the deployed runtime without deploying code: removing the invalid F5-mutated hash seed allows the VoxCPM2 worker to start and load after F5 synthesis.
+- timestamp: 2026-05-25T18:23:00Z
+  checked: Parent-session verification of F5/VoxCPM2 hash-seed fix
+  found: Passed focused checks in parent context: F5/VoxCPM2 registry suites 34 passed, call-session VoxCPM2/queued-audio subset 10 passed, WebRTC VoxCPM2/failure/audio-started subset 5 passed, web call VoxCPM2/error/audio-started subset 4 passed, full AI backend suite 143 passed with 3 dependency warnings, and `git diff --check` passed.
+  implication: The final patch is locally verified in the parent context and ready for canonical OMEN deployment.
 
 ## Eliminated
 
@@ -102,11 +146,19 @@ Live-call TTS must begin playing early available assistant audio after a generat
   evidence: OMEN AI logs for the failing sessions show `/webrtc/speak` returning 502 without any preceding `tts.enqueue`, `track.enqueue`, or `ai_audio_started` event.
   timestamp: 2026-05-25T17:08:10Z
 
+- hypothesis: The remaining worker failure is caused by a generally too-short 180-second VoxCPM2 load timeout.
+  evidence: Historical OMEN standalone runtime smoke loaded VoxCPM2 in about 19.3-23.5 seconds, and a fresh standalone manager switch to VoxCPM2 completed in about 36.3 seconds.
+  timestamp: 2026-05-25T17:55:00Z
+
+- hypothesis: F5 synthesis leaves unreleased CUDA memory/cache references, and stronger unload/GC/cache clearing is sufficient to make the VoxCPM2 worker load.
+  evidence: OMEN probes still reproduced the worker timeout after explicit `f5.unload()`, `gc.collect()`, `torch.cuda.empty_cache()`, `torch.cuda.ipc_collect()`, clearing F5 module caches, and moving F5 `ema_model`/`vocoder` to CPU before unload.
+  timestamp: 2026-05-25T18:07:00Z
+
 ## Specialist Review
 
 ## Resolution
 
-- root_cause: VoxCPM2 was in a permanent `engine load failed` unavailable state on the AI backend. `ModelManager.switch_tts_engine()` rejects unavailable engines without retry, so live-call `/webrtc/speak` fails before producing any TTS chunks even though the web call already generated visible assistant text.
-- fix: `ModelManager.switch_tts_engine()` now retries engines marked unavailable specifically by `engine load failed` / `default engine load failed`, clearing the stale unavailable state before attempting load again; load failures are logged server-side with a sanitized class name and still mark the engine unavailable if the retry fails.
-- verification: "Local verification passed in parent session: focused live-call/TTS/model-manager/web-call tests, full AI backend tests (141 passed, 3 dependency warnings), and `git diff --check`. OMEN deployment and live-call verification remain pending."
-- files_changed: ai-backend/app/models/model_manager.py, ai-backend/tests/test_model_manager.py
+- root_cause: F5 synthesis calls third-party `seed_everything()` with a random 63-bit seed and mutates `PYTHONHASHSEED` in the long-lived AI backend process. The subsequent VoxCPM2 Python worker inherits an invalid hash seed and fails during interpreter startup before it can emit `WORKER_READY_PREFIX`; production discards worker stderr, so the parent surfaces this as `VoxCPM2 worker timed out` and `call_tts_failed`.
+- fix: `F5TtsAdapter.synthesize()` now preserves and restores the previous `PYTHONHASHSEED` around third-party F5 inference; `VoxCpm2TtsAdapter._ensure_worker()` now sanitizes invalid inherited `PYTHONHASHSEED` values to `random` before spawning the Python worker.
+- verification: Local verification passed in parent context: new hash-seed regressions, focused VoxCPM2/F5/model-manager/live-call/WebRTC/web-call suites, full AI backend suite, and `git diff --check`. Read-only OMEN mechanism probe passed after manually clearing the poisoned env var. Canonical deployment is pending.
+- files_changed: ai-backend/app/models/tts_f5.py, ai-backend/app/models/tts_voxcpm2.py, ai-backend/tests/test_tts_registry.py, ai-backend/tests/test_tts_voxcpm2.py

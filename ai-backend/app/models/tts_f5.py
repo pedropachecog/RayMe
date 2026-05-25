@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.machinery
+import os
 import sys
 import tempfile
 import types
@@ -54,15 +55,22 @@ class F5TtsAdapter(ImportGatedTtsAdapter):
         with tempfile.TemporaryDirectory(prefix="rayme-f5-") as tmp_dir:
             reference_path = Path(tmp_dir) / f"reference{_audio_suffix(request.reference_audio_content_type)}"
             reference_path.write_bytes(request.reference_audio)
-            wav, sample_rate, _ = runtime.infer(
-                str(reference_path),
-                reference_transcript,
-                request.text,
-                show_info=lambda *_args, **_kwargs: None,
-                progress=None,
-                nfe_step=7,
-                speed=request.speech_speed,
-            )
+            previous_hash_seed = os.environ.get("PYTHONHASHSEED")
+            try:
+                wav, sample_rate, _ = runtime.infer(
+                    str(reference_path),
+                    reference_transcript,
+                    request.text,
+                    show_info=lambda *_args, **_kwargs: None,
+                    progress=None,
+                    nfe_step=7,
+                    speed=request.speech_speed,
+                )
+            finally:
+                if previous_hash_seed is None:
+                    os.environ.pop("PYTHONHASHSEED", None)
+                else:
+                    os.environ["PYTHONHASHSEED"] = previous_hash_seed
 
         wav_array = np.asarray(wav, dtype=np.float32).flatten()
         if wav_array.size == 0:

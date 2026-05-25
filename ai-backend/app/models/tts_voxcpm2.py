@@ -245,6 +245,7 @@ class VoxCpm2TtsAdapter(ImportGatedTtsAdapter):
 
         ai_backend_root = Path(__file__).resolve().parents[2]
         env = dict(os.environ)
+        _sanitize_python_hash_seed(env)
         existing_pythonpath = env.get("PYTHONPATH")
         env["PYTHONPATH"] = (
             str(ai_backend_root)
@@ -464,6 +465,19 @@ def _ensure_librosa_load() -> None:
         return audio_array, target_sr
 
     librosa.load = _soundfile_load  # type: ignore[attr-defined]
+
+
+def _sanitize_python_hash_seed(env: dict[str, str]) -> None:
+    value = env.get("PYTHONHASHSEED")
+    if value is None or value == "random":
+        return
+    try:
+        seed = int(value)
+    except ValueError:
+        env["PYTHONHASHSEED"] = "random"
+        return
+    if seed < 0 or seed > 4_294_967_295:
+        env["PYTHONHASHSEED"] = "random"
 
 
 def _resample_linear(audio: np.ndarray, source_sr: int, target_sr: int) -> np.ndarray:
