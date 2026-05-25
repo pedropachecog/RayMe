@@ -12,6 +12,10 @@ logger = logging.getLogger(__name__)
 
 
 VramProbe = Callable[[], Mapping[str, int | float]]
+RETRIABLE_TTS_UNAVAILABLE_REASONS = {
+    "engine load failed",
+    "default engine load failed",
+}
 
 
 class NullTtsAdapter:
@@ -98,7 +102,16 @@ class ModelManager:
             raise ValueError("unknown TTS engine")
         target = self._statuses[engine_id]
         if not target.available:
-            raise ValueError("TTS engine unavailable")
+            if target.unavailable_reason not in RETRIABLE_TTS_UNAVAILABLE_REASONS:
+                raise ValueError("TTS engine unavailable")
+            logger.info(
+                "[rayme-tts] retry_unavailable_engine engine=%s reason=%s",
+                engine_id,
+                target.unavailable_reason,
+            )
+            target.available = True
+            target.state = "idle"
+            target.unavailable_reason = None
         if self.resident_tts_engine == engine_id:
             target.resident = True
             target.state = "resident"
@@ -114,10 +127,15 @@ class ModelManager:
 
         try:
             self._load_engine(engine_id)
-        except Exception:
+        except Exception as exc:
             self.resident_tts_engine = None
             self.loading_engine = None
             self._mark_unavailable(engine_id, "engine load failed")
+            logger.exception(
+                "[rayme-tts] engine.load_failed engine=%s exc=%s",
+                engine_id,
+                exc.__class__.__name__,
+            )
             raise
 
         target.resident = True

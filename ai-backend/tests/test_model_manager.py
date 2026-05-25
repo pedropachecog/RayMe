@@ -67,6 +67,27 @@ class ScriptedTtsAdapter:
         self.loaded = False
 
 
+class FlakyLoadTtsAdapter(ScriptedTtsAdapter):
+    def __init__(
+        self,
+        engine_id: str,
+        events: list[str],
+        *,
+        failures_before_success: int,
+    ) -> None:
+        super().__init__(engine_id, events)
+        self.failures_before_success = failures_before_success
+
+    def load(self) -> None:
+        self.events.append(f"{self.engine_id}:load")
+        if self.failures_before_success > 0:
+            self.failures_before_success -= 1
+            raise RuntimeError(
+                "Traceback: CUDA out of memory while loading C:\\secret\\model.bin"
+            )
+        self.loaded = True
+
+
 def _require_attr(module: object, attr: str) -> Any:
     try:
         return getattr(module, attr)
@@ -243,6 +264,21 @@ def test_failed_engine_self_test_degrades_only_that_engine_with_typed_reason() -
     _assert_no_raw_exception_text(health)
 
 
+def test_startup_self_test_failure_remains_unavailable_without_retry() -> None:
+    manager, _, events = _build_manager(failing_engine="xtts_v2")
+
+    _complete(manager.startup())
+    with pytest.raises(ValueError, match="TTS engine unavailable"):
+        _complete(manager.switch_tts_engine("xtts_v2"))
+    health = _health_mapping(manager)
+    statuses = _engine_statuses(health)
+
+    assert statuses["xtts_v2"]["available"] is False
+    assert statuses["xtts_v2"]["state"] == "unavailable"
+    assert statuses["xtts_v2"]["unavailable_reason"] == "engine startup self-test failed"
+    assert "xtts_v2:load" not in events
+
+
 def test_voxcpm2_load_failure_degrades_only_voxcpm2() -> None:
     manager, _, events = _build_manager(load_failing_engine="voxcpm2")
 
@@ -272,6 +308,36 @@ def test_voxcpm2_load_failure_degrades_only_voxcpm2() -> None:
         assert statuses[engine_id]["available"] is True
     _assert_no_raw_exception_text(statuses["voxcpm2"]["unavailable_reason"])
     _assert_no_raw_exception_text(health)
+
+
+def test_transient_voxcpm2_load_failure_can_retry_on_later_switch() -> None:
+    manager, adapters, events = _build_manager()
+    adapters["voxcpm2"] = FlakyLoadTtsAdapter(
+        "voxcpm2",
+        events,
+        failures_before_success=1,
+    )
+    manager.tts_adapters["voxcpm2"] = adapters["voxcpm2"]
+
+    _complete(manager.startup())
+    with pytest.raises(RuntimeError):
+        _complete(manager.switch_tts_engine("voxcpm2"))
+
+    failed_health = _health_mapping(manager)
+    failed_statuses = _engine_statuses(failed_health)
+    assert failed_statuses["voxcpm2"]["state"] == "unavailable"
+    assert failed_statuses["voxcpm2"]["unavailable_reason"] == "engine load failed"
+
+    _complete(manager.switch_tts_engine("voxcpm2"))
+    health = _health_mapping(manager)
+    statuses = _engine_statuses(health)
+
+    assert health["resident_tts_engine"] == "voxcpm2"
+    assert statuses["voxcpm2"]["available"] is True
+    assert statuses["voxcpm2"]["resident"] is True
+    assert statuses["voxcpm2"]["state"] == "resident"
+    assert statuses["voxcpm2"]["unavailable_reason"] is None
+    assert events.count("voxcpm2:load") == 2
 
 
 def test_default_engine_load_failure_degrades_health_without_blocking_startup() -> None:
