@@ -1,8 +1,8 @@
 ---
-status: local_verified_pending_deploy
+status: deployed_verified
 trigger: "playback is not working at all. it shows there was an error."
 created: "2026-05-25T00:00:00Z"
-updated: "2026-05-25T18:23:00Z"
+updated: "2026-05-25T18:41:15Z"
 ---
 
 # Debug Session: Live Call Speech Playback Failed
@@ -30,8 +30,8 @@ Live-call TTS must begin playing early available assistant audio after a generat
       - "The installed F5 helper `seed_everything(seed)` writes `os.environ['PYTHONHASHSEED'] = str(seed)`, and F5 `infer(seed=None)` chooses `random.randint(0, sys.maxsize)`, which can exceed Python's valid hash-seed range."
     falsification_test: "After F5 synthesis mutates PYTHONHASHSEED to an invalid value, a regression should prove F5 restores the previous environment and VoxCPM2 worker spawning sanitizes any invalid inherited value; if the post-F5 OMEN worker still fails with the same fatal hash-seed error, the fix is incomplete."
     fix_rationale: "Restoring PYTHONHASHSEED after F5 inference removes the parent-process environment poisoning at the source; sanitizing the VoxCPM2 worker environment prevents any future invalid inherited value from killing the child interpreter before the ready protocol."
-    blind_spots: "Local tests cannot load the real Windows CUDA VoxCPM2 worker, so deployed verification is still required after parent review/deploy; the fix does not alter VoxCPM2 streaming timing or whole-synthesis fallback behavior."
-- next_action: commit and deploy through `scripts/deploy-omen.sh`, then rerun the Phase 8 direct call-flow evidence against OMEN to confirm VoxCPM2 `/webrtc/speak` produces `tts.enqueue` and `ai_audio_started`.
+    blind_spots: "The final browser run covered the real OMEN browser/LLM/STT/VoxCPM2 path with two completed audio turns; residual health remains `degraded` only because non-implemented placeholder TTS engines are reported unavailable."
+- next_action: complete handoff; runtime fix is deployed on OMEN at `76bacc7ea5069e1091607bf2ae9cba43dfe56096`.
 
 ## Evidence
 
@@ -131,6 +131,18 @@ Live-call TTS must begin playing early available assistant audio after a generat
   checked: Parent-session verification of F5/VoxCPM2 hash-seed fix
   found: Passed focused checks in parent context: F5/VoxCPM2 registry suites 34 passed, call-session VoxCPM2/queued-audio subset 10 passed, WebRTC VoxCPM2/failure/audio-started subset 5 passed, web call VoxCPM2/error/audio-started subset 4 passed, full AI backend suite 143 passed with 3 dependency warnings, and `git diff --check` passed.
   implication: The final patch is locally verified in the parent context and ready for canonical OMEN deployment.
+- timestamp: 2026-05-25T18:27:30Z
+  checked: Deployed Phase 8 direct call-flow evidence after canonical OMEN deploy
+  found: `08-run-call-flow-evidence.py --warm-samples 1` wrote `.planning/debug/evidence/call-speech-playback-failed-live-call-flow.json`. VoxCPM2 emitted `ai_audio_started` at 1305.7 ms with `streaming_used=true`, `chunk_count_at_start=5`, final `chunk_count=17`, `whole_wav_fallback_used=false`, and `total_generation_ms=3263.4`. OMEN `/health` then reported `resident_tts_engine=voxcpm2`, `voxcpm2.available=true`, `voxcpm2.state=resident`, and `unavailable_reason=null`.
+  implication: The deployed backend no longer fails before first playback; VoxCPM2 streams chunks into the live-call audio path and does not regress to whole-synthesis fallback.
+- timestamp: 2026-05-25T18:31:00Z
+  checked: Browser live-call acceptance after deploy
+  found: The first post-deploy non-mocked browser run reached `/api/calls/{id}/end` successfully instead of the earlier 500, but exposed that a cancelled request could leave a stale aiosqlite connection in the pool and that the live spec could click hangup before the second turn was durably/audio-complete. Added SQLite `pool_pre_ping=True` with a regression, aligned the stale Phase 1 settings expectation, and hardened the live spec to wait for persisted rows plus playback signals before hangup.
+  implication: The original playback fix held under browser verification; the remaining failures were hangup/test synchronization defects discovered while closing the live-call evidence loop.
+- timestamp: 2026-05-25T18:40:45Z
+  checked: Final canonical OMEN deploy and non-mocked browser live-call acceptance
+  found: `scripts/deploy-omen.sh` deployed `76bacc7ea5069e1091607bf2ae9cba43dfe56096`. The OMEN browser command `npm --prefix web-ui\client run test:e2e -- tests/e2e/live-call.spec.ts --project=desktop-chromium --reporter=line` passed 1 test in 1.6 minutes with VoxCPM2, requiring two unique `ai_audio_started` turn ids, two `ai_done` events, two persisted `ai_speech` rows, and a successful hangup/return-to-thread flow. Final AI health reported VoxCPM2 resident and available.
+  implication: The user-reported live-call path is deployed and verified end to end: generated responses now start TTS playback, complete audio turns, persist transcript rows, and hang up cleanly.
 
 ## Eliminated
 
@@ -160,5 +172,5 @@ Live-call TTS must begin playing early available assistant audio after a generat
 
 - root_cause: F5 synthesis calls third-party `seed_everything()` with a random 63-bit seed and mutates `PYTHONHASHSEED` in the long-lived AI backend process. The subsequent VoxCPM2 Python worker inherits an invalid hash seed and fails during interpreter startup before it can emit `WORKER_READY_PREFIX`; production discards worker stderr, so the parent surfaces this as `VoxCPM2 worker timed out` and `call_tts_failed`.
 - fix: `F5TtsAdapter.synthesize()` now preserves and restores the previous `PYTHONHASHSEED` around third-party F5 inference; `VoxCpm2TtsAdapter._ensure_worker()` now sanitizes invalid inherited `PYTHONHASHSEED` values to `random` before spawning the Python worker.
-- verification: Local verification passed in parent context: new hash-seed regressions, focused VoxCPM2/F5/model-manager/live-call/WebRTC/web-call suites, full AI backend suite, and `git diff --check`. Read-only OMEN mechanism probe passed after manually clearing the poisoned env var. Canonical deployment is pending.
-- files_changed: ai-backend/app/models/tts_f5.py, ai-backend/app/models/tts_voxcpm2.py, ai-backend/tests/test_tts_registry.py, ai-backend/tests/test_tts_voxcpm2.py
+- verification: Local verification passed in parent context: new hash-seed regressions, focused VoxCPM2/F5/model-manager/live-call/WebRTC/web-call suites, full AI backend suite, full web server suite, client sync check, and `git diff --check`. Canonical OMEN deployments passed, direct Phase 8 live-call flow evidence passed, and the non-mocked OMEN browser live-call spec passed with two VoxCPM2 playback-start and completion events.
+- files_changed: ai-backend/app/models/tts_f5.py, ai-backend/app/models/tts_voxcpm2.py, ai-backend/tests/test_tts_registry.py, ai-backend/tests/test_tts_voxcpm2.py, web-ui/server/app/storage/session.py, web-ui/server/tests/test_storage_session.py, web-ui/server/tests/test_phase1_acceptance.py, web-ui/client/tests/e2e/live-call.spec.ts

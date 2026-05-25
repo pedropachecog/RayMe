@@ -1,0 +1,134 @@
+{
+  "ai_base_url": "configured-ai-backend",
+  "generated_at": "2026-05-25T18:27:29.720560Z",
+  "phase": "08",
+  "runtime": {
+    "engine_order": [
+      "f5",
+      "voxcpm2"
+    ],
+    "measured_warm_samples_per_engine": 1,
+    "reference_audio_source": "phase00-short-ref-fixture",
+    "warmup_samples_per_engine": 1
+  },
+  "samples": [
+    {
+      "ai_audio_started_event": {
+        "audio": {
+          "duration_ms": 4576,
+          "peak": 9608.0,
+          "rms": 830.997802734375,
+          "samples": 219648
+        },
+        "engine_id": "f5",
+        "session_id": "phase08-f5-9cb757a006d9469f9efc",
+        "tts_playback": {
+          "ai_audio_started_ms": 1024.6,
+          "chunk_count_at_start": 1,
+          "fallback_used": false,
+          "first_chunk_enqueued_ms": 1024.6,
+          "first_chunk_generated_ms": null,
+          "inter_chunk_gaps_ms": [],
+          "streaming_used": false,
+          "whole_wav_fallback_used": false
+        },
+        "turn_id": "turn-029c2b39a80f43e1",
+        "type": "ai_audio_started",
+        "voice_id": "phase08-f5-voice"
+      },
+      "engine": "f5",
+      "http_elapsed_ms": 8640.1,
+      "sample_index": 1,
+      "session_id": "phase08-f5-9cb757a006d9469f9efc",
+      "tts_playback_final": {
+        "chunk_count": 1,
+        "fallback_used": false,
+        "inter_chunk_gaps_ms": [],
+        "streaming_used": false,
+        "total_generation_ms": 1017.4,
+        "total_playback_ms": 4826.0,
+        "whole_wav_fallback_used": false
+      },
+      "turn_id": "turn-029c2b39a80f43e1",
+      "warm_call_ttfa_ms": 1024.6
+    },
+    {
+      "ai_audio_started_event": {
+        "audio": {
+          "duration_ms": 160,
+          "peak": 554.0,
+          "rms": 47.212379455566406,
+          "samples": 7680
+        },
+        "engine_id": "voxcpm2",
+        "session_id": "phase08-voxcpm2-537bee778401450c9978",
+        "tts_playback": {
+          "ai_audio_started_ms": 1305.7,
+          "chunk_count_at_start": 5,
+          "fallback_used": false,
+          "first_chunk_enqueued_ms": 1305.7,
+          "first_chunk_generated_ms": 618.5,
+          "inter_chunk_gaps_ms": [
+            146.0,
+            164.8,
+            166.9,
+            169.5
+          ],
+          "startup_buffer_max_wait_ms": 1250.0,
+          "startup_buffer_target_ms": 750.0,
+          "startup_buffer_wait_ms": 649.6,
+          "startup_buffered_audio_ms": 800.0,
+          "startup_buffered_chunks": 5,
+          "streaming_used": true,
+          "whole_wav_fallback_used": false
+        },
+        "turn_id": "turn-af34790085294a31",
+        "type": "ai_audio_started",
+        "voice_id": "phase08-voxcpm2-voice"
+      },
+      "engine": "voxcpm2",
+      "http_elapsed_ms": 9033.7,
+      "sample_index": 1,
+      "session_id": "phase08-voxcpm2-537bee778401450c9978",
+      "tts_playback_final": {
+        "chunk_count": 17,
+        "fallback_used": false,
+        "generated_audio_ms": 2720.0,
+        "inter_chunk_gaps_ms": [
+          146.0,
+          164.8,
+          166.9,
+          169.5,
+          153.5,
+          165.2,
+          183.4,
+          160.3,
+          162.7,
+          162.6,
+          158.0,
+          164.4,
+          163.2,
+          161.3,
+          166.2,
+          156.4
+        ],
+        "realtime_generation_ratio": 0.833,
+        "streaming_used": true,
+        "total_generation_ms": 3263.4,
+        "total_playback_ms": 2970.0,
+        "under_realtime_generation": true,
+        "whole_wav_fallback_used": false
+      },
+      "turn_id": "turn-af34790085294a31",
+      "warm_call_ttfa_ms": 1305.7
+    }
+  ],
+  "schema_version": 1,
+  "summary": {
+    "f5_warm_call_ttfa_ms": 1024.6,
+    "voxcpm2_beats_f5": false,
+    "voxcpm2_warm_call_ttfa_ms": 1305.7,
+    "warm_sample_count": 1
+  },
+  "web_base_url": "configured-web-ui"
+}
