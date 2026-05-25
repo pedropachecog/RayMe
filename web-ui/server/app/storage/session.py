@@ -43,7 +43,7 @@ def _configure_sqlite_pragmas(engine: AsyncEngine) -> None:
 def create_engine(database_url: str | None = None) -> AsyncEngine:
     url = database_url or os.environ.get("RAYME_DATABASE_URL", DEFAULT_DATABASE_URL)
     _ensure_sqlite_parent(url)
-    engine = create_async_engine(url)
+    engine = create_async_engine(url, pool_pre_ping=True)
     if make_url(url).get_backend_name() == "sqlite":
         _configure_sqlite_pragmas(engine)
     return engine

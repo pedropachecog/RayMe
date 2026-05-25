@@ -175,6 +175,7 @@ def test_phase1_import_chat_actions_reload_and_continue(
             base_url="http://server-llm.local/v1",
             model="server-model",
             api_key="server-secret",
+            disable_thinking=True,
         )
         for request in scripted_client.requests
     )
