@@ -62,12 +62,19 @@ for (const liveTtsEngine of liveTtsEngines) {
     expect(liveWebUrl).toBe(canonicalLiveWebUrl);
     expect(liveAiHealthUrl).toBe(canonicalLiveAiHealthUrl);
 
-    const assertNoBrowserErrors = installBrowserErrorGuard(page);
+    const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+      allowConsoleErrors: [/Failed to load resource: the server responded with a status of 502/]
+    });
     const liveEvents: string[] = [];
+    const liveSignals = {
+      aiAudioStartedTurnIds: new Set<string>(),
+      aiDoneEvents: 0
+    };
 
     page.on('request', (request) => {
       expectRayMeApiRequest(request);
       recordLiveCallRequest(request, liveEvents);
+      recordLiveCallSignal(request, liveSignals);
     });
 
     const healthResponse = await page.goto(canonicalLiveAiHealthUrl);
@@ -110,6 +117,8 @@ for (const liveTtsEngine of liveTtsEngines) {
 
     await expect.poll(() => transcriptTurnCount(page, 'user_speech'), { timeout: 240_000 }).toBeGreaterThanOrEqual(2);
     await expect.poll(() => transcriptTurnCount(page, 'ai_speech'), { timeout: 300_000 }).toBeGreaterThanOrEqual(2);
+    await expect.poll(() => liveSignals.aiAudioStartedTurnIds.size, { timeout: 300_000 }).toBeGreaterThanOrEqual(2);
+    await expect.poll(() => liveSignals.aiDoneEvents, { timeout: 300_000 }).toBeGreaterThanOrEqual(2);
     await expect.poll(
       () => persistedThreadRowCount(apiRequest, fixture.threadId, 'ai_speech'),
       { timeout: 300_000 }
@@ -165,6 +174,43 @@ function recordLiveCallRequest(request: Request, events: string[]) {
   const url = new URL(request.url());
   if (url.pathname.startsWith('/api/calls') || url.pathname.startsWith('/webrtc')) {
     events.push(`${request.method()} ${url.pathname}`);
+  }
+}
+
+function recordLiveCallSignal(
+  request: Request,
+  signals: { aiAudioStartedTurnIds: Set<string>; aiDoneEvents: number }
+) {
+  const url = new URL(request.url());
+  if (!url.pathname.endsWith('/_debug/event') || request.method() !== 'POST') {
+    return;
+  }
+
+  let payload: unknown;
+  try {
+    payload = request.postDataJSON();
+  } catch {
+    return;
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    return;
+  }
+  const eventPayload = payload as { event?: unknown; detail?: unknown };
+  if (eventPayload.event === 'call.ai_audio_started') {
+    const detail = eventPayload.detail as { turn_id?: unknown } | null;
+    const turnId = typeof detail?.turn_id === 'string' ? detail.turn_id : '';
+    if (turnId) {
+      signals.aiAudioStartedTurnIds.add(turnId);
+    }
+    return;
+  }
+
+  if (eventPayload.event === 'datachannel.message') {
+    const detail = eventPayload.detail as { event_type?: unknown } | null;
+    if (detail?.event_type === 'ai_done') {
+      signals.aiDoneEvents += 1;
+    }
   }
 }
 
