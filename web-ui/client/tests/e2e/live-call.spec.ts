@@ -110,6 +110,10 @@ for (const liveTtsEngine of liveTtsEngines) {
 
     await expect.poll(() => transcriptTurnCount(page, 'user_speech'), { timeout: 240_000 }).toBeGreaterThanOrEqual(2);
     await expect.poll(() => transcriptTurnCount(page, 'ai_speech'), { timeout: 300_000 }).toBeGreaterThanOrEqual(2);
+    await expect.poll(
+      () => persistedThreadRowCount(apiRequest, fixture.threadId, 'ai_speech'),
+      { timeout: 300_000 }
+    ).toBeGreaterThanOrEqual(2);
 
     if (liveStabilityMs > 0) {
       const beforeUserTurns = await transcriptTurnCount(page, 'user_speech');
@@ -256,6 +260,16 @@ async function transcriptTurnCount(page: Page, type: string) {
 
 async function threadRowCount(page: Page, kind: string) {
   return page.locator(`[data-message-kind="${kind}"]`).count();
+}
+
+async function persistedThreadRowCount(apiRequest: APIRequestContext, threadId: string, kind: string) {
+  const response = await apiRequest.get(`${canonicalLiveWebUrl}/api/threads/${encodeURIComponent(threadId)}`);
+  if (!response.ok()) {
+    return 0;
+  }
+  const thread = await response.json();
+  const messages = Array.isArray(thread.messages) ? thread.messages : [];
+  return messages.filter((message: { message_kind?: string }) => message.message_kind === kind).length;
 }
 
 function escapeRegExp(value: string) {
