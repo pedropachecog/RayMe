@@ -286,6 +286,36 @@ web-ui\server\.venv\Scripts\python.exe web-ui\server\scripts\run_dev_https.py --
 "@
 Set-Content -Path "C:\Users\pmpg\rayme\start-web-ui.cmd" -Value $webLauncher -Encoding ASCII
 
+function Write-RayMeDesktopShortcut {
+  $launcherScript = Join-Path $repo "scripts\start-rayme-omen.ps1"
+  if (-not (Test-Path $launcherScript)) {
+    throw "Desktop launcher target missing: $launcherScript"
+  }
+
+  $desktopDir = [Environment]::GetFolderPath([Environment+SpecialFolder]::DesktopDirectory)
+  if ([string]::IsNullOrWhiteSpace($desktopDir)) {
+    throw "Could not resolve the current Windows Desktop directory"
+  }
+  if (-not (Test-Path $desktopDir)) {
+    New-Item -ItemType Directory -Path $desktopDir | Out-Null
+  }
+
+  $shortcutPath = Join-Path $desktopDir "Run RayMe.lnk"
+  $powershellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+  $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+  $shortcut.TargetPath = $powershellPath
+  $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$launcherScript`""
+  $shortcut.WorkingDirectory = $repo
+  $shortcut.Description = "Start RayMe scheduled tasks and open the LAN Web UI"
+  $shortcut.IconLocation = "$env:SystemRoot\System32\shell32.dll,220"
+  $shortcut.WindowStyle = 7
+  $shortcut.Save()
+  Write-Host "Desktop launcher: $shortcutPath"
+}
+
+Write-Host "== Writing Desktop launcher"
+Write-RayMeDesktopShortcut
+
 Write-Host "== Building web client"
 Set-Location "$repo\web-ui\client"
 npm run build
