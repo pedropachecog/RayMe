@@ -269,7 +269,7 @@ $aiLauncher = @"
 @echo off
 cd /d C:\Users\pmpg\rayme\RayMe
 set "PATH=$cudaRuntimeBin;%PATH%"
-ai-backend\.venv\Scripts\python.exe ai-backend\scripts\run_https.py --host 192.168.1.199 --port 9443 --cert C:\Users\pmpg\rayme\phase1-tls\rayme.local+1.pem --key C:\Users\pmpg\rayme\phase1-tls\rayme.local+1-key.pem >> C:\Users\pmpg\rayme\logs\ai-backend.run.log 2>>&1
+ai-backend\.venv\Scripts\pythonw.exe ai-backend\scripts\run_https.py --host 192.168.1.199 --port 9443 --cert C:\Users\pmpg\rayme\phase1-tls\rayme.local+1.pem --key C:\Users\pmpg\rayme\phase1-tls\rayme.local+1-key.pem >> C:\Users\pmpg\rayme\logs\ai-backend.run.log 2>>&1
 "@
 Set-Content -Path "C:\Users\pmpg\rayme\start-ai-backend.cmd" -Value $aiLauncher -Encoding ASCII
 
@@ -282,7 +282,7 @@ set "RAYME_WEB_PUBLIC_URL=https://192.168.1.199:8443"
 set "RAYME_AI_BACKEND_BASE_URL=https://192.168.1.199:9443"
 set "RAYME_DATABASE_URL=sqlite+aiosqlite:///C:/Users/pmpg/rayme/RayMe/web-ui/server/data/rayme.sqlite3"
 set "RAYME_ALLOWED_ORIGINS=https://192.168.1.199:8443,https://rayme.local:8443"
-web-ui\server\.venv\Scripts\python.exe web-ui\server\scripts\run_dev_https.py --host 192.168.1.199 --port 8443 --cert C:\Users\pmpg\rayme\phase1-tls\rayme.local+1.pem --key C:\Users\pmpg\rayme\phase1-tls\rayme.local+1-key.pem >> C:\Users\pmpg\rayme\logs\web-ui.run.log 2>>&1
+web-ui\server\.venv\Scripts\pythonw.exe web-ui\server\scripts\run_dev_https.py --host 192.168.1.199 --port 8443 --cert C:\Users\pmpg\rayme\phase1-tls\rayme.local+1.pem --key C:\Users\pmpg\rayme\phase1-tls\rayme.local+1-key.pem >> C:\Users\pmpg\rayme\logs\web-ui.run.log 2>>&1
 "@
 Set-Content -Path "C:\Users\pmpg\rayme\start-web-ui.cmd" -Value $webLauncher -Encoding ASCII
 
@@ -304,9 +304,9 @@ function Write-RayMeDesktopShortcut {
   $powershellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
   $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
   $shortcut.TargetPath = $powershellPath
-  $shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$launcherScript`""
+  $shortcut.Arguments = "-NoProfile -File `"$launcherScript`" -Quiet"
   $shortcut.WorkingDirectory = $repo
-  $shortcut.Description = "Start RayMe scheduled tasks and open the LAN Web UI"
+  $shortcut.Description = "Start RayMe services without opening a browser"
   $shortcut.IconLocation = "$env:SystemRoot\System32\shell32.dll,220"
   $shortcut.WindowStyle = 7
   $shortcut.Save()

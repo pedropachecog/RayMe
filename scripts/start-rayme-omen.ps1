@@ -3,13 +3,16 @@ param(
   [string]$WebUrl = "https://192.168.1.199:8443",
   [int]$AiPort = 9443,
   [int]$WebPort = 8443,
-  [int]$TimeoutSeconds = 180
+  [int]$TimeoutSeconds = 180,
+  [switch]$Quiet,
+  [switch]$OpenBrowser
 )
 
 $ErrorActionPreference = "Stop"
 
 function Write-RayMeStep {
   param([Parameter(Mandatory = $true)][string]$Message)
+  if ($Quiet) { return }
   Write-Host "== $Message"
 }
 
@@ -59,9 +62,9 @@ function Start-RayMeTaskIfNeeded {
   }
 
   Write-RayMeStep "Starting $TaskName"
-  & schtasks.exe /Run /TN $TaskName | Out-Host
+  $output = & schtasks.exe /Run /TN $TaskName 2>&1
   if ($LASTEXITCODE -ne 0) {
-    throw "Failed to start scheduled task '$TaskName'"
+    throw "Failed to start scheduled task '$TaskName'. $output"
   }
 
   Wait-RayMeListener -Port $Port -TimeoutSeconds $TimeoutSeconds
@@ -79,5 +82,9 @@ Assert-RayMeScheduledTask -TaskName "RayMePhase1Web"
 Start-RayMeTaskIfNeeded -TaskName "RayMePhase1AI" -Port $AiPort
 Start-RayMeTaskIfNeeded -TaskName "RayMePhase1Web" -Port $WebPort
 
-Write-RayMeStep "Opening $WebUrl"
-Start-Process $WebUrl
+if ($OpenBrowser) {
+  Write-RayMeStep "Opening $WebUrl"
+  Start-Process $WebUrl
+} else {
+  Write-RayMeStep "RayMe is ready at $WebUrl"
+}

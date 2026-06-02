@@ -157,9 +157,10 @@ file is written by `scripts/deploy-omen.sh`; do not hand-edit it on OMEN.
 
 `scripts/deploy-omen.sh` also creates or updates a Windows Desktop shortcut
 named `Run RayMe.lnk`. The shortcut targets the repo-owned
-`C:\Users\pmpg\rayme\RayMe\scripts\start-rayme-omen.ps1` script, which starts
-the existing `RayMePhase1AI` and `RayMePhase1Web` scheduled tasks when their
-ports are not already listening, then opens `https://192.168.1.199:8443`. This
+`C:\Users\pmpg\rayme\RayMe\scripts\start-rayme-omen.ps1` script, which quietly
+starts the existing `RayMePhase1AI` and `RayMePhase1Web` scheduled tasks when
+their ports are not already listening. It does not open a browser
+automatically; after startup, open `https://192.168.1.199:8443` manually. This
 is a convenience launcher only; deployment, scheduled-task definitions, and the
 canonical `.cmd` launchers remain owned by `scripts/deploy-omen.sh`.
 
