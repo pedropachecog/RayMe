@@ -7,7 +7,8 @@ executing, deploying, or asking the user to test anything.
 
 Read these files first, in this order:
 
-1. `AGENTS.md` - includes the AIbert Communication Contract and repo rules.
+1. `AGENTS.md` - includes the AIbert Communication Contract, direct-voice rule,
+   and repo rules.
 2. `.planning/USER-PROFILE.md` - durable user/persona preferences, if present.
 3. `.planning/PROJECT.md` - product goal and non-negotiable constraints.
 4. `.planning/STATE.md` - current phase, decisions, and active policies.
