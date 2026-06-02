@@ -7,15 +7,17 @@ executing, deploying, or asking the user to test anything.
 
 Read these files first, in this order:
 
-1. `.planning/PROJECT.md` - product goal and non-negotiable constraints.
-2. `.planning/STATE.md` - current phase, decisions, and active policies.
-3. `.planning/OPERATING-NOTES.md` - operational rules for handoff, OMEN, GPU,
+1. `AGENTS.md` - includes the AIbert Communication Contract and repo rules.
+2. `.planning/USER-PROFILE.md` - durable user/persona preferences, if present.
+3. `.planning/PROJECT.md` - product goal and non-negotiable constraints.
+4. `.planning/STATE.md` - current phase, decisions, and active policies.
+5. `.planning/OPERATING-NOTES.md` - operational rules for handoff, OMEN, GPU,
    Android, Playwright, and cleanup.
-4. `.planning/LEARNINGS.md` - repeated mistakes, false assumptions, and
+6. `.planning/LEARNINGS.md` - repeated mistakes, false assumptions, and
    recurrence guards.
-5. `.planning/LIVE-CALL-INVARIANTS.md` - non-negotiable live-call and GSD
+7. `.planning/LIVE-CALL-INVARIANTS.md` - non-negotiable live-call and GSD
    incident-repair rules.
-6. The active phase `PLAN.md`/`SUMMARY.md` files relevant to the request.
+8. The active phase `PLAN.md`/`SUMMARY.md` files relevant to the request.
 
 Do not rely on conversational memory for any of those points after context has
 been cleared.

@@ -99,6 +99,35 @@ Before telling the user a workflow is ready, report the exact evidence:
 If that evidence does not exist yet, keep working instead of asking the user to
 find the next failure.
 
+## 2026-06-02: Invisible RayMe Launcher Was Not Debuggable UX
+
+### What Went Wrong
+
+- The OMEN Desktop launcher was changed from a suspicious-looking startup flow
+  into a quiet background flow.
+- That removed blank command prompts and browser auto-open, but it also removed
+  visible running state, visible logs, and an obvious stop mechanism.
+- The user could not tell whether RayMe was running or inspect startup failures.
+
+### False Assumptions
+
+- Quiet/minimized background execution was treated as better UX for a local
+  development app.
+- Log files and scheduled-task state were treated as sufficient debugging
+  affordances even though the user needed console-visible output.
+- Technical neatness was prioritized over the user's actual control loop:
+  start it, watch logs, use it, close the window to stop it.
+
+### Guards Added
+
+- `scripts/start-rayme-omen.ps1` is now a foreground RayMe console launcher.
+- The Desktop shortcut created by `scripts/deploy-omen.sh` opens that console
+  normally, does not auto-open the browser, and does not use `-Quiet`.
+- The console starts AI and Web as child processes, prefixes logs as `[AI]` and
+  `[WEB]`, prints the URL, and stops children when the console closes.
+- Local/dev RayMe launchers must show visible running state, logs, and a visible
+  stop mechanism unless the user explicitly asks for daemon/background mode.
+
 ## 2026-05-15: VoxCPM2 First-Audio Evidence Hid Choppy Live Playback, Then Full-Stream Buffering Violated The Phone-Call Invariant
 
 ### What Went Wrong

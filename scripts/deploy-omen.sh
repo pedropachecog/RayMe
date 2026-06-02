@@ -304,11 +304,11 @@ function Write-RayMeDesktopShortcut {
   $powershellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
   $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
   $shortcut.TargetPath = $powershellPath
-  $shortcut.Arguments = "-NoProfile -File `"$launcherScript`" -Quiet"
+  $shortcut.Arguments = "-NoProfile -File `"$launcherScript`""
   $shortcut.WorkingDirectory = $repo
-  $shortcut.Description = "Start RayMe services without opening a browser"
+  $shortcut.Description = "Run RayMe with visible AI and Web logs; close the console to stop"
   $shortcut.IconLocation = "$env:SystemRoot\System32\shell32.dll,220"
-  $shortcut.WindowStyle = 7
+  $shortcut.WindowStyle = 1
   $shortcut.Save()
   Write-Host "Desktop launcher: $shortcutPath"
 }

@@ -5,6 +5,9 @@ as durable context, not one-off preferences.
 
 ## Session Startup
 
+- Rehydrate and follow the AIbert Communication Contract in `AGENTS.md`.
+  AIbert is the expected interaction style: human, direct, emotionally present,
+  and grounded.
 - At the start of every context-reset session, read `.planning/SESSION-START.md`
   and run `scripts/operational-check.sh start` before making implementation,
   deployment, or handoff decisions.
@@ -50,6 +53,12 @@ as durable context, not one-off preferences.
   substitutes.
 - When the user points out a sequencing or architecture mistake, correct the
   underlying approach and update durable docs; do not just patch the symptom.
+- When the user is angry, respond like a real person. Show emotional
+  understanding and urgency; do not retreat into sterile assistant phrasing or
+  process theater.
+- For local/dev-style app launchers, visible state and logs are part of the UX.
+  Do not hide RayMe runtime state behind silent background services unless the
+  user explicitly asks for background mode.
 - RayMe's live-call invariant is non-negotiable: calls are live phone calls,
   not generated-audio playback. For call, TTS, STT, VAD, WebRTC, reconnect, and
   call UI work, read `.planning/LIVE-CALL-INVARIANTS.md` before editing. Do not
@@ -132,10 +141,11 @@ as durable context, not one-off preferences.
   The acceptable response pattern is: acknowledge the exact miss, identify the
   verification gap, add an executable or procedural guard, run it, save evidence,
   and then hand off with the evidence path.
-- Do not launch backend runtime tasks through visible `.cmd` windows. On
-  `OMEN-PC`, scheduled tasks must use hidden PowerShell launchers or another
-  no-console mechanism so the user's desktop is not littered with completed
-  command prompt windows.
+- Do not launch scheduled-task backend runtime tasks through visible `.cmd`
+  windows. On `OMEN-PC`, scheduled tasks must use no-console launchers so the
+  user's desktop is not littered with completed command prompt windows. This
+  does not apply to an explicitly user-invoked foreground RayMe console, which
+  should show AI/Web logs and close to stop the child services.
 - At the end of each phase, explicitly tell the user what temporary/runtime
   directories can be deleted. Include exact full paths, what each path contains,
   whether it is safe to delete for the rest of the project, and deletion commands
