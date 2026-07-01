@@ -79,6 +79,23 @@ if (-not (Test-Path "$cudaRuntimeBin\cublas64_12.dll")) {
 }
 
 function Stop-RayMePortOwners {
+  Write-Host "== Stopping existing RayMe service processes"
+  $repoPattern = [regex]::Escape($repo)
+  $raymeProcesses = Get-CimInstance Win32_Process |
+    Where-Object {
+      $_.CommandLine -and
+      $_.CommandLine -match $repoPattern -and
+      (
+        $_.CommandLine -match "ai-backend\\scripts\\run_https\.py" -or
+        $_.CommandLine -match "web-ui\\server\\scripts\\run_dev_https\.py"
+      )
+    }
+  if ($raymeProcesses) {
+    $raymeProcesses | Select-Object ProcessId,Name,CommandLine | Format-Table -AutoSize
+    $raymeProcesses | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }
+    Start-Sleep -Seconds 3
+  }
+
   Write-Host "== Stopping existing port owners"
   $ports = Get-NetTCPConnection -State Listen -LocalPort 8443,9443 -ErrorAction SilentlyContinue
   if ($ports) {
