@@ -359,9 +359,10 @@ schtasks /Create /TN RayMePhase1Web /TR "C:\Users\pmpg\rayme\start-web-ui.cmd" /
 
 Write-Host "== Verifying interactive OMEN session"
 $queryUserOutput = & query user 2>$null
-$queryUserExit = $LASTEXITCODE
-if ($queryUserExit -ne 0 -or -not ($queryUserOutput -match "^\s*>?\s*pmpg\s")) {
-  throw "No interactive Windows session for pmpg. RayMePhase1AI/Web are interactive-only scheduled tasks; log into OMEN-PC as pmpg, then rerun scripts/deploy-omen.sh."
+$activePmpgSession = $queryUserOutput -match "^\s*>?\s*pmpg\s+.*\s+Active\s+"
+if (-not $activePmpgSession) {
+  $sessionText = if ($queryUserOutput) { $queryUserOutput -join "; " } else { "<none>" }
+  throw "No active Windows desktop session for pmpg. RayMePhase1AI/Web are interactive-only scheduled tasks; connect to OMEN-PC as pmpg and keep the session active, then rerun scripts/deploy-omen.sh. query user: $sessionText"
 }
 
 Write-Host "== Starting scheduled tasks"
