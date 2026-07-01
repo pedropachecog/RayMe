@@ -358,7 +358,7 @@ schtasks /Create /TN RayMePhase1AI /TR "C:\Users\pmpg\rayme\start-ai-backend.cmd
 schtasks /Create /TN RayMePhase1Web /TR "C:\Users\pmpg\rayme\start-web-ui.cmd" /SC ONCE /ST 23:59 /F | Out-Host
 
 Write-Host "== Starting scheduled tasks"
-schtasks /Run /TN RayMePhase1AI | Out-Host
+schtasks /Run /TN RayMePhase1AI /I | Out-Host
 
 function Wait-RayMeListener {
   param(
@@ -381,7 +381,7 @@ function Wait-RayMeListener {
 Write-Host "== Waiting for AI listener"
 Wait-RayMeListener -Port 9443 | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize
 
-schtasks /Run /TN RayMePhase1Web | Out-Host
+schtasks /Run /TN RayMePhase1Web /I | Out-Host
 
 Write-Host "== Waiting for web listener"
 Wait-RayMeListener -Port 8443 | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize
