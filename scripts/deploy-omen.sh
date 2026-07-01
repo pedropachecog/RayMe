@@ -56,6 +56,17 @@ if ($dirty) {
 }
 git fetch origin $branch
 git pull --ff-only origin $branch
+if ($LASTEXITCODE -ne 0) {
+  $preResetHead = (git rev-parse HEAD).Trim()
+  $targetHead = (git rev-parse "origin/$branch").Trim()
+  $backupBranch = "backup/omen-pre-reset-$($preResetHead.Substring(0, 12))-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+  Write-Host "== Fast-forward failed; preserving clean OMEN checkout at $backupBranch"
+  git branch $backupBranch $preResetHead
+  if ($LASTEXITCODE -ne 0) { throw "Failed to create backup branch $backupBranch before OMEN reset" }
+  Write-Host "== Resetting clean OMEN checkout to origin/$branch ($targetHead)"
+  git reset --hard "origin/$branch"
+  if ($LASTEXITCODE -ne 0) { throw "Failed to reset clean OMEN checkout to origin/$branch" }
+}
 $actualHead = (git rev-parse HEAD).Trim()
 Write-Host "== OMEN commit $actualHead"
 if ($expectedHead -and $actualHead -ne $expectedHead) {
