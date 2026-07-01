@@ -357,6 +357,13 @@ schtasks /Delete /TN RayMePhase1Web /F 2>&1 | Out-Null
 schtasks /Create /TN RayMePhase1AI /TR "C:\Users\pmpg\rayme\start-ai-backend.cmd" /SC ONCE /ST 23:59 /F | Out-Host
 schtasks /Create /TN RayMePhase1Web /TR "C:\Users\pmpg\rayme\start-web-ui.cmd" /SC ONCE /ST 23:59 /F | Out-Host
 
+Write-Host "== Verifying interactive OMEN session"
+$queryUserOutput = & query user 2>$null
+$queryUserExit = $LASTEXITCODE
+if ($queryUserExit -ne 0 -or -not ($queryUserOutput -match "^\s*>?\s*pmpg\s")) {
+  throw "No interactive Windows session for pmpg. RayMePhase1AI/Web are interactive-only scheduled tasks; log into OMEN-PC as pmpg, then rerun scripts/deploy-omen.sh."
+}
+
 Write-Host "== Starting scheduled tasks"
 schtasks /Run /TN RayMePhase1AI /I | Out-Host
 
