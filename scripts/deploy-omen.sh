@@ -354,19 +354,28 @@ Stop-RayMePortOwners
 Write-Host "== Asserting canonical scheduled tasks"
 schtasks /Delete /TN RayMePhase1AI /F 2>&1 | Out-Null
 schtasks /Delete /TN RayMePhase1Web /F 2>&1 | Out-Null
-schtasks /Create /TN RayMePhase1AI /TR "C:\Users\pmpg\rayme\start-ai-backend.cmd" /SC ONCE /ST 23:59 /F | Out-Host
-schtasks /Create /TN RayMePhase1Web /TR "C:\Users\pmpg\rayme\start-web-ui.cmd" /SC ONCE /ST 23:59 /F | Out-Host
 
-Write-Host "== Verifying interactive OMEN session"
-$queryUserOutput = & query user 2>$null
-$activePmpgSession = $queryUserOutput -match "^\s*>?\s*pmpg\s+.*\s+Active\s+"
-if (-not $activePmpgSession) {
-  $sessionText = if ($queryUserOutput) { $queryUserOutput -join "; " } else { "<none>" }
-  throw "No active Windows desktop session for pmpg. RayMePhase1AI/Web are interactive-only scheduled tasks; connect to OMEN-PC as pmpg and keep the session active, then rerun scripts/deploy-omen.sh. query user: $sessionText"
+function Register-RayMeTask {
+  param(
+    [Parameter(Mandatory = $true)][string]$TaskName,
+    [Parameter(Mandatory = $true)][string]$Launcher
+  )
+
+  $action = New-ScheduledTaskAction -Execute $Launcher
+  $trigger = New-ScheduledTaskTrigger -Once -At ((Get-Date).AddHours(6))
+  $principal = New-ScheduledTaskPrincipal -UserId "pmpg" -LogonType S4U -RunLevel Limited
+  $settings = New-ScheduledTaskSettingsSet `
+    -AllowStartIfOnBatteries `
+    -DontStopIfGoingOnBatteries `
+    -MultipleInstances IgnoreNew `
+    -ExecutionTimeLimit (New-TimeSpan -Hours 72)
+  Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Host
 }
+Register-RayMeTask -TaskName RayMePhase1AI -Launcher "C:\Users\pmpg\rayme\start-ai-backend.cmd"
+Register-RayMeTask -TaskName RayMePhase1Web -Launcher "C:\Users\pmpg\rayme\start-web-ui.cmd"
 
 Write-Host "== Starting scheduled tasks"
-schtasks /Run /TN RayMePhase1AI /I | Out-Host
+Start-ScheduledTask -TaskName RayMePhase1AI
 
 function Wait-RayMeListener {
   param(
@@ -389,7 +398,7 @@ function Wait-RayMeListener {
 Write-Host "== Waiting for AI listener"
 Wait-RayMeListener -Port 9443 | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize
 
-schtasks /Run /TN RayMePhase1Web /I | Out-Host
+Start-ScheduledTask -TaskName RayMePhase1Web
 
 Write-Host "== Waiting for web listener"
 Wait-RayMeListener -Port 8443 | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize
