@@ -1,8 +1,8 @@
 {
   "phase": "03.1-call-mvp-stabilization-and-regression-fixes",
-  "commit": "85bbacc919c83d1b486883e616156b2d8778c3f5",
-  "deployed_commit": "85bbacc919c83d1b486883e616156b2d8778c3f5",
-  "generated_at": "2026-05-12T16:06:10Z",
+  "commit": "cd48d620a1ce5bcc0c5269a8b14217ecbcd153f1",
+  "deployed_commit": "cd48d620a1ce5bcc0c5269a8b14217ecbcd153f1",
+  "generated_at": "2026-07-02T14:00:22Z",
   "web_url": "https://192.168.1.199:8443",
   "ai_health_url": "https://192.168.1.199:9443/health",
   "engines": {
