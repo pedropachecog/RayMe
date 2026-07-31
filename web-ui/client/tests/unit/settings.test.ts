@@ -10,6 +10,8 @@ import {
 import settingsApiSource from '../../src/lib/api/settings.ts?raw';
 import typesSource from '../../src/lib/api/types.ts?raw';
 import endpointPanelSource from '../../src/lib/components/EndpointSettingsPanel.svelte?raw';
+import enginePickerSource from '../../src/lib/components/voice/TtsEnginePicker.svelte?raw';
+import voiceAssignmentSource from '../../src/lib/components/voice/VoiceAssignmentSelect.svelte?raw';
 import audioPanelSource from '../../src/lib/components/settings/AudioSettingsPanel.svelte?raw';
 import vadPanelSource from '../../src/lib/components/settings/VadSettingsPanel.svelte?raw';
 import settingsSource from '../../src/routes/settings/+page.svelte?raw';
@@ -32,7 +34,16 @@ const publicSettings = {
     stt_model: 'distil-large-v3',
     vad_ready: true,
     resident_tts_engine: 'f5',
-    available_engines: ['f5', 'xtts_v2', 'qwen3_0_6b'],
+    available_engines: [
+      'f5',
+      'xtts_v2',
+      {
+        id: 'qwen3_1_7b',
+        label: 'Qwen3-TTS 1.7B-Base',
+        available: true,
+        state: 'loading'
+      }
+    ],
     loading_engine: null,
     vram_used_mb: 2104,
     vram_headroom_mb: 9896
@@ -174,6 +185,39 @@ describe('Settings route', () => {
       expect(settingsSource).not.toContain(forbidden);
       expect(endpointPanelSource).not.toContain(forbidden);
     }
+  });
+
+  it('types and renders canonical Qwen model readiness without exposing prompt internals', () => {
+    expect(typesSource).toContain("| 'qwen3_1_7b'");
+    expect(typesSource).not.toContain("| 'qwen3_0_6b'");
+    for (const readinessType of [
+      'TtsModelReadinessState',
+      'TtsPromptReadinessState',
+      'TtsModelReadiness',
+      'TtsPromptReadiness',
+      'updated_at',
+      'error_code'
+    ]) {
+      expect(typesSource).toContain(readinessType);
+    }
+
+    for (const copy of [
+      'Qwen3-TTS 1.7B-Base',
+      'Loading Qwen3-TTS 1.7B…',
+      'Qwen3-TTS 1.7B loaded',
+      'Qwen3-TTS 1.7B unavailable'
+    ]) {
+      expect(`${endpointPanelSource}\n${enginePickerSource}\n${voiceAssignmentSource}`).toContain(copy);
+    }
+
+    expect(endpointPanelSource).toContain('role="status"');
+    expect(endpointPanelSource).toContain('role="alert"');
+    expect(endpointPanelSource).toContain('resident_tts_engine');
+    expect(endpointPanelSource).toContain('loading_engine');
+    expect(endpointPanelSource).toContain('available_engines');
+    expect(endpointPanelSource).not.toMatch(/voice_key|cache key|model path|provider/i);
+    expect(enginePickerSource).not.toContain('qwen3_0_6b');
+    expect(voiceAssignmentSource).not.toContain('qwen3_0_6b');
   });
 
   it('loads, saves, and tests endpoint settings through real API wrappers', async () => {
