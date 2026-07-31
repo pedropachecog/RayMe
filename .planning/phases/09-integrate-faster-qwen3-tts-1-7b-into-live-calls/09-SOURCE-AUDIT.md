@@ -47,9 +47,9 @@ All required source items are executable. Deferred CONTEXT items and COVERAGE op
 | RESEARCH | R-03 | End-to-end paced backpressure | 09-03, 09-11 | COVERED | Bridge plus track credit. |
 | RESEARCH | R-04 | Persist only normal terminal speech | 09-10 | COVERED | Database/event assertions. |
 | RESEARCH | R-05 | Saved identity migration/read normalization | 09-07 | COVERED | Alembic/idempotency. |
-| RESEARCH | R-06 | Young-package legitimacy | 09-RESEARCH, COVERAGE, 09-01 | COVERED | Prior human approval resolved; exact automated metadata/tag/commit/lock checks. |
+| RESEARCH | R-06 | Young-package legitimacy | 09-RESEARCH, COVERAGE, 09-01 | COVERED | Prior human approval resolved; exact automated metadata, annotated-tag-object presence, peeled-commit identity, and lock checks. |
 | RESEARCH | R-07 | Visible readiness/hard-coded roster sweep | 09-08–09-09 | COVERED | Fast component plus Playwright. |
-| RESEARCH | R-08 | Canonical deployment/independent evidence | 09-04, 09-12–09-15 | COVERED | Early hard gate, self-test, final real E2E. |
+| RESEARCH | R-08 | Canonical deployment/independent evidence | 09-04, 09-12–09-15 | COVERED | Early push plus verified remote-SHA deploy hard gate, self-test, final real E2E. |
 | AI-SPEC | C-01–C-05 | Identity, reference integrity, streaming, timing, interruption | 09-01–09-15 | COVERED | Critical paths have local plus hardware evidence. |
 | AI-SPEC | C-06–C-07 | Message integrity/endings and longitudinal stability | 09-12–09-15 | COVERED | STT/EOS/50-turn/acoustics/speaker. |
 | AI-SPEC | H-01 | Clone likeness/naturalness/joins | 09-04, 09-11–09-15 | COVERED | Automated speaker/join readiness; integrated human listening remains explicitly pending. |

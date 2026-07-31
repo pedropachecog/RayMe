@@ -31,10 +31,10 @@ created: 2026-07-31
 
 | Plan | Wave | Requirement | Primary automated gate | Status |
 |---|---:|---|---|---|
-| 09-01 | 1 | REQ-22 | package-legitimacy/PyPI/tag/commit checks; `uv lock --check`; roster/health pytest | pending |
+| 09-01 | 1 | REQ-22 | package-legitimacy/PyPI plus annotated-tag-object and peeled-commit checks; `uv lock --check`; roster/health pytest | pending |
 | 09-02 | 2 | REQ-22/45 | `test_tts_qwen3.py` fake protocol/worker/adapter suite | pending |
 | 09-03 | 3 | REQ-22/45/46 | manager/WebRTC/CallSession slow stream/cancel plus VoxCPM2 regressions | pending |
-| 09-04 | 4 | REQ-22/45/46 | hash-bound sidecar self-test; `RAYME_OMEN_VERIFY_QWEN3_TRACER=1 scripts/deploy-omen.sh`; commit-matched tracer verifier | pending |
+| 09-04 | 4 | REQ-22/45/46 | hash-bound sidecar self-test; push plus verified remote-SHA gate before canonical deploy; commit-matched tracer verifier | pending |
 | 09-05 | 5 | REQ-22/45 | alignment/ceiling/protocol/cache/error pytest | pending |
 | 09-06 | 6 | REQ-22 | backend and server delete→invalidate/evict tests with unrelated-voice recovery | pending |
 | 09-07 | 5 | REQ-22/45 | migration/voice/call server pytest plus Alembic upgrade | pending |
