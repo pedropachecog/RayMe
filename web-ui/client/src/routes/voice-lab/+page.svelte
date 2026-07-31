@@ -22,6 +22,7 @@
     TtsPromptReadiness,
     VoiceAsset,
     VoiceMetadata,
+    VoicePreparationStatus,
     VoiceSummary,
     VoiceTestPlayPayload,
     VoxCpm2EngineSettings,
@@ -165,7 +166,13 @@
   let libraryLoading = true;
   let libraryError = '';
   let libraryStatus = '';
-  let testingVoiceId: string | null = null;
+  type VoiceLibraryOperation = 'idle' | 'preparing' | 'testing' | 'failed';
+  let preparationByVoiceId: Record<string, VoicePreparationStatus> = {};
+  let operationByVoiceId: Record<string, VoiceLibraryOperation> = {};
+  let operationErrorByVoiceId: Record<string, string> = {};
+  let lastTestPayloadByVoiceId: Record<string, VoiceTestPlayPayload> = {};
+  let preparationPollTokenByVoiceId: Record<string, number> = {};
+  let nextLibraryPreparationToken = 0;
   let testAudioByVoiceId: Record<string, string> = {};
   let renamingVoice: VoiceSummary | null = null;
   let deletingVoice: VoiceSummary | null = null;
@@ -195,6 +202,7 @@
 
   onDestroy(() => {
     preparationPollToken += 1;
+    preparationPollTokenByVoiceId = {};
   });
 
   async function loadEngineMetadata() {
@@ -444,28 +452,115 @@
 
   async function playLibraryVoice(voice: VoiceSummary, payload: VoiceTestPlayPayload) {
     pauseActiveAudio();
-    testingVoiceId = voice.voice_id;
+    const voiceId = voice.voice_id;
+    const qwenOperation = voice.default_engine === QWEN3_ENGINE_ID;
+    const normalizedPayload = {
+      ...payload,
+      text: payload.text.trim() || 'The line is open. This is the saved RayMe voice.'
+    };
+    lastTestPayloadByVoiceId = { ...lastTestPayloadByVoiceId, [voiceId]: normalizedPayload };
+    operationErrorByVoiceId = { ...operationErrorByVoiceId, [voiceId]: '' };
+    operationByVoiceId = {
+      ...operationByVoiceId,
+      [voiceId]: qwenOperation ? 'preparing' : 'testing'
+    };
     libraryStatus = '';
+    let pollToken = 0;
+    if (qwenOperation) {
+      preparationByVoiceId = {
+        ...preparationByVoiceId,
+        [voiceId]: {
+          model: { state: 'loading', engine_id: QWEN3_ENGINE_ID },
+          prompt: { state: 'prewarming' }
+        }
+      };
+      pollToken = ++nextLibraryPreparationToken;
+      preparationPollTokenByVoiceId = {
+        ...preparationPollTokenByVoiceId,
+        [voiceId]: pollToken
+      };
+      void monitorLibraryPreparation(voiceId, pollToken);
+    }
 
     try {
-      const result = await testPlayVoice(voice.voice_id, {
-        ...payload,
-        text: payload.text.trim() || 'The line is open. This is the saved RayMe voice.'
-      });
+      const result = await testPlayVoice(voiceId, normalizedPayload);
+      if (result.error || result.status === 'tts_failed') {
+        operationByVoiceId = { ...operationByVoiceId, [voiceId]: 'failed' };
+        operationErrorByVoiceId = {
+          ...operationErrorByVoiceId,
+          [voiceId]: qwenOperation
+            ? qwenFailureMessage(errorCodeFrom(result))
+            : 'RayMe could not test this voice. Try a different phrase or engine.'
+        };
+        return;
+      }
       const audioUrl = synthesisAudioUrl(result);
       if (audioUrl) {
-        testAudioByVoiceId = { ...testAudioByVoiceId, [voice.voice_id]: audioUrl };
+        testAudioByVoiceId = { ...testAudioByVoiceId, [voiceId]: audioUrl };
         activeAudio = new Audio(audioUrl);
-        void activeAudio.play().catch(() => {
-          libraryStatus = 'Test voice ready.';
-        });
+        void activeAudio.play().catch(() => undefined);
       }
-      libraryStatus = 'Test voice ready.';
+      if (qwenOperation) {
+        preparationByVoiceId = {
+          ...preparationByVoiceId,
+          [voiceId]: {
+            model: { state: 'resident', engine_id: QWEN3_ENGINE_ID },
+            prompt: { state: 'ready' }
+          }
+        };
+      }
+      operationByVoiceId = { ...operationByVoiceId, [voiceId]: 'idle' };
     } catch {
-      libraryError = 'RayMe could not test this voice. Try a different phrase or engine.';
+      operationByVoiceId = { ...operationByVoiceId, [voiceId]: 'failed' };
+      operationErrorByVoiceId = {
+        ...operationErrorByVoiceId,
+        [voiceId]: qwenOperation
+          ? qwenFailureMessage(preparationByVoiceId[voiceId]?.prompt.error_code)
+          : 'RayMe could not test this voice. Try a different phrase or engine.'
+      };
     } finally {
-      testingVoiceId = null;
+      if (pollToken && preparationPollTokenByVoiceId[voiceId] === pollToken) {
+        const { [voiceId]: _finished, ...remaining } = preparationPollTokenByVoiceId;
+        preparationPollTokenByVoiceId = remaining;
+      }
     }
+  }
+
+  async function monitorLibraryPreparation(voiceId: string, token: number) {
+    for (
+      let attempt = 0;
+      attempt < 480 && preparationPollTokenByVoiceId[voiceId] === token;
+      attempt += 1
+    ) {
+      try {
+        const preparation = await getVoicePreparationStatus();
+        if (preparationPollTokenByVoiceId[voiceId] !== token) return;
+        preparationByVoiceId = { ...preparationByVoiceId, [voiceId]: preparation };
+        if (preparation.prompt.state === 'ready') {
+          operationByVoiceId = { ...operationByVoiceId, [voiceId]: 'testing' };
+          return;
+        }
+        if (
+          preparation.model.state === 'failed' ||
+          preparation.model.state === 'unavailable' ||
+          preparation.prompt.state === 'failed'
+        ) {
+          operationByVoiceId = { ...operationByVoiceId, [voiceId]: 'failed' };
+          operationErrorByVoiceId = {
+            ...operationErrorByVoiceId,
+            [voiceId]: qwenFailureMessage(preparation.prompt.error_code)
+          };
+          return;
+        }
+      } catch {
+        // The row's test-play request remains authoritative during a transient status miss.
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    }
+  }
+
+  function retryLibraryPreparation(voice: VoiceSummary, payload: VoiceTestPlayPayload) {
+    void playLibraryVoice(voice, lastTestPayloadByVoiceId[voice.voice_id] ?? payload);
   }
 
   async function deleteLibraryVoice(voice: VoiceSummary) {
@@ -805,9 +900,12 @@
         {engines}
         loading={libraryLoading}
         errorMessage={libraryError}
-        {testingVoiceId}
+        {preparationByVoiceId}
+        {operationByVoiceId}
+        {operationErrorByVoiceId}
         testAudioByVoiceId={testAudioByVoiceId}
         onTestPlay={playLibraryVoice}
+        onRetryPreparation={retryLibraryPreparation}
         onRename={openRenameDialog}
         onDelete={deleteLibraryVoice}
       />

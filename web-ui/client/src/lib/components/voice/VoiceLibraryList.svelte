@@ -1,14 +1,24 @@
 <script lang="ts">
-  import type { TtsEngineMetadata, VoiceSummary, VoiceTestPlayPayload } from '$lib/api/types';
+  import type {
+    TtsEngineMetadata,
+    VoicePreparationStatus,
+    VoiceSummary,
+    VoiceTestPlayPayload
+  } from '$lib/api/types';
   import VoiceLibraryRow from '$lib/components/voice/VoiceLibraryRow.svelte';
+
+  type VoiceLibraryOperation = 'idle' | 'preparing' | 'testing' | 'failed';
 
   export let voices: VoiceSummary[] = [];
   export let engines: TtsEngineMetadata[] = [];
   export let loading = false;
   export let errorMessage = '';
-  export let testingVoiceId: string | null = null;
+  export let preparationByVoiceId: Record<string, VoicePreparationStatus> = {};
+  export let operationByVoiceId: Record<string, VoiceLibraryOperation> = {};
+  export let operationErrorByVoiceId: Record<string, string> = {};
   export let testAudioByVoiceId: Record<string, string> = {};
   export let onTestPlay: (voice: VoiceSummary, payload: VoiceTestPlayPayload) => void = () => {};
+  export let onRetryPreparation: (voice: VoiceSummary, payload: VoiceTestPlayPayload) => void = () => {};
   export let onRename: (voice: VoiceSummary) => void = () => {};
   export let onDelete: (voice: VoiceSummary) => void = () => {};
 
@@ -36,9 +46,13 @@
         <VoiceLibraryRow
           {voice}
           engineLabel={engineLabels.get(voice.default_engine) ?? voice.default_engine}
-          testing={testingVoiceId === voice.voice_id}
+          modelReadiness={preparationByVoiceId[voice.voice_id]?.model ?? { state: 'idle', engine_id: null }}
+          promptReadiness={preparationByVoiceId[voice.voice_id]?.prompt ?? { state: 'none' }}
+          operation={operationByVoiceId[voice.voice_id] ?? 'idle'}
+          operationError={operationErrorByVoiceId[voice.voice_id] ?? ''}
           testAudioUrl={testAudioByVoiceId[voice.voice_id] ?? null}
           {onTestPlay}
+          {onRetryPreparation}
           {onRename}
           {onDelete}
         />

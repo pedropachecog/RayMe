@@ -1,13 +1,24 @@
 <script lang="ts">
-  import { Pencil, Play, Trash2 } from 'lucide-svelte';
+  import { Pencil, Play, RefreshCw, Trash2 } from 'lucide-svelte';
 
-  import type { VoiceSummary, VoiceTestPlayPayload } from '$lib/api/types';
+  import type {
+    TtsModelReadiness,
+    TtsPromptReadiness,
+    VoiceSummary,
+    VoiceTestPlayPayload
+  } from '$lib/api/types';
+
+  type VoiceLibraryOperation = 'idle' | 'preparing' | 'testing' | 'failed';
 
   export let voice: VoiceSummary;
   export let engineLabel = '';
-  export let testing = false;
+  export let modelReadiness: TtsModelReadiness = { state: 'idle', engine_id: null };
+  export let promptReadiness: TtsPromptReadiness = { state: 'none' };
+  export let operation: VoiceLibraryOperation = 'idle';
+  export let operationError = '';
   export let testAudioUrl: string | null = null;
   export let onTestPlay: (voice: VoiceSummary, payload: VoiceTestPlayPayload) => void = () => {};
+  export let onRetryPreparation: (voice: VoiceSummary, payload: VoiceTestPlayPayload) => void = () => {};
   export let onRename: (voice: VoiceSummary) => void = () => {};
   export let onDelete: (voice: VoiceSummary) => void = () => {};
 
@@ -24,14 +35,41 @@
       : voice.unavailable_label || 'No assignments';
   $: updatedLabel = formatTimestamp(voice.updated_at ?? voice.created_at);
   $: createdLabel = formatTimestamp(voice.created_at);
+  $: isQwenVoice = voice.default_engine === 'qwen3_1_7b';
+  $: modelStatusCopy = modelReadinessCopy(modelReadiness);
+  $: promptStatusCopy = promptReadinessCopy(promptReadiness);
 
   function playVoice() {
-    onTestPlay(voice, {
+    onTestPlay(voice, testPayload());
+  }
+
+  function retryVoice() {
+    onRetryPreparation(voice, testPayload());
+  }
+
+  function testPayload(): VoiceTestPlayPayload {
+    return {
       text: testText.trim(),
       use_default_engine: useDefaultEngine,
       engine: useDefaultEngine ? null : voice.default_engine,
       speech_speed: speechSpeed
-    });
+    };
+  }
+
+  function modelReadinessCopy(readiness: TtsModelReadiness) {
+    if (readiness.state === 'loading') return 'Loading Qwen3-TTS 1.7B…';
+    if (readiness.state === 'resident') return 'Qwen3-TTS 1.7B loaded';
+    if (readiness.state === 'failed' || readiness.state === 'unavailable') {
+      return 'Qwen3-TTS 1.7B unavailable';
+    }
+    return 'Qwen3-TTS 1.7B not loaded';
+  }
+
+  function promptReadinessCopy(readiness: TtsPromptReadiness) {
+    if (readiness.state === 'prewarming') return 'Preparing saved voice…';
+    if (readiness.state === 'ready') return 'Saved voice ready';
+    if (readiness.state === 'failed') return 'Voice preparation failed';
+    return 'Voice not prepared';
   }
 
   function voiceSpeechSpeed(value: VoiceSummary) {
@@ -107,10 +145,40 @@
     />
   </label>
 
+  {#if isQwenVoice}
+    <div class="readiness" aria-label={`${voice.name} Qwen readiness`}>
+      <span>Model</span>
+      <strong>{modelStatusCopy}</strong>
+      <span>Saved voice</span>
+      <strong>{promptStatusCopy}</strong>
+    </div>
+  {/if}
+
   <div class="actions">
-    <button type="button" disabled={testing} on:click={playVoice}>
-      <Play size={16} strokeWidth={1.8} aria-hidden="true" />
-      <span>Test Voice</span>
+    <button
+      type="button"
+      disabled={operation === 'preparing' || operation === 'testing'}
+      on:click={operation === 'failed' && isQwenVoice ? retryVoice : playVoice}
+    >
+      {#if operation === 'preparing' || (operation === 'failed' && isQwenVoice)}
+        <RefreshCw
+          class={operation === 'preparing' ? 'preparing-icon' : undefined}
+          size={16}
+          strokeWidth={1.8}
+          aria-hidden="true"
+        />
+      {:else}
+        <Play size={16} strokeWidth={1.8} aria-hidden="true" />
+      {/if}
+      <span>
+        {operation === 'preparing'
+          ? 'Preparing voice…'
+          : operation === 'testing'
+            ? 'Testing voice…'
+            : operation === 'failed' && isQwenVoice
+              ? 'Retry Preparation'
+              : 'Test Voice'}
+      </span>
     </button>
     <button type="button" on:click={() => onRename(voice)}>
       <Pencil size={16} strokeWidth={1.8} aria-hidden="true" />
@@ -122,8 +190,15 @@
     </button>
   </div>
 
-  {#if testing}
-    <p class="row-status" role="status">Testing voice...</p>
+  {#if operation === 'preparing'}
+    <p class="row-status" role="status">Preparing saved voice…</p>
+  {:else if operation === 'testing'}
+    <p class="row-status" role="status">Testing voice…</p>
+  {:else if isQwenVoice && promptReadiness.state === 'ready'}
+    <p class="row-status" role="status">Saved voice ready</p>
+  {/if}
+  {#if operationError}
+    <p class="row-error" role="alert">{operationError}</p>
   {/if}
   {#if testAudioUrl}
     <div class="test-player" aria-label={`${voice.name} test playback`}>
@@ -189,7 +264,8 @@
   .test-text,
   .toggle,
   .speed-control,
-  .test-player {
+  .test-player,
+  .readiness {
     color: var(--color-text);
     font-size: var(--font-label);
     font-weight: 600;
@@ -202,6 +278,26 @@
     min-height: 44px;
     align-items: center;
     gap: var(--space-sm);
+  }
+
+  .readiness {
+    display: grid;
+    min-width: 0;
+    grid-template-columns: max-content minmax(0, 1fr);
+    gap: var(--space-xs) var(--space-sm);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm);
+    background: rgba(20, 31, 56, 0.6);
+  }
+
+  .readiness span {
+    color: var(--color-text-muted);
+  }
+
+  .readiness strong {
+    min-width: 0;
+    color: var(--color-text);
+    overflow-wrap: anywhere;
   }
 
   input[type='text'] {
@@ -236,6 +332,7 @@
     font-size: var(--font-label);
     font-weight: 600;
     line-height: var(--line-label);
+    overflow-wrap: anywhere;
   }
 
   .danger {
@@ -246,5 +343,40 @@
     width: fit-content;
     background: rgba(0, 227, 253, 0.08);
     color: var(--color-text);
+  }
+
+  .row-error {
+    color: var(--color-danger);
+    font-size: var(--font-label);
+    font-weight: 600;
+    line-height: var(--line-label);
+    overflow-wrap: anywhere;
+  }
+
+  :global(.preparing-icon) {
+    animation: preparation-spin 1s linear infinite;
+  }
+
+  @keyframes preparation-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(.preparing-icon) {
+      animation: none;
+    }
+  }
+
+  @media (max-width: 520px) {
+    .actions button {
+      flex: 1 1 100%;
+      max-width: 100%;
+    }
+
+    .readiness {
+      grid-template-columns: 1fr;
+    }
   }
 </style>

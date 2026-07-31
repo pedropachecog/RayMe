@@ -460,7 +460,7 @@ describe('Voice Lab Phase 2 source contract', () => {
     }
 
     expect(voiceLabSources).toMatch(/listVoices/);
-    expect(voiceLabSources).toMatch(/testingVoiceId|testPlayState|row.*loading/i);
+    expect(voiceLabSources).toMatch(/operationByVoiceId|testPlayState|row.*loading/i);
   });
 
   it('keeps saved Qwen preparation, synthesis, errors, and retry scoped by voice id', () => {
