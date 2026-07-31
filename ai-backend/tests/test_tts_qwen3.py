@@ -7,6 +7,8 @@ import json
 import queue
 import threading
 import time
+import wave
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -566,7 +568,8 @@ def test_qwen_adapter_owns_spawned_load_prewarm_stream_invalidate_unload_lifecyc
     assert generate["hard_audio_seconds"] <= 32.0
     assert "reference_audio_b64" not in generate
     assert "reference_transcript" not in generate
-    assert process.terminated is False
+    # Unload is process ownership cleanup, not just a logical model flag.
+    assert process.terminated is True
 
 
 def test_qwen_adapter_spawn_imports_no_cuda_runtime_in_parent(
@@ -658,10 +661,15 @@ def test_qwen_adapter_cancel_timeout_terminates_stuck_worker(
         reference_transcript="The exact spoken reference.",
     )
 
-    producer = threading.Thread(
-        target=lambda: list(adapter.stream(_request(), request_id="turn-1")),
-        daemon=True,
-    )
+    producer_errors: list[Exception] = []
+
+    def consume_stuck_stream() -> None:
+        try:
+            list(adapter.stream(_request(), request_id="turn-1"))
+        except Exception as exc:  # the forced process stop must unblock the reader
+            producer_errors.append(exc)
+
+    producer = threading.Thread(target=consume_stuck_stream, daemon=True)
     producer.start()
     deadline = time.monotonic() + 1.0
     while not any(payload["op"] == "generate" for payload in process.ops):
@@ -671,6 +679,10 @@ def test_qwen_adapter_cancel_timeout_terminates_stuck_worker(
     assert adapter.cancel("turn-1") is False
 
     assert process.terminated is True
+    producer.join(timeout=1.0)
+    assert producer.is_alive() is False
+    assert len(producer_errors) == 1
+    assert isinstance(producer_errors[0], qwen.Qwen3WorkerError)
 
 
 class ScriptedNativeRuntime:
@@ -681,6 +693,103 @@ class ScriptedNativeRuntime:
         self.streaming_calls.append(kwargs)
         yield ([0.1] * 7680, 24000, {"total_steps": 4})
         yield ([0.1] * 7680, 24000, {"total_steps": 8})
+
+
+def test_qwen_worker_loads_only_exact_cuda_torch_runtime_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from app.models import gpu_runtime
+    from app.models import tts_qwen3_worker as worker
+
+    calls: list[tuple[str, dict[str, Any]]] = []
+    warmups: list[int] = []
+
+    class Parameter:
+        device = type("Device", (), {"type": "cuda"})()
+
+    class Runtime:
+        def parameters(self):
+            yield Parameter()
+
+        def warmup(self, *, prefill_len: int) -> None:
+            warmups.append(prefill_len)
+
+    class RuntimeClass:
+        @classmethod
+        def from_pretrained(cls, model_path: str, **kwargs: Any) -> Runtime:
+            calls.append((model_path, kwargs))
+            return Runtime()
+
+    fake_torch = type("FakeTorch", (), {"bfloat16": object()})()
+    cuda_guards: list[str] = []
+    monkeypatch.setattr(
+        gpu_runtime,
+        "require_torch_cuda_runtime",
+        lambda component: cuda_guards.append(component),
+    )
+    monkeypatch.setattr(worker.importlib.metadata, "version", lambda _name: "0.3.2")
+
+    runtime = worker.load_runtime(
+        tmp_path,
+        runtime_class=RuntimeClass,
+        torch_module=fake_torch,
+    )
+
+    assert isinstance(runtime, Runtime)
+    assert cuda_guards == ["Qwen3-TTS 1.7B"]
+    assert calls == [
+        (
+            str(tmp_path),
+            {
+                "device": "cuda",
+                "dtype": fake_torch.bfloat16,
+                "attn_implementation": "sdpa",
+                "max_seq_len": 2048,
+                "backend": "torch",
+            },
+        )
+    ]
+    assert warmups == [100]
+
+
+def test_qwen_worker_prewarm_builds_one_full_icl_prompt_from_exact_reference() -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    reference = BytesIO()
+    with wave.open(reference, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+        wav.writeframes((b"\x00\x01" * 2400))
+    prompt_calls: list[dict[str, Any]] = []
+
+    class PromptModel:
+        def create_voice_clone_prompt(self, **kwargs: Any) -> list[str]:
+            prompt_calls.append(kwargs)
+            return ["gpu-prompt-stays-worker-local"]
+
+    runtime = type("Runtime", (), {"model": PromptModel()})()
+    command = _protocol_module().parse_command(
+        {
+            "schema_version": 1,
+            "op": "prewarm",
+            "request_id": "prewarm-1",
+            "voice_key": "voice_0123456789abcdef",
+            "reference_audio_b64": base64.b64encode(reference.getvalue()).decode("ascii"),
+            "reference_transcript": "The exact spoken reference.",
+        }
+    )
+
+    prompt = worker.prepare_voice_prompt(runtime, command)
+
+    assert prompt.voice_key == command.voice_key
+    assert prompt.reference_transcript == "The exact spoken reference."
+    assert prompt.prompt_items == ["gpu-prompt-stays-worker-local"]
+    assert prompt_calls[0]["ref_text"] == "The exact spoken reference."
+    assert prompt_calls[0]["x_vector_only_mode"] is False
+    audio, sample_rate = prompt_calls[0]["ref_audio"]
+    assert sample_rate == 24000
+    assert len(audio) == 2400 + 12000
 
 
 def test_qwen_worker_pulls_only_native_full_icl_stream_with_locked_settings(
@@ -762,3 +871,88 @@ def test_qwen_worker_cancel_closes_native_generator_and_emits_one_terminal(
     remaining = list(iterator)
 
     assert [event.event for event in remaining] == ["cancelled"]
+
+
+def test_qwen_worker_preserves_cancel_that_arrives_before_generate_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    runtime = ScriptedNativeRuntime()
+    prompt = worker.PreparedVoicePrompt(
+        voice_key="voice_0123456789abcdef",
+        reference_transcript="The exact spoken reference.",
+        prompt_items=[object()],
+    )
+    command = _protocol_module().parse_command(
+        {
+            "schema_version": 1,
+            "op": "generate",
+            "request_id": "turn-before-first-audio",
+            "voice_key": prompt.voice_key,
+            "text": "This request is cancelled before dispatch.",
+            "max_new_tokens": 48,
+            "hard_audio_seconds": 6.0,
+        }
+    )
+    cancel = _protocol_module().parse_command(
+        {
+            "schema_version": 1,
+            "op": "cancel",
+            "request_id": "turn-before-first-audio",
+        }
+    )
+    monkeypatch.setattr(worker, "_RUNTIME", runtime)
+    monkeypatch.setattr(worker, "_PREPARED_PROMPT", prompt)
+    monkeypatch.setattr(worker, "_emit_event", lambda event: emitted.append(event))
+    emitted: list[Any] = []
+
+    worker._signal_cancel(cancel)
+    worker._dispatch(command)
+
+    assert [event.event for event in emitted] == ["cancelled"]
+    assert runtime.streaming_calls[0]["text"] == command.text
+
+
+def test_qwen_worker_runtime_failure_after_audio_emits_matching_single_error_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    class FailingRuntime(ScriptedNativeRuntime):
+        def generate_voice_clone_streaming(self, **kwargs: Any):
+            self.streaming_calls.append(kwargs)
+            yield ([0.1] * 7680, 24000, {"total_steps": 4})
+            raise RuntimeError("private CUDA failure detail")
+
+    runtime = FailingRuntime()
+    prompt = worker.PreparedVoicePrompt(
+        voice_key="voice_0123456789abcdef",
+        reference_transcript="The exact spoken reference.",
+        prompt_items=[object()],
+    )
+    command = _protocol_module().parse_command(
+        {
+            "schema_version": 1,
+            "op": "generate",
+            "request_id": "turn-runtime-failure",
+            "voice_key": prompt.voice_key,
+            "text": "The private error must remain inside the worker.",
+            "max_new_tokens": 48,
+            "hard_audio_seconds": 6.0,
+        }
+    )
+    monkeypatch.setattr(
+        worker,
+        "_wav_bytes",
+        lambda _audio, _sample_rate: b"RIFF-native-chunk",
+    )
+
+    events = list(
+        worker.iter_generation_events(runtime, prompt, command, threading.Event())
+    )
+
+    assert [event.event for event in events] == ["chunk", "error"]
+    assert events[-1].chunk_count == 1
+    assert events[-1].error_code == "qwen3_generation_failed"
+    assert "private" not in events[-1].model_dump_json()

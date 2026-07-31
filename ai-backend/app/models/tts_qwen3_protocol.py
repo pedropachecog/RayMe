@@ -258,11 +258,19 @@ def parse_event(payload: object) -> QwenWorkerEvent:
 class QwenStreamEventValidator:
     """Request-scoped state machine for chunk and terminal worker events."""
 
-    def __init__(self, *, request_id: str) -> None:
+    def __init__(
+        self,
+        *,
+        request_id: str,
+        max_cumulative_duration_ms: float = 32_000.0,
+    ) -> None:
         _CommandBase.model_validate(
             {"schema_version": SCHEMA_VERSION, "request_id": request_id}
         )
         self.request_id = request_id
+        if max_cumulative_duration_ms <= 0 or max_cumulative_duration_ms > 32_000:
+            raise ValueError("invalid cumulative audio ceiling")
+        self.max_cumulative_duration_ms = max_cumulative_duration_ms
         self.next_chunk_index = 0
         self.last_generated_at_ms = -1.0
         self.last_total_steps = 0
@@ -281,10 +289,13 @@ class QwenStreamEventValidator:
                 raise QwenProtocolError("worker generated time is not monotonic")
             if event.total_steps_so_far <= self.last_total_steps:
                 raise QwenProtocolError("worker generation steps are not monotonic")
+            next_duration_ms = self.cumulative_duration_ms + event.duration_ms
+            if next_duration_ms > self.max_cumulative_duration_ms:
+                raise QwenProtocolError("worker audio exceeded request ceiling")
             self.next_chunk_index += 1
             self.last_generated_at_ms = event.generated_at_ms
             self.last_total_steps = event.total_steps_so_far
-            self.cumulative_duration_ms += event.duration_ms
+            self.cumulative_duration_ms = next_duration_ms
             return
         if not isinstance(event, QwenTerminalEvent):
             raise QwenProtocolError("non-stream worker event in stream")
