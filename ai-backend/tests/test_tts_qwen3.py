@@ -1,6 +1,14 @@
 from __future__ import annotations
 
 import base64
+import importlib.machinery
+import importlib.util
+import json
+import queue
+import threading
+import time
+from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -327,3 +335,430 @@ def test_qwen_invalidate_acknowledgement_contains_only_opaque_identity() -> None
     assert "reference_audio" not in dumped
     assert "reference_transcript" not in dumped
     assert "model_path" not in dumped
+
+
+class ScriptedQwenWorkerProcess:
+    def __init__(
+        self,
+        *,
+        hang_generate: bool = False,
+        acknowledge_cancel: bool = True,
+        malformed_generate: bool = False,
+    ) -> None:
+        self.returncode: int | None = None
+        self.ops: list[dict[str, Any]] = []
+        self.stdout = self.ScriptedStdout()
+        self.stdin = self.ScriptedStdin(self)
+        self.hang_generate = hang_generate
+        self.acknowledge_cancel = acknowledge_cancel
+        self.malformed_generate = malformed_generate
+        self.terminated = False
+        self.killed = False
+
+    class ScriptedStdout:
+        def __init__(self) -> None:
+            self.lines: queue.Queue[str | None] = queue.Queue()
+
+        def __iter__(self):
+            return self
+
+        def __next__(self) -> str:
+            line = self.lines.get()
+            if line is None:
+                raise StopIteration
+            return line
+
+    class ScriptedStdin:
+        def __init__(self, process: "ScriptedQwenWorkerProcess") -> None:
+            self.process = process
+            self.closed = False
+
+        def write(self, line: str) -> int:
+            qwen = _qwen_module()
+            assert line.startswith(qwen.WORKER_EVENT_PREFIX)
+            payload = json.loads(line[len(qwen.WORKER_EVENT_PREFIX) :])
+            self.process.ops.append(payload)
+            request_id = payload["request_id"]
+            if payload["op"] == "load":
+                self.process.emit(
+                    {
+                        "schema_version": 1,
+                        "event": "loaded",
+                        "request_id": request_id,
+                        "engine_id": "qwen3_1_7b",
+                        "runtime_version": "0.3.2",
+                        "model_revision": "fd4b254389122332181a7c3db7f27e918eec64e3",
+                        "device": "cuda",
+                        "sample_rate": 24000,
+                        "warmup_prefill": 100,
+                    }
+                )
+            elif payload["op"] == "prewarm":
+                self.process.emit(
+                    {
+                        "schema_version": 1,
+                        "event": "prompt_ready",
+                        "request_id": request_id,
+                        "voice_key": payload["voice_key"],
+                    }
+                )
+            elif payload["op"] == "generate":
+                if self.process.malformed_generate:
+                    self.process.emit(
+                        {
+                            "schema_version": 1,
+                            "event": "chunk",
+                            "request_id": "wrong-turn",
+                            "chunk_index": 0,
+                            "wav_b64": _audio_b64(),
+                            "sample_rate": 24000,
+                            "duration_ms": 320.0,
+                            "generated_at_ms": 370.0,
+                            "total_steps_so_far": 4,
+                        }
+                    )
+                elif not self.process.hang_generate:
+                    for index in range(2):
+                        self.process.emit(
+                            {
+                                "schema_version": 1,
+                                "event": "chunk",
+                                "request_id": request_id,
+                                "chunk_index": index,
+                                "wav_b64": _audio_b64(f"RIFF-chunk-{index}".encode()),
+                                "sample_rate": 24000,
+                                "duration_ms": 320.0,
+                                "generated_at_ms": 370.0 + 320.0 * index,
+                                "total_steps_so_far": 4 * (index + 1),
+                            }
+                        )
+                    self.process.emit(
+                        {
+                            "schema_version": 1,
+                            "event": "done",
+                            "request_id": request_id,
+                            "chunk_count": 2,
+                            "natural_eos": True,
+                        }
+                    )
+            elif payload["op"] == "cancel" and self.process.acknowledge_cancel:
+                self.process.emit(
+                    {
+                        "schema_version": 1,
+                        "event": "cancelled",
+                        "request_id": request_id,
+                        "chunk_count": 0,
+                        "natural_eos": False,
+                    }
+                )
+            elif payload["op"] == "invalidate":
+                self.process.emit(
+                    {
+                        "schema_version": 1,
+                        "event": "invalidated",
+                        "request_id": request_id,
+                        "voice_key": payload["voice_key"],
+                    }
+                )
+            elif payload["op"] == "unload":
+                self.process.emit(
+                    {
+                        "schema_version": 1,
+                        "event": "done",
+                        "request_id": request_id,
+                        "chunk_count": 0,
+                        "natural_eos": True,
+                    }
+                )
+            return len(line)
+
+        def flush(self) -> None:
+            return None
+
+        def close(self) -> None:
+            self.closed = True
+
+    def emit(self, payload: dict[str, Any]) -> None:
+        qwen = _qwen_module()
+        self.stdout.lines.put(
+            qwen.WORKER_EVENT_PREFIX + json.dumps(payload, separators=(",", ":")) + "\n"
+        )
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def terminate(self) -> None:
+        self.terminated = True
+        self.returncode = -15
+        self.stdout.lines.put(None)
+
+    def kill(self) -> None:
+        self.killed = True
+        self.returncode = -9
+        self.stdout.lines.put(None)
+
+    def wait(self, timeout: float | None = None) -> int:
+        self.returncode = self.returncode if self.returncode is not None else 0
+        return self.returncode
+
+
+def _qwen_module():
+    from app.models import tts_qwen3
+
+    return tts_qwen3
+
+
+def _request():
+    from app.models.tts_registry import TtsSynthesisInput
+
+    return TtsSynthesisInput(
+        text="RayMe must pull native chunks without collecting them.",
+        reference_audio=b"RIFF-reference",
+        reference_audio_content_type="audio/wav",
+        reference_transcript="The exact spoken reference.",
+    )
+
+
+@pytest.fixture
+def qwen_runtime_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_find_spec = importlib.util.find_spec
+
+    def fake_find_spec(name: str, *args: Any, **kwargs: Any):
+        if name == "faster_qwen3_tts":
+            return importlib.machinery.ModuleSpec(name, loader=None)
+        return original_find_spec(name, *args, **kwargs)
+
+    monkeypatch.setattr(importlib.util, "find_spec", fake_find_spec)
+
+
+def test_qwen_adapter_owns_spawned_load_prewarm_stream_invalidate_unload_lifecycle(
+    qwen_runtime_available: None,
+) -> None:
+    qwen = _qwen_module()
+    process = ScriptedQwenWorkerProcess()
+    adapter = qwen.Qwen3TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
+
+    adapter.load()
+    ready = adapter.prewarm(
+        voice_key="voice_0123456789abcdef",
+        reference_audio=b"RIFF-reference",
+        reference_transcript="The exact spoken reference.",
+    )
+    chunks = list(adapter.stream(_request(), request_id="turn-1"))
+    adapter.invalidate("voice_0123456789abcdef")
+    adapter.unload()
+
+    assert adapter.engine_id == "qwen3_1_7b"
+    assert adapter.required_modules == ("faster_qwen3_tts",)
+    assert ready.voice_key == "voice_0123456789abcdef"
+    assert [chunk.chunk_index for chunk in chunks] == [0, 1]
+    assert [chunk.sample_rate for chunk in chunks] == [24000, 24000]
+    assert [payload["op"] for payload in process.ops] == [
+        "load",
+        "prewarm",
+        "generate",
+        "invalidate",
+        "unload",
+    ]
+    generate = process.ops[2]
+    assert generate["voice_key"] == "voice_0123456789abcdef"
+    assert generate["max_new_tokens"] <= 384
+    assert generate["hard_audio_seconds"] <= 32.0
+    assert "reference_audio_b64" not in generate
+    assert "reference_transcript" not in generate
+    assert process.terminated is False
+
+
+def test_qwen_adapter_spawn_imports_no_cuda_runtime_in_parent(
+    monkeypatch: pytest.MonkeyPatch, qwen_runtime_available: None
+) -> None:
+    qwen = _qwen_module()
+    captured: list[tuple[list[str], dict[str, Any]]] = []
+
+    def process_factory(args: list[str], **kwargs: Any) -> ScriptedQwenWorkerProcess:
+        captured.append((args, kwargs))
+        return ScriptedQwenWorkerProcess()
+
+    adapter = qwen.Qwen3TtsAdapter(process_factory=process_factory)
+    adapter.load()
+
+    assert captured[0][0][-2:] == ["-m", "app.models.tts_qwen3_worker"]
+    source = Path(qwen.__file__).read_text(encoding="utf-8")
+    assert "import torch" not in source
+    assert "from faster_qwen3_tts" not in source
+
+
+def test_qwen_adapter_rejects_wrong_request_worker_event_and_contains_process(
+    qwen_runtime_available: None,
+) -> None:
+    qwen = _qwen_module()
+    process = ScriptedQwenWorkerProcess(malformed_generate=True)
+    adapter = qwen.Qwen3TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
+    adapter.load()
+    adapter.prewarm(
+        voice_key="voice_0123456789abcdef",
+        reference_audio=b"RIFF-reference",
+        reference_transcript="The exact spoken reference.",
+    )
+
+    with pytest.raises(qwen.Qwen3WorkerProtocolError):
+        list(adapter.stream(_request(), request_id="turn-1"))
+
+    assert process.terminated is True
+
+
+def test_qwen_adapter_cancel_is_request_scoped_and_stream_drains_cancelled_terminal(
+    qwen_runtime_available: None,
+) -> None:
+    qwen = _qwen_module()
+    process = ScriptedQwenWorkerProcess(hang_generate=True)
+    adapter = qwen.Qwen3TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
+    adapter.load()
+    adapter.prewarm(
+        voice_key="voice_0123456789abcdef",
+        reference_audio=b"RIFF-reference",
+        reference_transcript="The exact spoken reference.",
+    )
+    result: list[object] = []
+
+    producer = threading.Thread(
+        target=lambda: result.extend(adapter.stream(_request(), request_id="turn-1")),
+        daemon=True,
+    )
+    producer.start()
+    deadline = time.monotonic() + 1.0
+    while not any(payload["op"] == "generate" for payload in process.ops):
+        assert time.monotonic() < deadline
+        time.sleep(0.001)
+
+    assert adapter.cancel("turn-1") is True
+    producer.join(timeout=1.0)
+
+    assert producer.is_alive() is False
+    assert result == []
+    assert process.ops[-1] == {
+        "schema_version": 1,
+        "op": "cancel",
+        "request_id": "turn-1",
+    }
+    assert process.terminated is False
+
+
+def test_qwen_adapter_cancel_timeout_terminates_stuck_worker(
+    monkeypatch: pytest.MonkeyPatch, qwen_runtime_available: None
+) -> None:
+    qwen = _qwen_module()
+    process = ScriptedQwenWorkerProcess(hang_generate=True, acknowledge_cancel=False)
+    monkeypatch.setattr(qwen, "WORKER_CANCEL_TIMEOUT_SECONDS", 0.01)
+    adapter = qwen.Qwen3TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
+    adapter.load()
+    adapter.prewarm(
+        voice_key="voice_0123456789abcdef",
+        reference_audio=b"RIFF-reference",
+        reference_transcript="The exact spoken reference.",
+    )
+
+    producer = threading.Thread(
+        target=lambda: list(adapter.stream(_request(), request_id="turn-1")),
+        daemon=True,
+    )
+    producer.start()
+    deadline = time.monotonic() + 1.0
+    while not any(payload["op"] == "generate" for payload in process.ops):
+        assert time.monotonic() < deadline
+        time.sleep(0.001)
+
+    assert adapter.cancel("turn-1") is False
+
+    assert process.terminated is True
+
+
+class ScriptedNativeRuntime:
+    def __init__(self) -> None:
+        self.streaming_calls: list[dict[str, Any]] = []
+
+    def generate_voice_clone_streaming(self, **kwargs: Any):
+        self.streaming_calls.append(kwargs)
+        yield ([0.1] * 7680, 24000, {"total_steps": 4})
+        yield ([0.1] * 7680, 24000, {"total_steps": 8})
+
+
+def test_qwen_worker_pulls_only_native_full_icl_stream_with_locked_settings(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    runtime = ScriptedNativeRuntime()
+    prompt = worker.PreparedVoicePrompt(
+        voice_key="voice_0123456789abcdef",
+        reference_transcript="The exact spoken reference.",
+        prompt_items=[object()],
+    )
+    command = _protocol_module().parse_command(
+        {
+            "schema_version": 1,
+            "op": "generate",
+            "request_id": "turn-1",
+            "voice_key": prompt.voice_key,
+            "text": "The native stream stays live.",
+            "max_new_tokens": 48,
+            "hard_audio_seconds": 6.0,
+        }
+    )
+    monkeypatch.setattr(
+        worker,
+        "_wav_bytes",
+        lambda _audio, _sample_rate: b"RIFF-native-chunk",
+    )
+
+    events = list(worker.iter_generation_events(runtime, prompt, command, threading.Event()))
+
+    assert [event.event for event in events] == ["chunk", "chunk", "done"]
+    call = runtime.streaming_calls[0]
+    assert call["voice_clone_prompt"] is prompt.prompt_items
+    assert call["ref_text"] == prompt.reference_transcript
+    assert call["chunk_size"] == 4
+    assert call["xvec_only"] is False
+    assert call["non_streaming_mode"] is True
+    assert call["append_silence"] is True
+    assert call["parity_mode"] is False
+    assert call["max_new_tokens"] == 48
+    assert not hasattr(runtime, "generate_voice_clone")
+    assert not hasattr(runtime, "generate")
+
+
+def test_qwen_worker_cancel_closes_native_generator_and_emits_one_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    runtime = ScriptedNativeRuntime()
+    prompt = worker.PreparedVoicePrompt(
+        voice_key="voice_0123456789abcdef",
+        reference_transcript="The exact spoken reference.",
+        prompt_items=[object()],
+    )
+    command = _protocol_module().parse_command(
+        {
+            "schema_version": 1,
+            "op": "generate",
+            "request_id": "turn-1",
+            "voice_key": prompt.voice_key,
+            "text": "Cancel this stream.",
+            "max_new_tokens": 48,
+            "hard_audio_seconds": 6.0,
+        }
+    )
+    cancelled = threading.Event()
+    monkeypatch.setattr(
+        worker,
+        "_wav_bytes",
+        lambda _audio, _sample_rate: b"RIFF-native-chunk",
+    )
+    iterator = worker.iter_generation_events(runtime, prompt, command, cancelled)
+
+    assert next(iterator).event == "chunk"
+    cancelled.set()
+    remaining = list(iterator)
+
+    assert [event.event for event in remaining] == ["cancelled"]
