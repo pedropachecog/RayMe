@@ -1765,6 +1765,158 @@ def test_qwen_termination_cancels_exact_request_and_rejects_normal_completion(
     )
 
 
+@pytest.mark.parametrize(
+    ("control_cause", "expected_state", "expected_terminal"),
+    [
+        ("button_interrupt", "listening", "interrupted"),
+        ("vad_barge_in", "listening", "interrupted"),
+        ("hangup", "ended", "ended"),
+        ("engine_switch", "listening", None),
+        ("connection_failure", "failed", "failed"),
+        ("session_close", "ended", "ended"),
+    ],
+)
+def test_qwen_control_causes_are_request_scoped_terminal_safe_and_recoverable(
+    monkeypatch: Any,
+    control_cause: str,
+    expected_state: str,
+    expected_terminal: str | None,
+) -> None:
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
+    events: list[dict[str, Any]] = []
+
+    async def scenario() -> tuple[
+        CancellableQwenStreamingTtsAdapter,
+        ObservableStreamingOutboundAudioTrack,
+        CallSession,
+        dict[str, Any] | None,
+        dict[str, Any],
+    ]:
+        manager = CallSessionManager()
+        track = ObservableStreamingOutboundAudioTrack()
+        adapter = CancellableQwenStreamingTtsAdapter(yield_before_cancel=True)
+        session = await manager.create_session(
+            session_id=f"call-{control_cause}",
+            voice_id="voice-qwen",
+            engine_id="qwen3_1_7b",
+            tts_adapter=adapter,
+            outbound_audio_track=track,
+            event_sink=events.append,
+        )
+        turn_id = f"turn-{control_cause}"
+        speech = asyncio.create_task(
+            session.speak_text(
+                turn_id,
+                "This active Qwen request must stop at the matching control.",
+                "voice-qwen",
+                "qwen3_1_7b",
+                final_chunk=True,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="The exact reference transcript.",
+            )
+        )
+        terminal: dict[str, Any] | None = None
+        try:
+            await _wait_for_async_event_or_task(
+                track.first_chunk_enqueued,
+                speech,
+                label=f"Qwen audio before {control_cause}",
+            )
+            if control_cause in {"button_interrupt", "vad_barge_in"}:
+                terminal = await session.interrupt(cause=control_cause)
+            elif control_cause == "hangup":
+                terminal = await session.end(reason="hangup")
+            elif control_cause == "engine_switch":
+                await session.update_call_selection(
+                    voice_id="voice-f5",
+                    engine_id="f5",
+                )
+            elif control_cause == "connection_failure":
+                terminal = await session.fail(reason="connection_failed")
+            else:
+                await manager.remove_session(session.session_id)
+                terminal = events[-1]
+
+            try:
+                await speech
+            except asyncio.CancelledError:
+                pass
+
+            recovery_adapter = SlowQwenStreamingTtsAdapter(chunk_count=2)
+            recovery_adapter.release_completion.set()
+            recovery_track = ObservableStreamingOutboundAudioTrack()
+            recovery_session = await manager.create_session(
+                session_id=f"recovery-{control_cause}",
+                voice_id="voice-qwen",
+                engine_id="qwen3_1_7b",
+                tts_adapter=recovery_adapter,
+                outbound_audio_track=recovery_track,
+            )
+            recovery = await recovery_session.speak_text(
+                f"recovery-turn-{control_cause}",
+                "A clean later call still succeeds.",
+                "voice-qwen",
+                "qwen3_1_7b",
+                final_chunk=True,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="The exact reference transcript.",
+            )
+            return adapter, track, session, terminal, recovery
+        finally:
+            adapter.release_stream.set()
+            if not speech.done():
+                speech.cancel()
+
+    adapter, track, session, terminal, recovery = _run(scenario())
+
+    turn_id = f"turn-{control_cause}"
+    assert adapter.cancel_calls == [turn_id]
+    assert adapter.synthesize_calls == 0
+    assert track.stop_calls == 1
+    assert session.state == expected_state
+    assert recovery["type"] == "ai_done"
+    assert "ai_done" not in [item["type"] for item in events]
+    if expected_terminal is not None:
+        assert terminal is not None
+        assert terminal["type"] == expected_terminal
+        assert terminal["control_cause"] == control_cause
+        assert terminal["cancelled_turn_id"] == turn_id
+        assert terminal["cancelled_request_id"] == turn_id
+        final = terminal["tts_playback_final"]
+        assert final["natural_eos"] is False
+        assert final["track_discarded_samples"] >= 0
+
+
+def test_cancelled_turn_rejects_late_audio_and_normal_terminal_events() -> None:
+    events: list[dict[str, Any]] = []
+    session, _ = _new_session(event_sink=events.append)
+    session._cancelled_ai_turns.add("cancelled-turn")
+
+    audio = _run(
+        session.emit_event(
+            {
+                "type": "ai_audio_started",
+                "session_id": session.session_id,
+                "turn_id": "cancelled-turn",
+            }
+        )
+    )
+    done = _run(
+        session.emit_event(
+            {
+                "type": "ai_done",
+                "session_id": session.session_id,
+                "turn_id": "cancelled-turn",
+            }
+        )
+    )
+
+    assert audio == {"status": "discarded", "turn_id": "cancelled-turn"}
+    assert done == {"status": "discarded", "turn_id": "cancelled-turn"}
+    assert events == []
+
+
 def test_voxcpm2_streaming_speak_returns_one_done_event_for_final_turn() -> None:
     events: list[dict[str, Any]] = []
 

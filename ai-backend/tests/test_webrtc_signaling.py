@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import asyncio
 import math
+import threading
 from concurrent.futures import CancelledError as FutureCancelledError
 from io import BytesIO
 from typing import Any
@@ -115,6 +116,38 @@ class ScriptedQwenStreamingTtsAdapter(ScriptedStreamingTtsAdapter):
     ) -> Any:
         self.stream_identities.append((request_id, voice_key))
         yield from super().stream(request)
+
+
+class BlockingQwenStreamingTtsAdapter(ScriptedQwenStreamingTtsAdapter):
+    def __init__(self) -> None:
+        super().__init__()
+        self.stream_started = threading.Event()
+        self.release_stream = threading.Event()
+        self.cancel_calls: list[str] = []
+
+    def stream(
+        self,
+        request: Any,
+        *,
+        request_id: str,
+        voice_key: str,
+    ) -> Any:
+        self.stream_identities.append((request_id, voice_key))
+        self.stream_started.set()
+        yield TtsAudioChunk(
+            engine_id=self.engine_id,
+            chunk_index=0,
+            wav_bytes=SCRIPTED_WAV_BYTES,
+            sample_rate=24000,
+            duration_ms=100,
+            generated_at_ms=25.0,
+        )
+        self.release_stream.wait()
+
+    def cancel(self, request_id: str) -> bool:
+        self.cancel_calls.append(request_id)
+        self.release_stream.set()
+        return True
 
 
 class ScriptedModelManager:
@@ -804,6 +837,69 @@ def test_webrtc_interrupt_control_returns_session_state(stub_webrtc: None) -> No
     payload = response.json()
     assert payload["session_id"] == session_id
     assert payload["state"] in {"listening", "interrupted"}
+
+
+def test_webrtc_reoffer_engine_switch_cancels_exact_active_qwen_request(
+    stub_webrtc: None,
+) -> None:
+    adapter = BlockingQwenStreamingTtsAdapter()
+    manager = ScriptedPreparingModelManager(adapter, ready=True)
+    client = _client(model_manager=manager)
+    session_id = "call-session-qwen-engine-switch"
+    client.post(
+        "/webrtc/offer",
+        json={
+            **_offer_payload(session_id=session_id),
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+        },
+    )
+    responses: list[Any] = []
+
+    def speak() -> None:
+        responses.append(
+            client.post(
+                SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+                json={
+                    "turn_id": "turn-qwen-engine-switch",
+                    "text": "This request must stop before the engine changes.",
+                    "voice_id": "voice-qwen",
+                    "engine_id": "qwen3_1_7b",
+                    "final_chunk": True,
+                    "reference_audio_b64": "cmVhbC1zYW1wbGU=",
+                    "reference_transcript": "The exact reference transcript.",
+                },
+            )
+        )
+
+    thread = threading.Thread(target=speak)
+    thread.start()
+    try:
+        assert adapter.stream_started.wait(1.0)
+        switched = client.post(
+            "/webrtc/offer",
+            json={
+                **_offer_payload(session_id=session_id),
+                "voice_id": "voice-f5",
+                "engine_id": "f5",
+            },
+        )
+        assert switched.status_code == 200
+    finally:
+        adapter.release_stream.set()
+        thread.join(2.0)
+
+    assert not thread.is_alive()
+    assert adapter.cancel_calls == ["turn-qwen-engine-switch"]
+    assert adapter.stream_identities == [
+        ("turn-qwen-engine-switch", "voice-qwen")
+    ]
+    assert responses and responses[0].status_code == 502
+    assert responses[0].json()["detail"] == {
+        "code": "call_tts_failed",
+        "message": "Speech playback cancelled",
+        "engine_id": "qwen3_1_7b",
+    }
 
 
 def test_webrtc_speak_synthesizes_with_exact_engine_and_emits_done(stub_webrtc: None) -> None:
