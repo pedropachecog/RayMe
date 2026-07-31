@@ -592,11 +592,16 @@ Plans:
 4. Barge-in/hangup stops Faster Qwen3 generation promptly, discards late chunks, returns the session to listening, and cannot emit a normal `ai_done` after cancellation.
 5. Local backend/server/client regressions pass; `scripts/deploy-omen.sh` installs/verifies the pinned runtime, deploys the committed implementation, and post-deploy `/webrtc/status` plus a real call-flow evidence run prove the engine is ready for the builder's physical call test.
 
-**Plans:** 0 plans
+**Plans:** 6 plans
 
 Plans:
 
-- [ ] TBD (run /gsd-plan-phase 9 to break down)
+- [ ] 09-01-PLAN.md - Production tracer from pinned 1.7B load/prewarm through early streamed call playback and cancel (Wave 1)
+- [ ] 09-02-PLAN.md - Worker protocol, prompt alignment/cache, output ceilings, and engine-scoped failure containment (Wave 2)
+- [ ] 09-03-PLAN.md - Saved-voice identity migration, reference authorization, server validation, and readiness bridge (Wave 2)
+- [ ] 09-04-PLAN.md - Voice Lab and call UI canonical identity, visible readiness, errors, and saved Playwright contracts (Wave 3)
+- [ ] 09-05-PLAN.md - Incremental LLM segment pump, paced end-to-end backpressure, truthful metrics, and terminal-safe persistence (Wave 4)
+- [ ] 09-06-PLAN.md - Twenty-scenario evaluation, canonical OMEN deployment, 50-turn proof, and physical-call handoff (Wave 5)
 
 ---
 
