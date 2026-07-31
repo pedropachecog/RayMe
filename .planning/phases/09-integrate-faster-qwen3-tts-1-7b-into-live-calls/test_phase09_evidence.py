@@ -65,6 +65,15 @@ def test_manifest_freezes_exact_twenty_ai_spec_scenarios() -> None:
     assert all("evidence_artifact" in scenario for scenario in scenarios)
     assert all("thresholds" in scenario for scenario in scenarios)
 
+    stream_scenarios = [
+        scenario
+        for scenario in scenarios
+        if scenario["scenario_id"].startswith(("clone-valid", "message-integrity"))
+        or scenario["scenario_id"] == "slow-stream-backpressure"
+    ]
+    assert len(stream_scenarios) == 7
+    assert all(str(scenario.get("target_text") or "").strip() for scenario in stream_scenarios)
+
 
 def test_manifest_pins_runtime_model_and_speaker_revisions() -> None:
     manifest = _manifest()

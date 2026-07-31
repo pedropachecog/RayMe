@@ -220,6 +220,7 @@
       "scenario_id": "slow-stream-backpressure",
       "criticality": "critical",
       "seed": 91012,
+      "target_text": "Let me explain this carefully while the live call plays each audio chunk in order, without waiting for the complete response before you hear the first words.",
       "stimulus": "slow_producer_and_slower_consumer",
       "expected_events": ["ai_audio_started", "generation_complete", "playout_complete", "ai_done"],
       "evidence_artifact": "qwen3-call-flow.json",
