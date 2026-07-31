@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready_to_execute
-stopped_at: Completed 09-03-PLAN.md
-last_updated: "2026-07-31T16:20:45.394Z"
+stopped_at: Completed 09-04-PLAN.md
+last_updated: "2026-07-31T17:42:43.066Z"
 last_activity: 2026-07-31
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 112
-  completed_plans: 96
+  completed_plans: 97
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
-last_activity_desc: "Completed Phase 09 Plan 03: responsive Qwen readiness plus bounded live streaming and exact cancellation contracts"
+last_activity_desc: "Completed Phase 09 Plan 04: canonical pinned Qwen deployment plus real saved-voice/WebRTC early-stream, cancellation, and recovery evidence"
 ---
 
 ## Phase Status
@@ -260,8 +260,8 @@ last_activity_desc: "Completed Phase 09 Plan 03: responsive Qwen readiness plus 
 ## Session Continuity
 
 Last activity: 2026-07-31
-Last session: 2026-07-31T16:20:45.037Z
-Stopped at: Completed 09-03-PLAN.md
+Last session: 2026-07-31T17:42:42.732Z
+Stopped at: Completed 09-04-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -273,6 +273,7 @@ Resume file: None
 | Phase 09 P01 | 5min | 2 tasks | 6 files |
 | Phase 09 P02 | 14min | 2 tasks | 4 files |
 | Phase 09 P03 | 18min | 2 tasks | 7 files |
+| Phase 09 P04 | 1h 14m | 2 tasks | 7 files |
 
 ## Decisions
 
@@ -285,3 +286,6 @@ Resume file: None
 - [Phase 09]: Admit live native streaming only for the explicit voxcpm2 and qwen3_1_7b engine set; Qwen receives the exact turn id as request id and never reaches whole synthesis.
 - [Phase 09]: Use a capacity-two blocking thread-to-async bridge with bridge totals emitted only at terminal time.
 - [Phase 09]: Signal the matching TTS request before cancelling the call task for both interrupt and hangup.
+- [Phase 09]: Canonical OMEN deploy alone owns exact Qwen source, model snapshot, CUDA attestation, and verified local model-path launcher wiring.
+- [Phase 09]: Real-person Qwen references require matching steward, authorization basis, LAN-test scope, reference hash, and transcript hash; invalid cases use deterministic non-person SAPI.
+- [Phase 09]: Windows Qwen workers use console Python and complete the mandatory CUDA load before starting the cancellation reader.
