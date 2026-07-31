@@ -793,6 +793,7 @@
               bind:value={voiceDataSteward}
               name="voice_data_steward"
               type="text"
+              required
               autocomplete="off"
               aria-invalid={Boolean(authorizationError && !voiceDataSteward.trim())}
             />
@@ -804,6 +805,7 @@
               bind:value={authorizationBasis}
               name="authorization_basis"
               type="text"
+              required
               autocomplete="off"
               aria-invalid={Boolean(authorizationError && !authorizationBasis.trim())}
             />
@@ -814,6 +816,7 @@
               bind:this={useScopeSelect}
               bind:value={useScope}
               name="use_scope"
+              required
               aria-invalid={Boolean(authorizationError && !useScope)}
             >
               <option value="">Choose permitted scope</option>

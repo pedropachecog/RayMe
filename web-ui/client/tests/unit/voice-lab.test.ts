@@ -387,6 +387,11 @@ describe('Voice Lab Phase 2 source contract', () => {
       expect(apiTypesSource).toContain(field);
       expect(routeSource).toContain(field);
     }
+    const authorizationBlock = routeSource.slice(
+      routeSource.indexOf('<section class="authorization-panel"'),
+      routeSource.indexOf('<div class="readiness"', routeSource.indexOf('<section class="authorization-panel"'))
+    );
+    expect(authorizationBlock.match(/\brequired\b/g)).toHaveLength(3);
     expect(routeSource).toContain("selectedEngine === 'qwen3_1_7b'");
     expect(routeSource).toContain("useScope = ''");
     expect(routeSource).toContain('rayme_lan_call_testing');
