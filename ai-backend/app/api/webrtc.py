@@ -272,8 +272,10 @@ async def create_webrtc_offer_answer(
                 outbound_audio_track=outbound_audio_track,
             )
             session.thread_id = payload.thread_id
-            session.voice_id = payload.voice_id
-            session.engine_id = payload.engine_id
+            await session.update_call_selection(
+                voice_id=payload.voice_id,
+                engine_id=payload.engine_id,
+            )
             session.prompt_messages = [
                 message.model_dump() for message in payload.prompt_messages
             ]

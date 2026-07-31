@@ -51,6 +51,7 @@ CALL_TTS_STREAM_START_MIN_CHUNKS = 2
 CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS = 0.75
 CALL_TTS_STREAM_MAX_STARTUP_BUFFER_SECONDS = 1.25
 CALL_TTS_STREAM_BRIDGE_CAPACITY = 2
+CALL_TTS_CANCEL_DRAIN_TIMEOUT_SECONDS = 2.0
 LIVE_STREAMING_TTS_ENGINES = frozenset({"voxcpm2", "qwen3_1_7b"})
 VOXCPM2_LIVE_MAX_INFERENCE_TIMESTEPS = 4
 VOXCPM2_LIVE_NORMALIZE = False
@@ -180,6 +181,9 @@ class CallSession:
         self._active_tts_request_id: str | None = None
         self._active_tts_turn_id: str | None = None
         self._active_tts_cancel_requested = False
+        self._active_tts_metrics_snapshot: Callable[[], dict[str, Any]] | None = None
+        self._last_tts_cancel_context: dict[str, Any] | None = None
+        self._late_tts_event_discard_count = 0
         self._undelivered_events: list[dict[str, Any]] = []
         self._media_reconnect_grace_pending = False
         self._media_reconnect_grace_until = 0.0
@@ -805,6 +809,25 @@ class CallSession:
         }
 
     async def emit_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        event_type = event.get("type")
+        event_turn_id = event.get("turn_id")
+        if (
+            event_type in {AI_AUDIO_STARTED_EVENT, AI_DONE_EVENT}
+            and isinstance(event_turn_id, str)
+            and (
+                event_turn_id in self._cancelled_ai_turns
+                or self.state in {"ended", "failed"}
+            )
+        ):
+            self._late_tts_event_discard_count += 1
+            logger.info(
+                "[rayme-call] tts.event.discarded session=%s turn=%s type=%s",
+                self.session_id,
+                event_turn_id,
+                event_type,
+            )
+            return {"status": "discarded", "turn_id": event_turn_id}
+
         if self.event_sink is not None:
             result = self.event_sink(event)
             if inspect.isawaitable(result):
@@ -812,7 +835,6 @@ class CallSession:
 
         channel = self.data_channel
         ready_state = getattr(channel, "readyState", None) if channel is not None else None
-        event_type = event.get("type")
         delivered = False
         if channel is None:
             logger.info(
@@ -879,15 +901,36 @@ class CallSession:
             )
         )
 
-    async def interrupt(self) -> dict[str, Any]:
+    async def interrupt(self, *, cause: str = "button_interrupt") -> dict[str, Any]:
         self.interrupted = True
-        await self.cancel_ai_turn()
+        cancel_context = await self.cancel_ai_turn(cause=cause)
         self.state = "interrupted"
         event = await self.emit_event(
-            simple_event(INTERRUPTED_EVENT, session_id=self.session_id)
+            simple_event(
+                INTERRUPTED_EVENT,
+                session_id=self.session_id,
+                **cancel_context,
+            )
         )
         self.state = "listening"
         return event
+
+    async def update_call_selection(
+        self,
+        *,
+        voice_id: str | None,
+        engine_id: str | None,
+    ) -> None:
+        changed = voice_id != self.voice_id or engine_id != self.engine_id
+        if changed and (
+            self.active_turn_task is not None
+            or self._active_tts_turn_id is not None
+        ):
+            await self.cancel_ai_turn(cause="engine_switch")
+            if self.state not in {"ended", "failed"}:
+                self.state = "listening"
+        self.voice_id = voice_id
+        self.engine_id = engine_id
 
     async def speak_text(
         self,
@@ -1099,6 +1142,7 @@ class CallSession:
         bridge_queue_high_water = 0
         producer_block_time_ms = 0.0
         bridge_producer_block_count = 0
+        bridge_discarded_item_count = 0
         generation_complete_ms: float | None = None
         playout_complete_ms: float | None = None
         playout_wait_completed: bool | None = None
@@ -1118,7 +1162,27 @@ class CallSession:
         def track_metrics() -> dict[str, Any]:
             snapshot = getattr(self.outbound_audio_track, "playout_metrics", None)
             if not callable(snapshot):
-                return {}
+                return {
+                    "track_pending_samples": 0,
+                    "track_pending_audio_ms": 0.0,
+                    "track_pending_samples_high_water": 0,
+                    "track_pending_audio_high_water_ms": 0.0,
+                    "track_admission_capacity_samples": 0,
+                    "track_admission_capacity_ms": 0.0,
+                    "track_admission_block_count": 0,
+                    "track_admission_block_time_ms": 0.0,
+                    "track_underflow_frames": 0,
+                    "track_playout_debt_ms": 0.0,
+                    "track_playout_debt_high_water_ms": 0.0,
+                    "track_enqueued_chunks": 0,
+                    "track_played_samples": 0,
+                    "track_discarded_chunks": 0,
+                    "track_discarded_samples": 0,
+                    "track_join_count": 0,
+                    "track_order_violation_count": 0,
+                    "track_idle_wait_completed_count": 0,
+                    "track_idle_wait_timeout_count": 0,
+                }
             return {
                 f"track_{key}": value
                 for key, value in dict(snapshot()).items()
@@ -1158,6 +1222,7 @@ class CallSession:
                 ),
                 "playout_wait_completed": playout_wait_completed,
                 "natural_eos": stream_completed_normally,
+                "bridge_discarded_item_count": bridge_discarded_item_count,
                 **track_metrics(),
             }
 
@@ -1277,6 +1342,17 @@ class CallSession:
             self._active_tts_request_id = turn_id
             self._active_tts_turn_id = turn_id
             self._active_tts_cancel_requested = False
+            self._last_tts_cancel_context = None
+
+            def cancellation_metrics_snapshot() -> dict[str, Any]:
+                nonlocal bridge_discarded_item_count
+                bridge_discarded_item_count = max(
+                    bridge_discarded_item_count,
+                    queue.qsize(),
+                )
+                return final_metrics()
+
+            self._active_tts_metrics_snapshot = cancellation_metrics_snapshot
 
             async def put_bridge_item(item: Any) -> None:
                 nonlocal bridge_queue_high_water
@@ -1463,6 +1539,17 @@ class CallSession:
             await self._cancel_active_tts_generation(turn_id)
             raise
         except Exception:
+            if turn_id in self._cancelled_ai_turns:
+                if self.state not in {"ended", "failed"}:
+                    self.state = "listening"
+                cancelled_event: dict[str, Any] = {
+                    "status": "cancelled",
+                    "turn_id": turn_id,
+                    "tts_playback_final": final_metrics(),
+                }
+                if audio_started_event is not None:
+                    cancelled_event["ai_audio_started_event"] = audio_started_event
+                return cancelled_event
             self.state = "listening"
             event = failed_event(
                 session_id=self.session_id,
@@ -1484,8 +1571,9 @@ class CallSession:
                 self._active_tts_request_id = None
                 self._active_tts_turn_id = None
                 self._active_tts_cancel_requested = False
+                self._active_tts_metrics_snapshot = None
 
-    async def _cancel_active_tts_generation(self, turn_id: str | None) -> None:
+    async def _cancel_active_tts_generation(self, turn_id: str | None) -> bool | None:
         request_id = self._active_tts_request_id
         active_turn_id = self._active_tts_turn_id
         adapter = self._active_tts_adapter
@@ -1495,15 +1583,28 @@ class CallSession:
             or self._active_tts_cancel_requested
             or (turn_id is not None and active_turn_id != turn_id)
         ):
-            return
+            return None
 
         cancel = getattr(adapter, "cancel", None)
         if not callable(cancel):
-            return
+            return None
 
         self._active_tts_cancel_requested = True
         try:
-            await asyncio.to_thread(cancel, request_id)
+            return bool(
+                await asyncio.wait_for(
+                    asyncio.to_thread(cancel, request_id),
+                    timeout=CALL_TTS_CANCEL_DRAIN_TIMEOUT_SECONDS,
+                )
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[rayme-call] tts.cancel_timeout session=%s turn=%s engine=%s",
+                self.session_id,
+                active_turn_id or "",
+                getattr(adapter, "engine_id", "unknown"),
+            )
+            return False
         except Exception as exc:
             logger.warning(
                 "[rayme-call] tts.cancel_failed session=%s turn=%s engine=%s exc=%s",
@@ -1512,10 +1613,18 @@ class CallSession:
                 getattr(adapter, "engine_id", "unknown"),
                 exc.__class__.__name__,
             )
+            return False
 
-    async def cancel_ai_turn(self, turn_id: str | None = None) -> None:
+    async def cancel_ai_turn(
+        self,
+        turn_id: str | None = None,
+        *,
+        cause: str = "interrupt",
+    ) -> dict[str, Any]:
+        cancel_started_at = time.perf_counter()
         active = self.active_turn_task
         resolved_turn_id = turn_id or self._active_tts_turn_id
+        request_id = self._active_tts_request_id
         if resolved_turn_id is not None:
             self._cancelled_ai_turns.add(resolved_turn_id)
         stop = getattr(self.outbound_audio_track, "stop_current", None)
@@ -1524,17 +1633,56 @@ class CallSession:
             if inspect.isawaitable(result):
                 await result
         self.outbound_audio_buffer.drain()
-        await self._cancel_active_tts_generation(resolved_turn_id)
+        cancel_acknowledged = await self._cancel_active_tts_generation(resolved_turn_id)
+        metrics_snapshot = self._active_tts_metrics_snapshot
+        playback_final = metrics_snapshot() if callable(metrics_snapshot) else None
+        cancel_context: dict[str, Any] = {"control_cause": cause}
+        if resolved_turn_id is not None:
+            cancel_context["cancelled_turn_id"] = resolved_turn_id
+        if request_id is not None:
+            cancel_context["cancelled_request_id"] = request_id
+        if cancel_acknowledged is not None:
+            cancel_context["cancel_acknowledged"] = cancel_acknowledged
+        if playback_final is not None:
+            cancel_context["tts_playback_final"] = playback_final
+        self._last_tts_cancel_context = dict(cancel_context)
+
         if active is not None and active is not asyncio.current_task():
             cancel = getattr(active, "cancel", None)
             if callable(cancel):
-                cancel()
-        self.active_turn_task = None
+                active_loop_getter = getattr(active, "get_loop", None)
+                active_loop = active_loop_getter() if callable(active_loop_getter) else None
+                current_loop = asyncio.get_running_loop()
+                if active_loop is not None and active_loop is not current_loop:
+                    if active_loop.is_running():
+                        active_loop.call_soon_threadsafe(cancel)
+                    else:
+                        cancel()
+                else:
+                    cancel()
+                    if isinstance(active, asyncio.Future):
+                        remaining = max(
+                            CALL_TTS_CANCEL_DRAIN_TIMEOUT_SECONDS
+                            - (time.perf_counter() - cancel_started_at),
+                            0.0,
+                        )
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.shield(active),
+                                timeout=remaining,
+                            )
+                        except (asyncio.CancelledError, asyncio.TimeoutError):
+                            pass
+        if self.active_turn_task is active:
+            self.active_turn_task = None
+        return cancel_context
 
     async def end(self, *, reason: str = "ended") -> dict[str, Any]:
+        cancel_context: dict[str, Any] = {}
         if self.ended_at is None:
             if self.active_turn_task is not None or self._active_tts_turn_id is not None:
-                await self.cancel_ai_turn()
+                cause = "session_close" if reason == "removed" else reason
+                cancel_context = await self.cancel_ai_turn(cause=cause)
             self.ended_at = datetime.now(timezone.utc)
             self.end_reason = reason
             self.state = "ended"
@@ -1551,10 +1699,14 @@ class CallSession:
                 ENDED_EVENT,
                 session_id=self.session_id,
                 reason=self.end_reason or reason,
+                **cancel_context,
             )
         )
 
     async def fail(self, *, reason: str = "connection_failed") -> dict[str, Any]:
+        cancel_context: dict[str, Any] = {}
+        if self.active_turn_task is not None or self._active_tts_turn_id is not None:
+            cancel_context = await self.cancel_ai_turn(cause="connection_failure")
         self.state = "failed"
         self.end_reason = reason
         if self.ended_at is None:
@@ -1571,6 +1723,7 @@ class CallSession:
                 code=reason,
                 message="Call session failed.",
                 retry_allowed=True,
+                **cancel_context,
             )
         )
 
@@ -1585,6 +1738,7 @@ class CallSession:
             "muted": self.muted,
             "incoming_audio_frames": self.incoming_audio_frames,
             "dropped_audio_frames": self.dropped_audio_frames,
+            "late_tts_event_discard_count": self._late_tts_event_discard_count,
         }
 
     def _accept_vad_frame(self, frame: PcmAudioFrame) -> dict[str, bool]:
@@ -2371,6 +2525,11 @@ class CallSessionManager:
                 existing.stt_adapter = stt_adapter
             if tts_adapter is not None:
                 existing.tts_adapter = tts_adapter
+            if voice_id is not None or engine_id is not None:
+                await existing.update_call_selection(
+                    voice_id=voice_id if voice_id is not None else existing.voice_id,
+                    engine_id=engine_id if engine_id is not None else existing.engine_id,
+                )
             if outbound_audio_track is not None:
                 existing.outbound_audio_track = outbound_audio_track
             return existing

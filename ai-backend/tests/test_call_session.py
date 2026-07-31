@@ -2322,4 +2322,5 @@ def test_stats_returns_session_state_and_audio_counters() -> None:
         "muted": True,
         "incoming_audio_frames": 2,
         "dropped_audio_frames": 1,
+        "late_tts_event_discard_count": 0,
     }
