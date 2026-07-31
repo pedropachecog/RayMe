@@ -228,7 +228,9 @@
     try {
       localMediaStream = await requestCallMicrophone();
       startLocalMicMeter(localMediaStream);
-      await unlockAudioForCall();
+      // Browser audio unlock is best-effort: resume() may remain pending until a
+      // user gesture, and must never block signaling or visible call readiness.
+      void unlockAudioForCall();
       const started = await startCall({ thread_id: threadId });
       callId = started.call_id;
       sessionId = started.session_id || started.call_id;

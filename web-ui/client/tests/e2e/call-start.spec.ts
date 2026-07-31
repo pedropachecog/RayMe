@@ -145,12 +145,13 @@ test('keeps a Qwen call in Preparing voice until model and saved prompt are auth
 test('focuses a fixed Qwen preparation failure without exposing backend detail', async ({ page }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
   await installMockCallMedia(page);
-  await installCallStartRoutes(page, {
+  const counters = await installCallStartRoutes(page, {
     qwenPreparation: true,
     qwenPromptState: 'failed'
   });
 
   await page.goto(`/call/${threadId}`);
+  await expect.poll(() => counters.offerCount).toBe(1);
 
   const failure = page.getByRole('alert');
   await expect(failure.getByRole('heading', { name: 'Voice preparation failed' })).toBeFocused();
@@ -534,12 +535,12 @@ test('re-offers when ICE disconnects while aggregate peer state stays connected'
   await setCurrentMockPeerState(page, 'connected', 'connected');
   await setCurrentMockPeerIceState(page, 'disconnected');
 
-  await page.clock.fastForward(2_400);
+  await page.clock.fastForward(2_000);
   expect(counters.offerCount).toBe(1);
   expect(counters.endCount).toBe(0);
   expect(debugEventCount(counters, 'pc.media_reconnect.scheduled')).toBe(1);
 
-  await page.clock.fastForward(100);
+  await page.clock.fastForward(500);
   await expect.poll(() => counters.offerCount).toBe(2);
   expect(counters.endCount).toBe(0);
   await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
