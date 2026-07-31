@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 
@@ -7,15 +8,19 @@ import { expectRayMeApiRequest, installBrowserErrorGuard } from './helpers/accep
 
 const canonicalLiveWebUrl = 'https://192.168.1.199:8443';
 const canonicalLiveAiHealthUrl = 'https://192.168.1.199:9443/health';
+const canonicalLiveWebRtcStatusUrl = 'https://192.168.1.199:9443/webrtc/status';
+const qwenEngineId = 'qwen3_1_7b';
+const qwenLanScope = 'rayme_lan_call_testing';
+const generatedNonPersonBasis = 'generated_non_person_fixture';
 
 const liveEnabled = process.env.RAYME_ENABLE_LIVE_E2E === '1';
 const liveWebUrl = process.env.RAYME_LIVE_WEB_URL;
 const liveAiHealthUrl = process.env.RAYME_LIVE_AI_HEALTH_URL;
 const liveReferenceAudioFile = process.env.RAYME_LIVE_REFERENCE_AUDIO_FILE;
 const liveFakeAudioFile = process.env.RAYME_LIVE_FAKE_AUDIO_FILE;
-const liveReferenceTranscript =
-  process.env.RAYME_LIVE_REFERENCE_TRANSCRIPT ??
-  'Some call me nature, others call me mother nature.';
+const liveReferenceTranscriptFile = process.env.RAYME_LIVE_REFERENCE_TRANSCRIPT_FILE;
+const liveReferenceProvenanceFile = process.env.RAYME_LIVE_REFERENCE_PROVENANCE_FILE;
+const liveExpectedCommit = process.env.RAYME_LIVE_EXPECTED_COMMIT;
 const liveStabilityMs = parsePositiveInt(process.env.RAYME_LIVE_STABILITY_MS);
 const liveTtsEngines = (process.env.RAYME_LIVE_TTS_ENGINES ?? 'voxcpm2,f5')
   .split(',')
@@ -26,9 +31,14 @@ const localLlmUrl = process.env.RAYME_LIVE_LLM_URL ?? 'http://192.168.1.190:8001
 const localLlmModel = process.env.RAYME_LIVE_LLM_MODEL ?? 'unsloth/Qwen3.5-27B';
 
 for (const engine of liveTtsEngines) {
-  if (engine !== 'voxcpm2' && engine !== 'f5') {
-    throw new Error(`RAYME_LIVE_TTS_ENGINES only supports voxcpm2 or f5, got ${engine}`);
+  if (engine !== 'voxcpm2' && engine !== 'f5' && engine !== qwenEngineId) {
+    throw new Error(
+      `RAYME_LIVE_TTS_ENGINES only supports voxcpm2, f5, or ${qwenEngineId}, got ${engine}`
+    );
   }
+}
+if (liveEnabled && !liveTtsEngines.includes(qwenEngineId)) {
+  throw new Error(`RAYME_LIVE_TTS_ENGINES must include ${qwenEngineId} for Phase 09 acceptance`);
 }
 
 test.use({
@@ -55,12 +65,21 @@ for (const liveTtsEngine of liveTtsEngines) {
     request: apiRequest
   }) => {
     test.skip(
-      !liveEnabled || !liveWebUrl || !liveAiHealthUrl || !liveReferenceAudioFile || !liveFakeAudioFile,
-      'Set RAYME_ENABLE_LIVE_E2E=1, RAYME_LIVE_WEB_URL, RAYME_LIVE_AI_HEALTH_URL, RAYME_LIVE_REFERENCE_AUDIO_FILE, and RAYME_LIVE_FAKE_AUDIO_FILE to run live call acceptance.'
+      !liveEnabled ||
+        !liveWebUrl ||
+        !liveAiHealthUrl ||
+        !liveReferenceAudioFile ||
+        !liveFakeAudioFile ||
+        !liveReferenceTranscriptFile ||
+        !liveReferenceProvenanceFile ||
+        !liveExpectedCommit,
+      'Set RAYME_ENABLE_LIVE_E2E=1 plus canonical web/health URLs, expected commit, permitted reference/fake-mic files, and explicit transcript/provenance files to run live call acceptance.'
     );
+    test.info().annotations.push({ type: 'environment', description: 'environment=deployed_live' });
     test.setTimeout(600_000 + liveStabilityMs);
     expect(liveWebUrl).toBe(canonicalLiveWebUrl);
     expect(liveAiHealthUrl).toBe(canonicalLiveAiHealthUrl);
+    expect(liveExpectedCommit).toMatch(/^[0-9a-f]{40}$/);
 
     const assertNoBrowserErrors = installBrowserErrorGuard(page, {
       allowConsoleErrors: [/Failed to load resource: the server responded with a status of 502/]
