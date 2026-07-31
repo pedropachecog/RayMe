@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready_to_execute
-stopped_at: Completed 09-07-PLAN.md
-last_updated: "2026-07-31T18:39:04.927Z"
+stopped_at: Completed 09-06-PLAN.md
+last_updated: "2026-07-31T19:06:20.248Z"
 last_activity: 2026-07-31
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 112
-  completed_plans: 99
+  completed_plans: 100
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
-last_activity_desc: "Completed Phase 09 Plan 07: exact identity migration, hash-bound reference authorization, and live-call readiness bridge"
+last_activity_desc: "Completed Phase 09 Plan 06: saved-voice prompt cancellation, invalidation, and exact-owner eviction lifecycle"
 ---
 
 ## Phase Status
@@ -260,8 +260,8 @@ last_activity_desc: "Completed Phase 09 Plan 07: exact identity migration, hash-
 ## Session Continuity
 
 Last activity: 2026-07-31
-Last session: 2026-07-31T18:39:04.588Z
-Stopped at: Completed 09-07-PLAN.md
+Last session: 2026-07-31T19:06:19.915Z
+Stopped at: Completed 09-06-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -276,6 +276,7 @@ Resume file: None
 | Phase 09 P04 | 1h 14m | 2 tasks | 7 files |
 | Phase 09 P05 | 20min | 2 tasks | 8 files |
 | Phase 09 P07 | 26min | 3 tasks | 10 files |
+| Phase 09 P06 | 20min | 2 tasks | 12 files |
 
 ## Decisions
 
@@ -299,3 +300,6 @@ Resume file: None
 - [Phase 09]: Qwen authorization binds named stewardship and basis to LAN scope plus exact reference and transcript hashes without fabricating consent.
 - [Phase 09]: Live calls retain the durable saved voice id publicly while using a content-derived opaque voice key at the AI backend boundary.
 - [Phase 09]: Call preparation runs once and then polls separate shared model and prompt readiness with safe fixed failures.
+- [Phase 09]: Prompt ownership uses sha256('rayme:qwen3_1_7b:' + saved_voice_id), separate from private prompt-content cache identity.
+- [Phase 09]: Matching active Qwen generation is cancelled before worker prompt eviction.
+- [Phase 09]: Qwen soft deletion commits only after strict backend invalidation; failure leaves the voice active and retryable.
