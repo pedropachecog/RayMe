@@ -80,6 +80,10 @@ class VoiceMetadataValidationError(ValueError):
     """Raised when durable voice metadata is not bounded for storage."""
 
 
+class VoicePromptInvalidationError(RuntimeError):
+    """Raised when backend prompt eviction cannot be confirmed."""
+
+
 @dataclass(frozen=True, slots=True)
 class VoiceSampleBlob:
     path: Path
@@ -173,8 +177,7 @@ class VoiceService:
             payload = _qwen3_processor_payload(
                 payload,
                 authorization,
-                reference_bytes=reference_bytes,
-                reference_transcript=str(payload.get("reference_transcript") or ""),
+                owner_id=asset.id,
             )
         payload = _with_voxcpm2_payload_settings(payload)
         preview = getattr(self.processor, "synthesize_preview", None)
@@ -246,21 +249,42 @@ class VoiceService:
         return await self.voice_detail(voice)
 
     async def delete_voice(self, voice_id: str, *, force: bool) -> dict[str, Any]:
-        voice = await self._voice(voice_id)
+        voice = await self._voice(voice_id, include_deleted=True)
         referents = await self.referents_for_voice(voice_id)
+        if voice.deleted_at is not None:
+            return _voice_deletion_response(voice, referents=referents)
         if referents and not force:
             raise VoiceReferencedError(referents)
+
+        prompt_invalidation: dict[str, Any] | None = None
+        if normalize_voice_engine_id(voice.default_engine) == QWEN3_ENGINE_ID:
+            owner_key = qwen3_voice_key(voice.id)
+            invalidate = getattr(self.processor, "invalidate_qwen_prompt", None)
+            if not callable(invalidate):
+                raise VoicePromptInvalidationError(
+                    "Voice prompt removal failed"
+                )
+            try:
+                raw_invalidation = await invalidate(owner_key)
+                prompt_invalidation = _qwen3_invalidation_result(
+                    raw_invalidation,
+                    owner_key=owner_key,
+                )
+            except VoicePromptInvalidationError:
+                raise
+            except Exception as exc:
+                raise VoicePromptInvalidationError(
+                    "Voice prompt removal failed"
+                ) from exc
 
         voice.deleted_at = utc_now()
         await self.session.commit()
         await self.session.refresh(voice)
-        return {
-            "voice_id": voice.id,
-            "deleted_at": voice.deleted_at.isoformat() if voice.deleted_at else None,
-            "strategy": "soft_delete",
-            "referents": referents,
-            "tombstone": {"name": voice.name},
-        }
+        return _voice_deletion_response(
+            voice,
+            referents=referents,
+            prompt_invalidation=prompt_invalidation,
+        )
 
     async def test_play_voice(self, voice_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         voice = await self._voice(voice_id)
@@ -414,6 +438,7 @@ __all__ = [
     "VoiceSampleValidationError",
     "VoiceSynthesisFailedError",
     "VoiceMetadataValidationError",
+    "VoicePromptInvalidationError",
     "VoiceService",
     "build_qwen3_authorization_record",
     "canonical_voice_engine_id_for_read",
@@ -516,7 +541,7 @@ def validate_saved_qwen3_reference(
         raise VoiceMetadataValidationError("Qwen3-TTS reference authorization must be confirmed")
 
     return AuthorizedQwenReference(
-        voice_key=qwen3_voice_key(reference_bytes, transcript),
+        voice_key=qwen3_voice_key(voice.id),
         reference_bytes=reference_bytes,
         reference_transcript=transcript,
         content_type=content_type,
@@ -526,12 +551,12 @@ def validate_saved_qwen3_reference(
     )
 
 
-def qwen3_voice_key(reference_bytes: bytes, reference_transcript: str) -> str:
-    digest = hashlib.sha256()
-    digest.update(reference_bytes)
-    digest.update(b"\0")
-    digest.update(reference_transcript.encode("utf-8"))
-    return f"qwen3_voice_{digest.hexdigest()[:32]}"
+def qwen3_voice_key(saved_voice_id: str) -> str:
+    """Derive the opaque prompt owner key without private clone content."""
+    if not isinstance(saved_voice_id, str) or not saved_voice_id.strip():
+        raise VoiceMetadataValidationError("Qwen3-TTS saved voice identity is invalid")
+    identity = f"rayme:{QWEN3_ENGINE_ID}:{saved_voice_id}".encode("utf-8")
+    return hashlib.sha256(identity).hexdigest()
 
 
 def _validate_asset_bytes(asset: VoiceAsset, reference_bytes: bytes) -> None:
@@ -559,8 +584,7 @@ def _qwen3_processor_payload(
     payload: dict[str, Any],
     authorization: dict[str, str],
     *,
-    reference_bytes: bytes,
-    reference_transcript: str,
+    owner_id: str,
 ) -> dict[str, Any]:
     sanitized = {
         key: value
@@ -569,8 +593,54 @@ def _qwen3_processor_payload(
     }
     if not authorization.get("reference_sha256") or not authorization.get("transcript_sha256"):
         raise VoiceMetadataValidationError("Qwen3-TTS reference authorization is invalid")
-    sanitized["voice_id"] = qwen3_voice_key(reference_bytes, reference_transcript)
+    sanitized["voice_id"] = qwen3_voice_key(owner_id)
     return sanitized
+
+
+def _qwen3_invalidation_result(
+    raw: Any,
+    *,
+    owner_key: str,
+) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise VoicePromptInvalidationError("Voice prompt removal failed")
+    status = raw.get("status")
+    matched = raw.get("matched")
+    active_cancelled = raw.get("active_cancelled")
+    if (
+        raw.get("engine_id") != QWEN3_ENGINE_ID
+        or raw.get("voice_key") != owner_key
+        or status not in {"invalidated", "not_present"}
+        or not isinstance(matched, bool)
+        or not isinstance(active_cancelled, bool)
+        or (status == "invalidated") != matched
+    ):
+        raise VoicePromptInvalidationError("Voice prompt removal failed")
+    return {
+        "engine_id": QWEN3_ENGINE_ID,
+        "voice_key": owner_key,
+        "status": status,
+        "matched": matched,
+        "active_cancelled": active_cancelled,
+    }
+
+
+def _voice_deletion_response(
+    voice: Voice,
+    *,
+    referents: list[dict[str, str]],
+    prompt_invalidation: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    response: dict[str, Any] = {
+        "voice_id": voice.id,
+        "deleted_at": voice.deleted_at.isoformat() if voice.deleted_at else None,
+        "strategy": "soft_delete",
+        "referents": referents,
+        "tombstone": {"name": voice.name},
+    }
+    if prompt_invalidation is not None:
+        response["prompt_invalidation"] = prompt_invalidation
+    return response
 
 
 def _required_authorization_text(payload: dict[str, Any], field: str) -> str:

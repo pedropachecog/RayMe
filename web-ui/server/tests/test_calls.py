@@ -603,7 +603,7 @@ def test_qwen_offer_prepares_exact_authorized_reference_and_turn_uses_opaque_key
     call_fixture: CallFixture,
 ) -> None:
     call_fixture.completion.token_sequences = [["Prepared Qwen call reply."]]
-    thread_id, _ = asyncio.run(
+    thread_id, saved_voice_id = asyncio.run(
         _insert_qwen_thread_with_character_and_voice(call_fixture.sessionmaker)
     )
     started_response = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id})
@@ -622,7 +622,7 @@ def test_qwen_offer_prepares_exact_authorized_reference_and_turn_uses_opaque_key
     assert started["engine_id"] == "qwen3_1_7b"
     assert len(call_fixture.backend.prepare_calls) == 1
     prepare_payload = call_fixture.backend.prepare_calls[0]["payload"]
-    assert prepare_payload["voice_id"].startswith("qwen3_voice_")
+    assert prepare_payload["voice_id"] == _qwen_test_voice_key(saved_voice_id)
     assert prepare_payload["voice_id"] != started["voice_id"]
     assert prepare_payload["engine_id"] == "qwen3_1_7b"
     assert base64.b64decode(prepare_payload["reference_audio_base64"], validate=True) == (
@@ -1384,12 +1384,12 @@ async def _insert_qwen_thread_with_character_and_voice(
     return thread_id, voice_id
 
 
-def _qwen_test_voice_key() -> str:
-    digest = hashlib.sha256()
-    digest.update(b"voice sample bytes")
-    digest.update(b"\0")
-    digest.update(b"Reference transcript for Qwen call preparation.")
-    return f"qwen3_voice_{digest.hexdigest()[:32]}"
+def _qwen_test_voice_key(
+    saved_voice_id: str = "voice_char_qwen_call_ready",
+) -> str:
+    return hashlib.sha256(
+        f"rayme:qwen3_1_7b:{saved_voice_id}".encode("utf-8")
+    ).hexdigest()
 
 
 async def _insert_f5_thread_with_character_and_voice(sessionmaker: async_sessionmaker) -> str:

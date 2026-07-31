@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from typing import Any, Literal
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 UNREACHABLE_MESSAGE = "AI backend unreachable"
 INVALID_RESPONSE_MESSAGE = "AI backend returned an invalid response"
@@ -29,6 +29,7 @@ SAFE_PROCESSING_MESSAGES = {
     "qwen3_worker_protocol": "Qwen3-TTS runtime failed",
     "qwen3_worker_timeout": "Qwen3-TTS runtime timed out",
     "qwen3_worker_stopped": "Qwen3-TTS runtime stopped",
+    "qwen3_invalidate_failed": "Voice prompt removal failed",
     "call_tts_prepare_mismatch": "Selected voice does not match the call",
     "call_tts_prepare_unavailable": "Voice preparation is unavailable",
     "call_tts_prepare_failed": "Voice preparation failed",
@@ -82,6 +83,26 @@ class SynthesisResult(BaseModel):
     content_type: str
     audio_base64: str | None = None
     duration_ms: int | float | None = None
+
+
+class QwenPromptInvalidationResult(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    engine_id: Literal["qwen3_1_7b"]
+    voice_key: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[a-f0-9]{64}$",
+    )
+    status: Literal["invalidated", "not_present"]
+    matched: bool
+    active_cancelled: bool
+
+    @model_validator(mode="after")
+    def validate_status(self) -> "QwenPromptInvalidationResult":
+        if (self.status == "invalidated") != self.matched:
+            raise ValueError("prompt invalidation status mismatch")
+        return self
 
 
 class AiBackendClientError(Exception):
@@ -163,6 +184,25 @@ class AiBackendClient:
         response_payload = _json_payload(response)
         try:
             return SynthesisResult.model_validate(response_payload)
+        except ValidationError as exc:
+            raise _invalid_response() from exc
+
+    async def invalidate_qwen_prompt(
+        self,
+        base_url: str,
+        voice_key: str,
+    ) -> QwenPromptInvalidationResult:
+        response = await self._request(
+            "POST",
+            _join_endpoint(base_url, "/tts/qwen3/prompts/invalidate"),
+            json={"engine_id": "qwen3_1_7b", "voice_key": voice_key},
+            processing_message="Voice prompt removal failed",
+            processing_code="qwen3_invalidate_failed",
+            timeout=self._timeout,
+        )
+        payload = _json_payload(response)
+        try:
+            return QwenPromptInvalidationResult.model_validate(payload)
         except ValidationError as exc:
             raise _invalid_response() from exc
 
@@ -414,6 +454,7 @@ __all__ = [
     "AiBackendStatus",
     "AiBackendUnavailable",
     "EngineStatus",
+    "QwenPromptInvalidationResult",
     "SynthesisResult",
     "TranscriptionResult",
 ]

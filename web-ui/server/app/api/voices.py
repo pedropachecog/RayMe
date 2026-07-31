@@ -22,6 +22,7 @@ from app.domain.voice_service import (
     VoiceNotFoundError,
     VoiceReferencedError,
     VoiceService,
+    VoicePromptInvalidationError,
     VoiceSynthesisFailedError,
     normalize_voxcpm2_engine_settings,
 )
@@ -117,6 +118,10 @@ class AiBackendVoiceProcessor:
 
     async def preparation_status(self) -> dict[str, Any]:
         return await self.client.get_tts_preparation_status(self.base_url)
+
+    async def invalidate_qwen_prompt(self, voice_key: str) -> dict[str, Any]:
+        result = await self.client.invalidate_qwen_prompt(self.base_url, voice_key)
+        return result.model_dump()
 
     async def _synthesize(self, *, kind: str, **payload: Any) -> dict[str, Any]:
         try:
@@ -301,6 +306,18 @@ async def delete_voice(
         ) from exc
     except VoiceNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Voice not found") from exc
+    except (AiBackendClientError, VoicePromptInvalidationError):
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": {
+                    "code": "qwen3_invalidate_failed",
+                    "message": "Voice prompt removal failed",
+                },
+                "retry_allowed": True,
+                "deleted": False,
+            },
+        )
 
 
 @router.post("/{voice_id}/test-play")
