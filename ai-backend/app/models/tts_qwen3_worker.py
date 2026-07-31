@@ -213,13 +213,18 @@ def _dispatch(command: QwenWorkerCommand) -> bool:
         return True
 
     if isinstance(command, QwenInvalidateCommand):
-        if _PREPARED_PROMPT is not None and _PREPARED_PROMPT.voice_key == command.voice_key:
+        matched = (
+            _PREPARED_PROMPT is not None
+            and _PREPARED_PROMPT.voice_key == command.voice_key
+        )
+        if matched:
             _PREPARED_PROMPT = None
         _emit_event(
             QwenInvalidatedEvent(
                 event="invalidated",
                 request_id=command.request_id,
                 voice_key=command.voice_key,
+                matched=matched,
             )
         )
         return True

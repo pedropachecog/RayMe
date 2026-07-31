@@ -5,7 +5,7 @@ import asyncio
 import logging
 import uuid
 from io import BytesIO
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field
@@ -50,6 +50,66 @@ class TtsSynthesizeRequest(BaseModel):
     voxcpm2_inference_timesteps: int = Field(default=10, ge=4, le=30)
     voxcpm2_normalize: bool = True
     voxcpm2_denoise: bool = True
+
+
+class QwenPromptInvalidateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    engine_id: Literal["qwen3_1_7b"]
+    voice_key: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=r"^[a-f0-9]{64}$",
+    )
+
+
+@router.post("/tts/qwen3/prompts/invalidate")
+async def invalidate_qwen_prompt(
+    request: Request,
+    payload: QwenPromptInvalidateRequest,
+) -> dict[str, object]:
+    manager = _manager_from_app(request)
+    invalidate = getattr(manager, "invalidate_tts_prompt", None)
+    if not callable(invalidate):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "qwen3_invalidate_failed",
+                "message": "Voice prompt removal failed",
+                "engine_id": payload.engine_id,
+                "retryable": True,
+            },
+        )
+    try:
+        result = await invalidate(payload.engine_id, payload.voice_key)
+    except Exception as exc:
+        _mark_engine_unavailable(manager, payload.engine_id, failure=exc)
+        logger.warning(
+            "[rayme-tts] prompt.invalidate_failed engine=%s code=%s exc=%s",
+            payload.engine_id,
+            getattr(exc, "code", "qwen3_invalidate_failed"),
+            exc.__class__.__name__,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "qwen3_invalidate_failed",
+                "message": "Voice prompt removal failed",
+                "engine_id": payload.engine_id,
+                "retryable": True,
+            },
+        ) from exc
+    if not isinstance(result, dict):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "qwen3_invalidate_failed",
+                "message": "Voice prompt removal failed",
+                "engine_id": payload.engine_id,
+                "retryable": True,
+            },
+        )
+    return result
 
 
 @router.post("/tts/synthesize")

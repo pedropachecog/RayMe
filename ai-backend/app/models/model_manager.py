@@ -341,6 +341,60 @@ class ModelManager:
             self._selected_prompt_cache_key = prompt_cache_key
             return self._prepare_result(engine_id)
 
+    async def invalidate_tts_prompt(
+        self,
+        engine_id: str,
+        voice_key: str,
+    ) -> dict[str, object]:
+        if engine_id != "qwen3_1_7b":
+            raise ValueError("prompt invalidation is unavailable for this engine")
+        if (
+            not isinstance(voice_key, str)
+            or not voice_key
+            or len(voice_key) > 128
+            or not all(
+                character.isalnum() or character in "_.:-"
+                for character in voice_key
+            )
+        ):
+            raise ValueError("invalid voice key")
+        if self._prepare_lock is None:
+            self._prepare_lock = asyncio.Lock()
+        async with self._prepare_lock:
+            manager_matched = (
+                self._selected_voice_prompt["engine_id"] == engine_id
+                and self._selected_voice_prompt["voice_key"] == voice_key
+            )
+            adapter = self.tts_adapters[engine_id]
+            invalidate = getattr(adapter, "invalidate", None)
+            if not callable(invalidate):
+                raise Qwen3PromptError(
+                    "Qwen3 voice prompt invalidation is unavailable",
+                    code="qwen3_invalidate_failed",
+                )
+            try:
+                adapter_result = await asyncio.to_thread(invalidate, voice_key)
+            except Exception as exc:
+                if bool(getattr(exc, "marks_engine_unavailable", False)):
+                    self._contain_qwen_runtime_failure(engine_id)
+                raise
+
+            adapter_matched = bool(getattr(adapter_result, "matched", False))
+            active_cancelled = bool(
+                getattr(adapter_result, "active_cancelled", False)
+            )
+            matched = manager_matched or adapter_matched
+            if manager_matched:
+                self._reset_selected_voice_prompt()
+                self._qwen_alignment_cache = None
+            return {
+                "engine_id": engine_id,
+                "voice_key": voice_key,
+                "status": "invalidated" if matched else "not_present",
+                "matched": matched,
+                "active_cancelled": active_cancelled,
+            }
+
     def is_tts_prompt_ready(
         self,
         engine_id: str,

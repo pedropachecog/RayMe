@@ -175,6 +175,7 @@ def test_qwen_protocol_command_schema_rejects_wrong_or_oversized_data(
                 "event": "invalidated",
                 "request_id": "invalidate-1",
                 "voice_key": "voice_0123456789abcdef",
+                "matched": True,
             },
             "QwenInvalidatedEvent",
         ),

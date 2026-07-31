@@ -187,6 +187,7 @@ class QwenInvalidatedEvent(_EventBase):
         max_length=128,
         pattern=VOICE_KEY_PATTERN,
     )
+    matched: bool
 
 
 class QwenChunkEvent(_EventBase):

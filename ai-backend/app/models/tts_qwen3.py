@@ -14,6 +14,7 @@ import time
 import unicodedata
 import uuid
 from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -107,6 +108,13 @@ class Qwen3WorkerProtocolError(Qwen3RuntimeError):
     default_code = "qwen3_worker_protocol"
 
 
+@dataclass(frozen=True, slots=True)
+class QwenPromptInvalidationResult:
+    voice_key: str
+    matched: bool
+    active_cancelled: bool
+
+
 class Qwen3TtsAdapter(ImportGatedTtsAdapter):
     engine_id = "qwen3_1_7b"
     required_modules = ("faster_qwen3_tts",)
@@ -119,6 +127,7 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
         self._worker_lines: thread_queue.Queue[str | None] | None = None
         self._operation_lock = threading.RLock()
         self._write_lock = threading.Lock()
+        self._prompt_lock = threading.Lock()
         self._active_lock = threading.Lock()
         self._active_request_id: str | None = None
         self._cancel_acknowledgements: dict[str, threading.Event] = {}
@@ -128,7 +137,8 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
 
     @property
     def selected_voice_key(self) -> str | None:
-        return self._selected_voice_key
+        with self._prompt_lock:
+            return self._selected_voice_key
 
     @property
     def active_request_id(self) -> str | None:
@@ -191,8 +201,7 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                 reference_audio_b64=base64.b64encode(reference_audio).decode("ascii"),
                 reference_transcript=reference_transcript,
             )
-            self._selected_voice_key = None
-            self._selected_prompt_key = None
+            self._clear_selected_prompt()
             self._send_command(command)
             event = self._read_event(timeout_seconds=WORKER_PREWARM_TIMEOUT_SECONDS)
             if event.request_id != request_id:
@@ -207,8 +216,9 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                 or event.voice_key != prompt_key
             ):
                 self._fail_protocol("invalid Qwen3 prewarm acknowledgement")
-            self._selected_voice_key = voice_key
-            self._selected_prompt_key = prompt_key
+            with self._prompt_lock:
+                self._selected_voice_key = voice_key
+                self._selected_prompt_key = prompt_key
             return event.model_copy(update={"voice_key": voice_key})
 
     def stream(
@@ -221,11 +231,13 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
         with self._operation_lock:
             if not self.loaded:
                 self.load()
-            selected_voice_key = voice_key or self._selected_voice_key
-            selected_prompt_key = self._selected_prompt_key
+            with self._prompt_lock:
+                current_voice_key = self._selected_voice_key
+                selected_voice_key = voice_key or current_voice_key
+                selected_prompt_key = self._selected_prompt_key
             if (
                 not selected_voice_key
-                or selected_voice_key != self._selected_voice_key
+                or selected_voice_key != current_voice_key
                 or selected_prompt_key is None
             ):
                 raise Qwen3PromptError(
@@ -333,17 +345,47 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
         self._stop_worker()
         return False
 
-    def invalidate(self, voice_key: str) -> None:
-        with self._operation_lock:
-            if not self.loaded:
-                self._selected_voice_key = None
-                self._selected_prompt_key = None
-                return
-            prompt_key = (
-                self._selected_prompt_key
-                if self._selected_voice_key == voice_key
-                else voice_key
+    def invalidate(self, voice_key: str) -> QwenPromptInvalidationResult:
+        with self._prompt_lock:
+            matched = self._selected_voice_key == voice_key
+        if not matched:
+            return QwenPromptInvalidationResult(
+                voice_key=voice_key,
+                matched=False,
+                active_cancelled=False,
             )
+
+        active_request_id = self.active_request_id
+        active_cancelled = False
+        if active_request_id is not None:
+            active_cancelled = self.cancel(active_request_id)
+
+        with self._operation_lock:
+            with self._prompt_lock:
+                still_selected = self._selected_voice_key == voice_key
+                prompt_key = self._selected_prompt_key if still_selected else None
+            if not still_selected:
+                # Cancellation timeout terminates the worker and clears prompt
+                # ownership. That is still a successful privacy eviction.
+                return QwenPromptInvalidationResult(
+                    voice_key=voice_key,
+                    matched=True,
+                    active_cancelled=active_cancelled,
+                )
+            if not self.loaded:
+                self._clear_selected_prompt()
+                return QwenPromptInvalidationResult(
+                    voice_key=voice_key,
+                    matched=True,
+                    active_cancelled=active_cancelled,
+                )
+            if prompt_key is None:
+                self._clear_selected_prompt()
+                return QwenPromptInvalidationResult(
+                    voice_key=voice_key,
+                    matched=True,
+                    active_cancelled=active_cancelled,
+                )
             request_id = _new_request_id("invalidate")
             self._send_command(
                 QwenInvalidateCommand(
@@ -357,11 +399,15 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                 not isinstance(event, QwenInvalidatedEvent)
                 or event.request_id != request_id
                 or event.voice_key != prompt_key
+                or event.matched is not True
             ):
                 self._fail_protocol("invalid Qwen3 invalidate acknowledgement")
-            if self._selected_voice_key == voice_key:
-                self._selected_voice_key = None
-                self._selected_prompt_key = None
+            self._clear_selected_prompt()
+            return QwenPromptInvalidationResult(
+                voice_key=voice_key,
+                matched=True,
+                active_cancelled=active_cancelled,
+            )
 
     def unload(self) -> None:
         active_request_id = self.active_request_id
@@ -387,8 +433,7 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                 except Qwen3WorkerError:
                     pass
             self.loaded = False
-            self._selected_voice_key = None
-            self._selected_prompt_key = None
+            self._clear_selected_prompt()
             self._stop_worker()
 
     def _ensure_worker(self) -> subprocess.Popen[str]:
@@ -511,8 +556,7 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
         self._worker = None
         self._worker_lines = None
         self.loaded = False
-        self._selected_voice_key = None
-        self._selected_prompt_key = None
+        self._clear_selected_prompt()
         with self._active_lock:
             acknowledgements = list(self._cancel_acknowledgements.values())
         for acknowledgement in acknowledgements:
@@ -531,6 +575,11 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
             except subprocess.TimeoutExpired:
                 worker.kill()
                 worker.wait(timeout=5)
+
+    def _clear_selected_prompt(self) -> None:
+        with self._prompt_lock:
+            self._selected_voice_key = None
+            self._selected_prompt_key = None
 
 
 def _generation_limits(text: str) -> tuple[int, float]:
