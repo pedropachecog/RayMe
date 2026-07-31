@@ -233,7 +233,7 @@ test('Voice Library test-play keeps another row rename action available', async 
   await firstRow.getByLabel('Use default engine').check();
   await setRangeValue(firstRow.getByLabel('Aster Saved Voice speech speed'), '0.75');
   await firstRow.getByRole('button', { name: 'Test Voice' }).click();
-  await expect(firstRow.getByText('Testing voice...')).toBeVisible();
+  await expect(firstRow.getByRole('status')).toHaveText('Testing voice…');
   await expect(secondRow.getByRole('button', { name: 'Rename Voice' })).toBeEnabled();
   await expect(firstRow.getByLabel('Aster Saved Voice generated test audio')).toBeVisible();
 
