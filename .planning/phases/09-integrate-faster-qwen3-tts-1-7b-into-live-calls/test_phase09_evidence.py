@@ -4,6 +4,8 @@ import importlib.util
 import json
 import math
 import re
+import subprocess
+import sys
 from pathlib import Path
 from types import ModuleType
 
@@ -196,3 +198,164 @@ def test_speaker_runtime_is_pinned_local_cuda_only() -> None:
 
 
 # Task 2 adds verifier-specific tests below this line.
+
+
+EXPECTED_SELF_TESTS = {
+    "false-overall-status",
+    "stale-timestamp",
+    "deployed-commit-mismatch",
+    "whole-synthesis-fallback",
+    "missing-critical-gate",
+    "missing-scenario",
+    "authorization-missing",
+    "authorization-malformed",
+    "authorization-wrong-reference-hash",
+    "authorization-wrong-transcript-hash",
+    "authorization-wrong-scope",
+    "bridge-capacity-absent",
+    "bridge-high-water-unbounded",
+    "track-capacity-absent",
+    "track-high-water-unbounded",
+    "speaker-late-drop",
+    "speaker-baseline-drop",
+    "private-path-leak",
+    "full-transcript-leak",
+    "base64-audio-leak",
+    "access-token-leak",
+    "forbidden-audio-extension-leak",
+    "cpu-substitution",
+    "model-substitution",
+    "non-natural-eos",
+    "active-playout-underflow",
+    "realtime-supply-failure",
+    "late-audio-after-cancel",
+    "ai-done-after-cancel",
+    "persistence-after-cancel",
+    "unbounded-prompt-cache",
+    "unbounded-output-ceiling",
+    "missing-human-pending-separation",
+}
+
+
+def test_verifier_contracts_only_checks_static_tools_and_schema() -> None:
+    verifier = _load_module(VERIFIER_PATH, "phase09_verifier_contracts")
+    manifest = verifier.verify_contracts_only()
+    assert len(manifest["scenarios"]) == 20
+    assert set(manifest["critical_gate_ids"]) == set(verifier.REQUIRED_CRITICAL_GATES)
+
+
+def test_verifier_accepts_recomputed_synthetic_core_and_decision_bundle(tmp_path: Path) -> None:
+    verifier = _load_module(VERIFIER_PATH, "phase09_verifier_valid")
+    commit = "a" * 40
+    verifier.write_synthetic_bundle(
+        tmp_path,
+        deployed_commit=commit,
+        generated_at="2026-07-31T00:00:00Z",
+    )
+    assert verifier.verify_core_ready(
+        results_dir=tmp_path,
+        expected_commit=commit,
+        now="2026-07-31T01:00:00Z",
+    ) == commit
+    assert verifier.verify_decision_ready(
+        results_dir=tmp_path,
+        expected_commit=commit,
+        now="2026-07-31T01:00:00Z",
+    ) == commit
+
+
+def test_verifier_rejects_raw_failure_even_when_overall_status_is_true(tmp_path: Path) -> None:
+    verifier = _load_module(VERIFIER_PATH, "phase09_verifier_false_status")
+    commit = "a" * 40
+    verifier.write_synthetic_bundle(tmp_path, deployed_commit=commit, generated_at="2026-07-31T00:00:00Z")
+    soak_path = tmp_path / "qwen3-soak.json"
+    soak = json.loads(soak_path.read_text(encoding="utf-8"))
+    soak["overall_status"] = True
+    soak["turns"][-1]["natural_eos"] = False
+    soak_path.write_text(json.dumps(soak), encoding="utf-8")
+    with pytest.raises(verifier.EvidenceError, match="natural EOS"):
+        verifier.verify_core_ready(
+            results_dir=tmp_path,
+            expected_commit=commit,
+            now="2026-07-31T01:00:00Z",
+        )
+
+
+def test_verifier_recomputes_speaker_medians_instead_of_trusting_gate(tmp_path: Path) -> None:
+    verifier = _load_module(VERIFIER_PATH, "phase09_verifier_speaker")
+    commit = "a" * 40
+    verifier.write_synthetic_bundle(tmp_path, deployed_commit=commit, generated_at="2026-07-31T00:00:00Z")
+    speaker_path = tmp_path / "qwen3-speaker.json"
+    speaker = json.loads(speaker_path.read_text(encoding="utf-8"))
+    speaker["speaker_stability_gate"] = True
+    speaker["late_scores"] = [
+        {**row, "cosine": 0.70} for row in speaker["late_scores"]
+    ]
+    speaker_path.write_text(json.dumps(speaker), encoding="utf-8")
+    with pytest.raises(verifier.EvidenceError, match="late speaker median"):
+        verifier.verify_decision_ready(
+            results_dir=tmp_path,
+            expected_commit=commit,
+            now="2026-07-31T01:00:00Z",
+        )
+
+
+@pytest.mark.parametrize(
+    "payload,pattern",
+    [
+        ({"safe": "C:\\Users\\private\\voice"}, "private path"),
+        ({"reference_transcript": "the complete private transcript sentinel"}, "transcript"),
+        ({"wav_b64": "A" * 1024}, "base64"),
+        ({"authorization": "Bearer rayme_secret_access_token_1234567890"}, "token"),
+        ({"sample": "results/private-reference.wav"}, "audio extension"),
+        ({"/home/private/reference": "safe"}, "private path"),
+    ],
+)
+def test_verifier_leak_scan_covers_keys_and_values(payload: dict[str, str], pattern: str) -> None:
+    verifier = _load_module(VERIFIER_PATH, f"phase09_verifier_leak_{pattern.replace(' ', '_')}")
+    with pytest.raises(verifier.EvidenceError, match=pattern):
+        verifier.verify_no_private_leaks(payload, label="test payload")
+
+
+def test_verifier_named_self_tests_cover_every_false_readiness_mutation() -> None:
+    verifier = _load_module(VERIFIER_PATH, "phase09_verifier_selftest")
+    passed = verifier.run_self_tests()
+    assert set(passed) == EXPECTED_SELF_TESTS
+    assert len(passed) == len(EXPECTED_SELF_TESTS)
+
+
+def test_verifier_cli_self_test_lists_named_mutations() -> None:
+    completed = subprocess.run(
+        [sys.executable, str(VERIFIER_PATH), "--self-test"],
+        cwd=PHASE_DIR.parents[3],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    for name in EXPECTED_SELF_TESTS:
+        assert f"PASS self-test: {name}" in completed.stdout
+    assert completed.stdout.rstrip().endswith("PASS")
+
+
+def test_print_deployed_commit_emits_only_validated_sha(tmp_path: Path) -> None:
+    verifier = _load_module(VERIFIER_PATH, "phase09_verifier_print")
+    commit = "d" * 40
+    verifier.write_synthetic_bundle(tmp_path, deployed_commit=commit, generated_at="2026-07-31T00:00:00Z")
+    completed = subprocess.run(
+        [
+            sys.executable,
+            str(VERIFIER_PATH),
+            "--print-deployed-commit",
+            "--results-dir",
+            str(tmp_path),
+            "--now",
+            "2026-07-31T01:00:00Z",
+        ],
+        cwd=PHASE_DIR.parents[3],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert completed.stdout == f"{commit}\n"
