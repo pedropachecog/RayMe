@@ -1579,6 +1579,118 @@ def test_qwen_capacity_two_bridge_blocks_producer_without_dropping_chunks(
     assert final["chunk_count"] == 6
 
 
+def test_qwen_fast_producer_is_bounded_by_paced_track_consumption(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
+    monkeypatch.setattr(session_module, "CALL_TTS_AUDIO_PREROLL_SECONDS", 0.0)
+    events: list[dict[str, Any]] = []
+    stream_completed_at_start: list[bool] = []
+
+    async def scenario() -> tuple[dict[str, Any], QueuedAudioOutputTrack, list[int]]:
+        track = QueuedAudioOutputTrack(
+            sample_rate=48000,
+            frame_ms=20,
+            max_pending_audio_seconds=0.24,
+        )
+        adapter = BackpressureQwenStreamingTtsAdapter()
+        played_peaks: list[int] = []
+
+        def sink(event: dict[str, Any]) -> None:
+            events.append(event)
+            if event["type"] == "ai_audio_started":
+                stream_completed_at_start.append(adapter.stream_completed.is_set())
+
+        session, _ = _new_session(
+            tts_adapter=adapter,
+            outbound_audio_track=track,
+            event_sink=sink,
+        )
+        speech = asyncio.create_task(
+            session.speak_text(
+                "ai-turn-qwen-paced-credit",
+                "Fast generation must stay bounded by real paced playout.",
+                "voice-qwen",
+                "qwen3_1_7b",
+                final_chunk=True,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="The exact reference transcript.",
+            )
+        )
+
+        async def consume() -> None:
+            while not speech.done() or track.pending_samples > 0:
+                frame = await track.recv()
+                played_peaks.append(int(np.max(np.abs(frame.to_ndarray()))))
+
+        consumer = asyncio.create_task(consume())
+        try:
+            result = await asyncio.wait_for(speech, timeout=5.0)
+            await asyncio.wait_for(consumer, timeout=1.0)
+            return result, track, played_peaks
+        finally:
+            if not consumer.done():
+                consumer.cancel()
+
+    event, track, played_peaks = _run(scenario())
+
+    assert event["type"] == "ai_done"
+    assert stream_completed_at_start == [False]
+    assert any(peak > 0 for peak in played_peaks)
+    immediate = event["ai_audio_started_event"]["tts_playback"]
+    assert "total_generation_ms" not in immediate
+    assert "total_playback_ms" not in immediate
+    assert "generation_complete_ms" not in immediate
+    assert "playout_complete_ms" not in immediate
+    assert "track_pending_audio_high_water_ms" not in immediate
+    final = event["tts_playback_final"]
+    assert final["bridge_queue_capacity"] == 2
+    assert final["bridge_queue_high_water"] <= 2
+    assert final["bridge_producer_block_count"] > 0
+    assert final["track_admission_capacity_ms"] == 240.0
+    assert final["track_pending_audio_high_water_ms"] <= 240.0
+    assert final["track_admission_block_count"] > 0
+    assert final["track_admission_block_time_ms"] > 0
+    assert final["track_order_violation_count"] == 0
+    assert final["track_discarded_samples"] == 0
+    assert final["track_playout_debt_ms"] == 0.0
+    assert final["playout_wait_completed"] is True
+    assert final["playout_complete_ms"] >= final["generation_complete_ms"]
+    assert track.pending_samples == 0
+
+
+def test_queued_audio_output_track_credit_wakes_and_discards_on_stop() -> None:
+    async def scenario() -> tuple[dict[str, Any], dict[str, Any]]:
+        track = QueuedAudioOutputTrack(
+            sample_rate=16000,
+            frame_ms=20,
+            max_pending_audio_seconds=0.04,
+        )
+        samples = np.full(3200, 0.25, dtype=np.float32)
+        buffer = BytesIO()
+        sf.write(buffer, samples, 16000, format="WAV")
+
+        enqueue = asyncio.create_task(track.enqueue(buffer.getvalue()))
+        await asyncio.sleep(0)
+        assert track.pending_samples <= 640
+        assert not enqueue.done()
+        before = track.playout_metrics()
+        await track.stop_current()
+        await asyncio.wait_for(enqueue, timeout=0.5)
+        after = track.playout_metrics()
+        return before, after
+
+    before, after = _run(scenario())
+
+    assert before["pending_samples"] <= before["admission_capacity_samples"]
+    assert before["admission_block_count"] > 0
+    assert after["pending_samples"] == 0
+    assert after["playout_debt_ms"] == 0.0
+    assert after["discarded_samples"] > 0
+    assert after["discarded_chunks"] > 0
+
+
 @pytest.mark.parametrize("yield_before_cancel", [False, True])
 @pytest.mark.parametrize("termination", ["interrupt", "hangup"])
 def test_qwen_termination_cancels_exact_request_and_rejects_normal_completion(
