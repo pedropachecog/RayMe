@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready_to_execute
-stopped_at: Completed 09-02-PLAN.md
-last_updated: "2026-07-31T15:55:11.795Z"
+stopped_at: Completed 09-03-PLAN.md
+last_updated: "2026-07-31T16:20:45.394Z"
 last_activity: 2026-07-31
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 112
-  completed_plans: 95
+  completed_plans: 96
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
-last_activity_desc: "Completed quick task 260602-5bv: replaced OMEN desktop RayMe shortcut with a visible foreground console that streams logs and stops services when closed"
+last_activity_desc: "Completed Phase 09 Plan 03: responsive Qwen readiness plus bounded live streaming and exact cancellation contracts"
 ---
 
 ## Phase Status
@@ -260,8 +260,8 @@ last_activity_desc: "Completed quick task 260602-5bv: replaced OMEN desktop RayM
 ## Session Continuity
 
 Last activity: 2026-07-31
-Last session: 2026-07-31T15:55:11.448Z
-Stopped at: Completed 09-02-PLAN.md
+Last session: 2026-07-31T16:20:45.037Z
+Stopped at: Completed 09-03-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -272,6 +272,7 @@ Resume file: None
 |------|----------|-------|-------|
 | Phase 09 P01 | 5min | 2 tasks | 6 files |
 | Phase 09 P02 | 14min | 2 tasks | 4 files |
+| Phase 09 P03 | 18min | 2 tasks | 7 files |
 
 ## Decisions
 
@@ -280,3 +281,7 @@ Resume file: None
 - [Phase 09]: Keep all Torch, Faster Qwen3-TTS, model, and full-ICL prompt ownership inside one spawned worker; the parent adapter handles only validated JSON events and WAV bytes.
 - [Phase 09]: Treat generator exhaustion as normal authority while converting token/audio ceilings, malformed IPC, and runtime failures into one request-scoped non-success terminal.
 - [Phase 09]: Preserve cancellation that arrives before worker dispatch, require the matching cancelled terminal, and terminate the worker when acknowledgement does not arrive within two seconds.
+- [Phase 09]: Expose Qwen model residency and selected opaque-voice prompt readiness as separate state machines so a resident model cannot masquerade as a call-ready voice.
+- [Phase 09]: Admit live native streaming only for the explicit voxcpm2 and qwen3_1_7b engine set; Qwen receives the exact turn id as request id and never reaches whole synthesis.
+- [Phase 09]: Use a capacity-two blocking thread-to-async bridge with bridge totals emitted only at terminal time.
+- [Phase 09]: Signal the matching TTS request before cancelling the call task for both interrupt and hangup.
