@@ -256,16 +256,26 @@ def load_runtime(
 
 
 def _assert_runtime_cuda(runtime: Any) -> None:
-    candidates = (runtime, getattr(runtime, "model", None))
+    qwen_wrapper = getattr(runtime, "model", None)
+    candidates = (
+        runtime,
+        qwen_wrapper,
+        getattr(qwen_wrapper, "model", None),
+    )
     for candidate in candidates:
         if candidate is None or not hasattr(candidate, "parameters"):
             continue
         try:
-            parameter = next(iter(candidate.parameters()))
-        except (StopIteration, TypeError):
+            parameters = iter(candidate.parameters())
+        except TypeError:
             continue
-        device = getattr(parameter, "device", None)
-        if str(getattr(device, "type", device)) == "cuda":
+        found_parameter = False
+        for parameter in parameters:
+            found_parameter = True
+            device = getattr(parameter, "device", None)
+            if str(getattr(device, "type", device)) != "cuda":
+                raise RuntimeError("Qwen3-TTS runtime did not expose CUDA parameters")
+        if found_parameter:
             return
     raise RuntimeError("Qwen3-TTS runtime did not expose CUDA parameters")
 

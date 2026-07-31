@@ -752,6 +752,45 @@ def test_qwen_worker_loads_only_exact_cuda_torch_runtime_settings(
     assert warmups == [100]
 
 
+def test_qwen_worker_accepts_cuda_parameters_at_pinned_wrapper_model_depth() -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    class Parameter:
+        device = type("Device", (), {"type": "cuda"})()
+
+    class NativeModel:
+        def parameters(self):
+            yield Parameter()
+
+    runtime = type(
+        "PinnedFasterQwenRuntime",
+        (),
+        {"model": type("QwenWrapper", (), {"model": NativeModel()})()},
+    )()
+
+    worker._assert_runtime_cuda(runtime)
+
+
+def test_qwen_worker_rejects_non_cuda_parameter_at_pinned_wrapper_model_depth() -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    class Parameter:
+        device = type("Device", (), {"type": "cpu"})()
+
+    class NativeModel:
+        def parameters(self):
+            yield Parameter()
+
+    runtime = type(
+        "PinnedFasterQwenRuntime",
+        (),
+        {"model": type("QwenWrapper", (), {"model": NativeModel()})()},
+    )()
+
+    with pytest.raises(RuntimeError, match="did not expose CUDA parameters"):
+        worker._assert_runtime_cuda(runtime)
+
+
 def test_qwen_worker_prewarm_builds_one_full_icl_prompt_from_exact_reference() -> None:
     from app.models import tts_qwen3_worker as worker
 
