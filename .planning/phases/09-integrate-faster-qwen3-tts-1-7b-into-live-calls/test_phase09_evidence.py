@@ -566,6 +566,31 @@ def test_runner_dispatches_all_manifest_scenarios_through_named_production_paths
     }
     assert all(row["observed_events"] for row in rows)
     assert all("measurements" in row for row in rows)
+    assert [row["seed"] for row in rows] == [
+        scenario["seed"] for scenario in manifest["scenarios"]
+    ]
+
+
+def test_runner_anchor_hashes_are_bound_to_each_actual_wav_and_mismatch_fails() -> None:
+    runner = _runner_module("phase09_runner_actual_anchor_hashes")
+    shared = "a" * 64
+    rows = [
+        {"turn": turn, "audio_sha256": shared}
+        for turn in (1, 10, 20, 30, 40, 50)
+    ]
+
+    runner.bind_and_validate_actual_anchor_hashes(
+        rows,
+        anchor_turns=[1, 10, 20, 30, 40, 50],
+    )
+    assert [row["anchor_sha256"] for row in rows] == [shared] * 6
+
+    rows[-1]["audio_sha256"] = "b" * 64
+    with pytest.raises(runner.EvidenceRunnerError, match="bit-identical"):
+        runner.bind_and_validate_actual_anchor_hashes(
+            rows,
+            anchor_turns=[1, 10, 20, 30, 40, 50],
+        )
 
 
 def test_runner_source_owns_production_routes_and_forbids_direct_generation_imports() -> None:
@@ -821,5 +846,6 @@ def test_runner_finish_source_pins_local_cuda_scorer_and_never_self_certifies() 
     assert "feb593a6c23c1cc3d9510425c29b0a14d2b07b1e" in source
     assert "--finish-acoustic-leak" in source
     assert "--core-only" in source
-    assert "cpu_fallback" not in source
+    assert '\"device\": \"cpu\"' not in source
+    assert "remote_audio_judge" not in source
     assert "overall_status" not in source

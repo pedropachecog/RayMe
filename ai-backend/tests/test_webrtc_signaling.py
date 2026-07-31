@@ -1073,6 +1073,81 @@ def test_webrtc_prepared_qwen_speak_uses_native_stream_and_truthful_carriers(
     final = payload["event"]["tts_playback_final"]
     assert final["bridge_queue_capacity"] == 2
     assert final["bridge_queue_high_water"] <= 2
+    assert adapter.calls[0].qwen3_release_evidence_mode is None
+    assert adapter.calls[0].qwen3_release_evidence_seed is None
+
+
+def test_webrtc_qwen_release_evidence_seed_requires_explicit_evidence_session_and_propagates(
+    stub_webrtc: None,
+) -> None:
+    adapter = ScriptedQwenStreamingTtsAdapter()
+    manager = ScriptedPreparingModelManager(adapter, ready=True)
+    client = _client(model_manager=manager)
+    session_id = "phase09-evidence-seed-contract"
+    client.post(
+        "/webrtc/offer",
+        json={
+            **_offer_payload(session_id=session_id),
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+        },
+    )
+    base = {
+        "turn_id": "evidence-anchor-01",
+        "text": "A deterministic release evidence anchor.",
+        "voice_id": "voice-qwen",
+        "engine_id": "qwen3_1_7b",
+        "final_chunk": True,
+        "reference_audio_b64": "cmVhbC1zYW1wbGU=",
+        "reference_transcript": "The exact reference transcript.",
+    }
+
+    accepted = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={
+            **base,
+            "release_evidence_mode": "phase09_release_evidence",
+            "release_evidence_seed": 91_001,
+        },
+    )
+    assert accepted.status_code == 200
+    assert adapter.calls[-1].qwen3_release_evidence_mode == "phase09_release_evidence"
+    assert adapter.calls[-1].qwen3_release_evidence_seed == 91_001
+
+    invalid_payloads = (
+        {**base, "release_evidence_mode": "phase09_release_evidence"},
+        {**base, "release_evidence_seed": 91_001},
+        {
+            **base,
+            "release_evidence_mode": "ordinary_call",
+            "release_evidence_seed": 91_001,
+        },
+    )
+    for payload in invalid_payloads:
+        assert client.post(
+            SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+            json=payload,
+        ).status_code == 422
+
+    ordinary_session = "ordinary-live-call"
+    client.post(
+        "/webrtc/offer",
+        json={
+            **_offer_payload(session_id=ordinary_session),
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+        },
+    )
+    rejected = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=ordinary_session),
+        json={
+            **base,
+            "release_evidence_mode": "phase09_release_evidence",
+            "release_evidence_seed": 91_001,
+        },
+    )
+    assert rejected.status_code == 422
+    assert rejected.json()["detail"]["code"] == "qwen_release_evidence_scope_invalid"
 
 
 def test_webrtc_speak_streaming_failure_keeps_fixed_public_error(

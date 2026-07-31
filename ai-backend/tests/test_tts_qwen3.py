@@ -98,6 +98,51 @@ def test_qwen_protocol_command_schema_is_versioned_and_discriminated(
     assert command.request_id == payload["request_id"]
 
 
+def test_qwen_generate_protocol_accepts_only_paired_bounded_release_evidence_seed() -> None:
+    protocol = _protocol_module()
+    base = {
+        "schema_version": 1,
+        "op": "generate",
+        "request_id": "evidence-anchor-01",
+        "voice_key": "voice_0123456789abcdef",
+        "text": "A deterministic release evidence anchor.",
+        "max_new_tokens": 48,
+        "hard_audio_seconds": 6.0,
+    }
+
+    command = protocol.parse_command(
+        {
+            **base,
+            "release_evidence_mode": "phase09_release_evidence",
+            "release_evidence_seed": 91_001,
+        }
+    )
+    assert command.release_evidence_mode == "phase09_release_evidence"
+    assert command.release_evidence_seed == 91_001
+
+    for invalid in (
+        {**base, "release_evidence_mode": "phase09_release_evidence"},
+        {**base, "release_evidence_seed": 91_001},
+        {
+            **base,
+            "release_evidence_mode": "ordinary_call",
+            "release_evidence_seed": 91_001,
+        },
+        {
+            **base,
+            "release_evidence_mode": "phase09_release_evidence",
+            "release_evidence_seed": -1,
+        },
+        {
+            **base,
+            "release_evidence_mode": "phase09_release_evidence",
+            "release_evidence_seed": 4_294_967_296,
+        },
+    ):
+        with pytest.raises(ValidationError):
+            protocol.parse_command(invalid)
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -611,6 +656,112 @@ def test_qwen_adapter_owns_spawned_load_prewarm_stream_invalidate_unload_lifecyc
     assert "reference_transcript" not in generate
     # Unload is process ownership cleanup, not just a logical model flag.
     assert process.terminated is True
+
+
+def test_qwen_adapter_propagates_explicit_evidence_seed_without_seeding_ordinary_calls(
+    qwen_runtime_available: None,
+) -> None:
+    from app.models.tts_registry import TtsSynthesisInput
+
+    qwen = _qwen_module()
+    process = ScriptedQwenWorkerProcess()
+    adapter = qwen.Qwen3TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
+    adapter.load()
+    adapter.prewarm(
+        voice_key="voice_0123456789abcdef",
+        reference_audio=b"RIFF-reference",
+        reference_transcript="The exact spoken reference.",
+    )
+    ordinary = _request()
+    evidence = TtsSynthesisInput(
+        text="A deterministic release evidence anchor.",
+        reference_audio=b"RIFF-reference",
+        reference_audio_content_type="audio/wav",
+        reference_transcript="The exact spoken reference.",
+        qwen3_release_evidence_mode="phase09_release_evidence",
+        qwen3_release_evidence_seed=91_001,
+    )
+
+    list(adapter.stream(ordinary, request_id="ordinary-turn"))
+    list(adapter.stream(evidence, request_id="evidence-turn"))
+
+    generated = [payload for payload in process.ops if payload["op"] == "generate"]
+    assert generated[0]["release_evidence_mode"] is None
+    assert generated[0]["release_evidence_seed"] is None
+    assert generated[1]["release_evidence_mode"] == "phase09_release_evidence"
+    assert generated[1]["release_evidence_seed"] == 91_001
+
+
+def test_qwen_worker_release_evidence_rng_is_repeatable_and_restores_all_rng_states(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import random
+    import sys
+
+    import numpy as np
+
+    from app.models import tts_qwen3_worker as worker
+
+    class FakeTorchRandom:
+        def __init__(self) -> None:
+            self.state = b"torch-before"
+
+        def get_rng_state(self) -> bytes:
+            return self.state
+
+        def set_rng_state(self, state: bytes) -> None:
+            self.state = state
+
+    class FakeCuda:
+        def __init__(self) -> None:
+            self.states = [b"cuda-before"]
+            self.seed_calls: list[int] = []
+
+        def get_rng_state_all(self) -> list[bytes]:
+            return list(self.states)
+
+        def set_rng_state_all(self, states: list[bytes]) -> None:
+            self.states = list(states)
+
+        def manual_seed_all(self, seed: int) -> None:
+            self.seed_calls.append(seed)
+            self.states = [f"cuda-{seed}".encode()]
+
+    fake_random = FakeTorchRandom()
+    fake_cuda = FakeCuda()
+
+    class FakeTorch:
+        random = fake_random
+        cuda = fake_cuda
+
+        @staticmethod
+        def manual_seed(seed: int) -> None:
+            fake_random.state = f"torch-{seed}".encode()
+
+    monkeypatch.setitem(sys.modules, "torch", FakeTorch)
+    random.seed(77)
+    np.random.seed(77)
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+
+    samples: list[tuple[float, float, bytes, list[bytes]]] = []
+    for _ in range(2):
+        with worker._release_evidence_rng_scope(91_001):
+            samples.append(
+                (
+                    random.random(),
+                    float(np.random.random()),
+                    fake_random.state,
+                    list(fake_cuda.states),
+                )
+            )
+        assert random.getstate() == python_state
+        assert np.array_equal(np.random.get_state()[1], numpy_state[1])
+        assert fake_random.state == b"torch-before"
+        assert fake_cuda.states == [b"cuda-before"]
+
+    assert samples[0] == samples[1]
+    assert fake_cuda.seed_calls == [91_001, 91_001]
 
 
 def test_qwen_worker_invalidate_drops_matching_prompt_tensors_and_is_idempotent(
