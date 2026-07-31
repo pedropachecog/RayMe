@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   deleteVoice,
+  getVoicePreparationStatus,
   getVoice,
   listVoices,
   previewVoice,
@@ -27,16 +28,24 @@ const sourceFiles = [
   'src/lib/api/voices.ts',
   'src/lib/api/types.ts'
 ];
+const clientRoot = existsSync('src/routes/voice-lab/+page.svelte') ? '' : 'web-ui/client/';
+const sourcePath = (path: string) => `${clientRoot}${path}`;
 
 const voiceLabSources = sourceFiles
-  .filter((path) => existsSync(path))
-  .map((path) => `\n/* ${path} */\n${readFileSync(path, 'utf8')}`)
+  .filter((path) => existsSync(sourcePath(path)))
+  .map((path) => `\n/* ${path} */\n${readFileSync(sourcePath(path), 'utf8')}`)
   .join('\n');
-const routeSource = existsSync('src/routes/voice-lab/+page.svelte')
-  ? readFileSync('src/routes/voice-lab/+page.svelte', 'utf8')
+const routeSource = existsSync(sourcePath('src/routes/voice-lab/+page.svelte'))
+  ? readFileSync(sourcePath('src/routes/voice-lab/+page.svelte'), 'utf8')
   : '';
-const apiTypesSource = existsSync('src/lib/api/types.ts')
-  ? readFileSync('src/lib/api/types.ts', 'utf8')
+const apiTypesSource = existsSync(sourcePath('src/lib/api/types.ts'))
+  ? readFileSync(sourcePath('src/lib/api/types.ts'), 'utf8')
+  : '';
+const callRouteSource = existsSync(sourcePath('src/routes/call/[threadId]/+page.svelte'))
+  ? readFileSync(sourcePath('src/routes/call/[threadId]/+page.svelte'), 'utf8')
+  : '';
+const voicesApiSource = existsSync(sourcePath('src/lib/api/voices.ts'))
+  ? readFileSync(sourcePath('src/lib/api/voices.ts'), 'utf8')
   : '';
 
 const requiredVoiceLabCopy = [
@@ -68,7 +77,7 @@ const requiredVoiceLabCopy = [
 const engineLabels = [
   'F5-TTS',
   'XTTS v2',
-  'Qwen3-TTS 0.6B-Base',
+  'Qwen3-TTS 1.7B-Base',
   'LuxTTS',
   'Chatterbox Turbo',
   'TADA 1B',
@@ -237,7 +246,7 @@ describe('Voice Lab API wrappers', () => {
 describe('Voice Lab Phase 2 source contract', () => {
   it('has concrete Voice Lab and Voice Library source files', () => {
     expect(
-      sourceFiles.filter((path) => existsSync(path)),
+      sourceFiles.filter((path) => existsSync(sourcePath(path))),
       'Voice Lab implementation sources should exist before this contract can pass'
     ).toEqual(
       expect.arrayContaining([
@@ -271,7 +280,7 @@ describe('Voice Lab Phase 2 source contract', () => {
       expect(voiceLabSources).toMatch(new RegExp(metadataTerm, 'i'));
     }
 
-    expect(voiceLabSources).not.toContain("['F5-TTS', 'XTTS v2', 'Qwen3-TTS 0.6B-Base']");
+    expect(voiceLabSources).not.toContain('Qwen3-TTS 0.6B-Base');
   });
 
   it('renders VoxCPM2 controls only for VoxCPM2', () => {
@@ -357,6 +366,75 @@ describe('Voice Lab Phase 2 source contract', () => {
     expect(routeSource).toMatch(/canSave\s*=\s*Boolean\([\s\S]*asset[\s\S]*voiceName[\s\S]*transcript[\s\S]*selectedEngine/i);
     expect(routeSource).not.toMatch(/canSave\s*=\s*Boolean\([^)]*preview/i);
     expect(routeSource).not.toMatch(/preview\s*(?:Succeeded|Complete|Ready)\s*&&\s*canSave/i);
+  });
+
+  it('requires the three Qwen authorization fields and preserves them through preparation failures', async () => {
+    const fetchMock = installFetch({
+      model: { state: 'loading', engine_id: 'qwen3_1_7b' },
+      prompt: { state: 'prewarming', voice_key: 'opaque', error_code: null }
+    });
+
+    await getVoicePreparationStatus();
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/voices/preparation-status',
+      init: { method: 'GET' }
+    });
+
+    for (const label of ['Reference authorization', 'Reference source', 'Authorization basis', 'Use scope']) {
+      expect(routeSource).toContain(label);
+    }
+    for (const field of ['voice_data_steward', 'authorization_basis', 'use_scope']) {
+      expect(apiTypesSource).toContain(field);
+      expect(routeSource).toContain(field);
+    }
+    expect(routeSource).toContain("selectedEngine === 'qwen3_1_7b'");
+    expect(routeSource).toContain("useScope = ''");
+    expect(routeSource).toContain('rayme_lan_call_testing');
+    expect(routeSource).toContain('focusFirstInvalidQwenField');
+    expect(routeSource).toContain('authorizationBasis');
+    expect(routeSource).toContain('voiceDataSteward');
+    expect(voicesApiSource).toContain("'/voices/preparation-status'");
+  });
+
+  it('keeps Qwen model and prompt preparation separate and never promotes a cold call to Listening', () => {
+    for (const copy of [
+      'Loading Qwen3-TTS 1.7B…',
+      'Qwen3-TTS 1.7B loaded',
+      'Voice not prepared',
+      'Preparing saved voice…',
+      'Saved voice ready',
+      'Voice preparation failed',
+      'Preparing voice',
+      'Retry Preparation'
+    ]) {
+      expect(`${routeSource}\n${callRouteSource}`).toContain(copy);
+    }
+
+    expect(routeSource).toContain('modelReadiness');
+    expect(routeSource).toContain('promptReadiness');
+    expect(callRouteSource).toContain("started.engine_id === 'qwen3_1_7b'");
+    expect(callRouteSource).toContain("preparation.prompt.state === 'ready'");
+    expect(callRouteSource).toMatch(/callState === 'connecting'[\s\S]*Preparing voice/);
+    expect(callRouteSource).toMatch(/canUseToolbar[\s\S]*callState !== 'connecting'/);
+    expect(callRouteSource).toContain('role="status"');
+    expect(callRouteSource).toContain('role="alert"');
+  });
+
+  it('uses fixed actionable Qwen failure copy without raw backend details', () => {
+    for (const copy of [
+      'Add the matching reference transcript before using Qwen3-TTS 1.7B.',
+      'This transcript does not appear to match the voice sample.',
+      'Add the reference source, authorization basis, and use scope before using this voice.',
+      'RayMe could not prepare this voice. Retry preparation.',
+      'RayMe stopped this voice because the generated audio exceeded its safe limit.',
+      'Qwen3-TTS 1.7B is unavailable right now.'
+    ]) {
+      expect(`${routeSource}\n${callRouteSource}`).toContain(copy);
+    }
+    for (const forbidden of ['Traceback', 'RuntimeError', 'model cache', 'voice_key', 'reference_sha256']) {
+      expect(routeSource).not.toContain(forbidden);
+      expect(callRouteSource).not.toContain(forbidden);
+    }
   });
 
   it('preserves user input and preview text when preview synthesis fails', () => {
