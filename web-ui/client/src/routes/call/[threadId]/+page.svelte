@@ -1880,8 +1880,9 @@
   }
 
   function messageForCallFailure(code: CallErrorCode, message?: string | null) {
-    if (code === 'qwen3_generation_ceiling') {
-      return 'RayMe stopped this voice because the generated audio exceeded its safe limit. Check the transcript and try again.';
+    const safeQwenMessage = safeQwenCallFailureMessage(code);
+    if (safeQwenMessage) {
+      return safeQwenMessage;
     }
 
     const normalized = message?.trim();
@@ -1898,6 +1899,33 @@
     }
 
     return 'The call ended because the connection dropped. Your transcript so far was saved.';
+  }
+
+  function safeQwenCallFailureMessage(code: CallErrorCode): string | null {
+    if (code === 'qwen3_transcript_required') {
+      return 'Add the matching reference transcript before using Qwen3-TTS 1.7B.';
+    }
+    if (code === 'qwen3_transcript_mismatch' || code === 'qwen3_alignment_failed') {
+      return 'This transcript does not appear to match the voice sample. Review the transcript or choose a different sample, then try again.';
+    }
+    if (code === 'qwen3_authorization_required') {
+      return 'Add the reference source, authorization basis, and use scope before using this voice.';
+    }
+    if (code === 'qwen3_generation_ceiling') {
+      return 'RayMe stopped this voice because the generated audio exceeded its safe limit. Check the transcript and try again.';
+    }
+    if (
+      code === 'qwen3_worker_protocol' ||
+      code === 'qwen3_worker_timeout' ||
+      code === 'qwen3_worker_stopped' ||
+      code === 'call_tts_prepare_unavailable'
+    ) {
+      return 'Qwen3-TTS 1.7B is unavailable right now. Choose another voice or check AI backend status in Settings.';
+    }
+    if (code.startsWith('qwen3_') || code.startsWith('call_tts_prepare_')) {
+      return 'RayMe could not prepare this voice for the call. Retry preparation, choose another voice, or check Settings.';
+    }
+    return null;
   }
 
   function appendUserFinal(text: string, turnId?: string) {

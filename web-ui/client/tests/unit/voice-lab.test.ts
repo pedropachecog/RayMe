@@ -440,6 +440,12 @@ describe('Voice Lab Phase 2 source contract', () => {
       expect(routeSource).not.toContain(forbidden);
       expect(callRouteSource).not.toContain(forbidden);
     }
+    const callFailureMapper = callRouteSource.slice(
+      callRouteSource.indexOf('function messageForCallFailure'),
+      callRouteSource.indexOf('function appendUserFinal')
+    );
+    expect(callFailureMapper).toMatch(/safeQwenCallFailureMessage\(code\)[\s\S]*const normalized/);
+    expect(callFailureMapper).toContain("code.startsWith('qwen3_')");
   });
 
   it('preserves user input and preview text when preview synthesis fails', () => {
