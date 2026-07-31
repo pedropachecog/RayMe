@@ -360,10 +360,32 @@ export interface AiBackendSettingsStatus {
   vram_headroom_mb?: number | null;
 }
 
+export type TtsModelReadinessState = 'idle' | 'loading' | 'resident' | 'unavailable' | 'failed';
+export type TtsPromptReadinessState = 'none' | 'prewarming' | 'ready' | 'failed';
+
+export interface TtsModelReadiness {
+  state: TtsModelReadinessState;
+  engine_id?: TtsEngineId | null;
+  updated_at?: string | null;
+  error_code?: string | null;
+}
+
+export interface TtsPromptReadiness {
+  state: TtsPromptReadinessState;
+  voice_key?: string | null;
+  updated_at?: string | null;
+  error_code?: string | null;
+}
+
+export interface VoicePreparationStatus {
+  model: TtsModelReadiness;
+  prompt: TtsPromptReadiness;
+}
+
 export type TtsEngineId =
   | 'f5'
   | 'xtts_v2'
-  | 'qwen3_0_6b'
+  | 'qwen3_1_7b'
   | 'luxtts'
   | 'chatterbox_turbo'
   | 'tada_1b'

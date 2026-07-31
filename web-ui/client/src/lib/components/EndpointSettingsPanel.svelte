@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { Eye, EyeOff, PlugZap } from 'lucide-svelte';
+  import { Eye, EyeOff, PlugZap, RefreshCw } from 'lucide-svelte';
 
   import type { AiBackendSettingsStatus, EndpointStatus } from '$lib/api/types';
 
@@ -25,15 +25,48 @@
 
   let apiKeyVisible = false;
 
+  const canonicalEngineLabels: Record<string, string> = {
+    f5: 'F5-TTS',
+    xtts_v2: 'XTTS v2',
+    qwen3_1_7b: 'Qwen3-TTS 1.7B-Base',
+    luxtts: 'LuxTTS',
+    chatterbox_turbo: 'Chatterbox Turbo',
+    tada_1b: 'TADA 1B',
+    voxcpm2: 'VoxCPM2'
+  };
+
   $: showApiKey = apiKeyValue !== undefined;
   $: showModel = modelValue !== undefined;
   $: showAiBackendStatus = aiBackendStatus !== undefined;
-  $: availableEngineLabels = (aiBackendStatus?.available_engines ?? []).map((engine) => {
-    if (typeof engine === 'string') {
-      return engine;
-    }
-    return engine.label ?? engine.id ?? engine.engine_id ?? 'Unknown engine';
-  });
+  $: engineMetadata = (aiBackendStatus?.available_engines ?? []).filter(
+    (engine): engine is Exclude<typeof engine, string> => typeof engine !== 'string'
+  );
+  $: availableEngineLabels = (aiBackendStatus?.available_engines ?? []).map((engine) =>
+    typeof engine === 'string'
+      ? engineLabel(engine)
+      : engine.label ?? engineLabel(engine.id ?? engine.engine_id)
+  );
+  $: residentEngineId = aiBackendStatus?.resident_tts_engine ?? null;
+  $: loadingEngineId = aiBackendStatus?.loading_engine ?? null;
+  $: qwenMetadata = engineMetadata.find(
+    (engine) => (engine.id ?? engine.engine_id) === 'qwen3_1_7b'
+  );
+  $: qwenUnavailable =
+    qwenMetadata?.available === false || qwenMetadata?.state === 'unavailable';
+  $: residentEngineCopy =
+    residentEngineId === 'qwen3_1_7b'
+      ? 'Qwen3-TTS 1.7B loaded'
+      : residentEngineId
+        ? engineLabel(residentEngineId)
+        : 'None';
+  $: loadingEngineCopy =
+    loadingEngineId === 'qwen3_1_7b'
+      ? 'Loading Qwen3-TTS 1.7B…'
+      : loadingEngineId
+        ? engineLabel(loadingEngineId)
+        : qwenUnavailable
+          ? 'Qwen3-TTS 1.7B unavailable'
+          : 'None';
   $: vramHeadroom =
     typeof aiBackendStatus?.vram_headroom_mb === 'number'
       ? `${Math.round(aiBackendStatus.vram_headroom_mb)} MB`
@@ -46,6 +79,16 @@
         : status === 'Unreachable'
           ? 'unreachable'
           : 'not-configured';
+
+  function engineLabel(engineId: string | null | undefined): string {
+    if (!engineId) {
+      return 'Unknown engine';
+    }
+    const metadata = engineMetadata?.find(
+      (engine) => (engine.id ?? engine.engine_id) === engineId
+    );
+    return metadata?.label ?? canonicalEngineLabels[engineId] ?? engineId;
+  }
 </script>
 
 <section class="endpoint-panel" aria-labelledby={`${idPrefix}-title`}>
@@ -71,7 +114,11 @@
       </div>
       <div>
         <dt>Resident TTS engine</dt>
-        <dd>{aiBackendStatus.resident_tts_engine ?? 'None'}</dd>
+        {#if residentEngineId === 'qwen3_1_7b'}
+          <dd role="status">{residentEngineCopy}</dd>
+        {:else}
+          <dd>{residentEngineCopy}</dd>
+        {/if}
       </div>
       <div>
         <dt>Available engines</dt>
@@ -79,7 +126,16 @@
       </div>
       <div>
         <dt>Loading engine</dt>
-        <dd>{aiBackendStatus.loading_engine ?? 'None'}</dd>
+        {#if loadingEngineId}
+          <dd class="loading" role="status">
+            <RefreshCw class="progress-icon" size={14} strokeWidth={1.8} aria-hidden="true" />
+            {loadingEngineCopy}
+          </dd>
+        {:else if qwenUnavailable}
+          <dd class="unavailable" role="alert">{loadingEngineCopy}</dd>
+        {:else}
+          <dd>{loadingEngineCopy}</dd>
+        {/if}
       </div>
       <div>
         <dt>VRAM headroom</dt>
@@ -246,6 +302,33 @@
     font-size: var(--font-label);
     font-weight: 600;
     line-height: var(--line-label);
+  }
+
+  dd.loading {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-xs);
+  }
+
+  dd.unavailable {
+    color: var(--color-danger);
+  }
+
+  :global(.progress-icon) {
+    flex: 0 0 auto;
+    animation: status-spin 1s linear infinite;
+  }
+
+  @keyframes status-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(.progress-icon) {
+      animation: none;
+    }
   }
 
   dd {

@@ -23,8 +23,8 @@
         return 'F5-TTS';
       case 'xtts_v2':
         return 'XTTS v2';
-      case 'qwen3_0_6b':
-        return 'Qwen3-TTS 0.6B-Base';
+      case 'qwen3_1_7b':
+        return 'Qwen3-TTS 1.7B-Base';
       case 'luxtts':
         return 'LuxTTS';
       case 'chatterbox_turbo':
@@ -97,8 +97,8 @@
         >
           <span class="voice-name">{voice.name}</span>
           <span class="voice-engine">{engineLabel(voice.default_engine)}</span>
-          {#if voice.default_engine === 'qwen3_0_6b'}
-            <span class="caveat">Qwen3-TTS 0.6B-Base caveat</span>
+          {#if voice.default_engine === 'qwen3_1_7b'}
+            <span class="caveat">Requires matching transcript</span>
           {/if}
         </button>
       {/each}

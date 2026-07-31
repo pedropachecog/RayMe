@@ -54,9 +54,11 @@
       }
     },
     {
-      id: 'qwen3_0_6b',
-      label: 'Qwen3-TTS 0.6B-Base',
-      caveat_chips: ['Opt-in', 'Latency caveat', 'Accent caveat'],
+      id: 'qwen3_1_7b',
+      label: 'Qwen3-TTS 1.7B-Base',
+      caveat_chips: ['1.7B Base', 'Requires transcript', 'Native streaming'],
+      requires_transcript: true,
+      supports_streaming: true,
       availability: {
         available: false,
         state: 'unavailable',
@@ -213,20 +215,20 @@
       });
     }
 
-    return DEFAULT_TTS_ENGINES.map((engine) => {
-      const normalized = byId.get(engine.id) ?? engine;
-      if (!returnedIds.has(engine.id)) {
-        return {
-          ...normalized,
-          availability: {
-            available: false,
-            state: 'unavailable',
-            unavailable_reason: 'Engine was not reported by the AI backend.'
-          }
-        };
-      }
-      return normalized;
-    });
+    const returned = [...returnedIds]
+      .map((id) => byId.get(id))
+      .filter((engine): engine is TtsEngineMetadata => Boolean(engine));
+    const missingFallbacks = DEFAULT_TTS_ENGINES.filter((engine) => !returnedIds.has(engine.id)).map(
+      (engine) => ({
+        ...engine,
+        availability: {
+          available: false,
+          state: 'unavailable',
+          unavailable_reason: 'Engine was not reported by the AI backend.'
+        }
+      })
+    );
+    return [...returned, ...missingFallbacks];
   }
 
   async function handleSampleSelected(file: File) {
