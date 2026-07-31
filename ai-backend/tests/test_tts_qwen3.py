@@ -591,6 +591,30 @@ def test_qwen_adapter_spawn_imports_no_cuda_runtime_in_parent(
     assert "from faster_qwen3_tts" not in source
 
 
+def test_qwen_adapter_uses_console_python_for_ipc_when_backend_runs_pythonw(
+    monkeypatch: pytest.MonkeyPatch,
+    qwen_runtime_available: None,
+    tmp_path: Path,
+) -> None:
+    qwen = _qwen_module()
+    pythonw = tmp_path / "pythonw.exe"
+    console_python = tmp_path / "python.exe"
+    pythonw.touch()
+    console_python.touch()
+    monkeypatch.setattr(qwen.sys, "executable", str(pythonw))
+    captured: list[list[str]] = []
+
+    def process_factory(args: list[str], **_kwargs: Any) -> ScriptedQwenWorkerProcess:
+        captured.append(args)
+        return ScriptedQwenWorkerProcess()
+
+    adapter = qwen.Qwen3TtsAdapter(process_factory=process_factory)
+    adapter.load()
+    adapter.unload()
+
+    assert captured[0][0] == str(console_python)
+
+
 def test_qwen_adapter_rejects_wrong_request_worker_event_and_contains_process(
     qwen_runtime_available: None,
 ) -> None:

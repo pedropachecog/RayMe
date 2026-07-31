@@ -294,7 +294,7 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
             else f"{ai_backend_root}{os.pathsep}{existing_pythonpath}"
         )
         self._worker = self._process_factory(
-            [sys.executable, "-m", "app.models.tts_qwen3_worker"],
+            [_worker_python_executable(), "-m", "app.models.tts_qwen3_worker"],
             cwd=str(ai_backend_root),
             env=env,
             stdin=subprocess.PIPE,
@@ -425,3 +425,13 @@ def _sanitize_python_hash_seed(env: dict[str, str]) -> None:
         return
     if parsed < 0 or parsed > (2**32 - 1):
         env["PYTHONHASHSEED"] = "random"
+
+
+def _worker_python_executable() -> str:
+    executable = Path(sys.executable)
+    if executable.name.casefold() != "pythonw.exe":
+        return str(executable)
+    console_executable = executable.with_name("python.exe")
+    if not console_executable.is_file():
+        raise Qwen3WorkerError("Qwen3 console worker runtime unavailable")
+    return str(console_executable)
