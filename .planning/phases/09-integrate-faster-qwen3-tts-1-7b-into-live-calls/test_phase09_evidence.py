@@ -578,3 +578,248 @@ def test_runner_source_owns_production_routes_and_forbids_direct_generation_impo
     assert "import faster_qwen3_tts" not in source
     assert "generate_voice_clone(" not in source
     assert "generate_voice_clone_streaming(" not in source
+
+
+# Plan 09-13 Task 2: core/finish lifecycle and sanitized bundle contracts.
+
+
+class _CoreAcquisition:
+    def __init__(self, payloads: dict[str, dict[str, object]]) -> None:
+        self.payloads = payloads
+        self.ready_checks = 0
+
+    async def collect_core(self) -> dict[str, dict[str, object]]:
+        return self.payloads
+
+    async def assert_qwen_ready(self) -> dict[str, object]:
+        self.ready_checks += 1
+        return {
+            "model_state": "resident",
+            "prompt_state": "ready",
+            "resident_engine": "qwen3_1_7b",
+        }
+
+    def private_state(self) -> dict[str, object]:
+        return {
+            "selected_voice_id": "voice_opaque_test",
+            "reference_authorization": _manifest()["selected_fixture"],
+            "baseline_audio": {"short": "private-short", "medium": "private-medium", "long": "private-long"},
+            "soak_audio": {str(turn): f"private-turn-{turn}" for turn in [1, 2, 3, 4, 5, 23, 24, 25, 26, 27, 46, 47, 48, 49, 50]},
+        }
+
+
+def _synthetic_payloads(tmp_path: Path, commit: str) -> dict[str, dict[str, object]]:
+    verifier = _load_module(VERIFIER_PATH, f"phase09_runner_bundle_{tmp_path.name}")
+    source = tmp_path / "source"
+    verifier.write_synthetic_bundle(
+        source,
+        deployed_commit=commit,
+        generated_at="2026-07-31T00:00:00Z",
+    )
+    return {
+        key: json.loads((source / filename).read_text(encoding="utf-8"))
+        for key, filename in verifier.CORE_FILES.items()
+    }
+
+
+def test_runner_core_only_writes_exact_verifiable_core_and_private_state(tmp_path: Path) -> None:
+    import asyncio
+
+    commit = "a" * 40
+    runner = _runner_module("phase09_runner_core_split")
+    verifier = _load_module(VERIFIER_PATH, "phase09_runner_core_verify")
+    acquisition = _CoreAcquisition(_synthetic_payloads(tmp_path, commit))
+    output_dir = tmp_path / "results"
+    local_dir = output_dir / ".local"
+
+    asyncio.run(
+        runner.run_core_only(
+            expected_commit=commit,
+            output_dir=output_dir,
+            local_dir=local_dir,
+            acquisition=acquisition,
+        )
+    )
+
+    assert acquisition.ready_checks == 1
+    assert {path.name for path in output_dir.glob("qwen3-*.json")} == set(verifier.CORE_FILES.values())
+    assert verifier.verify_core_ready(
+        results_dir=output_dir,
+        expected_commit=commit,
+        now="2026-07-31T01:00:00Z",
+    ) == commit
+    state = json.loads((local_dir / "qwen3-runner-state.json").read_text(encoding="utf-8"))
+    assert state["expected_commit"] == commit
+    assert state["mode"] == "core_complete"
+    assert state["qwen_ready"] is True
+    assert state["selected_voice_id"] == "voice_opaque_test"
+    assert not (output_dir / "qwen3-speaker.json").exists()
+    assert not (output_dir / "qwen3-log-leak-scan.json").exists()
+
+
+class _FinishLifecycle:
+    def __init__(
+        self,
+        *,
+        speaker: dict[str, object],
+        leak_scan: dict[str, object],
+        fail_at: str | None = None,
+    ) -> None:
+        self.speaker = speaker
+        self.leak_scan = leak_scan
+        self.fail_at = fail_at
+        self.events: list[str] = []
+
+    async def assert_core_binding(self, expected_commit: str, state: dict[str, object]) -> None:
+        self.events.append("assert_core_binding")
+        assert state["expected_commit"] == expected_commit
+
+    async def unload_qwen(self) -> None:
+        self.events.append("unload_qwen")
+
+    async def run_cuda_speaker_scorer(self) -> dict[str, object]:
+        self.events.append("run_cuda_speaker_scorer")
+        if self.fail_at == "scorer":
+            raise RuntimeError("scorer failed")
+        return self.speaker
+
+    async def scan_same_commit_logs(self) -> dict[str, object]:
+        self.events.append("scan_same_commit_logs")
+        return self.leak_scan
+
+    async def reload_qwen(self) -> None:
+        self.events.append("reload_qwen")
+        if self.fail_at == "reload":
+            raise RuntimeError("reload failed")
+
+    async def prewarm_selected_voice(self) -> None:
+        self.events.append("prewarm_selected_voice")
+
+    async def assert_qwen_ready(self) -> dict[str, object]:
+        self.events.append("assert_qwen_ready")
+        return {"model_state": "resident", "prompt_state": "ready"}
+
+
+def _prepare_core_state(tmp_path: Path, commit: str) -> tuple[Path, Path, dict[str, dict[str, object]]]:
+    import asyncio
+
+    runner = _runner_module(f"phase09_runner_prepare_{tmp_path.name}")
+    output_dir = tmp_path / "results"
+    local_dir = output_dir / ".local"
+    payloads = _synthetic_payloads(tmp_path, commit)
+    asyncio.run(
+        runner.run_core_only(
+            expected_commit=commit,
+            output_dir=output_dir,
+            local_dir=local_dir,
+            acquisition=_CoreAcquisition(payloads),
+        )
+    )
+    return output_dir, local_dir, payloads
+
+
+def test_runner_finish_unloads_scores_on_cuda_restores_and_leaves_browser_placeholder(
+    tmp_path: Path,
+) -> None:
+    import asyncio
+
+    commit = "b" * 40
+    runner = _runner_module("phase09_runner_finish_split")
+    verifier = _load_module(VERIFIER_PATH, "phase09_runner_finish_payload")
+    output_dir, local_dir, _ = _prepare_core_state(tmp_path, commit)
+    decision_source = tmp_path / "decision-source"
+    verifier.write_synthetic_bundle(
+        decision_source,
+        deployed_commit=commit,
+        generated_at="2026-07-31T00:00:00Z",
+    )
+    speaker = json.loads((decision_source / "qwen3-speaker.json").read_text(encoding="utf-8"))
+    leak_scan = json.loads((decision_source / "qwen3-log-leak-scan.json").read_text(encoding="utf-8"))
+    lifecycle = _FinishLifecycle(speaker=speaker, leak_scan=leak_scan)
+
+    asyncio.run(
+        runner.run_finish_acoustic_leak(
+            expected_commit=commit,
+            output_dir=output_dir,
+            local_dir=local_dir,
+            lifecycle=lifecycle,
+            generated_at="2026-07-31T00:00:00Z",
+        )
+    )
+
+    assert lifecycle.events == [
+        "assert_core_binding",
+        "unload_qwen",
+        "run_cuda_speaker_scorer",
+        "scan_same_commit_logs",
+        "reload_qwen",
+        "prewarm_selected_voice",
+        "assert_qwen_ready",
+    ]
+    assert json.loads((output_dir / "qwen3-speaker.json").read_text(encoding="utf-8")) == speaker
+    assert json.loads((output_dir / "qwen3-log-leak-scan.json").read_text(encoding="utf-8")) == leak_scan
+    browser = json.loads((output_dir / "qwen3-browser.json").read_text(encoding="utf-8"))
+    assert browser["deployed_commit"] == commit
+    assert browser["evidence_state"] == "awaiting_real_live_e2e"
+    assert browser["mocked"] is False
+    assert browser["live_e2e_enabled"] is False
+    with pytest.raises(verifier.EvidenceError, match="real qwen3_1_7b live E2E"):
+        verifier.verify_decision_ready(
+            results_dir=output_dir,
+            expected_commit=commit,
+            now="2026-07-31T01:00:00Z",
+        )
+    state = json.loads((local_dir / "qwen3-runner-state.json").read_text(encoding="utf-8"))
+    assert state["mode"] == "finish_complete"
+    assert state["qwen_ready"] is True
+
+
+@pytest.mark.parametrize("fail_at", ["scorer", "reload"])
+def test_runner_finish_failure_never_claims_qwen_ready_or_uses_fallback(
+    tmp_path: Path,
+    fail_at: str,
+) -> None:
+    import asyncio
+
+    commit = "c" * 40
+    runner = _runner_module(f"phase09_runner_finish_failure_{fail_at}")
+    verifier = _load_module(VERIFIER_PATH, f"phase09_runner_finish_failure_payload_{fail_at}")
+    output_dir, local_dir, _ = _prepare_core_state(tmp_path, commit)
+    decision_source = tmp_path / "decision-source"
+    verifier.write_synthetic_bundle(
+        decision_source,
+        deployed_commit=commit,
+        generated_at="2026-07-31T00:00:00Z",
+    )
+    lifecycle = _FinishLifecycle(
+        speaker=json.loads((decision_source / "qwen3-speaker.json").read_text(encoding="utf-8")),
+        leak_scan=json.loads((decision_source / "qwen3-log-leak-scan.json").read_text(encoding="utf-8")),
+        fail_at=fail_at,
+    )
+
+    with pytest.raises(RuntimeError, match="failed"):
+        asyncio.run(
+            runner.run_finish_acoustic_leak(
+                expected_commit=commit,
+                output_dir=output_dir,
+                local_dir=local_dir,
+                lifecycle=lifecycle,
+            )
+        )
+
+    state = json.loads((local_dir / "qwen3-runner-state.json").read_text(encoding="utf-8"))
+    assert state["mode"] == "finish_failed"
+    assert state["qwen_ready"] is False
+    assert state["failure_stage"] == fail_at
+    assert "cpu" not in " ".join(lifecycle.events).lower()
+    assert "remote" not in " ".join(lifecycle.events).lower()
+
+
+def test_runner_finish_source_pins_local_cuda_scorer_and_never_self_certifies() -> None:
+    source = RUNNER_PATH.read_text(encoding="utf-8")
+    assert "09-speaker-score.py" in source
+    assert "feb593a6c23c1cc3d9510425c29b0a14d2b07b1e" in source
+    assert "--finish-acoustic-leak" in source
+    assert "--core-only" in source
+    assert "cpu_fallback" not in source
+    assert "overall_status" not in source
