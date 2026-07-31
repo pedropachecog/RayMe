@@ -214,7 +214,7 @@ describe('Character Editor route', () => {
     expect(voiceAssignmentSelectSource).toContain('Default voice');
     expect(voiceAssignmentSelectSource).toContain('No voice assigned');
     expect(voiceAssignmentSelectSource).toContain('Create Voice');
-    expect(voiceAssignmentSelectSource).toContain('Qwen3-TTS 0.6B-Base');
+    expect(voiceAssignmentSelectSource).toContain('Qwen3-TTS 1.7B-Base');
   });
 
   it('uploads and removes portraits through PUT and DELETE /api/characters/{character_id}/portrait', async () => {
