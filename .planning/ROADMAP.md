@@ -586,6 +586,7 @@ Plans:
 **User-goal preservation:** A technical integration is not complete unless the builder can select a 1.7B-cloned voice in RayMe, start a real call, hear early audio while later chunks are still generating, interrupt it, and continue the conversation without the voice degrading into muffling, whispering, noise, or unintelligibility over time.
 
 **Success criteria** (observable, testable):
+
 1. Faster Qwen3-TTS 1.7B is visible in Voice Lab and saved-voice metadata, requires a matching reference transcript for ICL cloning, and returns sanitized actionable errors for missing/misaligned inputs.
 2. OMEN loads the pinned CUDA runtime and model through RayMe's one-hot TTS manager with visible `loading`/`resident` state; reference prompt extraction is prewarmed before the first spoken call turn rather than hidden inside playback latency.
 3. Real call synthesis uses the streaming API only: a deliberately slow stream starts playback before completion, startup buffering is explicitly bounded, immediate/final metrics stay separate, and VoxCPM2 retains tests rejecting whole-synthesis fallback.
@@ -597,21 +598,52 @@ Plans:
 **Wave summary:** Waves 1–3 create the narrow dependency, worker, and local call contracts. Wave 4 is a blocking canonical OMEN production-path tracer; every broad migration/UI/call/evidence plan depends on that real hardware gate. Waves 5–9 harden validation/deletion/storage/UI/turn flow/playout and construct independently self-tested evidence tooling. Wave 10 performs final canonical deployment and core exact-commit hardware evidence. Wave 11 runs pinned acoustic/privacy checks, real Qwen browser E2E, decision-ready verification, and exact operational handoff.
 
 Plans:
+**Wave 1**
 
 - [ ] 09-01-PLAN.md - Immutable dependency/package provenance and truthful 1.7B roster identity (Wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 09-02-PLAN.md - Versioned worker protocol and supervised native full-ICL stream/cancel adapter (Wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 09-03-PLAN.md - Local one-hot readiness plus fake slow-stream/cancel CallSession contract (Wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 09-04-PLAN.md - Blocking canonical OMEN real saved-voice/CallSession/WebRTC hardware tracer (Wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 09-05-PLAN.md - Alignment, ceilings, prompt cache, protocol, and engine-scoped backend hardening (Wave 5)
-- [ ] 09-06-PLAN.md - Saved-voice delete to AI-backend prompt cancel/invalidate/evict lifecycle (Wave 6)
 - [ ] 09-07-PLAN.md - Exact identity migration, reference authorization, server validation, and readiness bridge (Wave 5)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 09-06-PLAN.md - Saved-voice delete to AI-backend prompt cancel/invalidate/evict lifecycle (Wave 6)
 - [ ] 09-08-PLAN.md - Canonical Settings identity, three-field authorization, row-scoped prepare/test readiness, and call-gate component contracts (Wave 6)
+- [ ] 09-11-PLAN.md - Paced end-to-end backpressure, truthful metrics, and complete cancellation controls (Wave 6)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
 - [ ] 09-09-PLAN.md - Mocked Voice Lab/Library/Settings/call readiness Playwright acceptance and commit-asserting Qwen live E2E support (Wave 7)
 - [ ] 09-10-PLAN.md - Incremental slow-LLM segment pump and terminal-authorized persistence (Wave 7)
-- [ ] 09-11-PLAN.md - Paced end-to-end backpressure, truthful metrics, and complete cancellation controls (Wave 6)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
 - [ ] 09-12-PLAN.md - Twenty-scenario manifest, pinned local speaker scorer, and adversarial verifier self-test (Wave 8)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
 - [ ] 09-13-PLAN.md - Production-path 20-scenario/50-turn OMEN evidence runner construction (Wave 9)
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
 - [ ] 09-14-PLAN.md - Final canonical deploy and exact-commit runtime/call/STT core evidence (Wave 10)
+
+**Wave 11** *(blocked on Wave 10 completion)*
+
 - [ ] 09-15-PLAN.md - Pinned acoustic/privacy gates, real Qwen live E2E, decision-ready evidence, and operational handoff (Wave 11)
 
 ---
