@@ -5,7 +5,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from enum import Enum
 from typing import Literal, Protocol, runtime_checkable
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 try:
     from enum import StrEnum
@@ -56,10 +56,25 @@ class TtsEngineMetadata(BaseModel, frozen=True):
 
 
 class TtsSynthesisInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     text: str
     reference_audio: bytes
     reference_audio_content_type: str | None = None
     reference_transcript: str | None = None
+    request_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+    )
+    turn_id: str | None = Field(default=None, min_length=1, max_length=128)
+    voice_key: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+    )
     speech_speed: float = Field(default=1.0, ge=0.5, le=1.5)
     voxcpm2_cloning_mode: Literal["auto", "reference_only", "transcript_guided"] = "auto"
     voxcpm2_style_prompt: str | None = Field(default=None, max_length=300)

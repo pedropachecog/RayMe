@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Mapping
 import logging
+import threading
 from typing import Any
 
 from app.config import AiBackendSettings
@@ -48,6 +50,14 @@ class ModelManager:
         self.vram_probe: VramProbe = vram_probe or self._probe_vram
         self.loading_engine: str | None = None
         self.resident_tts_engine: str | None = None
+        self._switch_lock = threading.RLock()
+        self._prepare_lock: asyncio.Lock | None = None
+        self._selected_voice_prompt: dict[str, str | None] = {
+            "engine_id": None,
+            "voice_key": None,
+            "state": "none",
+            "error_code": None,
+        }
         self.stt_adapter: Any | None = None
         self.vad_adapter: Any | None = None
         self.stt_ready = False
@@ -91,6 +101,7 @@ class ModelManager:
             self._unload_engine(self.resident_tts_engine)
         self.resident_tts_engine = None
         self.loading_engine = None
+        self._reset_selected_voice_prompt()
         for status in self._statuses.values():
             if status.available:
                 status.resident = False
@@ -98,6 +109,10 @@ class ModelManager:
         self._started = False
 
     def switch_tts_engine(self, engine_id: str) -> EngineStatus:
+        with self._switch_lock:
+            return self._switch_tts_engine_locked(engine_id)
+
+    def _switch_tts_engine_locked(self, engine_id: str) -> EngineStatus:
         if engine_id not in self._statuses:
             raise ValueError("unknown TTS engine")
         target = self._statuses[engine_id]
@@ -124,6 +139,9 @@ class ModelManager:
             self._unload_engine(previous)
             self._statuses[previous].resident = False
             self._statuses[previous].state = "idle"
+            self.resident_tts_engine = None
+            if previous == "qwen3_1_7b" and engine_id != previous:
+                self._reset_selected_voice_prompt()
 
         try:
             self._load_engine(engine_id)
@@ -143,6 +161,92 @@ class ModelManager:
         self.resident_tts_engine = engine_id
         self.loading_engine = None
         return target
+
+    async def prepare_tts_engine(
+        self,
+        engine_id: str,
+        *,
+        voice_key: str,
+        reference_audio: bytes,
+        reference_transcript: str,
+    ) -> dict[str, str | None]:
+        if engine_id not in self._statuses:
+            raise ValueError("unknown TTS engine")
+        if not voice_key or len(voice_key) > 128:
+            raise ValueError("invalid voice key")
+        if engine_id == "qwen3_1_7b":
+            if not reference_audio:
+                raise ValueError("Qwen3 reference audio is required")
+            if not reference_transcript.strip():
+                raise ValueError("Qwen3 reference transcript is required")
+
+        if self._prepare_lock is None:
+            self._prepare_lock = asyncio.Lock()
+        async with self._prepare_lock:
+            same_ready_prompt = (
+                engine_id == "qwen3_1_7b"
+                and self.resident_tts_engine == engine_id
+                and self._selected_voice_prompt["voice_key"] == voice_key
+                and self._selected_voice_prompt["state"] == "ready"
+            )
+            if same_ready_prompt:
+                return self._prepare_result(engine_id)
+
+            self._selected_voice_prompt = {
+                "engine_id": engine_id,
+                "voice_key": voice_key,
+                "state": "none",
+                "error_code": None,
+            }
+            if self.resident_tts_engine != engine_id:
+                self.loading_engine = engine_id
+                self._statuses[engine_id].state = "loading"
+                await asyncio.to_thread(self.switch_tts_engine, engine_id)
+
+            if engine_id != "qwen3_1_7b":
+                return self._prepare_result(engine_id)
+
+            adapter = self.tts_adapters[engine_id]
+            prewarm = getattr(adapter, "prewarm", None)
+            if not callable(prewarm):
+                self._selected_voice_prompt["state"] = "failed"
+                self._selected_voice_prompt["error_code"] = (
+                    "voice_prompt_preparation_failed"
+                )
+                raise ValueError("Qwen3 voice prompt preparation is unavailable")
+
+            self._selected_voice_prompt["state"] = "prewarming"
+            try:
+                await asyncio.to_thread(
+                    prewarm,
+                    voice_key=voice_key,
+                    reference_audio=reference_audio,
+                    reference_transcript=reference_transcript,
+                )
+            except Exception as exc:
+                self._selected_voice_prompt["state"] = "failed"
+                self._selected_voice_prompt["error_code"] = (
+                    "voice_prompt_preparation_failed"
+                )
+                logger.warning(
+                    "[rayme-tts] voice_prompt.prewarm_failed engine=%s exc=%s",
+                    engine_id,
+                    exc.__class__.__name__,
+                )
+                raise
+
+            self._selected_voice_prompt["state"] = "ready"
+            self._selected_voice_prompt["error_code"] = None
+            return self._prepare_result(engine_id)
+
+    def is_tts_prompt_ready(self, engine_id: str, voice_key: str) -> bool:
+        return (
+            engine_id == "qwen3_1_7b"
+            and self.resident_tts_engine == engine_id
+            and self._selected_voice_prompt["engine_id"] == engine_id
+            and self._selected_voice_prompt["voice_key"] == voice_key
+            and self._selected_voice_prompt["state"] == "ready"
+        )
 
     def health(self) -> dict[str, object]:
         vram = self._safe_vram_probe()
@@ -164,8 +268,26 @@ class ModelManager:
             "resident_tts_engine": self.resident_tts_engine,
             "available_engines": [status.model_dump() for status in engine_statuses],
             "loading_engine": self.loading_engine,
+            "selected_voice_prompt": dict(self._selected_voice_prompt),
             "vram_used_mb": vram["used_mb"],
             "vram_headroom_mb": vram["headroom_mb"],
+        }
+
+    def _prepare_result(self, engine_id: str) -> dict[str, str | None]:
+        return {
+            "engine_id": engine_id,
+            "model_state": self._statuses[engine_id].state,
+            "prompt_state": self._selected_voice_prompt["state"],
+            "voice_key": self._selected_voice_prompt["voice_key"],
+            "error_code": self._selected_voice_prompt["error_code"],
+        }
+
+    def _reset_selected_voice_prompt(self) -> None:
+        self._selected_voice_prompt = {
+            "engine_id": None,
+            "voice_key": None,
+            "state": "none",
+            "error_code": None,
         }
 
     def metadata(self) -> tuple[EngineMetadata, ...]:

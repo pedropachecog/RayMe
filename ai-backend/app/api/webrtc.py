@@ -5,11 +5,12 @@ import base64
 import binascii
 import inspect
 import logging
+import os
 import time
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from app.api.stt import _settings_from_app, _stt_adapter_from_app, _vad_adapter_from_app
 from app.call.session import CallSession, CallSessionManager
@@ -93,6 +94,27 @@ class SpeakRequest(BaseModel):
     voxcpm2_denoise: bool = True
 
 
+class PrepareSpeechRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    voice_id: str = Field(min_length=1, max_length=128)
+    engine_id: str = Field(min_length=1, max_length=64)
+    reference_audio_b64: str = Field(
+        min_length=1,
+        max_length=MAX_REFERENCE_AUDIO_B64_LENGTH,
+        validation_alias=AliasChoices("reference_audio_b64", "reference_audio_base64"),
+    )
+    reference_transcript: str = Field(min_length=1, max_length=10000)
+    reference_audio_content_type: str | None = Field(default=None, max_length=120)
+
+    @field_validator("reference_transcript")
+    @classmethod
+    def require_reference_transcript(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("reference transcript is required")
+        return value
+
+
 class ReconnectAudioBackfillRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -118,14 +140,77 @@ class CallControlResponse(BaseModel):
 @router.get("/status")
 def get_webrtc_status(request: Request) -> dict[str, object]:
     manager = _manager_from_app(request)
+    model_manager = getattr(request.app.state, "model_manager", None)
+    model_health = model_manager.health() if model_manager is not None else {}
     return {
         "status": "ready",
         "phase": "03",
         "live_call_ready": True,
         "media_transport_ready": True,
         "active_sessions": manager.stats()["active_sessions"],
+        "deployed_commit": os.environ.get("RAYME_DEPLOYED_COMMIT", "").strip(),
+        "tts_model": {
+            "resident_engine": model_health.get("resident_tts_engine"),
+            "loading_engine": model_health.get("loading_engine"),
+        },
+        "selected_voice_prompt": model_health.get(
+            "selected_voice_prompt",
+            {
+                "engine_id": None,
+                "voice_key": None,
+                "state": "none",
+                "error_code": None,
+            },
+        ),
         "message": "Phase 3 live call signaling is ready.",
     }
+
+
+@router.post("/sessions/{session_id}/prepare")
+async def prepare_session_speech(
+    request: Request,
+    session_id: str,
+    payload: PrepareSpeechRequest,
+) -> dict[str, Any]:
+    session = _session_or_404(request, session_id)
+    if payload.voice_id != session.voice_id or payload.engine_id != session.engine_id:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "call_tts_prepare_mismatch",
+                "message": "Selected voice does not match the call",
+            },
+        )
+    reference_audio = _decode_reference_audio(payload.reference_audio_b64)
+    model_manager = getattr(request.app.state, "model_manager", None)
+    prepare = getattr(model_manager, "prepare_tts_engine", None)
+    if not callable(prepare):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "call_tts_prepare_unavailable",
+                "message": "Voice preparation is unavailable",
+            },
+        )
+    try:
+        result = await prepare(
+            payload.engine_id,
+            voice_key=payload.voice_id,
+            reference_audio=reference_audio,
+            reference_transcript=payload.reference_transcript,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail={
+                "code": "call_tts_prepare_failed",
+                "message": "Voice preparation failed",
+                "engine_id": payload.engine_id,
+            },
+        ) from exc
+    return {"session_id": session_id, **dict(result)}
 
 
 @router.post("/offer")
@@ -334,7 +419,17 @@ async def speak_session(
     session = _session_or_404(request, session_id)
     try:
         _reject_oversized_reference_audio(payload.reference_audio_b64)
-        adapter = _tts_adapter(request, payload.engine_id)
+        if payload.engine_id == "qwen3_1_7b" and not str(
+            payload.reference_transcript or ""
+        ).strip():
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "qwen_reference_transcript_required",
+                    "message": "Matching reference transcript is required",
+                },
+            )
+        adapter = _tts_adapter(request, payload.engine_id, voice_key=payload.voice_id)
         event = await session.speak_text(
             payload.turn_id,
             payload.text,
@@ -499,6 +594,29 @@ def _reject_oversized_reference_audio(reference_audio_b64: str | None) -> None:
         )
 
 
+def _decode_reference_audio(reference_audio_b64: str) -> bytes:
+    _reject_oversized_reference_audio(reference_audio_b64)
+    try:
+        decoded = base64.b64decode(reference_audio_b64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "call_tts_reference_audio_invalid",
+                "message": "Reference audio is invalid",
+            },
+        ) from exc
+    if not decoded:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "call_tts_reference_audio_invalid",
+                "message": "Reference audio is invalid",
+            },
+        )
+    return decoded
+
+
 def _session_or_404(request: Request, session_id: str) -> CallSession:
     session = _manager_from_app(request).get_session(session_id)
     if session is None:
@@ -537,15 +655,32 @@ def _vad_adapter(request: Request) -> Any:
     )
 
 
-def _tts_adapter(request: Request, engine_id: str) -> Any:
+def _tts_adapter(
+    request: Request,
+    engine_id: str,
+    *,
+    voice_key: str | None = None,
+) -> Any:
     manager = getattr(request.app.state, "model_manager", None)
     if manager is None:
         manager = ModelManager(_settings_from_app(request))
         manager.startup()
         request.app.state.model_manager = manager
-    switch = getattr(manager, "switch_tts_engine", None)
-    if callable(switch):
-        switch(engine_id)
+    if engine_id == "qwen3_1_7b":
+        is_ready = getattr(manager, "is_tts_prompt_ready", None)
+        if not callable(is_ready) or not is_ready(engine_id, voice_key or ""):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "call_tts_not_ready",
+                    "message": "Selected voice is not ready",
+                    "engine_id": engine_id,
+                },
+            )
+    else:
+        switch = getattr(manager, "switch_tts_engine", None)
+        if callable(switch):
+            switch(engine_id)
     adapters = getattr(manager, "tts_adapters", {})
     try:
         return adapters[engine_id]

@@ -1205,6 +1205,8 @@ class CallSession:
 
         try:
             request = self._build_tts_synthesis_input(
+                turn_id=turn_id,
+                voice_id=voice_id,
                 text=text,
                 reference_audio_b64=reference_audio_b64,
                 reference_transcript=reference_transcript,
@@ -1916,6 +1918,8 @@ class CallSession:
     def _build_tts_synthesis_input(
         self,
         *,
+        turn_id: str,
+        voice_id: str,
         text: str,
         reference_audio_b64: str | None,
         reference_transcript: str | None,
@@ -1929,6 +1933,9 @@ class CallSession:
             reference_audio=_decode_reference_audio_b64(reference_audio_b64),
             reference_transcript=reference_transcript,
             reference_audio_content_type=reference_audio_content_type,
+            request_id=turn_id,
+            turn_id=turn_id,
+            voice_key=voice_id,
             speech_speed=1.0,
             **voxcpm2_options,
         )
@@ -2015,6 +2022,8 @@ class CallSession:
             raise ValueError("call TTS reference audio is required")
         return await adapter.synthesize(
             self._build_tts_synthesis_input(
+                turn_id=turn_id,
+                voice_id=voice_id,
                 text=text,
                 reference_audio_b64=reference_audio_b64,
                 reference_transcript=reference_transcript,
@@ -2049,6 +2058,8 @@ class CallSession:
                 raise ValueError("call TTS reference audio is required")
             result = adapter.synthesize(
                 self._build_tts_synthesis_input(
+                    turn_id=turn_id,
+                    voice_id=voice_id,
                     text=text,
                     reference_audio_b64=reference_audio_b64,
                     reference_transcript=reference_transcript,
