@@ -573,6 +573,9 @@ async def _create_saved_voice(
             "name": "RayMe Phase 09 Synthetic Qwen Tracer",
             "default_engine": ENGINE_ID,
             "reference_transcript": transcript,
+            "voice_data_steward": selection.steward_id,
+            "authorization_basis": selection.authorization_basis,
+            "use_scope": selection.use_scope,
             "metadata": {
                 "source": "phase09_hardware_tracer",
                 "authorization": _voice_provenance(selection),

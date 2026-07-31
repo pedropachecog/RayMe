@@ -478,6 +478,56 @@ def test_runner_loads_tracer_canonical_authorization_contract() -> None:
     assert "_resolve_authorized_reference" in source
 
 
+def test_hardware_tracer_sends_canonical_top_level_voice_authorization(tmp_path: Path) -> None:
+    import asyncio
+
+    tracer = _runner_module("phase09_runner_saved_voice_contract").load_hardware_tracer()
+    selection = _fallback_selection(tmp_path / "selection")
+
+    class CapturingApi:
+        web_base_url = "https://rayme.invalid"
+
+        def __init__(self) -> None:
+            self.saved_payload: dict[str, object] | None = None
+
+        def post_wav(self, path: str, *, filename: str, content: bytes):
+            assert path == "/api/voices/assets"
+            assert filename == "rayme-phase09-reference.wav"
+            assert content == b"RIFF-reference"
+            return tracer.ApiResponse(status=201, payload={"asset_id": "asset_phase09"})
+
+        def post_json(
+            self,
+            base_url: str,
+            path: str,
+            payload: dict[str, object],
+        ):
+            assert base_url == self.web_base_url
+            assert path == "/api/voices"
+            self.saved_payload = payload
+            return tracer.ApiResponse(status=201, payload={"voice_id": "voice_phase09"})
+
+    api = CapturingApi()
+    voice_id, asset_id = asyncio.run(
+        tracer._create_saved_voice(
+            api,
+            reference_audio=b"RIFF-reference",
+            transcript="Generated non person fixture.",
+            selection=selection,
+        )
+    )
+
+    assert (voice_id, asset_id) == ("voice_phase09", "asset_phase09")
+    assert api.saved_payload is not None
+    assert api.saved_payload["voice_data_steward"] == selection.steward_id
+    assert api.saved_payload["authorization_basis"] == selection.authorization_basis
+    assert api.saved_payload["use_scope"] == selection.use_scope
+    assert api.saved_payload["metadata"] == {
+        "source": "phase09_hardware_tracer",
+        "authorization": tracer._voice_provenance(selection),
+    }
+
+
 def test_runner_writes_generated_non_person_fixture_sidecar_without_private_content(
     tmp_path: Path,
 ) -> None:
