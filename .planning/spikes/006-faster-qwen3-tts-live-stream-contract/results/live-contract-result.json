@@ -1,0 +1,92 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-31T12:08:24.518129Z",
+  "model": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+  "package": "faster-qwen3-tts==0.3.2",
+  "settings": {
+    "queue_capacity": 2,
+    "chunk_size": 4
+  },
+  "cases": [
+    {
+      "label": "fake-complete",
+      "queue_capacity": 2,
+      "max_queue_depth": 2,
+      "produced_chunks": 10,
+      "consumed_chunks": 10,
+      "post_cancel_produced_chunks": 0,
+      "producer_error": [],
+      "timed_out": false,
+      "producer_stopped": true,
+      "producer_completed_normally": true,
+      "first_consume_ms": 12.474,
+      "producer_complete_ms": 227.621,
+      "first_consume_before_completion": true,
+      "interrupt_to_stop_ms": null,
+      "whole_stream_collected_before_consume": false
+    },
+    {
+      "label": "fake-interrupt",
+      "queue_capacity": 2,
+      "max_queue_depth": 1,
+      "produced_chunks": 2,
+      "consumed_chunks": 2,
+      "post_cancel_produced_chunks": 1,
+      "producer_error": [],
+      "timed_out": false,
+      "producer_stopped": true,
+      "producer_completed_normally": false,
+      "first_consume_ms": 12.286,
+      "producer_complete_ms": 33.32,
+      "first_consume_before_completion": true,
+      "interrupt_to_stop_ms": 10.63,
+      "whole_stream_collected_before_consume": false
+    },
+    {
+      "label": "real-complete",
+      "queue_capacity": 2,
+      "max_queue_depth": 2,
+      "produced_chunks": 62,
+      "consumed_chunks": 62,
+      "post_cancel_produced_chunks": 0,
+      "producer_error": [],
+      "timed_out": false,
+      "producer_stopped": true,
+      "producer_completed_normally": true,
+      "first_consume_ms": 387.276,
+      "producer_complete_ms": 24027.481,
+      "first_consume_before_completion": true,
+      "interrupt_to_stop_ms": null,
+      "whole_stream_collected_before_consume": false
+    },
+    {
+      "label": "real-interrupt",
+      "queue_capacity": 2,
+      "max_queue_depth": 1,
+      "produced_chunks": 3,
+      "consumed_chunks": 3,
+      "post_cancel_produced_chunks": 1,
+      "producer_error": [],
+      "timed_out": false,
+      "producer_stopped": true,
+      "producer_completed_normally": false,
+      "first_consume_ms": 560.771,
+      "producer_complete_ms": 1387.823,
+      "first_consume_before_completion": true,
+      "interrupt_to_stop_ms": 278.325,
+      "whole_stream_collected_before_consume": false
+    }
+  ],
+  "gates": {
+    "all_producers_stopped": true,
+    "no_producer_errors": true,
+    "no_timeouts": true,
+    "bounded_queue": true,
+    "first_consume_before_completion": true,
+    "normal_streams_completed": true,
+    "interrupts_stop_below_2s": true,
+    "at_most_one_post_cancel_chunk": true,
+    "never_collects_whole_stream": true
+  },
+  "overall_status": "passed"
+}

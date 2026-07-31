@@ -1,0 +1,421 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-31T12:05:28.945758Z",
+  "endpoint": "https://192.168.1.199:9443/stt/transcribe",
+  "stt_model": "distil-large-v3/int8_float16",
+  "turns": [
+    {
+      "turn": 1,
+      "anchor": true,
+      "status": "accepted",
+      "target": "A long conversation should keep this voice clear, full, and easy to understand from the first turn through the final turn.",
+      "transcript": "A long conversation should keep this voice clear, full and easy to understand from the first turn through the final turn.",
+      "wer": 0.0
+    },
+    {
+      "turn": 2,
+      "anchor": false,
+      "status": "accepted",
+      "target": "The rain eased after midnight, and the quiet street reflected every porch light like glass.",
+      "transcript": "The rain eased after midnight, and the quiet street reflected every porch light like glass.",
+      "wer": 0.0
+    },
+    {
+      "turn": 3,
+      "anchor": false,
+      "status": "accepted",
+      "target": "We can take this one thought at a time, without rushing the pauses or swallowing the endings.",
+      "transcript": "We can take this one thought at a time without rushing the pauses or swallowing the endings.",
+      "wer": 0.0
+    },
+    {
+      "turn": 4,
+      "anchor": false,
+      "status": "accepted",
+      "target": "Tomorrow I would like to walk by the water, find a warm cafe, and write down what matters.",
+      "transcript": "Tomorrow I would like to walk by the water, find a warm cafe and write down what matters.",
+      "wer": 0.0
+    },
+    {
+      "turn": 5,
+      "anchor": false,
+      "status": "accepted",
+      "target": "A real phone conversation needs a steady voice, quick playback, and room for you to interrupt.",
+      "transcript": "A real phone conversation needs a steady voice, quick playback and room for you to interrupt.",
+      "wer": 0.0
+    },
+    {
+      "turn": 6,
+      "anchor": false,
+      "status": "accepted",
+      "target": "Nothing about this sentence should become muffled, breathy, metallic, noisy, or hard to follow.",
+      "transcript": "Nothing about this sentence should become muffled, breathy, metallic, noisy or hard to follow.",
+      "wer": 0.0
+    },
+    {
+      "turn": 7,
+      "anchor": false,
+      "status": "accepted",
+      "target": "I remember the small details: the open window, the blue notebook, and the song from downstairs.",
+      "transcript": "I remember the small details, the open window, the blue notebook, and the song from downstairs.",
+      "wer": 0.0
+    },
+    {
+      "turn": 8,
+      "anchor": false,
+      "status": "accepted",
+      "target": "Even after many replies, the speaker identity and natural cadence should remain recognizably stable.",
+      "transcript": "Even after many replies, the speaker identity and natural cadence should remain recognizably stable.",
+      "wer": 0.0
+    },
+    {
+      "turn": 9,
+      "anchor": false,
+      "status": "accepted",
+      "target": "I am still here with you, speaking at a natural volume and keeping every consonant clear.",
+      "transcript": "I am still here with you, speaking at a natural volume and keeping every consonant clear.",
+      "wer": 0.0
+    },
+    {
+      "turn": 10,
+      "anchor": true,
+      "status": "accepted",
+      "target": "A long conversation should keep this voice clear, full, and easy to understand from the first turn through the final turn.",
+      "transcript": "A long conversation should keep this voice clear, full and easy to understand from the first turn through the final turn.",
+      "wer": 0.0
+    },
+    {
+      "turn": 11,
+      "anchor": false,
+      "status": "accepted",
+      "target": "We can take this one thought at a time, without rushing the pauses or swallowing the endings.",
+      "transcript": "We can take this one thought at a time without rushing the pauses or swallowing the endings.",
+      "wer": 0.0
+    },
+    {
+      "turn": 12,
+      "anchor": false,
+      "status": "accepted",
+      "target": "Tomorrow I would like to walk by the water, find a warm cafe, and write down what matters.",
+      "transcript": "Tomorrow I would like to walk by the water, find a warm cafe, and write down what matters.",
+      "wer": 0.0
+    },
+    {
+      "turn": 13,
+      "anchor": false,
+      "status": "accepted",
+      "target": "A real phone conversation needs a steady voice, quick playback, and room for you to interrupt.",
+      "transcript": "A real phone conversation needs a steady voice quick playback and room for you to interrupt.",
+      "wer": 0.0
+    },
+    {
+      "turn": 14,
+      "anchor": false,
+      "status": "accepted",
+      "target": "Nothing about this sentence should become muffled, breathy, metallic, noisy, or hard to follow.",
+      "transcript": "Nothing about this sentence should become muffled, breathy, metallic, noisy or hard to follow.",
+      "wer": 0.0
+    },
+    {
+      "turn": 15,
+      "anchor": false,
+      "status": "accepted",
+      "target": "I remember the small details: the open window, the blue notebook, and the song from downstairs.",
+      "transcript": "I remember the small details, the open window, the blue notebook and the song from downstairs.",
+      "wer": 0.0
+    },
+    {
+      "turn": 16,
+      "anchor": false,
+      "status": "accepted",
+      "target": "Even after many replies, the speaker identity and natural cadence should remain recognizably stable.",
+      "transcript": "Even after many replies, the speaker identity and natural cadence should remain recognizably stable.",
+      "wer": 0.0
+    },
+    {
+      "turn": 17,
+      "anchor": false,
+      "status": "accepted",
+      "target": "I am still here with you, speaking at a natural volume and keeping every consonant clear.",
+      "transcript": "I am still here with you speaking at a natural volume and keeping every consonant clear.",
+      "wer": 0.0
+    },
+    {
+      "turn": 18,
+      "anchor": false,
+      "status": "accepted",
+      "target": "The rain eased after midnight, and the quiet street reflected every porch light like glass.",
+      "transcript": "The rain eased after midnight, and the quiet street reflected every porch light like glass.",
+      "wer": 0.0
+    },
+    {
+      "turn": 19,
+      "anchor": false,
+      "status": "accepted",
+      "target": "We can take this one thought at a time, without rushing the pauses or swallowing the endings.",
+      "transcript": "We can take this one thought at a time without rushing the pauses or swallowing the endings.",
+      "wer": 0.0
+    },
+    {
+      "turn": 20,
+      "anchor": true,
+      "status": "accepted",
+      "target": "A long conversation should keep this voice clear, full, and easy to understand from the first turn through the final turn.",
+      "transcript": "A long conversation should keep this voice clear, full and easy to understand from the first turn through the final turn.",
+      "wer": 0.0
+    },
+    {
+      "turn": 21,
+      "anchor": false,
+      "status": "accepted",
+      "target": "A real phone conversation needs a steady voice, quick playback, and room for you to interrupt.",
+      "transcript": "A real phone conversation needs a steady voice, quick playback and room for you to interrupt.",
+      "wer": 0.0
+    },
+    {
+      "turn": 22,
+      "anchor": false,
+      "status": "accepted",
+      "target": "Nothing about this sentence should become muffled, breathy, metallic, noisy, or hard to follow.",
+      "transcript": "Nothing about this sentence should become muffled, breathy, metallic, noisy or hard to follow.",
+      "wer": 0.0
+    },
+    {
+      "turn": 23,
+      "anchor": false,
+      "status": "accepted",
+      "target": "I remember the small details: the open window, the blue notebook, and the song from downstairs.",
+      "transcript": "I remember the small details, the open window, the blue notebook, and the song from downstairs.",
+      "wer": 0.0
+    },
+    {
+      "turn": 24,
+      "anchor": false,
+      "status": "accepted",
+      "target": "Even after many replies, the speaker identity and natural cadence should remain recognizably stable.",
+      "transcript": "Even after many replies, the speaker identity and natural cadence should remain recognizably stable.",
+      "wer": 0.0
+    },
+    {
+      "turn": 25,
+      "anchor": false,
+      "status": "accepted",
+      "target": "I am still here with you, speaking at a natural volume and keeping every consonant clear.",
+      "transcript": "I'm still here with you speaking at a natural volume and keeping every consonant clear.",
+      "wer": 0.125
+    },
+    {
+      "turn": 26,
+      "anchor": false,
+      "status": "accepted",
+      "target": "The rain eased after midnight, and the quiet street reflected every porch light like glass.",
+      "transcript": "The rain eased after midnight, and the quiet street reflected every porch light like glass.",
+      "wer": 0.0
+    },
+    {
+      "turn": 27,
+      "anchor": false,
+      "status": "accepted",
+      "target": "We can take this one thought at a time, without rushing the pauses or swallowing the endings.",
+      "transcript": "We can take this one thought at a time without rushing the pauses or swallowing the endings.",
+      "wer": 0.0
+    },
+    {
+      "turn": 28,
+      "anchor": false,
+      "status": "accepted",
+      "target": "Tomorrow I would like to walk by the water, find a warm cafe, and write down what matters.",
+      "transcript": "Tomorrow I would like to walk by the water, find the warm cafe, and write down what matters.",
+      "wer": 0.055556
+    },
+    {
+      "turn": 29,
+      "anchor": false,
+      "status": "accepted",
+      "target": "A real phone conversation needs a steady voice, quick playback, and room for you to interrupt.",
+      "transcript": "A real phone conversation needs a steady voice, quick playback, and room for you to interrupt.",
+      "wer": 0.0
+    },
+    {
+      "turn": 30,
+      "anchor": true,
+      "status": "accepted",
+      "target": "A long conversation should keep this voice clear, full, and easy to understand from the first turn through the final turn.",
+      "transcript": "A long conversation should keep this voice clear, full and easy to understand from the first turn through the final turn.",
+      "wer": 0.0
+    },
+    {
+      "turn": 31,
+      "anchor": false,
+      "status": "accepted",
+      "target": "I remember the small details: the open window, the blue notebook, and the song from downstairs.",
+      "transcript": "I remember the small details, the open window, the blue notebook and the song from downstairs.",
+      "wer": 0.0
+    },
+    {
+      "turn": 32,
+      "anchor": false,
+      "status": "accepted",
+      "target": "Even after many replies, the speaker identity and natural cadence should remain recognizably stable.",
+      "transcript": "Even after many replies, the speaker identity and natural cadence should remain recognizably stable.",
+      "wer": 0.0
+    },
+    {
+      "turn": 33,
+      "anchor": false,
+      "status": "accepted",
+      "target": "I am still here with you, speaking at a natural volume and keeping every consonant clear.",
+      "transcript": "I am still here with you, speaking at the natural volume and keeping every consonant clear.",
+      "wer": 0.0625
+    },
+    {
+      "turn": 34,
+      "anchor": false,
+      "status": "accepted",
+      "target": "The rain eased after midnight, and the quiet street reflected every porch light like glass.",
+      "transcript": "The rain eased after midnight, and the quiet street reflected every porch light like glass.",
+      "wer": 0.0
+    },
+    {
+      "turn": 35,
+      "anchor": false,
+      "status": "accepted",
+      "target": "We can take this one thought at a time, without rushing the pauses or swallowing the endings.",
+      "transcript": "we can take this one thought at a time without rushing the pauses or swallowing the endings",
+      "wer": 0.0
+    },
+    {
+      "turn": 36,
+      "anchor": false,
+      "status": "accepted",
+      "target": "Tomorrow I would like to walk by the water, find a warm cafe, and write down what matters.",
+      "transcript": "Tomorrow I would like to walk by the water, find a warm cafe and write down what matters.",
+      "wer": 0.0
+    },
+    {
+      "turn": 37,
+      "anchor": false,
+      "status": "accepted",
+      "target": "A real phone conversation needs a steady voice, quick playback, and room for you to interrupt.",
+      "transcript": "A real phone conversation needs a steady voice, quick playback and room for you to interrupt.",
+      "wer": 0.0
+    },
+    {
+      "turn": 38,
+      "anchor": false,
+      "status": "accepted",
+      "target": "Nothing about this sentence should become muffled, breathy, metallic, noisy, or hard to follow.",
+      "transcript": "Nothing about this sentence should become muffled, breathy, metallic, noisy or hard to follow.",
+      "wer": 0.0
+    },
+    {
+      "turn": 39,
+      "anchor": false,
+      "status": "accepted",
+      "target": "I remember the small details: the open window, the blue notebook, and the song from downstairs.",
+      "transcript": "I remember the small details, the open window, the blue notebook, and the song from downstairs.",
+      "wer": 0.0
+    },
+    {
+      "turn": 40,
+      "anchor": true,
+      "status": "accepted",
+      "target": "A long conversation should keep this voice clear, full, and easy to understand from the first turn through the final turn.",
+      "transcript": "A long conversation should keep this voice clear, full and easy to understand from the first turn through the final turn.",
+      "wer": 0.0
+    },
+    {
+      "turn": 41,
+      "anchor": false,
+      "status": "accepted",
+      "target": "I am still here with you, speaking at a natural volume and keeping every consonant clear.",
+      "transcript": "I'm still here with you, speaking at a natural volume and keeping every consonant clear.",
+      "wer": 0.125
+    },
+    {
+      "turn": 42,
+      "anchor": false,
+      "status": "accepted",
+      "target": "The rain eased after midnight, and the quiet street reflected every porch light like glass.",
+      "transcript": "The rain eased after midnight, and the quiet street reflected every porch light like glass.",
+      "wer": 0.0
+    },
+    {
+      "turn": 43,
+      "anchor": false,
+      "status": "accepted",
+      "target": "We can take this one thought at a time, without rushing the pauses or swallowing the endings.",
+      "transcript": "We can take this one thought at a time without rushing the pauses or swallowing the endings.",
+      "wer": 0.0
+    },
+    {
+      "turn": 44,
+      "anchor": false,
+      "status": "accepted",
+      "target": "Tomorrow I would like to walk by the water, find a warm cafe, and write down what matters.",
+      "transcript": "Tomorrow I would like to walk by the water, find a warm cafe, and write down what matters.",
+      "wer": 0.0
+    },
+    {
+      "turn": 45,
+      "anchor": false,
+      "status": "accepted",
+      "target": "A real phone conversation needs a steady voice, quick playback, and room for you to interrupt.",
+      "transcript": "A real phone conversation needs a steady voice, quick playback and room for you to interrupt.",
+      "wer": 0.0
+    },
+    {
+      "turn": 46,
+      "anchor": false,
+      "status": "accepted",
+      "target": "Nothing about this sentence should become muffled, breathy, metallic, noisy, or hard to follow.",
+      "transcript": "Nothing about this sentence should become muffled, breathy, metallic, noisy or hard to follow.",
+      "wer": 0.0
+    },
+    {
+      "turn": 47,
+      "anchor": false,
+      "status": "accepted",
+      "target": "I remember the small details: the open window, the blue notebook, and the song from downstairs.",
+      "transcript": "I remember the small details, the open window, the blue notebook and the song from downstairs.",
+      "wer": 0.0
+    },
+    {
+      "turn": 48,
+      "anchor": false,
+      "status": "accepted",
+      "target": "Even after many replies, the speaker identity and natural cadence should remain recognizably stable.",
+      "transcript": "Even after many replies, the speaker identity and natural cadence should remain recognizably stable.",
+      "wer": 0.0
+    },
+    {
+      "turn": 49,
+      "anchor": false,
+      "status": "accepted",
+      "target": "I am still here with you, speaking at a natural volume and keeping every consonant clear.",
+      "transcript": "I am still here with you, speaking at a natural volume and keeping every consonant clear.",
+      "wer": 0.0
+    },
+    {
+      "turn": 50,
+      "anchor": true,
+      "status": "accepted",
+      "target": "A long conversation should keep this voice clear, full, and easy to understand from the first turn through the final turn.",
+      "transcript": "A long conversation should keep this voice clear, full and easy to understand from the first turn through the final turn.",
+      "wer": 0.0
+    }
+  ],
+  "summary": {
+    "early_mean_wer": 0.0,
+    "late_mean_wer": 0.0,
+    "late_minus_early_wer": 0.0,
+    "overall_mean_wer": 0.007361
+  },
+  "gates": {
+    "all_50_transcribed": true,
+    "all_stt_accepted": true,
+    "late_wer_at_most_0_20": true,
+    "late_wer_degradation_at_most_0_15": true
+  },
+  "overall_status": "passed"
+}

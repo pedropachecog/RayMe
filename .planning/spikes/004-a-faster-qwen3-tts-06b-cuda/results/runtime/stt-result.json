@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-07-31T11:52:00Z",
+  "stt": "RayMe distil-large-v3/int8_float16",
+  "normalization": "lowercase alphanumeric words; punctuation ignored",
+  "samples": [
+    {
+      "audio": "06b-chunk4-medium.wav",
+      "normalized_wer": 0.0
+    },
+    {
+      "audio": "06b-chunk8-medium.wav",
+      "normalized_wer": 0.0
+    },
+    {
+      "audio": "06b-chunk8-long.wav",
+      "normalized_wer": 0.0
+    }
+  ],
+  "overall_status": "passed"
+}
