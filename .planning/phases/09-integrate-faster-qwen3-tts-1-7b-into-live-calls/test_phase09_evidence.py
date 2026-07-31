@@ -849,3 +849,35 @@ def test_runner_finish_source_pins_local_cuda_scorer_and_never_self_certifies() 
     assert '\"device\": \"cpu\"' not in source
     assert "remote_audio_judge" not in source
     assert "overall_status" not in source
+
+
+def test_canonical_deploy_owns_final_qwen_core_evidence_and_copyback() -> None:
+    deploy_path = PHASE_DIR.parents[2] / "scripts" / "deploy-omen.sh"
+    source = deploy_path.read_text(encoding="utf-8")
+
+    assert 'RAYME_OMEN_VERIFY_QWEN3="${RAYME_OMEN_VERIFY_QWEN3:-0}"' in source
+    assert "$env:RAYME_OMEN_VERIFY_QWEN3" in source
+    assert "$verifyQwen3" in source
+    assert "microsoft/wavlm-base-plus-sv" in source
+    assert "feb593a6c23c1cc3d9510425c29b0a14d2b07b1e" in source
+    assert "snapshot_download" in source
+    assert "09-run-omen-evidence.py" in source
+    assert "--core-only" in source
+    assert "09-verify-evidence.py" in source
+    assert "--core-ready" in source
+
+    for filename in (
+        "qwen3-runtime.json",
+        "qwen3-webrtc-status.json",
+        "qwen3-call-flow.json",
+        "qwen3-soak.json",
+        "qwen3-stt.json",
+        "qwen3-permitted-reference.wav",
+        "qwen3-permitted-reference.txt",
+        "qwen3-permitted-provenance.json",
+        "qwen3-fake-mic.wav",
+    ):
+        assert filename in source
+
+    assert "__RAYME_QWEN3_CORE_READY__" in source
+    assert "09-speaker-score.py" not in source
