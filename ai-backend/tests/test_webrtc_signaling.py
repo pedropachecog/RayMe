@@ -99,6 +99,24 @@ class ScriptedStreamingTtsAdapter:
         )
 
 
+class ScriptedQwenStreamingTtsAdapter(ScriptedStreamingTtsAdapter):
+    engine_id = "qwen3_1_7b"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stream_identities: list[tuple[str, str]] = []
+
+    def stream(
+        self,
+        request: Any,
+        *,
+        request_id: str,
+        voice_key: str,
+    ) -> Any:
+        self.stream_identities.append((request_id, voice_key))
+        yield from super().stream(request)
+
+
 class ScriptedModelManager:
     def __init__(
         self,
@@ -793,6 +811,50 @@ def test_webrtc_speak_returns_streaming_tts_playback_metrics_for_voxcpm2(
     assert math.isfinite(final_playback["total_generation_ms"])
     assert math.isfinite(final_playback["total_playback_ms"])
     assert isinstance(final_playback["inter_chunk_gaps_ms"], list)
+
+
+def test_webrtc_prepared_qwen_speak_uses_native_stream_and_truthful_carriers(
+    stub_webrtc: None,
+) -> None:
+    adapter = ScriptedQwenStreamingTtsAdapter()
+    manager = ScriptedPreparingModelManager(adapter, ready=True)
+    client = _client(model_manager=manager)
+    session_id = "call-session-qwen-streaming"
+    client.post(
+        "/webrtc/offer",
+        json={
+            **_offer_payload(session_id=session_id),
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+        },
+    )
+
+    response = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={
+            "turn_id": "ai-turn-qwen-streaming",
+            "text": "Hello from native Qwen streaming.",
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+            "final_chunk": True,
+            "reference_audio_b64": "cmVhbC1zYW1wbGU=",
+            "reference_transcript": "The exact reference transcript.",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert adapter.stream_identities == [
+        ("ai-turn-qwen-streaming", "voice-qwen")
+    ]
+    assert payload["event"]["type"] == "ai_done"
+    immediate = payload["event"]["ai_audio_started_event"]["tts_playback"]
+    assert immediate["streaming_used"] is True
+    assert immediate["whole_wav_fallback_used"] is False
+    assert "total_generation_ms" not in immediate
+    final = payload["event"]["tts_playback_final"]
+    assert final["bridge_queue_capacity"] == 2
+    assert final["bridge_queue_high_water"] <= 2
 
 
 def test_webrtc_speak_streaming_failure_keeps_fixed_public_error(

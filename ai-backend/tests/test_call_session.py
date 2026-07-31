@@ -219,6 +219,145 @@ class SlowStreamingTtsAdapter:
         self.stream_completed.set()
 
 
+class SlowQwenStreamingTtsAdapter:
+    engine_id = "qwen3_1_7b"
+
+    def __init__(self, *, chunk_count: int = 3) -> None:
+        self.chunk_count = chunk_count
+        self.requests: list[dict[str, Any]] = []
+        self.second_chunk_yielded = threading.Event()
+        self.release_completion = threading.Event()
+        self.stream_completed = threading.Event()
+        self.cancel_calls: list[str] = []
+
+    def synthesize(self, _payload: Any) -> dict[str, Any]:
+        raise AssertionError("whole synthesis fallback was used")
+
+    def stream(
+        self,
+        request: Any,
+        *,
+        request_id: str,
+        voice_key: str,
+    ) -> Any:
+        self.requests.append(
+            {
+                "request": request,
+                "request_id": request_id,
+                "voice_key": voice_key,
+            }
+        )
+        for index in range(self.chunk_count):
+            yield TtsAudioChunk(
+                engine_id=self.engine_id,
+                chunk_index=index,
+                wav_bytes=SCRIPTED_WAV_BYTES,
+                sample_rate=24000,
+                duration_ms=120,
+                generated_at_ms=25.0 + index * 60.0,
+            )
+            if index == 1:
+                self.second_chunk_yielded.set()
+        self.release_completion.wait()
+        self.stream_completed.set()
+
+    def cancel(self, request_id: str) -> bool:
+        self.cancel_calls.append(request_id)
+        self.release_completion.set()
+        return True
+
+
+class BackpressureQwenStreamingTtsAdapter(SlowQwenStreamingTtsAdapter):
+    def __init__(self) -> None:
+        super().__init__(chunk_count=6)
+        self.yield_attempts = 0
+        self.completed_yields = 0
+        self.fourth_yield_attempted = threading.Event()
+
+    def stream(
+        self,
+        request: Any,
+        *,
+        request_id: str,
+        voice_key: str,
+    ) -> Any:
+        self.requests.append(
+            {
+                "request": request,
+                "request_id": request_id,
+                "voice_key": voice_key,
+            }
+        )
+        for index in range(self.chunk_count):
+            self.yield_attempts += 1
+            if self.yield_attempts == 4:
+                self.fourth_yield_attempted.set()
+            yield TtsAudioChunk(
+                engine_id=self.engine_id,
+                chunk_index=index,
+                wav_bytes=SCRIPTED_WAV_BYTES,
+                sample_rate=24000,
+                duration_ms=120,
+                generated_at_ms=25.0 + index * 60.0,
+            )
+            self.completed_yields += 1
+        self.stream_completed.set()
+
+
+class CancellableQwenStreamingTtsAdapter:
+    engine_id = "qwen3_1_7b"
+
+    def __init__(self, *, yield_before_cancel: bool) -> None:
+        self.yield_before_cancel = yield_before_cancel
+        self.stream_started = threading.Event()
+        self.release_stream = threading.Event()
+        self.cancel_calls: list[str] = []
+        self.synthesize_calls = 0
+
+    def synthesize(self, _payload: Any) -> dict[str, Any]:
+        self.synthesize_calls += 1
+        raise AssertionError("whole synthesis fallback was used")
+
+    def stream(
+        self,
+        request: Any,
+        *,
+        request_id: str,
+        voice_key: str,
+    ) -> Any:
+        assert request.request_id == request_id
+        assert request.voice_key == voice_key
+        self.stream_started.set()
+        if self.yield_before_cancel:
+            yield TtsAudioChunk(
+                engine_id=self.engine_id,
+                chunk_index=0,
+                wav_bytes=SCRIPTED_WAV_BYTES,
+                sample_rate=24000,
+                duration_ms=120,
+                generated_at_ms=25.0,
+            )
+        self.release_stream.wait()
+
+    def cancel(self, request_id: str) -> bool:
+        self.cancel_calls.append(request_id)
+        self.release_stream.set()
+        return True
+
+
+class BlockingFirstEnqueueTrack(ObservableStreamingOutboundAudioTrack):
+    def __init__(self) -> None:
+        super().__init__()
+        self.first_enqueue_entered = asyncio.Event()
+        self.release_first_enqueue = asyncio.Event()
+
+    async def enqueue(self, chunk: bytes, *, preroll_seconds: float = 0.0) -> float:
+        if not self.chunks:
+            self.first_enqueue_entered.set()
+            await self.release_first_enqueue.wait()
+        return await super().enqueue(chunk, preroll_seconds=preroll_seconds)
+
+
 class ScriptedInboundAudioFrame:
     def __init__(self, pcm: bytes) -> None:
         self.pcm = pcm
@@ -1327,6 +1466,180 @@ def test_voxcpm2_slow_stream_starts_playback_before_stream_completion(monkeypatc
     assert event["tts_playback_final"]["inter_chunk_gaps_ms"] == [275.0, 60.0]
     assert event["tts_playback_final"]["under_realtime_generation"] is True
     assert event["tts_playback_final"]["realtime_generation_ratio"] < 1.05
+
+
+def test_qwen_slow_stream_starts_playback_before_stream_completion(monkeypatch: Any) -> None:
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.2)
+    events: list[dict[str, Any]] = []
+
+    async def scenario() -> dict[str, Any]:
+        audio_started = asyncio.Event()
+
+        def sink(event: dict[str, Any]) -> None:
+            events.append(event)
+            if event["type"] == "ai_audio_started":
+                audio_started.set()
+
+        track = ObservableStreamingOutboundAudioTrack()
+        adapter = SlowQwenStreamingTtsAdapter()
+        session, _ = _new_session(
+            tts_adapter=adapter,
+            outbound_audio_track=track,
+            event_sink=sink,
+        )
+        speech = asyncio.create_task(
+            session.speak_text(
+                "ai-turn-qwen-slow-stream",
+                "Hello from a slow native Qwen stream.",
+                "voice-qwen",
+                "qwen3_1_7b",
+                final_chunk=True,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="The exact reference transcript.",
+                reference_audio_content_type="audio/wav",
+            )
+        )
+        try:
+            assert await asyncio.to_thread(adapter.second_chunk_yielded.wait, 1.0)
+            await _wait_for_async_event_or_task(
+                audio_started,
+                speech,
+                label="Qwen first playback before producer completion",
+            )
+            assert not adapter.stream_completed.is_set()
+            assert track.chunks
+            assert not speech.done()
+            adapter.release_completion.set()
+            return await speech
+        finally:
+            adapter.release_completion.set()
+            if not speech.done():
+                speech.cancel()
+
+    event = _run(scenario())
+
+    assert event["type"] == "ai_done"
+    assert [item["type"] for item in events] == ["ai_audio_started", "ai_done"]
+    assert event["ai_audio_started_event"]["tts_playback"]["streaming_used"] is True
+    assert "total_generation_ms" not in event["ai_audio_started_event"]["tts_playback"]
+    assert event["tts_playback_final"]["bridge_queue_capacity"] == 2
+    assert event["tts_playback_final"]["bridge_queue_high_water"] <= 2
+    assert adapter.requests[0]["request_id"] == "ai-turn-qwen-slow-stream"
+    assert adapter.requests[0]["voice_key"] == "voice-qwen"
+
+
+def test_qwen_capacity_two_bridge_blocks_producer_without_dropping_chunks(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
+
+    async def scenario() -> dict[str, Any]:
+        track = BlockingFirstEnqueueTrack()
+        adapter = BackpressureQwenStreamingTtsAdapter()
+        session, _ = _new_session(
+            tts_adapter=adapter,
+            outbound_audio_track=track,
+        )
+        speech = asyncio.create_task(
+            session.speak_text(
+                "ai-turn-qwen-backpressure",
+                "This stream must stay bounded while playout is held.",
+                "voice-qwen",
+                "qwen3_1_7b",
+                final_chunk=True,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="The exact reference transcript.",
+            )
+        )
+        try:
+            await _wait_for_async_event_or_task(
+                track.first_enqueue_entered,
+                speech,
+                label="Qwen first enqueue enters slow playout",
+            )
+            assert await asyncio.to_thread(adapter.fourth_yield_attempted.wait, 1.0)
+            await asyncio.sleep(0.05)
+            assert adapter.completed_yields == 3
+            assert not adapter.stream_completed.is_set()
+            track.release_first_enqueue.set()
+            return await speech
+        finally:
+            track.release_first_enqueue.set()
+            if not speech.done():
+                speech.cancel()
+
+    event = _run(scenario())
+
+    assert event["type"] == "ai_done"
+    final = event["tts_playback_final"]
+    assert final["bridge_queue_capacity"] == 2
+    assert final["bridge_queue_high_water"] == 2
+    assert final["producer_block_time_ms"] > 0
+    assert final["chunk_count"] == 6
+
+
+@pytest.mark.parametrize("yield_before_cancel", [False, True])
+def test_qwen_interrupt_cancels_exact_request_and_rejects_normal_completion(
+    monkeypatch: Any,
+    yield_before_cancel: bool,
+) -> None:
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
+    events: list[dict[str, Any]] = []
+
+    async def scenario() -> tuple[ObservableStreamingOutboundAudioTrack, str]:
+        track = ObservableStreamingOutboundAudioTrack()
+        adapter = CancellableQwenStreamingTtsAdapter(
+            yield_before_cancel=yield_before_cancel
+        )
+        session, _ = _new_session(
+            tts_adapter=adapter,
+            outbound_audio_track=track,
+            event_sink=events.append,
+        )
+        turn_id = (
+            "ai-turn-qwen-cancel-after" if yield_before_cancel else "ai-turn-qwen-cancel-before"
+        )
+        speech = asyncio.create_task(
+            session.speak_text(
+                turn_id,
+                "This Qwen speech must stop immediately.",
+                "voice-qwen",
+                "qwen3_1_7b",
+                final_chunk=True,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="The exact reference transcript.",
+            )
+        )
+        try:
+            assert await asyncio.to_thread(adapter.stream_started.wait, 1.0)
+            if yield_before_cancel:
+                await _wait_for_async_event_or_task(
+                    track.first_chunk_enqueued,
+                    speech,
+                    label="Qwen first audio before interruption",
+                )
+            await session.interrupt()
+            try:
+                await speech
+            except asyncio.CancelledError:
+                pass
+            assert adapter.cancel_calls == [turn_id]
+            assert adapter.synthesize_calls == 0
+            assert session.state == "listening"
+            return track, turn_id
+        finally:
+            adapter.release_stream.set()
+            if not speech.done():
+                speech.cancel()
+
+    track, _turn_id = _run(scenario())
+
+    assert len(track.chunks) == (1 if yield_before_cancel else 0)
+    assert track.stop_calls == 1
+    assert "ai_done" not in [item["type"] for item in events]
+    assert [item["type"] for item in events][-1] == "interrupted"
 
 
 def test_voxcpm2_streaming_speak_returns_one_done_event_for_final_turn() -> None:
