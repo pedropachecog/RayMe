@@ -251,6 +251,8 @@ def _powershell_quote(value: str) -> str:
 
 def _generate_sapi_wav(output_path: Path, transcript: str) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    # David's SAPI token rejects a forced 24 kHz stream with SPERR_UNSUPPORTED_FORMAT.
+    # Its native PCM WAV is deterministic and the saved-voice pipeline resamples it.
     command = "\n".join(
         (
             "$ErrorActionPreference = 'Stop'",
@@ -260,11 +262,8 @@ def _generate_sapi_wav(output_path: Path, transcript: str) -> None:
             "$speaker.Voice = $voice",
             "$speaker.Rate = -1",
             "$speaker.Volume = 100",
-            "$format = New-Object -ComObject SAPI.SpAudioFormat",
-            "$format.Type = 22",
             "$stream = New-Object -ComObject SAPI.SpFileStream",
             f"$stream.Open({_powershell_quote(str(output_path))}, 3, $false)",
-            "$stream.Format = $format",
             "$speaker.AudioOutputStream = $stream",
             f"[void]$speaker.Speak({_powershell_quote(transcript)})",
             "$stream.Close()",
