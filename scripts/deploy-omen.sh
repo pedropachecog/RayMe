@@ -8,6 +8,7 @@ RAYME_OMEN_VERIFY_VOXCPM2="${RAYME_OMEN_VERIFY_VOXCPM2:-0}"
 RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON="${RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON:-${RAYME_VOXCPM2_RUNTIME_SMOKE_JSON:-}}"
 RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON="${RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON:-${RAYME_VOXCPM2_VRAM_SOAK_JSON:-}}"
 RAYME_OMEN_VERIFY_QWEN3_TRACER="${RAYME_OMEN_VERIFY_QWEN3_TRACER:-0}"
+RAYME_OMEN_VERIFY_QWEN3="${RAYME_OMEN_VERIFY_QWEN3:-0}"
 
 SCRIPT_DIR=$(
   CDPATH= cd -- "$(dirname -- "$0")"
@@ -18,6 +19,9 @@ REPO_ROOT=$(
   pwd
 )
 RAYME_OMEN_QWEN3_TRACER_JSON="${RAYME_OMEN_QWEN3_TRACER_JSON:-$REPO_ROOT/.planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-hardware-tracer.json}"
+RAYME_QWEN3_PHASE_DIR="$REPO_ROOT/.planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls"
+RAYME_QWEN3_RESULTS_DIR="$RAYME_QWEN3_PHASE_DIR/results"
+RAYME_QWEN3_LOCAL_RESULTS_DIR="$RAYME_QWEN3_RESULTS_DIR/.local"
 
 local_head="$(git rev-parse HEAD)"
 
@@ -39,6 +43,7 @@ remote_bootstrap+="\$env:OMEN_REPO=$(ps_single_quote "$OMEN_REPO"); "
 remote_bootstrap+="\$env:OMEN_BRANCH=$(ps_single_quote "$OMEN_BRANCH"); "
 remote_bootstrap+="\$env:RAYME_OMEN_VERIFY_VOXCPM2=$(ps_single_quote "$RAYME_OMEN_VERIFY_VOXCPM2"); "
 remote_bootstrap+="\$env:RAYME_OMEN_VERIFY_QWEN3_TRACER=$(ps_single_quote "$RAYME_OMEN_VERIFY_QWEN3_TRACER"); "
+remote_bootstrap+="\$env:RAYME_OMEN_VERIFY_QWEN3=$(ps_single_quote "$RAYME_OMEN_VERIFY_QWEN3"); "
 remote_bootstrap+="Invoke-Expression ([Console]::In.ReadToEnd())"
 
 run_remote_deploy() {
@@ -51,10 +56,14 @@ if (-not $branch) { $branch = "main" }
 $expectedHead = $env:EXPECTED_HEAD
 $verifyVoxCpm2 = $env:RAYME_OMEN_VERIFY_VOXCPM2 -eq "1"
 $verifyQwen3Tracer = $env:RAYME_OMEN_VERIFY_QWEN3_TRACER -eq "1"
+$verifyQwen3 = $env:RAYME_OMEN_VERIFY_QWEN3 -eq "1"
 $qwenRuntimeCommit = "a70afc0f81f7f5f8801c3227968f1102f43f211c"
 $qwenModelId = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 $qwenModelRevision = "fd4b254389122332181a7c3db7f27e918eec64e3"
 $qwenModelDir = "C:\Users\pmpg\rayme\models\qwen3-tts-1.7b-$qwenModelRevision"
+$wavlmModelId = "microsoft/wavlm-base-plus-sv"
+$wavlmModelRevision = "feb593a6c23c1cc3d9510425c29b0a14d2b07b1e"
+$qwenEvidenceDir = Join-Path $repo ".local\phase09-qwen3-release-results"
 
 Set-Location $repo
 Write-Host "== OMEN deploy: repo $(Get-Location)"
@@ -333,6 +342,9 @@ function Invoke-RayMeQwen3Provisioning {
   $env:RAYME_DEPLOYED_COMMIT = $actualHead
   $env:RAYME_QWEN3_RUNTIME_COMMIT = $qwenRuntimeCommit
   $env:RAYME_QWEN3_MODEL_ID = $qwenModelId
+  $env:RAYME_WAVLM_MODEL_ID = $wavlmModelId
+  $env:RAYME_WAVLM_MODEL_REVISION = $wavlmModelRevision
+  $env:RAYME_MATERIALIZE_WAVLM = if ($verifyQwen3) { "1" } else { "0" }
 
   $probe = @'
 import importlib.metadata
@@ -347,6 +359,8 @@ EXPECTED_RUNTIME_COMMIT = os.environ["RAYME_QWEN3_RUNTIME_COMMIT"]
 EXPECTED_MODEL_ID = os.environ["RAYME_QWEN3_MODEL_ID"]
 EXPECTED_MODEL_REVISION = os.environ["RAYME_QWEN3_MODEL_REVISION"]
 MODEL_DIR = Path(os.environ["RAYME_QWEN3_MODEL_DIR"])
+WAVLM_MODEL_ID = os.environ["RAYME_WAVLM_MODEL_ID"]
+WAVLM_MODEL_REVISION = os.environ["RAYME_WAVLM_MODEL_REVISION"]
 
 resolved = Path(snapshot_download(
     repo_id=EXPECTED_MODEL_ID,
@@ -357,6 +371,17 @@ if resolved.resolve() != MODEL_DIR.resolve():
     raise RuntimeError("Qwen model snapshot resolved outside the canonical model directory")
 if not (MODEL_DIR / "config.json").is_file():
     raise RuntimeError("Pinned Qwen model snapshot is incomplete")
+
+wavlm_cache_path = None
+if os.environ.get("RAYME_MATERIALIZE_WAVLM") == "1":
+    wavlm_cache_path = Path(snapshot_download(
+        repo_id=WAVLM_MODEL_ID,
+        revision=WAVLM_MODEL_REVISION,
+    )).resolve()
+    if wavlm_cache_path.name != WAVLM_MODEL_REVISION:
+        raise RuntimeError("Pinned WavLM snapshot resolved to an unexpected revision")
+    if not (wavlm_cache_path / "config.json").is_file():
+        raise RuntimeError("Pinned WavLM snapshot is incomplete")
 
 manifest = {
     "model_id": EXPECTED_MODEL_ID,
@@ -397,6 +422,8 @@ print("__RAYME_QWEN3_RUNTIME_JSON__" + json.dumps({
     "cuda_available": True,
     "gpu_name": gpu_name,
     "sample_rate": 24000,
+    "wavlm_model_id": WAVLM_MODEL_ID if wavlm_cache_path else None,
+    "wavlm_model_revision": WAVLM_MODEL_REVISION if wavlm_cache_path else None,
 }, sort_keys=True))
 '@
   $probeOutput = $probe | & "$repo\ai-backend\.venv\Scripts\python.exe" -
@@ -411,7 +438,7 @@ if ($verifyVoxCpm2) {
   Invoke-RayMeVoxCpm2Verification
 }
 
-if ($verifyQwen3Tracer) {
+if ($verifyQwen3Tracer -or $verifyQwen3) {
   Stop-RayMePortOwners
   Invoke-RayMeQwen3Provisioning
 }
@@ -505,6 +532,24 @@ function Register-RayMeTask {
 Register-RayMeTask -TaskName RayMePhase1AI -Launcher "C:\Users\pmpg\rayme\start-ai-backend.cmd"
 Register-RayMeTask -TaskName RayMePhase1Web -Launcher "C:\Users\pmpg\rayme\start-web-ui.cmd"
 
+$canonicalTaskLaunchers = @{
+  RayMePhase1AI = "C:\Users\pmpg\rayme\start-ai-backend.cmd"
+  RayMePhase1Web = "C:\Users\pmpg\rayme\start-web-ui.cmd"
+}
+foreach ($entry in $canonicalTaskLaunchers.GetEnumerator()) {
+  $task = Get-ScheduledTask -TaskName $entry.Key -ErrorAction Stop
+  $actions = @($task.Actions)
+  if ($actions.Count -ne 1 -or [string]$actions[0].Execute -ne [string]$entry.Value) {
+    throw "Scheduled task $($entry.Key) does not point to its canonical launcher"
+  }
+}
+if (
+  -not (Test-Path "C:\Users\pmpg\rayme\start-ai-backend.cmd") -or
+  -not (Test-Path "C:\Users\pmpg\rayme\start-web-ui.cmd")
+) {
+  throw "Canonical RayMe launcher inventory is incomplete"
+}
+
 Write-Host "== Starting scheduled tasks"
 Start-ScheduledTask -TaskName RayMePhase1AI
 
@@ -567,7 +612,7 @@ if ($verifyVoxCpm2) {
   Write-Host "__RAYME_VOXCPM2_VRAM_SOAK_JSON__$($script:VoxCpm2VramSoak | ConvertTo-Json -Depth 8 -Compress)"
 }
 
-if ($verifyQwen3Tracer) {
+if ($verifyQwen3Tracer -or $verifyQwen3) {
   Write-Host "== Running production Qwen saved-voice/WebRTC hardware tracer"
   $tracerDir = Join-Path $repo ".local\phase09-qwen3-tracer"
   New-Item -ItemType Directory -Path $tracerDir -Force | Out-Null
@@ -596,11 +641,111 @@ if ($verifyQwen3Tracer) {
   if (-not $tracerLine) { throw "Qwen hardware tracer did not emit commit-matched JSON evidence" }
   Write-Host "__RAYME_QWEN3_RUNTIME_JSON__$($script:QwenRuntimeIdentity | ConvertTo-Json -Depth 8 -Compress)"
 }
+
+if ($verifyQwen3) {
+  Write-Host "== Running exact-commit Phase 09 Qwen core evidence"
+  if (Test-Path $qwenEvidenceDir) {
+    Remove-Item -Path $qwenEvidenceDir -Recurse -Force
+  }
+  New-Item -ItemType Directory -Path $qwenEvidenceDir -Force | Out-Null
+  $qwenEvidenceLocalDir = Join-Path $qwenEvidenceDir ".local"
+  New-Item -ItemType Directory -Path $qwenEvidenceLocalDir -Force | Out-Null
+
+  $qwenProcessMemory = @(
+    & nvidia-smi.exe --query-compute-apps=used_memory --format=csv,noheader,nounits 2>$null |
+      ForEach-Object {
+        $parsed = 0.0
+        if ([double]::TryParse(([string]$_).Trim(), [ref]$parsed) -and $parsed -gt 0) {
+          $parsed
+        }
+      }
+  )
+  if (-not $qwenProcessMemory) {
+    throw "Qwen GPU process memory could not be measured"
+  }
+  $qwenProcessMemoryMib = [double](($qwenProcessMemory | Measure-Object -Maximum).Maximum)
+  if ($qwenProcessMemoryMib -gt 5888) {
+    throw "Qwen GPU process memory exceeds the 5888 MiB release limit"
+  }
+
+  $env:RAYME_QWEN3_TORCH_RESERVED_MIB = [string]$qwenProcessMemoryMib
+  $env:RAYME_QWEN3_AI_LOG = "C:\Users\pmpg\rayme\logs\ai-backend.run.log"
+  $env:RAYME_QWEN3_WEB_LOG = "C:\Users\pmpg\rayme\logs\web-ui.run.log"
+  $runnerScript = Join-Path $repo ".planning\phases\09-integrate-faster-qwen3-tts-1-7b-into-live-calls\09-run-omen-evidence.py"
+  $verifierScript = Join-Path $repo ".planning\phases\09-integrate-faster-qwen3-tts-1-7b-into-live-calls\09-verify-evidence.py"
+  $runnerWorkDir = Join-Path $qwenEvidenceLocalDir "runner-work"
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  $runnerOutput = & "$repo\ai-backend\.venv\Scripts\python.exe" $runnerScript `
+    --core-only `
+    --expected-commit $actualHead `
+    --output-dir $qwenEvidenceDir `
+    --work-dir $runnerWorkDir 2>&1
+  $runnerStatus = $LASTEXITCODE
+  $ErrorActionPreference = $previousErrorActionPreference
+  $runnerOutput | Where-Object { $_ -like "PASS*" -or $_ -like "FAIL:*" } | ForEach-Object { Write-Host $_ }
+  if ($runnerStatus -ne 0) {
+    $failureLine = $runnerOutput | Where-Object { $_ -like "FAIL:*" } | Select-Object -Last 1
+    if (-not $failureLine) { $failureLine = "FAIL: evidence runner returned no sanitized diagnostic" }
+    throw "Production Qwen core evidence failed: $failureLine"
+  }
+
+  $fakeMicSource = Join-Path $tracerDir "synthetic-fake-microphone.wav"
+  if (-not (Test-Path $fakeMicSource)) {
+    throw "Qwen fake microphone fixture was not produced by the canonical tracer"
+  }
+  Copy-Item -Path $fakeMicSource -Destination (Join-Path $qwenEvidenceLocalDir "qwen3-fake-mic.wav") -Force
+
+  & "$repo\ai-backend\.venv\Scripts\python.exe" $verifierScript `
+    --core-ready `
+    --expected-commit $actualHead `
+    --results-dir $qwenEvidenceDir
+  if ($LASTEXITCODE -ne 0) { throw "Independent Qwen core evidence verification failed" }
+
+  $expectedCoreFiles = @(
+    "qwen3-runtime.json",
+    "qwen3-webrtc-status.json",
+    "qwen3-call-flow.json",
+    "qwen3-soak.json",
+    "qwen3-stt.json"
+  )
+  $expectedPrivateFiles = @(
+    "qwen3-permitted-reference.wav",
+    "qwen3-permitted-reference.txt",
+    "qwen3-permitted-provenance.json",
+    "qwen3-fake-mic.wav"
+  )
+  foreach ($filename in $expectedCoreFiles) {
+    if (-not (Test-Path (Join-Path $qwenEvidenceDir $filename))) {
+      throw "Qwen core evidence inventory is incomplete"
+    }
+  }
+  foreach ($filename in $expectedPrivateFiles) {
+    if (-not (Test-Path (Join-Path $qwenEvidenceLocalDir $filename))) {
+      throw "Qwen private test fixture inventory is incomplete"
+    }
+  }
+
+  $finalAiHealth = (curl.exe -k -sS https://192.168.1.199:9443/health | ConvertFrom-Json)
+  $finalWebRtcStatus = (curl.exe -k -sS https://192.168.1.199:9443/webrtc/status | ConvertFrom-Json)
+  $finalPrompt = $finalWebRtcStatus.selected_voice_prompt
+  if (
+    $finalAiHealth.resident_tts_engine -ne "qwen3_1_7b" -or
+    $finalWebRtcStatus.deployed_commit -ne $actualHead -or
+    -not $finalPrompt -or
+    $finalPrompt.engine_id -ne "qwen3_1_7b" -or
+    $finalPrompt.state -ne "ready"
+  ) {
+    throw "Qwen core evidence did not leave the exact deployed model and prompt call-ready"
+  }
+  Write-Host "__RAYME_QWEN3_CORE_READY__$actualHead"
+}
 POWERSHELL
 }
 
-if [[ "$RAYME_OMEN_VERIFY_VOXCPM2" == "1" || "$RAYME_OMEN_VERIFY_QWEN3_TRACER" == "1" ]]; then
+if [[ "$RAYME_OMEN_VERIFY_VOXCPM2" == "1" || "$RAYME_OMEN_VERIFY_QWEN3_TRACER" == "1" || "$RAYME_OMEN_VERIFY_QWEN3" == "1" ]]; then
   deploy_log="$(mktemp)"
+  trap 'rm -f "$deploy_log"' EXIT
   set +e
   run_remote_deploy >"$deploy_log" 2>&1
   deploy_status=$?
@@ -659,6 +804,40 @@ payload = json.loads(sys.argv[1])
 Path(sys.argv[2]).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
   fi
+  if [[ "$RAYME_OMEN_VERIFY_QWEN3" == "1" ]]; then
+    qwen_core_marker="$(sed -n 's/^__RAYME_QWEN3_CORE_READY__//p' "$deploy_log" | tail -n 1)"
+    if [[ "$qwen_core_marker" != "$local_head" ]]; then
+      echo "Qwen3 core evidence ready marker was missing or commit-mismatched" >&2
+      exit 1
+    fi
+
+    omen_repo_scp="${OMEN_REPO//\\//}"
+    remote_results="$omen_repo_scp/.local/phase09-qwen3-release-results"
+    mkdir -p "$RAYME_QWEN3_RESULTS_DIR" "$RAYME_QWEN3_LOCAL_RESULTS_DIR"
+    for filename in \
+      qwen3-runtime.json \
+      qwen3-webrtc-status.json \
+      qwen3-call-flow.json \
+      qwen3-soak.json \
+      qwen3-stt.json
+    do
+      scp -q "${OMEN_SSH_ALIAS}:${remote_results}/${filename}" "$RAYME_QWEN3_RESULTS_DIR/$filename"
+    done
+    for filename in \
+      qwen3-permitted-reference.wav \
+      qwen3-permitted-reference.txt \
+      qwen3-permitted-provenance.json \
+      qwen3-fake-mic.wav
+    do
+      scp -q "${OMEN_SSH_ALIAS}:${remote_results}/.local/${filename}" "$RAYME_QWEN3_LOCAL_RESULTS_DIR/$filename"
+    done
+
+    python3 "$RAYME_QWEN3_PHASE_DIR/09-verify-evidence.py" \
+      --core-ready \
+      --expected-commit "$local_head" \
+      --results-dir "$RAYME_QWEN3_RESULTS_DIR"
+  fi
+  trap - EXIT
   rm -f "$deploy_log"
 else
   run_remote_deploy
