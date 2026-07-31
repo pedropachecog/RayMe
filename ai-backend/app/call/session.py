@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import concurrent.futures
 import inspect
 import json
 import logging
@@ -49,6 +50,8 @@ CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS = 0.75
 CALL_TTS_STREAM_START_MIN_CHUNKS = 2
 CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS = 0.75
 CALL_TTS_STREAM_MAX_STARTUP_BUFFER_SECONDS = 1.25
+CALL_TTS_STREAM_BRIDGE_CAPACITY = 2
+LIVE_STREAMING_TTS_ENGINES = frozenset({"voxcpm2", "qwen3_1_7b"})
 VOXCPM2_LIVE_MAX_INFERENCE_TIMESTEPS = 4
 VOXCPM2_LIVE_NORMALIZE = False
 VOXCPM2_LIVE_DENOISE = False
@@ -111,7 +114,7 @@ def _decode_reference_audio_b64(reference_audio_b64: str) -> bytes:
 
 def _adapter_supports_streaming(adapter: Any, engine_id: str) -> bool:
     return (
-        engine_id == "voxcpm2"
+        engine_id in LIVE_STREAMING_TTS_ENGINES
         and adapter is not None
         and callable(getattr(adapter, "stream", None))
     )
@@ -173,6 +176,10 @@ class CallSession:
         self._silence_ms = 0
         self._speech_start_frame: int | None = None
         self._cancelled_ai_turns: set[str] = set()
+        self._active_tts_adapter: Any | None = None
+        self._active_tts_request_id: str | None = None
+        self._active_tts_turn_id: str | None = None
+        self._active_tts_cancel_requested = False
         self._undelivered_events: list[dict[str, Any]] = []
         self._media_reconnect_grace_pending = False
         self._media_reconnect_grace_until = 0.0
@@ -1075,7 +1082,9 @@ class CallSession:
         voxcpm2_options: dict[str, Any],
     ) -> dict[str, Any]:
         started_at = time.perf_counter()
-        queue: asyncio.Queue[Any] = asyncio.Queue()
+        queue: asyncio.Queue[Any] = asyncio.Queue(
+            maxsize=CALL_TTS_STREAM_BRIDGE_CAPACITY
+        )
         sentinel = object()
         audio_started_event: dict[str, Any] | None = None
         chunk_count = 0
@@ -1087,6 +1096,8 @@ class CallSession:
         playback_started = False
         first_chunk_received_at: float | None = None
         producer_task: asyncio.Task[Any] | None = None
+        bridge_queue_high_water = 0
+        producer_block_time_ms = 0.0
 
         def elapsed_ms() -> float:
             return round((time.perf_counter() - started_at) * 1000, 1)
@@ -1109,6 +1120,9 @@ class CallSession:
                 "realtime_generation_ratio": realtime_generation_ratio,
                 "under_realtime_generation": realtime_generation_ratio < 1.05,
                 "inter_chunk_gaps_ms": list(inter_chunk_gaps_ms),
+                "bridge_queue_capacity": CALL_TTS_STREAM_BRIDGE_CAPACITY,
+                "bridge_queue_high_water": bridge_queue_high_water,
+                "producer_block_time_ms": round(producer_block_time_ms, 1),
             }
 
         def pending_audio_seconds() -> float:
@@ -1215,22 +1229,75 @@ class CallSession:
             )
             loop = asyncio.get_running_loop()
 
-            def put_threadsafe(item: Any) -> None:
+            self._active_tts_adapter = adapter
+            self._active_tts_request_id = turn_id
+            self._active_tts_turn_id = turn_id
+            self._active_tts_cancel_requested = False
+
+            async def put_bridge_item(item: Any) -> None:
+                nonlocal bridge_queue_high_water
+                await queue.put(item)
+                bridge_queue_high_water = max(
+                    bridge_queue_high_water,
+                    queue.qsize(),
+                )
+
+            def put_threadsafe(item: Any) -> bool:
+                nonlocal producer_block_time_ms
                 try:
-                    loop.call_soon_threadsafe(queue.put_nowait, item)
+                    publish = asyncio.run_coroutine_threadsafe(
+                        put_bridge_item(item),
+                        loop,
+                    )
                 except RuntimeError:
-                    return
+                    return False
+
+                wait_started = time.perf_counter()
+                while True:
+                    try:
+                        publish.result(timeout=0.05)
+                        producer_block_time_ms += (
+                            time.perf_counter() - wait_started
+                        ) * 1000
+                        return True
+                    except concurrent.futures.TimeoutError:
+                        if turn_id in self._cancelled_ai_turns:
+                            publish.cancel()
+                            producer_block_time_ms += (
+                                time.perf_counter() - wait_started
+                            ) * 1000
+                            return False
+                    except (concurrent.futures.CancelledError, RuntimeError):
+                        return False
 
             def produce() -> None:
+                terminal_item: Any = sentinel
+                stream: Any | None = None
                 try:
-                    for chunk in adapter.stream(request):
+                    if engine_id == "qwen3_1_7b":
+                        stream = adapter.stream(
+                            request,
+                            request_id=turn_id,
+                            voice_key=voice_id,
+                        )
+                    else:
+                        stream = adapter.stream(request)
+                    for chunk in stream:
                         if turn_id in self._cancelled_ai_turns:
                             break
-                        put_threadsafe(chunk)
+                        if not put_threadsafe(chunk):
+                            break
                 except Exception as exc:
-                    put_threadsafe(exc)
+                    terminal_item = exc
                 finally:
-                    put_threadsafe(sentinel)
+                    close = getattr(stream, "close", None)
+                    if callable(close):
+                        try:
+                            close()
+                        except Exception as exc:
+                            terminal_item = exc
+                    if turn_id not in self._cancelled_ai_turns:
+                        put_threadsafe(terminal_item)
 
             producer_task = asyncio.create_task(asyncio.to_thread(produce))
 
@@ -1287,7 +1354,7 @@ class CallSession:
             if producer_task is not None:
                 await producer_task
             if chunk_count == 0:
-                raise ValueError("VoxCPM2 streaming synthesis failed")
+                raise ValueError("Streaming synthesis failed")
 
             if not playback_started:
                 await start_playback_from_buffer()
@@ -1342,6 +1409,7 @@ class CallSession:
             return queued_event
         except asyncio.CancelledError:
             self._cancelled_ai_turns.add(turn_id)
+            await self._cancel_active_tts_generation(turn_id)
             raise
         except Exception:
             self.state = "listening"
@@ -1359,33 +1427,66 @@ class CallSession:
                 return {**event, "ai_audio_started_event": audio_started_event}
             return event
 
+        finally:
+            if self._active_tts_turn_id == turn_id:
+                self._active_tts_adapter = None
+                self._active_tts_request_id = None
+                self._active_tts_turn_id = None
+                self._active_tts_cancel_requested = False
+
+    async def _cancel_active_tts_generation(self, turn_id: str | None) -> None:
+        request_id = self._active_tts_request_id
+        active_turn_id = self._active_tts_turn_id
+        adapter = self._active_tts_adapter
+        if (
+            request_id is None
+            or adapter is None
+            or self._active_tts_cancel_requested
+            or (turn_id is not None and active_turn_id != turn_id)
+        ):
+            return
+
+        cancel = getattr(adapter, "cancel", None)
+        if not callable(cancel):
+            return
+
+        self._active_tts_cancel_requested = True
+        try:
+            await asyncio.to_thread(cancel, request_id)
+        except Exception as exc:
+            logger.warning(
+                "[rayme-call] tts.cancel_failed session=%s turn=%s engine=%s exc=%s",
+                self.session_id,
+                active_turn_id or "",
+                getattr(adapter, "engine_id", "unknown"),
+                exc.__class__.__name__,
+            )
+
     async def cancel_ai_turn(self, turn_id: str | None = None) -> None:
         active = self.active_turn_task
-        if turn_id is not None:
-            self._cancelled_ai_turns.add(turn_id)
-        if active is not None:
-            cancel = getattr(active, "cancel", None)
-            if callable(cancel):
-                cancel()
-        self.active_turn_task = None
+        resolved_turn_id = turn_id or self._active_tts_turn_id
+        if resolved_turn_id is not None:
+            self._cancelled_ai_turns.add(resolved_turn_id)
         stop = getattr(self.outbound_audio_track, "stop_current", None)
         if callable(stop):
             result = stop()
             if inspect.isawaitable(result):
                 await result
         self.outbound_audio_buffer.drain()
+        await self._cancel_active_tts_generation(resolved_turn_id)
+        if active is not None and active is not asyncio.current_task():
+            cancel = getattr(active, "cancel", None)
+            if callable(cancel):
+                cancel()
+        self.active_turn_task = None
 
     async def end(self, *, reason: str = "ended") -> dict[str, Any]:
         if self.ended_at is None:
+            if self.active_turn_task is not None or self._active_tts_turn_id is not None:
+                await self.cancel_ai_turn()
             self.ended_at = datetime.now(timezone.utc)
             self.end_reason = reason
             self.state = "ended"
-            active = self.active_turn_task
-            if active is not None:
-                cancel = getattr(active, "cancel", None)
-                if callable(cancel):
-                    cancel()
-            self.active_turn_task = None
             close = getattr(self.peer_connection, "close", None)
             if callable(close):
                 result = close()

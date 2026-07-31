@@ -1580,9 +1580,11 @@ def test_qwen_capacity_two_bridge_blocks_producer_without_dropping_chunks(
 
 
 @pytest.mark.parametrize("yield_before_cancel", [False, True])
-def test_qwen_interrupt_cancels_exact_request_and_rejects_normal_completion(
+@pytest.mark.parametrize("termination", ["interrupt", "hangup"])
+def test_qwen_termination_cancels_exact_request_and_rejects_normal_completion(
     monkeypatch: Any,
     yield_before_cancel: bool,
+    termination: str,
 ) -> None:
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
@@ -1599,7 +1601,9 @@ def test_qwen_interrupt_cancels_exact_request_and_rejects_normal_completion(
             event_sink=events.append,
         )
         turn_id = (
-            "ai-turn-qwen-cancel-after" if yield_before_cancel else "ai-turn-qwen-cancel-before"
+            f"ai-turn-qwen-{termination}-after"
+            if yield_before_cancel
+            else f"ai-turn-qwen-{termination}-before"
         )
         speech = asyncio.create_task(
             session.speak_text(
@@ -1620,14 +1624,19 @@ def test_qwen_interrupt_cancels_exact_request_and_rejects_normal_completion(
                     speech,
                     label="Qwen first audio before interruption",
                 )
-            await session.interrupt()
+            if termination == "interrupt":
+                await session.interrupt()
+            else:
+                await session.end(reason="hangup")
             try:
                 await speech
             except asyncio.CancelledError:
                 pass
             assert adapter.cancel_calls == [turn_id]
             assert adapter.synthesize_calls == 0
-            assert session.state == "listening"
+            assert session.state == (
+                "listening" if termination == "interrupt" else "ended"
+            )
             return track, turn_id
         finally:
             adapter.release_stream.set()
@@ -1639,7 +1648,9 @@ def test_qwen_interrupt_cancels_exact_request_and_rejects_normal_completion(
     assert len(track.chunks) == (1 if yield_before_cancel else 0)
     assert track.stop_calls == 1
     assert "ai_done" not in [item["type"] for item in events]
-    assert [item["type"] for item in events][-1] == "interrupted"
+    assert [item["type"] for item in events][-1] == (
+        "interrupted" if termination == "interrupt" else "ended"
+    )
 
 
 def test_voxcpm2_streaming_speak_returns_one_done_event_for_final_turn() -> None:
