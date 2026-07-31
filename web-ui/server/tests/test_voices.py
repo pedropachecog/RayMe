@@ -20,8 +20,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api.characters import get_character_session, get_portrait_blob_dir
 from app.main import create_app
-from app.storage.models import Base
-from app.storage.models import Voice
+from app.storage.models import Base, Voice, VoiceAsset
 from app.storage.session import create_engine
 
 SUPPORTED_TTS_ENGINES = (
@@ -56,6 +55,7 @@ class ScriptedVoiceProcessor:
     fail_preview: bool = False
     return_tts_failed: bool = False
     calls: list[dict[str, Any]] | None = None
+    preparation: dict[str, Any] | None = None
 
     async def transcribe(self, **_: Any) -> dict[str, str | float]:
         self._record("transcribe", _)
@@ -89,6 +89,13 @@ class ScriptedVoiceProcessor:
             return {"status": "tts_failed", "error": "typed processing failure"}
         return {"audio_url": "/api/voices/test-play/test-play-1.wav"}
 
+    async def preparation_status(self) -> dict[str, Any]:
+        self._record("preparation_status", {})
+        return self.preparation or {
+            "model": {"state": "resident", "engine_id": "qwen3_1_7b"},
+            "prompt": {"state": "ready", "voice_key": "qwen3_voice_opaque"},
+        }
+
     def _record(self, operation: str, payload: dict[str, Any]) -> None:
         if self.calls is None:
             self.calls = []
@@ -100,6 +107,7 @@ class VoiceFixture:
     client: TestClient
     processor: ScriptedVoiceProcessor
     sessionmaker: async_sessionmaker
+    blob_dir: Path
 
 
 @dataclass(frozen=True, slots=True)
@@ -179,7 +187,12 @@ def voice_fixture(tmp_path: Path) -> Iterator[VoiceFixture]:
     _install_test_dependencies(app, sessionmaker, tmp_path / "blobs", processor)
 
     with TestClient(app) as client:
-        yield VoiceFixture(client=client, processor=processor, sessionmaker=sessionmaker)
+        yield VoiceFixture(
+            client=client,
+            processor=processor,
+            sessionmaker=sessionmaker,
+            blob_dir=tmp_path / "blobs" / "voices",
+        )
 
     asyncio.run(engine.dispose())
 
@@ -428,6 +441,200 @@ def test_qwen_engine_normalization_is_narrow_and_legacy_reads_are_canonical(
 
     assert response.status_code == 200
     assert response.json()["default_engine"] == "qwen3_1_7b"
+
+
+def test_qwen_preview_uses_authorized_contained_reference_and_opaque_voice_key(
+    voice_fixture: VoiceFixture,
+) -> None:
+    audio = _wav_audio("qwen-preview-private-name.wav")
+    uploaded = _upload_voice_asset(voice_fixture.client, audio)
+    response = voice_fixture.client.post(
+        "/api/voices/preview",
+        json={
+            "asset_id": uploaded.json()["asset_id"],
+            "name": "Authorized preview",
+            "default_engine": "qwen3_1_7b",
+            "reference_transcript": "Exact preview transcript.",
+            "preview_text": "A bounded preview target.",
+            **_qwen_authorization(),
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    call = voice_fixture.processor.calls[-1]
+    assert call["operation"] == "preview"
+    assert call["voice_id"].startswith("qwen3_voice_")
+    assert call["voice_id"] != uploaded.json()["asset_id"]
+    assert call["content"] == audio.content
+    assert call["reference_transcript"] == "Exact preview transcript."
+    assert "voice_data_steward" not in call
+    assert "authorization_basis" not in call
+    assert "use_scope" not in call
+
+
+def test_qwen_preview_requires_authorization_and_nonempty_target(
+    voice_fixture: VoiceFixture,
+) -> None:
+    uploaded = _upload_voice_asset(voice_fixture.client, _wav_audio("qwen-preview-reject.wav"))
+    before = len(voice_fixture.processor.calls or [])
+
+    missing_authorization = voice_fixture.client.post(
+        "/api/voices/preview",
+        json={
+            "asset_id": uploaded.json()["asset_id"],
+            "default_engine": "qwen3_1_7b",
+            "reference_transcript": "Exact preview transcript.",
+            "preview_text": "Preview target.",
+        },
+    )
+    empty_target = voice_fixture.client.post(
+        "/api/voices/preview",
+        json={
+            "asset_id": uploaded.json()["asset_id"],
+            "default_engine": "qwen3_1_7b",
+            "reference_transcript": "Exact preview transcript.",
+            "preview_text": "   ",
+            **_qwen_authorization(),
+        },
+    )
+
+    assert missing_authorization.status_code == 422
+    assert empty_target.status_code == 422
+    assert len(voice_fixture.processor.calls or []) == before
+
+
+@pytest.mark.parametrize("tamper", ("reference", "transcript", "authorization", "path"))
+def test_qwen_test_play_rejects_tampered_saved_authorization(
+    voice_fixture: VoiceFixture,
+    tamper: str,
+) -> None:
+    voice = _create_qwen_voice(voice_fixture.client, name=f"Tamper {tamper}")
+
+    async def tamper_record() -> None:
+        async with voice_fixture.sessionmaker() as session:
+            stored_voice = await session.get(Voice, voice.voice_id)
+            assert stored_voice is not None
+            asset = await session.get(VoiceAsset, voice.asset_id)
+            assert asset is not None
+            if tamper == "transcript":
+                stored_voice.reference_transcript = "Changed after authorization."
+            elif tamper == "authorization":
+                metadata = dict(stored_voice.metadata_json or {})
+                authorization = dict(metadata["qwen3_authorization"])
+                authorization["authorization_status"] = "needs_confirmation"
+                metadata["qwen3_authorization"] = authorization
+                stored_voice.metadata_json = metadata
+            elif tamper == "path":
+                asset.storage_path = "../private-reference.wav"
+            await session.commit()
+
+    if tamper == "reference":
+        (voice_fixture.blob_dir / f"{voice.asset_id}.wav").write_bytes(b"changed-reference")
+    else:
+        asyncio.run(tamper_record())
+
+    before = len(voice_fixture.processor.calls or [])
+    response = voice_fixture.client.post(
+        f"/api/voices/{voice.voice_id}/test-play",
+        json={"text": "Safe target speech.", "use_default_engine": True},
+    )
+
+    assert response.status_code in {404, 422}
+    assert len(voice_fixture.processor.calls or []) == before
+    serialized = json.dumps(response.json())
+    assert "private-reference" not in serialized
+    assert "Changed after authorization" not in serialized
+    assert "Traceback" not in serialized
+
+
+def test_voice_preparation_status_exposes_model_and_prompt_separately(
+    voice_fixture: VoiceFixture,
+) -> None:
+    voice_fixture.processor.preparation = {
+        "model": {"state": "loading", "engine_id": "qwen3_1_7b"},
+        "prompt": {"state": "prewarming", "voice_key": "qwen3_voice_opaque"},
+    }
+
+    response = voice_fixture.client.get("/api/voices/preparation-status")
+
+    assert response.status_code == 200
+    assert response.json() == voice_fixture.processor.preparation
+
+
+def test_ai_backend_voice_processor_maps_safe_qwen_4xx_and_exposes_readiness() -> None:
+    from app.api.voices import AiBackendVoiceProcessor
+    from app.domain.ai_backend_client import AiBackendClient
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/tts/synthesize":
+            return httpx.Response(
+                422,
+                json={
+                    "detail": {
+                        "code": "qwen3_transcript_mismatch",
+                        "message": r"Traceback C:\\private\\voice.wav exact secret transcript",
+                    }
+                },
+            )
+        if request.url.path == "/webrtc/status":
+            return httpx.Response(
+                200,
+                json={
+                    "tts_model": {
+                        "resident_engine": "qwen3_1_7b",
+                        "loading_engine": None,
+                    },
+                    "selected_voice_prompt": {
+                        "engine_id": "qwen3_1_7b",
+                        "voice_key": "qwen3_voice_opaque",
+                        "state": "ready",
+                        "error_code": None,
+                    },
+                },
+            )
+        return httpx.Response(404)
+
+    async def exercise() -> tuple[dict[str, Any], dict[str, Any]]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+            processor = AiBackendVoiceProcessor(
+                AiBackendClient(http_client=http_client),
+                "https://ai.local",
+            )
+            failed = await processor.synthesize_preview(
+                voice_id="qwen3_voice_opaque",
+                content=b"reference",
+                content_type="audio/wav",
+                reference_transcript="Exact transcript.",
+                preview_text="Target.",
+                default_engine="qwen3_1_7b",
+            )
+            readiness = await processor.preparation_status()
+            return failed, readiness
+
+    failed, readiness = asyncio.run(exercise())
+
+    assert failed == {
+        "status": "tts_failed",
+        "error": {
+            "code": "qwen3_transcript_mismatch",
+            "message": "Reference audio and transcript do not match",
+        },
+    }
+    assert readiness == {
+        "model": {"state": "resident", "engine_id": "qwen3_1_7b"},
+        "prompt": {
+            "state": "ready",
+            "voice_key": "qwen3_voice_opaque",
+            "error_code": None,
+        },
+    }
+    serialized = json.dumps({"failed": failed, "readiness": readiness})
+    assert "private" not in serialized.lower()
+    assert "secret transcript" not in serialized
+    assert [request.url.path for request in requests] == ["/tts/synthesize", "/webrtc/status"]
 
 
 def test_voice_save_succeeds_after_preview_returns_tts_failed(
@@ -1066,6 +1273,27 @@ def _create_voice(client: TestClient, *, name: str = "Saved voice") -> CreatedVo
         ),
     )
     assert response.status_code == 201
+    body = response.json()
+    return CreatedVoice(voice_id=body["voice_id"], asset_id=asset_id, body=body)
+
+
+def _create_qwen_voice(client: TestClient, *, name: str = "Saved Qwen voice") -> CreatedVoice:
+    asset_response = _upload_voice_asset(client, _wav_audio(f"{name}.wav"))
+    assert asset_response.status_code == 201
+    asset_id = asset_response.json()["asset_id"]
+    response = client.post(
+        "/api/voices",
+        json={
+            **_voice_payload(
+                asset_id=asset_id,
+                name=name,
+                default_engine="qwen3_1_7b",
+                reference_transcript="Exact saved Qwen transcript.",
+            ),
+            **_qwen_authorization(),
+        },
+    )
+    assert response.status_code == 201, response.text
     body = response.json()
     return CreatedVoice(voice_id=body["voice_id"], asset_id=asset_id, body=body)
 
