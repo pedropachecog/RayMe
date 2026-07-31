@@ -553,7 +553,7 @@ def _generation_limits(text: str) -> tuple[int, float]:
 
 def qwen_prompt_cache_key(reference_audio: bytes, reference_transcript: str) -> str:
     """Return the capacity-one worker identity without exposing clone material."""
-    normalized_transcript = _normalize_comparison_text(reference_transcript)
+    normalized_transcript = normalize_qwen_comparison_text(reference_transcript)
     if not reference_audio:
         raise Qwen3ValidationError(
             "Qwen3 reference audio is required",
@@ -577,7 +577,7 @@ def qwen_prompt_cache_key(reference_audio: bytes, reference_transcript: str) -> 
     return "prompt_" + hashlib.sha256(identity).hexdigest()
 
 
-def _normalize_comparison_text(value: str) -> str:
+def normalize_qwen_comparison_text(value: str) -> str:
     decomposed = unicodedata.normalize("NFKD", value.casefold())
     without_marks = "".join(
         character

@@ -158,7 +158,12 @@ class ScriptedPreparingModelManager(ScriptedModelManager):
             "voice_key": kwargs["voice_key"],
         }
 
-    def is_tts_prompt_ready(self, engine_id: str, voice_key: str) -> bool:
+    def is_tts_prompt_ready(
+        self,
+        engine_id: str,
+        voice_key: str,
+        **_kwargs: Any,
+    ) -> bool:
         return engine_id == "qwen3_1_7b" and voice_key == "voice-qwen" and self.ready
 
     def health(self) -> dict[str, Any]:
@@ -418,7 +423,7 @@ def test_tts_boundary_maps_qwen_failures_without_poisoning_correctable_voice_err
             self._statuses = {"qwen3_1_7b": object()}
             self.marked: list[tuple[str, str]] = []
 
-        def switch_tts_engine(self, _engine_id: str) -> None:
+        async def prepare_tts_engine(self, _engine_id: str, **_kwargs: Any) -> None:
             raise error_factory()
 
         def _mark_unavailable(self, engine_id: str, reason: str) -> None:

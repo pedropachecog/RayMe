@@ -152,13 +152,13 @@ class ScriptedAlignmentSttAdapter:
         }
 
 
-def _reference_wav_bytes() -> bytes:
+def _reference_wav_bytes(*, amplitude: int = 2048) -> bytes:
     buffer = BytesIO()
     with wave.open(buffer, "wb") as wav:
         wav.setnchannels(1)
         wav.setsampwidth(2)
         wav.setframerate(24000)
-        wav.writeframes((2048).to_bytes(2, "little", signed=True) * 4800)
+        wav.writeframes(amplitude.to_bytes(2, "little", signed=True) * 4800)
     return buffer.getvalue()
 
 
@@ -270,6 +270,9 @@ def _build_manager(
         setattr(manager, "tts_adapters", adapters)
     if not hasattr(manager, "vram_probe"):
         setattr(manager, "vram_probe", lambda: {"used_mb": 2300, "headroom_mb": 8700})
+    manager.stt_adapter = ScriptedAlignmentSttAdapter(
+        "The exact reference transcript."
+    )
 
     return manager, adapters, events
 
@@ -332,7 +335,7 @@ def test_prepare_qwen_keeps_status_responsive_and_separates_model_from_prompt() 
             manager.prepare_tts_engine(
                 "qwen3_1_7b",
                 voice_key="voice-key-1",
-                reference_audio=b"contained-reference",
+                reference_audio=_reference_wav_bytes(),
                 reference_transcript="The exact reference transcript.",
             )
         )
@@ -368,7 +371,7 @@ def test_prepare_qwen_keeps_status_responsive_and_separates_model_from_prompt() 
         repeated = await manager.prepare_tts_engine(
             "qwen3_1_7b",
             voice_key="voice-key-1",
-            reference_audio=b"contained-reference",
+            reference_audio=_reference_wav_bytes(),
             reference_transcript="The exact reference transcript.",
         )
         assert repeated["prompt_state"] == "ready"
@@ -395,7 +398,7 @@ def test_qwen_prompt_failure_is_voice_scoped_and_sanitized() -> None:
             await manager.prepare_tts_engine(
                 "qwen3_1_7b",
                 voice_key="voice-key-failed",
-                reference_audio=b"contained-reference",
+                reference_audio=_reference_wav_bytes(),
                 reference_transcript="The exact reference transcript.",
             )
 
@@ -480,6 +483,21 @@ def test_qwen_alignment_is_cached_by_content_and_blocks_before_load_or_prompt() 
             "qwen3_transcript_mismatch"
         )
         _assert_no_raw_exception_text(health)
+
+        # A rejected voice is scoped to that immutable prompt identity. A later
+        # aligned voice must still be able to load Qwen and become ready.
+        stt.transcript = approved
+        valid_result = await manager.prepare_tts_engine(
+            "qwen3_1_7b",
+            voice_key="voice-aligned-after-mismatch",
+            reference_audio=_reference_wav_bytes(amplitude=1024),
+            reference_transcript=approved,
+        )
+
+        assert valid_result["prompt_state"] == "ready"
+        assert len(stt.calls) == 2
+        assert len(adapter.prewarm_calls) == 1
+        assert adapter.prewarm_calls[0]["reference_transcript"] == approved
 
     asyncio.run(scenario())
 

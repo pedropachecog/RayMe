@@ -13,9 +13,11 @@ from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from app.api.stt import _settings_from_app, _stt_adapter_from_app, _vad_adapter_from_app
+from app.api.tts import _qwen_error_detail, _qwen_http_status
 from app.call.session import CallSession, CallSessionManager
 from app.call.tracks import QueuedAudioOutputTrack
 from app.models.model_manager import ModelManager
+from app.models.tts_qwen3 import Qwen3WorkerError
 from app.models.tts_registry import (
     MAX_REFERENCE_AUDIO_B64_LENGTH,
     MAX_REFERENCE_AUDIO_BYTES,
@@ -201,6 +203,11 @@ async def prepare_session_speech(
         )
     except HTTPException:
         raise
+    except Qwen3WorkerError as exc:
+        raise HTTPException(
+            status_code=_qwen_http_status(exc),
+            detail=_qwen_error_detail(exc, payload.engine_id),
+        ) from exc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -425,11 +432,23 @@ async def speak_session(
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
                 detail={
-                    "code": "qwen_reference_transcript_required",
+                    "code": "qwen3_transcript_required",
                     "message": "Matching reference transcript is required",
+                    "engine_id": payload.engine_id,
                 },
             )
-        adapter = _tts_adapter(request, payload.engine_id, voice_key=payload.voice_id)
+        qwen_reference_audio = None
+        if payload.engine_id == "qwen3_1_7b":
+            qwen_reference_audio = _decode_reference_audio(
+                payload.reference_audio_b64 or ""
+            )
+        adapter = _tts_adapter(
+            request,
+            payload.engine_id,
+            voice_key=payload.voice_id,
+            reference_audio=qwen_reference_audio,
+            reference_transcript=payload.reference_transcript,
+        )
         event = await session.speak_text(
             payload.turn_id,
             payload.text,
@@ -660,6 +679,8 @@ def _tts_adapter(
     engine_id: str,
     *,
     voice_key: str | None = None,
+    reference_audio: bytes | None = None,
+    reference_transcript: str | None = None,
 ) -> Any:
     manager = getattr(request.app.state, "model_manager", None)
     if manager is None:
@@ -668,7 +689,12 @@ def _tts_adapter(
         request.app.state.model_manager = manager
     if engine_id == "qwen3_1_7b":
         is_ready = getattr(manager, "is_tts_prompt_ready", None)
-        if not callable(is_ready) or not is_ready(engine_id, voice_key or ""):
+        if not callable(is_ready) or not is_ready(
+            engine_id,
+            voice_key or "",
+            reference_audio=reference_audio,
+            reference_transcript=reference_transcript,
+        ):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={

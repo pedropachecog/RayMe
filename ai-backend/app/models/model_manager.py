@@ -1,13 +1,24 @@
 from __future__ import annotations
 
 import asyncio
+from collections import Counter
 from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from difflib import SequenceMatcher
+from io import BytesIO
 import logging
 import threading
 from typing import Any
 
 from app.config import AiBackendSettings
 from app.models.engine_metadata import ENGINE_METADATA, EngineMetadata, EngineStatus
+from app.models.tts_qwen3 import (
+    Qwen3PromptError,
+    Qwen3ValidationError,
+    Qwen3WorkerError,
+    normalize_qwen_comparison_text,
+    qwen_prompt_cache_key,
+)
 from app.models.tts_registry import build_default_tts_adapters
 
 logger = logging.getLogger(__name__)
@@ -17,7 +28,50 @@ VramProbe = Callable[[], Mapping[str, int | float]]
 RETRIABLE_TTS_UNAVAILABLE_REASONS = {
     "engine load failed",
     "default engine load failed",
+    "engine runtime failed",
 }
+QWEN_ALIGNMENT_MIN_TOKEN_COVERAGE = 0.45
+QWEN_ALIGNMENT_MIN_EDIT_SIMILARITY = 0.50
+
+
+@dataclass(frozen=True)
+class QwenTranscriptAlignment:
+    accepted: bool
+    token_coverage: float
+    edit_similarity: float
+
+
+def evaluate_qwen_transcript_alignment(
+    approved_transcript: str,
+    observed_transcript: str,
+) -> QwenTranscriptAlignment:
+    approved_text = normalize_qwen_comparison_text(approved_transcript)
+    observed_text = normalize_qwen_comparison_text(observed_transcript)
+    approved_tokens = approved_text.split()
+    observed_tokens = observed_text.split()
+    if not approved_tokens or not observed_tokens:
+        return QwenTranscriptAlignment(
+            accepted=False,
+            token_coverage=0.0,
+            edit_similarity=0.0,
+        )
+    overlap = Counter(approved_tokens) & Counter(observed_tokens)
+    token_coverage = sum(overlap.values()) / len(approved_tokens)
+    edit_similarity = SequenceMatcher(
+        None,
+        approved_text,
+        observed_text,
+        autojunk=False,
+    ).ratio()
+    accepted = not (
+        token_coverage < QWEN_ALIGNMENT_MIN_TOKEN_COVERAGE
+        and edit_similarity < QWEN_ALIGNMENT_MIN_EDIT_SIMILARITY
+    )
+    return QwenTranscriptAlignment(
+        accepted=accepted,
+        token_coverage=round(token_coverage, 4),
+        edit_similarity=round(edit_similarity, 4),
+    )
 
 
 class NullTtsAdapter:
@@ -58,6 +112,8 @@ class ModelManager:
             "state": "none",
             "error_code": None,
         }
+        self._selected_prompt_cache_key: str | None = None
+        self._qwen_alignment_cache: tuple[str, QwenTranscriptAlignment] | None = None
         self.stt_adapter: Any | None = None
         self.vad_adapter: Any | None = None
         self.stt_ready = False
@@ -174,11 +230,22 @@ class ModelManager:
             raise ValueError("unknown TTS engine")
         if not voice_key or len(voice_key) > 128:
             raise ValueError("invalid voice key")
+        prompt_cache_key: str | None = None
         if engine_id == "qwen3_1_7b":
             if not reference_audio:
-                raise ValueError("Qwen3 reference audio is required")
+                raise Qwen3ValidationError(
+                    "Qwen3 reference audio is required",
+                    code="qwen3_reference_audio_required",
+                )
             if not reference_transcript.strip():
-                raise ValueError("Qwen3 reference transcript is required")
+                raise Qwen3ValidationError(
+                    "Qwen3 reference transcript is required",
+                    code="qwen3_transcript_required",
+                )
+            prompt_cache_key = qwen_prompt_cache_key(
+                reference_audio,
+                reference_transcript,
+            )
 
         if self._prepare_lock is None:
             self._prepare_lock = asyncio.Lock()
@@ -188,6 +255,7 @@ class ModelManager:
                 and self.resident_tts_engine == engine_id
                 and self._selected_voice_prompt["voice_key"] == voice_key
                 and self._selected_voice_prompt["state"] == "ready"
+                and self._selected_prompt_cache_key == prompt_cache_key
             )
             if same_ready_prompt:
                 return self._prepare_result(engine_id)
@@ -198,6 +266,31 @@ class ModelManager:
                 "state": "none",
                 "error_code": None,
             }
+            self._selected_prompt_cache_key = None
+            if engine_id == "qwen3_1_7b":
+                try:
+                    alignment = await asyncio.to_thread(
+                        self._qwen_reference_alignment,
+                        prompt_cache_key or "",
+                        reference_audio,
+                        reference_transcript,
+                    )
+                    if not alignment.accepted:
+                        raise Qwen3ValidationError(
+                            "Qwen3 reference audio and transcript do not match",
+                            code="qwen3_transcript_mismatch",
+                        )
+                except Qwen3WorkerError as exc:
+                    self._selected_voice_prompt["state"] = "failed"
+                    self._selected_voice_prompt["error_code"] = exc.code
+                    logger.warning(
+                        "[rayme-tts] voice_prompt.alignment_failed "
+                        "engine=%s voice=%s code=%s",
+                        engine_id,
+                        voice_key,
+                        exc.code,
+                    )
+                    raise
             if self.resident_tts_engine != engine_id:
                 self.loading_engine = engine_id
                 self._statuses[engine_id].state = "loading"
@@ -225,28 +318,53 @@ class ModelManager:
                 )
             except Exception as exc:
                 self._selected_voice_prompt["state"] = "failed"
-                self._selected_voice_prompt["error_code"] = (
-                    "voice_prompt_preparation_failed"
+                error_code = getattr(
+                    exc,
+                    "code",
+                    "voice_prompt_preparation_failed",
                 )
+                self._selected_voice_prompt["error_code"] = str(error_code)
+                if bool(getattr(exc, "marks_engine_unavailable", False)):
+                    self._contain_qwen_runtime_failure(engine_id)
                 logger.warning(
-                    "[rayme-tts] voice_prompt.prewarm_failed engine=%s exc=%s",
+                    "[rayme-tts] voice_prompt.prewarm_failed "
+                    "engine=%s voice=%s code=%s exc=%s",
                     engine_id,
+                    voice_key,
+                    error_code,
                     exc.__class__.__name__,
                 )
                 raise
 
             self._selected_voice_prompt["state"] = "ready"
             self._selected_voice_prompt["error_code"] = None
+            self._selected_prompt_cache_key = prompt_cache_key
             return self._prepare_result(engine_id)
 
-    def is_tts_prompt_ready(self, engine_id: str, voice_key: str) -> bool:
-        return (
+    def is_tts_prompt_ready(
+        self,
+        engine_id: str,
+        voice_key: str,
+        *,
+        reference_audio: bytes | None = None,
+        reference_transcript: str | None = None,
+    ) -> bool:
+        ready = (
             engine_id == "qwen3_1_7b"
             and self.resident_tts_engine == engine_id
             and self._selected_voice_prompt["engine_id"] == engine_id
             and self._selected_voice_prompt["voice_key"] == voice_key
             and self._selected_voice_prompt["state"] == "ready"
         )
+        if not ready or reference_audio is None or reference_transcript is None:
+            return ready
+        try:
+            return self._selected_prompt_cache_key == qwen_prompt_cache_key(
+                reference_audio,
+                reference_transcript,
+            )
+        except Qwen3WorkerError:
+            return False
 
     def health(self) -> dict[str, object]:
         vram = self._safe_vram_probe()
@@ -289,6 +407,90 @@ class ModelManager:
             "state": "none",
             "error_code": None,
         }
+        self._selected_prompt_cache_key = None
+
+    def _qwen_reference_alignment(
+        self,
+        prompt_cache_key: str,
+        reference_audio: bytes,
+        reference_transcript: str,
+    ) -> QwenTranscriptAlignment:
+        cached = self._qwen_alignment_cache
+        if cached is not None and cached[0] == prompt_cache_key:
+            return cached[1]
+
+        try:
+            import numpy as np
+            import soundfile as sf
+
+            audio, sample_rate = sf.read(
+                BytesIO(reference_audio),
+                dtype="float32",
+                always_2d=False,
+            )
+            samples = np.asarray(audio, dtype=np.float32)
+            if samples.ndim > 1:
+                samples = samples.mean(axis=1)
+            samples = samples.reshape(-1)
+            if (
+                samples.size == 0
+                or int(sample_rate) <= 0
+                or not np.isfinite(samples).all()
+                or float(np.max(np.abs(samples))) <= 1e-5
+            ):
+                raise ValueError("invalid reference audio")
+        except Exception as exc:
+            raise Qwen3ValidationError(
+                "Qwen3 reference audio is invalid",
+                code="qwen3_reference_audio_invalid",
+            ) from exc
+
+        adapter = self.stt_adapter
+        if adapter is None:
+            from app.models.stt import WhisperSttAdapter
+
+            adapter = WhisperSttAdapter(settings=self.settings)
+            self.stt_adapter = adapter
+        try:
+            result = adapter.transcribe(
+                audio=samples,
+                vad_adapter=None,
+                apply_vad_filter=False,
+            )
+            mapping = result.model_dump() if hasattr(result, "model_dump") else dict(result)
+            observed = str(mapping.get("transcript") or "")
+            if str(mapping.get("status") or "") != "accepted" or not observed.strip():
+                raise ValueError("alignment transcript unavailable")
+        except Qwen3WorkerError:
+            raise
+        except Exception as exc:
+            raise Qwen3PromptError(
+                "Qwen3 reference alignment could not be verified",
+                code="qwen3_alignment_failed",
+            ) from exc
+
+        alignment = evaluate_qwen_transcript_alignment(
+            reference_transcript,
+            observed,
+        )
+        self._qwen_alignment_cache = (prompt_cache_key, alignment)
+        return alignment
+
+    def _contain_qwen_runtime_failure(self, engine_id: str) -> None:
+        if engine_id != "qwen3_1_7b":
+            return
+        try:
+            self._unload_engine(engine_id)
+        except Exception:
+            logger.warning(
+                "[rayme-tts] engine.runtime_unload_failed engine=%s",
+                engine_id,
+            )
+        if self.resident_tts_engine == engine_id:
+            self.resident_tts_engine = None
+        if self.loading_engine == engine_id:
+            self.loading_engine = None
+        self._mark_unavailable(engine_id, "engine runtime failed")
 
     def metadata(self) -> tuple[EngineMetadata, ...]:
         return ENGINE_METADATA
