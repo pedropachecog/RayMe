@@ -579,7 +579,7 @@ Plans:
 
 **Goal:** Make `faster-qwen3-tts==0.3.2` with `Qwen/Qwen3-TTS-12Hz-1.7B-Base` a first-class RayMe voice-cloning engine whose saved voices can be selected for real calls on OMEN, with visible load/prewarm state, transcript-alignment protection, bounded early streaming, barge-in cancellation, and no whole-synthesis fallback.
 
-**Requirements delivered:** REQ-22 (saved voice engine), REQ-45 (sentence/chunk streaming TTS), REQ-46 (<800 ms end-to-end target; <500 ms warmed TTS first-audio target from Spike 004b).
+**Requirements:** REQ-22 (saved voice engine), REQ-45 (sentence/chunk streaming TTS), REQ-46 (<800 ms end-to-end target; <500 ms warmed TTS first-audio target from Spike 004b).
 
 **Depends on:** Phase 8 live streaming playback infrastructure and Spikes 004a/004b/005/006 runtime, longitudinal, and bounded-stream evidence.
 
