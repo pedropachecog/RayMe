@@ -593,7 +593,7 @@ Plans:
 4. Barge-in/hangup stops Faster Qwen3 generation promptly, discards late chunks, returns the session to listening, and cannot emit a normal `ai_done` after cancellation.
 5. Local backend/server/client regressions pass; `scripts/deploy-omen.sh` installs/verifies the pinned runtime, deploys the committed implementation, and post-deploy `/webrtc/status` plus a real call-flow evidence run prove the engine is ready for the builder's physical call test.
 
-**Plans:** 4/15 plans executed
+**Plans:** 5/15 plans executed
 
 **Wave summary:** Waves 1–3 create the narrow dependency, worker, and local call contracts. Wave 4 is a blocking canonical OMEN production-path tracer; every broad migration/UI/call/evidence plan depends on that real hardware gate. Waves 5–9 harden validation/deletion/storage/UI/turn flow/playout and construct independently self-tested evidence tooling. Wave 10 performs final canonical deployment and core exact-commit hardware evidence. Wave 11 runs pinned acoustic/privacy checks, real Qwen browser E2E, decision-ready verification, and exact operational handoff.
 
@@ -616,7 +616,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 09-05-PLAN.md - Alignment, ceilings, prompt cache, protocol, and engine-scoped backend hardening (Wave 5)
+- [x] 09-05-PLAN.md - Alignment, ceilings, prompt cache, protocol, and engine-scoped backend hardening (Wave 5)
 - [ ] 09-07-PLAN.md - Exact identity migration, reference authorization, server validation, and readiness bridge (Wave 5)
 
 **Wave 6** *(blocked on Wave 5 completion)*

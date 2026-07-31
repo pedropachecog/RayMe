@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready_to_execute
-stopped_at: Completed 09-04-PLAN.md
-last_updated: "2026-07-31T17:42:43.066Z"
+stopped_at: Completed 09-05-PLAN.md
+last_updated: "2026-07-31T18:09:01.594Z"
 last_activity: 2026-07-31
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 112
-  completed_plans: 97
+  completed_plans: 98
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
-last_activity_desc: "Completed Phase 09 Plan 04: canonical pinned Qwen deployment plus real saved-voice/WebRTC early-stream, cancellation, and recovery evidence"
+last_activity_desc: "Completed Phase 09 Plan 05: content-bound prompts, STT alignment, strict generation ceilings, and Qwen-scoped typed failure containment"
 ---
 
 ## Phase Status
@@ -260,8 +260,8 @@ last_activity_desc: "Completed Phase 09 Plan 04: canonical pinned Qwen deploymen
 ## Session Continuity
 
 Last activity: 2026-07-31
-Last session: 2026-07-31T17:42:42.732Z
-Stopped at: Completed 09-04-PLAN.md
+Last session: 2026-07-31T18:09:01.271Z
+Stopped at: Completed 09-05-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -274,6 +274,7 @@ Resume file: None
 | Phase 09 P02 | 14min | 2 tasks | 4 files |
 | Phase 09 P03 | 18min | 2 tasks | 7 files |
 | Phase 09 P04 | 1h 14m | 2 tasks | 7 files |
+| Phase 09 P05 | 20min | 2 tasks | 8 files |
 
 ## Decisions
 
@@ -289,3 +290,7 @@ Resume file: None
 - [Phase 09]: Canonical OMEN deploy alone owns exact Qwen source, model snapshot, CUDA attestation, and verified local model-path launcher wiring.
 - [Phase 09]: Real-person Qwen references require matching steward, authorization basis, LAN-test scope, reference hash, and transcript hash; invalid cases use deterministic non-person SAPI.
 - [Phase 09]: Windows Qwen workers use console Python and complete the mandatory CUDA load before starting the cancellation reader.
+- [Phase 09]: Prompt readiness is content-bound while the exact approved transcript enters full ICL unchanged.
+- [Phase 09]: Qwen clone alignment accepts when token coverage reaches 0.45 or normalized edit similarity reaches 0.50, caching only opaque identity and scalar results.
+- [Phase 09]: Only Qwen runtime/protocol failures mark the engine unavailable; validation, prompt, and ceiling failures remain correctable and scoped.
+- [Phase 09]: Qwen preview collects only validated native stream chunks; live-call whole-synthesis fallback remains prohibited.
