@@ -1,0 +1,302 @@
+{
+  "schema_version": 1,
+  "phase": "09",
+  "manifest_id": "rayme-qwen3-1.7b-release-v1",
+  "runtime": {
+    "engine_id": "qwen3_1_7b",
+    "package": "faster-qwen3-tts==0.3.2",
+    "source_commit": "a70afc0f81f7f5f8801c3227968f1102f43f211c",
+    "model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+    "model_revision": "fd4b254389122332181a7c3db7f27e918eec64e3",
+    "torch_version": "2.10.0+cu126",
+    "cuda_version": "12.6",
+    "device": "cuda"
+  },
+  "speaker_scorer": {
+    "model_id": "microsoft/wavlm-base-plus-sv",
+    "model_revision": "feb593a6c23c1cc3d9510425c29b0a14d2b07b1e",
+    "model_class": "WavLMForXVector",
+    "transformers_version": "4.57.3",
+    "sample_rate_hz": 16000,
+    "device": "cuda",
+    "maximum_late_drop": 0.05
+  },
+  "selected_fixture": {
+    "fixture_kind": "generated_non_person_fixture",
+    "opaque_asset_id": "voice_asset_c4a180c91578400eb7836cf41475bf54",
+    "voice_data_steward": "non_person_sapi_david_v1",
+    "authorization_basis": "generated_non_person_fixture",
+    "use_scope": "rayme_lan_call_testing",
+    "reference_sha256": "b58c9c9926cd7a535db401fe82ac18af8aa3a1e8532ef513197d463dc9fb9a8b",
+    "transcript_sha256": "fc4f6a7f4b2f8e6fe7de46941b5b5cb8f35f4d21a11529542c403e347853aa96"
+  },
+  "evidence_policy": {
+    "audio_storage": "local_only_uncommitted",
+    "embedding_storage": "local_only_uncommitted",
+    "private_transcript_storage": "local_only_uncommitted",
+    "committed_payload": "opaque_ids_hashes_and_scalars_only",
+    "hosted_audio_judge_allowed": false,
+    "product_owner_direction_is_speaker_permission": false,
+    "real_person_fixture_requires_hash_bound_sidecar": true,
+    "invalid_real_person_sidecar_action": "select_generated_non_person_fixture_before_open"
+  },
+  "acceptance_status": {
+    "autonomous_release_ready": "pending",
+    "integrated_human_listening_status": "pending",
+    "physical_call_status": "pending",
+    "candidate_spike_listening_status": "accepted_separately"
+  },
+  "artifact_inventory": {
+    "core": [
+      "qwen3-runtime.json",
+      "qwen3-webrtc-status.json",
+      "qwen3-call-flow.json",
+      "qwen3-soak.json",
+      "qwen3-stt.json"
+    ],
+    "decision": [
+      "qwen3-speaker.json",
+      "qwen3-log-leak-scan.json",
+      "qwen3-browser.json"
+    ],
+    "schema_version": 1
+  },
+  "critical_gate_ids": [
+    "runtime_identity_cuda_one_hot",
+    "reference_authorization",
+    "all_scenarios_observed",
+    "early_playback_before_completion",
+    "bounded_bridge_and_track",
+    "no_whole_synthesis_fallback",
+    "terminal_safe_cancellation",
+    "fifty_turn_non_degradation",
+    "spoken_message_integrity",
+    "private_evidence_clean"
+  ],
+  "thresholds": {
+    "max_evidence_age_seconds": 86400,
+    "native_hot_median_first_chunk_ms": 500.0,
+    "rayme_first_playback_ms": 1250.0,
+    "minimum_sample_rtfx": 1.05,
+    "minimum_median_rtfx": 1.25,
+    "bridge_capacity_chunks": 2,
+    "bridge_high_water_chunks": 2,
+    "track_capacity_audio_ms": 1500.0,
+    "cancel_target_ms": 500.0,
+    "cancel_hard_limit_ms": 2000.0,
+    "prompt_cache_capacity": 1,
+    "max_segment_words": 60,
+    "max_new_tokens": 384,
+    "max_audio_seconds": 32.0,
+    "torch_reserved_mib": 5888.0,
+    "system_gpu_mib": 11264.0,
+    "reserved_growth_mib": 256.0,
+    "required_soak_turns": 50,
+    "late_wer": 0.20,
+    "early_to_late_wer_delta": 0.15,
+    "overall_wer": 0.10,
+    "minimum_peak": 0.001,
+    "maximum_silence_fraction": 0.95,
+    "maximum_clipping_fraction": 0.01,
+    "absolute_rms_delta_db": 3.0,
+    "minimum_centroid_ratio": 0.70,
+    "maximum_flatness_growth": 0.15,
+    "minimum_rtfx_ratio": 0.75,
+    "maximum_ttfa_growth_ms": 200.0,
+    "maximum_speaker_drop": 0.05,
+    "maximum_prewarm_ms": 15000.0
+  },
+  "seed_policy": {
+    "evidence_seed_base": 91000,
+    "production_reuses_one_seed": false,
+    "anchor_turns": [1, 10, 20, 30, 40, 50],
+    "soak_buckets": {
+      "early": [1, 2, 3, 4, 5],
+      "middle": [23, 24, 25, 26, 27],
+      "late": [46, 47, 48, 49, 50]
+    }
+  },
+  "scenarios": [
+    {
+      "scenario_id": "clone-valid-short",
+      "criticality": "critical",
+      "seed": 91001,
+      "target_text": "Thanks for calling. I can help with that now.",
+      "expected_events": ["prompt_ready", "ai_audio_started", "generation_complete", "playout_complete", "ai_done"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"first_playback_ms_lte": 1250.0, "rtfx_gte": 1.05, "natural_eos": true}
+    },
+    {
+      "scenario_id": "clone-valid-medium",
+      "criticality": "critical",
+      "seed": 91002,
+      "target_text": "I checked the details, and everything is ready. We can review the next step together, then pause if you want to ask anything.",
+      "expected_events": ["prompt_ready", "ai_audio_started", "generation_complete", "playout_complete", "ai_done"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"first_playback_ms_lte": 1250.0, "rtfx_gte": 1.05, "natural_eos": true}
+    },
+    {
+      "scenario_id": "clone-valid-long",
+      "criticality": "critical",
+      "seed": 91003,
+      "target_text": "Let me walk through the complete answer carefully. First, I will confirm what happened. Next, I will explain the practical options and the tradeoffs between them. Finally, I will give you one clear recommendation, and I will stay quiet afterward so you can decide where you want the conversation to go next.",
+      "expected_events": ["prompt_ready", "ai_audio_started", "generation_complete", "playout_complete", "ai_done"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"first_playback_ms_lte": 1250.0, "rtfx_gte": 1.05, "natural_eos": true, "word_count_lte": 60}
+    },
+    {
+      "scenario_id": "message-integrity-names-numbers",
+      "criticality": "critical",
+      "seed": 91004,
+      "target_text": "Pedro asked Maya to call room 17 at 4:35 p.m. on October 12.",
+      "expected_events": ["ai_audio_started", "generation_complete", "playout_complete", "ai_done"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"wer_lte": 0.20, "final_word_required": true, "natural_eos": true}
+    },
+    {
+      "scenario_id": "message-integrity-negation-abbreviations",
+      "criticality": "critical",
+      "seed": 91005,
+      "target_text": "No, the U.S. office did not approve version 2.4, and Dr. Lee did not sign it.",
+      "expected_events": ["ai_audio_started", "generation_complete", "playout_complete", "ai_done"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"wer_lte": 0.20, "negation_required": true, "natural_eos": true}
+    },
+    {
+      "scenario_id": "message-integrity-punctuation-final-word",
+      "criticality": "critical",
+      "seed": 91006,
+      "target_text": "We can stop, wait, or continue; whichever you choose, remember the final word: lighthouse.",
+      "expected_events": ["ai_audio_started", "generation_complete", "playout_complete", "ai_done"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"wer_lte": 0.20, "final_word_label": "lighthouse", "natural_eos": true}
+    },
+    {
+      "scenario_id": "alignment-tolerant-punctuation-case",
+      "criticality": "critical",
+      "seed": 91007,
+      "stimulus": "public_synthetic_punctuation_case_variant",
+      "expected_events": ["alignment_accepted", "prompt_ready"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"accepted": true, "coverage_or_edit_similarity_gate": true}
+    },
+    {
+      "scenario_id": "alignment-tolerant-accented-english",
+      "criticality": "critical",
+      "seed": 91008,
+      "stimulus": "public_synthetic_spanish_accented_english_variant",
+      "expected_events": ["alignment_accepted", "prompt_ready"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"accepted": true, "coverage_or_edit_similarity_gate": true}
+    },
+    {
+      "scenario_id": "alignment-invalid-blank",
+      "criticality": "critical",
+      "seed": 91009,
+      "stimulus": "blank_reference_transcript",
+      "expected_events": ["alignment_rejected"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"generation_started": false, "public_error_code": "qwen_reference_transcript_required"}
+    },
+    {
+      "scenario_id": "alignment-invalid-known-mismatch",
+      "criticality": "critical",
+      "seed": 91010,
+      "stimulus": "known_gross_mismatch_hash_bound_fixture",
+      "expected_events": ["alignment_rejected"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"generation_started": false, "coverage_lt": 0.45, "edit_similarity_lt": 0.50}
+    },
+    {
+      "scenario_id": "runaway-ceiling",
+      "criticality": "critical",
+      "seed": 91011,
+      "stimulus": "scripted_non_ending_worker",
+      "expected_events": ["generation_started", "generation_cancelled", "qwen_generation_ceiling"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"natural_eos": false, "normal_ai_done_count": 0, "complete_persistence_count": 0, "max_new_tokens_lte": 384}
+    },
+    {
+      "scenario_id": "slow-stream-backpressure",
+      "criticality": "critical",
+      "seed": 91012,
+      "stimulus": "slow_producer_and_slower_consumer",
+      "expected_events": ["ai_audio_started", "generation_complete", "playout_complete", "ai_done"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"first_before_completion": true, "bridge_capacity_lte": 2, "bridge_high_water_lte": 2, "underflow_count": 0}
+    },
+    {
+      "scenario_id": "cancel-after-audio",
+      "criticality": "critical",
+      "seed": 91013,
+      "stimulus": "barge_in_after_first_playback",
+      "expected_events": ["ai_audio_started", "cancel_signalled", "cancelled"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"cancel_ack_ms_lt": 2000.0, "late_audio_count": 0, "normal_ai_done_count": 0, "complete_persistence_count": 0}
+    },
+    {
+      "scenario_id": "cancel-before-audio",
+      "criticality": "critical",
+      "seed": 91014,
+      "stimulus": "interrupt_during_prefill",
+      "expected_events": ["cancel_signalled", "cancelled"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"audio_started_count": 0, "normal_ai_done_count": 0, "complete_persistence_count": 0}
+    },
+    {
+      "scenario_id": "hangup-and-switch-hangup",
+      "criticality": "critical",
+      "seed": 91015,
+      "stimulus": "hangup_while_generation_active",
+      "expected_events": ["cancel_signalled", "cancelled", "session_ended", "recovery_ready"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"late_audio_count": 0, "normal_ai_done_count": 0, "complete_persistence_count": 0, "recovery": true}
+    },
+    {
+      "scenario_id": "hangup-and-switch-engine-switch",
+      "criticality": "critical",
+      "seed": 91016,
+      "stimulus": "one_hot_engine_switch_while_generation_active",
+      "expected_events": ["cancel_signalled", "cancelled", "engine_switched", "recovery_ready"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"resident_tts_count_lte": 1, "late_audio_count": 0, "recovery": true}
+    },
+    {
+      "scenario_id": "runtime-identity-one-hot",
+      "criticality": "critical",
+      "seed": 91017,
+      "stimulus": "canonical_runtime_attestation",
+      "expected_events": ["runtime_attested", "model_resident", "prompt_ready"],
+      "evidence_artifact": "qwen3-runtime.json",
+      "thresholds": {"resident_tts_count": 1, "torch_reserved_mib_lte": 5888.0, "system_gpu_mib_lte": 11264.0, "cpu_fallback": false}
+    },
+    {
+      "scenario_id": "worker-failure-sanitized",
+      "criticality": "high",
+      "seed": 91018,
+      "stimulus": "malformed_crash_timeout_matrix",
+      "expected_events": ["worker_error", "engine_unavailable", "backend_healthy", "recovery_ready"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"private_leak_count": 0, "backend_healthy": true, "other_engines_usable": true, "recovery": true}
+    },
+    {
+      "scenario_id": "hot-50-turn",
+      "criticality": "critical",
+      "seed": 91019,
+      "anchors": [1, 10, 20, 30, 40, 50],
+      "stimulus": "mixed_short_medium_long_hot_worker",
+      "expected_events": ["soak_started", "soak_completed"],
+      "evidence_artifact": "qwen3-soak.json",
+      "thresholds": {"turns": 50, "valid_audio": 50, "natural_eos": 50, "realtime": 50, "anchor_unique_hashes": 1}
+    },
+    {
+      "scenario_id": "canonical-deployed-call",
+      "criticality": "critical",
+      "seed": 91020,
+      "stimulus": "saved_voice_public_api_normal_barge_in_hangup",
+      "expected_events": ["model_resident", "prompt_ready", "ai_audio_started", "generation_complete", "playout_complete", "ai_done", "cancel_signalled", "cancelled", "session_ended"],
+      "evidence_artifact": "qwen3-call-flow.json",
+      "thresholds": {"normal_persistence_count": 1, "cancelled_persistence_count": 0, "late_audio_count": 0, "canonical_public_api": true}
+    }
+  ]
+}
