@@ -63,6 +63,11 @@ _COMMANDS: queue.Queue[QwenWorkerCommand | None] = queue.Queue(maxsize=8)
 
 
 def main() -> int:
+    initial_command = _read_initial_command()
+    if initial_command is None:
+        return 0
+    if not _dispatch(initial_command):
+        return 0
     reader = threading.Thread(
         target=_read_commands,
         name="rayme-qwen3-command-reader",
@@ -78,20 +83,39 @@ def main() -> int:
             return 0
 
 
+def _read_initial_command() -> QwenWorkerCommand | None:
+    """Read the mandatory first control command before CUDA starts any threads."""
+    for raw_line in sys.stdin:
+        command = _parse_command_line(raw_line)
+        if command is None:
+            continue
+        if isinstance(command, QwenCancelCommand):
+            _signal_cancel(command)
+            continue
+        return command
+    return None
+
+
 def _read_commands() -> None:
     for raw_line in sys.stdin:
-        line = raw_line.strip()
-        if not line.startswith(WORKER_EVENT_PREFIX):
-            continue
-        try:
-            command = parse_command(json.loads(line[len(WORKER_EVENT_PREFIX) :]))
-        except Exception:
+        command = _parse_command_line(raw_line)
+        if command is None:
             continue
         if isinstance(command, QwenCancelCommand):
             _signal_cancel(command)
             continue
         _COMMANDS.put(command)
     _COMMANDS.put(None)
+
+
+def _parse_command_line(raw_line: str) -> QwenWorkerCommand | None:
+    line = raw_line.strip()
+    if not line.startswith(WORKER_EVENT_PREFIX):
+        return None
+    try:
+        return parse_command(json.loads(line[len(WORKER_EVENT_PREFIX) :]))
+    except Exception:
+        return None
 
 
 def _signal_cancel(command: QwenCancelCommand) -> None:

@@ -977,6 +977,40 @@ def test_qwen_worker_preserves_cancel_that_arrives_before_generate_dispatch(
     assert runtime.streaming_calls[0]["text"] == command.text
 
 
+def test_qwen_worker_loads_cuda_before_starting_cancellation_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    command = _protocol_module().parse_command(
+        {"schema_version": 1, "op": "load", "request_id": "initial-load"}
+    )
+    events: list[str] = []
+    commands: queue.Queue[Any | None] = queue.Queue()
+    monkeypatch.setattr(worker, "_COMMANDS", commands)
+    monkeypatch.setattr(worker, "_read_initial_command", lambda: command)
+
+    def dispatch(received: Any) -> bool:
+        assert received is command
+        events.append("cuda-loaded")
+        return True
+
+    class ReaderThread:
+        def __init__(self, **_kwargs: Any) -> None:
+            pass
+
+        def start(self) -> None:
+            assert events == ["cuda-loaded"]
+            events.append("reader-started")
+            commands.put(None)
+
+    monkeypatch.setattr(worker, "_dispatch", dispatch)
+    monkeypatch.setattr(worker.threading, "Thread", ReaderThread)
+
+    assert worker.main() == 0
+    assert events == ["cuda-loaded", "reader-started"]
+
+
 def test_qwen_worker_runtime_failure_after_audio_emits_matching_single_error_terminal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
