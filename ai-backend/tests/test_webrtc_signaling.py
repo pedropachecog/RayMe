@@ -115,6 +115,39 @@ class ScriptedModelManager:
             raise ValueError("unknown engine")
 
 
+class ScriptedPreparingModelManager(ScriptedModelManager):
+    def __init__(self, adapter: Any, *, ready: bool = False) -> None:
+        super().__init__(adapters={"qwen3_1_7b": adapter})
+        self.ready = ready
+        self.prepare_calls: list[dict[str, Any]] = []
+
+    async def prepare_tts_engine(self, engine_id: str, **kwargs: Any) -> dict[str, Any]:
+        self.prepare_calls.append({"engine_id": engine_id, **kwargs})
+        self.ready = True
+        return {
+            "engine_id": engine_id,
+            "model_state": "resident",
+            "prompt_state": "ready",
+            "voice_key": kwargs["voice_key"],
+        }
+
+    def is_tts_prompt_ready(self, engine_id: str, voice_key: str) -> bool:
+        return engine_id == "qwen3_1_7b" and voice_key == "voice-qwen" and self.ready
+
+    def health(self) -> dict[str, Any]:
+        return {
+            "resident_tts_engine": "qwen3_1_7b" if self.ready else None,
+            "loading_engine": None,
+            "available_engines": [],
+            "selected_voice_prompt": {
+                "engine_id": "qwen3_1_7b",
+                "voice_key": "voice-qwen",
+                "state": "ready" if self.ready else "none",
+                "error_code": None,
+            },
+        }
+
+
 class StubPeerConnection:
     connectionState = "new"
 
@@ -199,6 +232,133 @@ def test_webrtc_status_exposes_live_call_readiness_and_session_counts() -> None:
     assert isinstance(payload["media_transport_ready"], bool)
     assert isinstance(payload["active_sessions"], int)
     assert payload["status"] in {"starting", "ready", "degraded", "unavailable"}
+
+
+def test_webrtc_status_exposes_deployed_commit_and_separate_qwen_readiness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("RAYME_DEPLOYED_COMMIT", "a" * 40)
+    manager = ScriptedPreparingModelManager(ScriptedStreamingTtsAdapter(), ready=True)
+
+    response = _client(model_manager=manager).get("/webrtc/status")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["deployed_commit"] == "a" * 40
+    assert payload["tts_model"] == {
+        "resident_engine": "qwen3_1_7b",
+        "loading_engine": None,
+    }
+    assert payload["selected_voice_prompt"] == {
+        "engine_id": "qwen3_1_7b",
+        "voice_key": "voice-qwen",
+        "state": "ready",
+        "error_code": None,
+    }
+
+
+def test_webrtc_prepare_qwen_uses_only_contained_reference_and_exact_transcript(
+    stub_webrtc: None,
+) -> None:
+    adapter = ScriptedStreamingTtsAdapter()
+    adapter.engine_id = "qwen3_1_7b"
+    manager = ScriptedPreparingModelManager(adapter)
+    client = _client(model_manager=manager)
+    session_id = "call-session-qwen-prepare"
+    client.post(
+        "/webrtc/offer",
+        json={
+            **_offer_payload(session_id=session_id),
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+        },
+    )
+
+    response = client.post(
+        f"/webrtc/sessions/{session_id}/prepare",
+        json={
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+            "reference_audio_b64": base64.b64encode(b"contained-reference").decode("ascii"),
+            "reference_transcript": "The exact reference transcript.",
+            "reference_audio_content_type": "audio/wav",
+        },
+    )
+
+    assert response.status_code == 200
+    assert manager.prepare_calls == [
+        {
+            "engine_id": "qwen3_1_7b",
+            "voice_key": "voice-qwen",
+            "reference_audio": b"contained-reference",
+            "reference_transcript": "The exact reference transcript.",
+        }
+    ]
+    assert response.json()["prompt_state"] == "ready"
+
+    rejected = client.post(
+        f"/webrtc/sessions/{session_id}/prepare",
+        json={
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+            "reference_audio_b64": "YQ==",
+            "reference_transcript": "The exact reference transcript.",
+            "model_path": r"C:\\private\\model",
+        },
+    )
+    assert rejected.status_code == 422
+    assert "private" not in rejected.text
+
+
+def test_webrtc_qwen_speak_requires_matching_prepared_voice(stub_webrtc: None) -> None:
+    adapter = ScriptedStreamingTtsAdapter()
+    adapter.engine_id = "qwen3_1_7b"
+    manager = ScriptedPreparingModelManager(adapter, ready=False)
+    client = _client(model_manager=manager)
+    session_id = "call-session-qwen-not-ready"
+    client.post(
+        "/webrtc/offer",
+        json={
+            **_offer_payload(session_id=session_id),
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+        },
+    )
+
+    response = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={
+            "turn_id": "ai-turn-qwen-not-ready",
+            "text": "This is one safe target segment.",
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+            "final_chunk": True,
+            "reference_audio_b64": "cmVhbC1zYW1wbGU=",
+            "reference_transcript": "The exact reference transcript.",
+            "model_path": r"C:\\private\\model",
+        },
+    )
+    assert response.status_code == 422
+    assert "private" not in response.text
+
+    response = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={
+            "turn_id": "ai-turn-qwen-not-ready",
+            "text": "This is one safe target segment.",
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+            "final_chunk": True,
+            "reference_audio_b64": "cmVhbC1zYW1wbGU=",
+            "reference_transcript": "The exact reference transcript.",
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "call_tts_not_ready",
+        "message": "Selected voice is not ready",
+        "engine_id": "qwen3_1_7b",
+    }
 
 
 def test_webrtc_offer_creates_session_answer_and_events_channel(stub_webrtc: None) -> None:

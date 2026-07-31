@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import inspect
 import json
+import threading
 from dataclasses import asdict, is_dataclass
 from typing import Any
 
@@ -86,6 +87,40 @@ class FlakyLoadTtsAdapter(ScriptedTtsAdapter):
                 "Traceback: CUDA out of memory while loading C:\\secret\\model.bin"
             )
         self.loaded = True
+
+
+class SlowPreparingQwenAdapter(ScriptedTtsAdapter):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__("qwen3_1_7b", events)
+        self.load_started = threading.Event()
+        self.release_load = threading.Event()
+        self.prewarm_started = threading.Event()
+        self.release_prewarm = threading.Event()
+        self.prewarm_calls: list[dict[str, Any]] = []
+
+    def load(self) -> None:
+        self.events.append("qwen3_1_7b:load")
+        self.load_started.set()
+        assert self.release_load.wait(1.0)
+        self.loaded = True
+
+    def prewarm(
+        self,
+        *,
+        voice_key: str,
+        reference_audio: bytes,
+        reference_transcript: str,
+    ) -> object:
+        self.prewarm_calls.append(
+            {
+                "voice_key": voice_key,
+                "reference_audio": reference_audio,
+                "reference_transcript": reference_transcript,
+            }
+        )
+        self.prewarm_started.set()
+        assert self.release_prewarm.wait(1.0)
+        return object()
 
 
 def _require_attr(module: object, attr: str) -> Any:
@@ -244,6 +279,100 @@ def test_switch_tts_engine_unloads_previous_resident_before_loading_target() -> 
     assert health["loading_engine"] is None
     assert _resident_engine_ids(statuses) == ["xtts_v2"]
     assert events.index("f5:unload") < events.index("xtts_v2:load")
+
+
+def test_prepare_qwen_keeps_status_responsive_and_separates_model_from_prompt() -> None:
+    async def scenario() -> None:
+        manager, adapters, events = _build_manager()
+        manager.startup()
+        qwen = SlowPreparingQwenAdapter(events)
+        adapters["qwen3_1_7b"] = qwen
+        manager.tts_adapters["qwen3_1_7b"] = qwen
+
+        prepare = asyncio.create_task(
+            manager.prepare_tts_engine(
+                "qwen3_1_7b",
+                voice_key="voice-key-1",
+                reference_audio=b"contained-reference",
+                reference_transcript="The exact reference transcript.",
+            )
+        )
+        assert await asyncio.to_thread(qwen.load_started.wait, 1.0)
+
+        loading = manager.health()
+        loading_statuses = _engine_statuses(loading)
+        assert loading["loading_engine"] == "qwen3_1_7b"
+        assert loading_statuses["qwen3_1_7b"]["state"] == "loading"
+        assert loading["resident_tts_engine"] is None
+        assert _resident_engine_ids(loading_statuses) == []
+        assert loading["selected_voice_prompt"] == {
+            "engine_id": "qwen3_1_7b",
+            "voice_key": "voice-key-1",
+            "state": "none",
+            "error_code": None,
+        }
+
+        qwen.release_load.set()
+        assert await asyncio.to_thread(qwen.prewarm_started.wait, 1.0)
+        prewarming = manager.health()
+        prewarming_statuses = _engine_statuses(prewarming)
+        assert prewarming["resident_tts_engine"] == "qwen3_1_7b"
+        assert _resident_engine_ids(prewarming_statuses) == ["qwen3_1_7b"]
+        assert prewarming["selected_voice_prompt"]["state"] == "prewarming"
+
+        qwen.release_prewarm.set()
+        prepared = await prepare
+        assert prepared["model_state"] == "resident"
+        assert prepared["prompt_state"] == "ready"
+        assert manager.health()["selected_voice_prompt"]["state"] == "ready"
+
+        repeated = await manager.prepare_tts_engine(
+            "qwen3_1_7b",
+            voice_key="voice-key-1",
+            reference_audio=b"contained-reference",
+            reference_transcript="The exact reference transcript.",
+        )
+        assert repeated["prompt_state"] == "ready"
+        assert len(qwen.prewarm_calls) == 1
+        assert events.index("f5:unload") < events.index("qwen3_1_7b:load")
+
+    asyncio.run(scenario())
+
+
+def test_qwen_prompt_failure_is_voice_scoped_and_sanitized() -> None:
+    class FailingPromptAdapter(ScriptedTtsAdapter):
+        def prewarm(self, **_kwargs: Any) -> None:
+            raise RuntimeError(
+                "Traceback CUDA out of memory C:\\secret\\model.bin /models/private"
+            )
+
+    async def scenario() -> None:
+        manager, _, events = _build_manager()
+        manager.startup()
+        adapter = FailingPromptAdapter("qwen3_1_7b", events)
+        manager.tts_adapters["qwen3_1_7b"] = adapter
+
+        with pytest.raises(RuntimeError):
+            await manager.prepare_tts_engine(
+                "qwen3_1_7b",
+                voice_key="voice-key-failed",
+                reference_audio=b"contained-reference",
+                reference_transcript="The exact reference transcript.",
+            )
+
+        health = manager.health()
+        statuses = _engine_statuses(health)
+        assert health["resident_tts_engine"] == "qwen3_1_7b"
+        assert statuses["qwen3_1_7b"]["available"] is True
+        assert health["selected_voice_prompt"] == {
+            "engine_id": "qwen3_1_7b",
+            "voice_key": "voice-key-failed",
+            "state": "failed",
+            "error_code": "voice_prompt_preparation_failed",
+        }
+        _assert_no_raw_exception_text(health)
+
+    asyncio.run(scenario())
 
 
 def test_failed_engine_self_test_degrades_only_that_engine_with_typed_reason() -> None:
