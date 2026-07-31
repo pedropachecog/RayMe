@@ -22,7 +22,7 @@ const liveReferenceTranscriptFile = process.env.RAYME_LIVE_REFERENCE_TRANSCRIPT_
 const liveReferenceProvenanceFile = process.env.RAYME_LIVE_REFERENCE_PROVENANCE_FILE;
 const liveExpectedCommit = process.env.RAYME_LIVE_EXPECTED_COMMIT;
 const liveStabilityMs = parsePositiveInt(process.env.RAYME_LIVE_STABILITY_MS);
-const liveTtsEngines = (process.env.RAYME_LIVE_TTS_ENGINES ?? 'voxcpm2,f5')
+const liveTtsEngines = (process.env.RAYME_LIVE_TTS_ENGINES ?? qwenEngineId)
   .split(',')
   .map((engine) => engine.trim())
   .filter(Boolean);
@@ -58,6 +58,60 @@ test.use({
 
 // The live suite mutates one OMEN runtime and exercises one GPU-backed call path.
 test.describe.configure({ mode: 'serial' });
+
+test('Qwen live fixture provenance fails closed and permits only hash-bound LAN scope', () => {
+  const referenceAudio = Buffer.from('deterministic non-person reference audio');
+  const transcriptBytes = Buffer.from('Deterministic non-person transcript.');
+  const permitted = {
+    voice_data_steward: 'rayme_sapi_fixture_steward',
+    authorization_basis: generatedNonPersonBasis,
+    use_scope: qwenLanScope,
+    reference_sha256: sha256(referenceAudio),
+    transcript_sha256: sha256(transcriptBytes)
+  };
+
+  expect(validateLiveReferenceProvenance(permitted, referenceAudio, transcriptBytes)).toEqual(
+    permitted
+  );
+  expect(() => validateLiveReferenceProvenance(null, referenceAudio, transcriptBytes)).toThrow(
+    'must be an object'
+  );
+  expect(() =>
+    validateLiveReferenceProvenance(
+      { ...permitted, reference_sha256: '0'.repeat(64) },
+      referenceAudio,
+      transcriptBytes
+    )
+  ).toThrow('audio hash does not match');
+  expect(() =>
+    validateLiveReferenceProvenance(
+      { ...permitted, transcript_sha256: '0'.repeat(64) },
+      referenceAudio,
+      transcriptBytes
+    )
+  ).toThrow('transcript hash does not match');
+  expect(() =>
+    validateLiveReferenceProvenance(
+      { ...permitted, use_scope: 'public_impersonation' },
+      referenceAudio,
+      transcriptBytes
+    )
+  ).toThrow('use scope is not permitted');
+  expect(() =>
+    validateLiveReferenceProvenance(
+      { ...permitted, authorization_basis: 'product_owner_listening' },
+      referenceAudio,
+      transcriptBytes
+    )
+  ).toThrow('is not speaker authorization');
+  expect(() =>
+    validateLiveReferenceProvenance(
+      { ...permitted, permission_confirmed: true },
+      referenceAudio,
+      transcriptBytes
+    )
+  ).toThrow('must not fabricate permission_confirmed');
+});
 
 for (const liveTtsEngine of liveTtsEngines) {
   test(`live OMEN-PC browser call completes two user to AI cycles with ${liveTtsEngine}`, async ({
@@ -96,9 +150,7 @@ for (const liveTtsEngine of liveTtsEngines) {
       recordLiveCallSignal(request, liveSignals);
     });
 
-    const healthResponse = await page.goto(canonicalLiveAiHealthUrl);
-    expect(healthResponse?.ok(), `AI backend health at ${canonicalLiveAiHealthUrl}`).toBe(true);
-    await expect(page.locator('body')).toContainText(/ok|healthy|status/i);
+    await assertLiveDeployment(apiRequest);
 
     await configureLiveSettings(apiRequest, liveTtsEngine);
     const fixture = await createLiveCallFixture(apiRequest, liveTtsEngine);
@@ -126,7 +178,16 @@ for (const liveTtsEngine of liveTtsEngines) {
       timeout: 60_000
     });
     const startPayload = (await startResponsePromise).json();
-    await offerResponsePromise;
+    const offerPayload = await (await offerResponsePromise).json();
+    if (liveTtsEngine === qwenEngineId) {
+      expect(offerPayload.preparation).toMatchObject({
+        model: { state: 'resident', engine_id: qwenEngineId },
+        prompt: { state: 'ready' }
+      });
+      await expect
+        .poll(() => readQwenReadiness(apiRequest), { timeout: 60_000 })
+        .toEqual({ residentEngine: qwenEngineId, promptEngine: qwenEngineId, promptState: 'ready' });
+    }
 
     await page.getByRole('button', { name: 'Mute' }).click();
     await expect(page.getByRole('button', { name: 'Unmute' })).toBeVisible({ timeout: 30_000 });
@@ -176,6 +237,10 @@ for (const liveTtsEngine of liveTtsEngines) {
 
     const started = await startPayload;
     expect(started.session_id || started.call_id, 'live call session id').toBeTruthy();
+    if (liveTtsEngine === qwenEngineId) {
+      expect(started.engine_id).toBe(qwenEngineId);
+      expect(started.voice_id).toBe(fixture.voiceId);
+    }
     expect(liveEvents).toEqual(
       expect.arrayContaining([
         'POST /api/calls/start',
@@ -249,7 +314,7 @@ async function configureLiveSettings(apiRequest: APIRequestContext, liveTtsEngin
 
 async function createLiveCallFixture(apiRequest: APIRequestContext, liveTtsEngine: string) {
   expect(liveReferenceAudioFile, 'live reference audio fixture').toBeTruthy();
-  const referenceAudio = readFileSync(liveReferenceAudioFile!);
+  const fixture = loadLiveReferenceFixture();
   const timestamp = Date.now();
   const metadata = liveTtsEngine === 'voxcpm2' ? { engine_settings: { voxcpm2: { cloning_mode: 'reference_only', style_prompt: '', cfg_value: 2.0, inference_timesteps: 10, normalize: false, denoise: false } } } : {};
 
@@ -258,7 +323,7 @@ async function createLiveCallFixture(apiRequest: APIRequestContext, liveTtsEngin
       file: {
         name: basename(liveReferenceAudioFile!),
         mimeType: 'audio/wav',
-        buffer: referenceAudio
+        buffer: fixture.referenceAudio
       }
     }
   });
@@ -266,14 +331,23 @@ async function createLiveCallFixture(apiRequest: APIRequestContext, liveTtsEngin
   const asset = await assetResponse.json();
   expect(asset.asset_id, 'live reference voice asset id').toBeTruthy();
 
+  const voicePayload = {
+    asset_id: asset.asset_id,
+    name: `Live Call Voice ${timestamp}`,
+    default_engine: liveTtsEngine,
+    reference_transcript: fixture.referenceTranscript,
+    ...(liveTtsEngine === qwenEngineId
+      ? {
+          voice_data_steward: fixture.provenance.voice_data_steward,
+          authorization_basis: fixture.provenance.authorization_basis,
+          use_scope: fixture.provenance.use_scope
+        }
+      : {}),
+    metadata
+  };
+  expect(Object.prototype.hasOwnProperty.call(voicePayload, 'permission_confirmed')).toBe(false);
   const voiceResponse = await apiRequest.post(`${canonicalLiveWebUrl}/api/voices`, {
-    data: {
-      asset_id: asset.asset_id,
-      name: `Live Call Voice ${timestamp}`,
-      default_engine: liveTtsEngine,
-      reference_transcript: liveReferenceTranscript,
-      metadata
-    }
+    data: voicePayload
   });
   expect(voiceResponse.ok(), 'save live call voice').toBe(true);
   const voice = await voiceResponse.json();
@@ -290,7 +364,7 @@ async function createLiveCallFixture(apiRequest: APIRequestContext, liveTtsEngin
       system_prompt: 'Reply in one short sentence for live call acceptance.',
       creator_notes: 'Created by live-call.spec.ts.',
       character_notes: 'Live call fixture.',
-      tags: ['phase-03', 'live-call'],
+      tags: ['phase-09', 'live-call', liveTtsEngine],
       alternate_greetings: [],
       post_history_instructions: 'Keep replies short.',
       creator: 'RayMe',
@@ -316,6 +390,145 @@ async function createLiveCallFixture(apiRequest: APIRequestContext, liveTtsEngin
     voiceId: String(voice.voice_id),
     characterId: String(character.id),
     threadId: String(thread.thread_id)
+  };
+}
+
+type LiveReferenceProvenance = {
+  voice_data_steward: string;
+  authorization_basis: string;
+  use_scope: typeof qwenLanScope;
+  reference_sha256: string;
+  transcript_sha256: string;
+};
+
+function loadLiveReferenceFixture(): {
+  referenceAudio: Buffer;
+  referenceTranscript: string;
+  provenance: LiveReferenceProvenance;
+} {
+  expect(liveReferenceAudioFile, 'live reference audio fixture').toBeTruthy();
+  expect(liveReferenceTranscriptFile, 'live reference transcript fixture').toBeTruthy();
+  expect(liveReferenceProvenanceFile, 'live reference provenance fixture').toBeTruthy();
+
+  const referenceAudio = readFileSync(liveReferenceAudioFile!);
+  const transcriptBytes = readFileSync(liveReferenceTranscriptFile!);
+  const referenceTranscript = transcriptBytes.toString('utf8');
+  if (!referenceTranscript.trim()) {
+    throw new Error('Live reference transcript fixture must be nonblank');
+  }
+
+  let rawProvenance: unknown;
+  try {
+    rawProvenance = JSON.parse(readFileSync(liveReferenceProvenanceFile!, 'utf8'));
+  } catch {
+    throw new Error('Live reference provenance fixture must be valid JSON');
+  }
+  const provenance = validateLiveReferenceProvenance(
+    rawProvenance,
+    referenceAudio,
+    transcriptBytes
+  );
+
+  return {
+    referenceAudio,
+    referenceTranscript,
+    provenance
+  };
+}
+
+function validateLiveReferenceProvenance(
+  rawProvenance: unknown,
+  referenceAudio: Buffer,
+  transcriptBytes: Buffer
+): LiveReferenceProvenance {
+  if (!rawProvenance || typeof rawProvenance !== 'object' || Array.isArray(rawProvenance)) {
+    throw new Error('Live reference provenance fixture must be an object');
+  }
+  const record = rawProvenance as Record<string, unknown>;
+  if (Object.prototype.hasOwnProperty.call(record, 'permission_confirmed')) {
+    throw new Error('Live reference provenance must not fabricate permission_confirmed');
+  }
+
+  const voiceDataSteward = requiredProvenanceText(record, 'voice_data_steward');
+  const authorizationBasis = requiredProvenanceText(record, 'authorization_basis');
+  const useScope = requiredProvenanceText(record, 'use_scope');
+  const referenceSha256 = requiredProvenanceText(record, 'reference_sha256');
+  const transcriptSha256 = requiredProvenanceText(record, 'transcript_sha256');
+  if (useScope !== qwenLanScope) {
+    throw new Error('Live reference provenance use scope is not permitted');
+  }
+  if (
+    ['product_owner_direction', 'product_owner_listening'].includes(
+      authorizationBasis.toLowerCase()
+    )
+  ) {
+    throw new Error('Product-owner direction or listening is not speaker authorization');
+  }
+  if (authorizationBasis === generatedNonPersonBasis && !voiceDataSteward) {
+    throw new Error('Generated non-person fixture must name its local data steward');
+  }
+  if (referenceSha256 !== sha256(referenceAudio)) {
+    throw new Error('Live reference provenance audio hash does not match fixture');
+  }
+  if (transcriptSha256 !== sha256(transcriptBytes)) {
+    throw new Error('Live reference provenance transcript hash does not match fixture');
+  }
+
+  return {
+    voice_data_steward: voiceDataSteward,
+    authorization_basis: authorizationBasis,
+    use_scope: qwenLanScope,
+    reference_sha256: referenceSha256,
+    transcript_sha256: transcriptSha256
+  };
+}
+
+function requiredProvenanceText(record: Record<string, unknown>, field: string): string {
+  const value = record[field];
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new Error(`Live reference provenance requires ${field}`);
+  }
+  return value.trim();
+}
+
+function sha256(value: Buffer): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+async function assertLiveDeployment(apiRequest: APIRequestContext) {
+  const healthResponse = await apiRequest.get(canonicalLiveAiHealthUrl);
+  expect(healthResponse.ok(), `AI backend health at ${canonicalLiveAiHealthUrl}`).toBe(true);
+  const health = (await healthResponse.json()) as Record<string, unknown>;
+  expect(health).toMatchObject({ phase: expect.any(String) });
+
+  const statusResponse = await apiRequest.get(canonicalLiveWebRtcStatusUrl);
+  expect(statusResponse.ok(), `WebRTC status at ${canonicalLiveWebRtcStatusUrl}`).toBe(true);
+  const status = (await statusResponse.json()) as Record<string, unknown>;
+  expect(status).toMatchObject({
+    status: 'ready',
+    live_call_ready: true,
+    media_transport_ready: true,
+    deployed_commit: liveExpectedCommit
+  });
+  const healthCommit = typeof health.deployed_commit === 'string' ? health.deployed_commit : null;
+  if (healthCommit) {
+    expect(healthCommit).toBe(liveExpectedCommit);
+  }
+}
+
+async function readQwenReadiness(apiRequest: APIRequestContext) {
+  const response = await apiRequest.get(canonicalLiveWebRtcStatusUrl);
+  if (!response.ok()) {
+    return { residentEngine: null, promptEngine: null, promptState: 'unavailable' };
+  }
+  const status = (await response.json()) as {
+    tts_model?: { resident_engine?: unknown };
+    selected_voice_prompt?: { engine_id?: unknown; state?: unknown };
+  };
+  return {
+    residentEngine: status.tts_model?.resident_engine ?? null,
+    promptEngine: status.selected_voice_prompt?.engine_id ?? null,
+    promptState: status.selected_voice_prompt?.state ?? null
   };
 }
 
