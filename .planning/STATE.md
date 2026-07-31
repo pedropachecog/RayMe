@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready_to_execute
-stopped_at: Completed 09-12-PLAN.md
-last_updated: "2026-07-31T21:21:43.837Z"
+stopped_at: Completed 09-13-PLAN.md
+last_updated: "2026-07-31T22:01:29.041Z"
 last_activity: 2026-07-31
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 112
-  completed_plans: 105
+  completed_plans: 106
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
-last_activity_desc: "Completed Phase 09 Plan 12: independent evidence manifest, pinned local speaker scorer, and adversarial verifier"
+last_activity_desc: "Completed Phase 09 Plan 13: production OMEN evidence runner, release-only deterministic anchors, and split CUDA scoring lifecycle"
 ---
 
 ## Phase Status
@@ -260,8 +260,8 @@ last_activity_desc: "Completed Phase 09 Plan 12: independent evidence manifest, 
 ## Session Continuity
 
 Last activity: 2026-07-31
-Last session: 2026-07-31T21:21:43.523Z
-Stopped at: Completed 09-12-PLAN.md
+Last session: 2026-07-31T22:01:28.726Z
+Stopped at: Completed 09-13-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -282,6 +282,7 @@ Resume file: None
 | Phase 09 P09 | 23min | 2 tasks | 8 files |
 | Phase 09 P10 | 18min | 2 tasks | 6 files |
 | Phase 09 P12 | 17min | 2 tasks | 4 files |
+| Phase 09 P13 | 30min | 2 tasks | 11 files |
 
 ## Decisions
 
@@ -327,3 +328,7 @@ Resume file: None
 - [Phase 09]: Run microsoft/wavlm-base-plus-sv only from revision feb593a6c23c1cc3d9510425c29b0a14d2b07b1e on pinned CUDA, retaining only hashes and cosine scalars.
 - [Phase 09]: Ignore stored overall booleans and independently recompute release thresholds from raw exact-commit evidence.
 - [Phase 09]: Keep autonomous release readiness separate from pending integrated listening and physical-call acceptance.
+- [Phase 09]: Deterministic generation is available only for paired Phase 09 release-evidence mode and seed values on dedicated evidence sessions and turns.
+- [Phase 09]: Evidence requests restore Python, NumPy, Torch, and CUDA RNG state so ordinary live calls retain independent sampling.
+- [Phase 09]: Every deterministic anchor is bound to its own captured WAV hash and any mismatch fails the release evidence run.
+- [Phase 09]: Core evidence acquisition precedes GPU-exclusive WavLM scoring, after which Qwen must reload and prewarm before readiness.
