@@ -54,6 +54,8 @@ class ScriptedVoiceProcessor:
     fail_transcribe: bool = False
     fail_preview: bool = False
     return_tts_failed: bool = False
+    fail_invalidate: bool = False
+    invalidate_active_cancelled: bool = False
     calls: list[dict[str, Any]] | None = None
     preparation: dict[str, Any] | None = None
 
@@ -94,6 +96,20 @@ class ScriptedVoiceProcessor:
         return self.preparation or {
             "model": {"state": "resident", "engine_id": "qwen3_1_7b"},
             "prompt": {"state": "ready", "voice_key": "qwen3_voice_opaque"},
+        }
+
+    async def invalidate_qwen_prompt(self, voice_key: str) -> dict[str, Any]:
+        self._record("invalidate_qwen_prompt", {"voice_key": voice_key})
+        if self.fail_invalidate:
+            raise RuntimeError(
+                r"Traceback C:\private\voice.wav exact secret transcript"
+            )
+        return {
+            "engine_id": "qwen3_1_7b",
+            "voice_key": voice_key,
+            "status": "invalidated",
+            "matched": True,
+            "active_cancelled": self.invalidate_active_cancelled,
         }
 
     def _record(self, operation: str, payload: dict[str, Any]) -> None:
@@ -463,13 +479,28 @@ def test_qwen_preview_uses_authorized_contained_reference_and_opaque_voice_key(
     assert response.status_code == 200, response.text
     call = voice_fixture.processor.calls[-1]
     assert call["operation"] == "preview"
-    assert call["voice_id"].startswith("qwen3_voice_")
+    from app.domain.voice_service import qwen3_voice_key
+
+    assert call["voice_id"] == qwen3_voice_key(uploaded.json()["asset_id"])
     assert call["voice_id"] != uploaded.json()["asset_id"]
     assert call["content"] == audio.content
     assert call["reference_transcript"] == "Exact preview transcript."
     assert "voice_data_steward" not in call
     assert "authorization_basis" not in call
     assert "use_scope" not in call
+
+
+def test_qwen_owner_key_is_saved_voice_scoped_and_contains_no_private_content() -> None:
+    from app.domain.voice_service import qwen3_voice_key
+
+    saved_voice_id = "voice_0123456789abcdef"
+    expected = hashlib.sha256(
+        f"rayme:qwen3_1_7b:{saved_voice_id}".encode("utf-8")
+    ).hexdigest()
+
+    assert qwen3_voice_key(saved_voice_id) == expected
+    assert len(expected) == 64
+    assert saved_voice_id not in expected
 
 
 def test_qwen_preview_requires_authorization_and_nonempty_target(
@@ -635,6 +666,71 @@ def test_ai_backend_voice_processor_maps_safe_qwen_4xx_and_exposes_readiness() -
     assert "private" not in serialized.lower()
     assert "secret transcript" not in serialized
     assert [request.url.path for request in requests] == ["/tts/synthesize", "/webrtc/status"]
+
+
+def test_ai_backend_voice_processor_uses_strict_prompt_invalidation_contract() -> None:
+    from app.api.voices import AiBackendVoiceProcessor
+    from app.domain.ai_backend_client import (
+        AiBackendClient,
+        AiBackendProcessingError,
+    )
+
+    requests: list[httpx.Request] = []
+    owner_key = "f" * 64
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            return httpx.Response(
+                200,
+                json={
+                    "engine_id": "qwen3_1_7b",
+                    "voice_key": owner_key,
+                    "status": "not_present",
+                    "matched": False,
+                    "active_cancelled": False,
+                },
+            )
+        return httpx.Response(
+            502,
+            json={
+                "detail": {
+                    "code": "qwen3_invalidate_failed",
+                    "message": r"Traceback C:\private\voice.wav exact secret transcript",
+                }
+            },
+        )
+
+    async def exercise() -> tuple[dict[str, Any], Exception]:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as http_client:
+            processor = AiBackendVoiceProcessor(
+                AiBackendClient(http_client=http_client),
+                "https://ai.local",
+            )
+            first = await processor.invalidate_qwen_prompt(owner_key)
+            try:
+                await processor.invalidate_qwen_prompt(owner_key)
+            except Exception as exc:
+                return first, exc
+        raise AssertionError("expected invalidation failure")
+
+    result, failure = asyncio.run(exercise())
+
+    assert result["status"] == "not_present"
+    assert isinstance(failure, AiBackendProcessingError)
+    assert failure.to_public_dict() == {
+        "code": "qwen3_invalidate_failed",
+        "message": "Voice prompt removal failed",
+    }
+    assert [request.url.path for request in requests] == [
+        "/tts/qwen3/prompts/invalidate",
+        "/tts/qwen3/prompts/invalidate",
+    ]
+    assert all(
+        json.loads(request.content)
+        == {"engine_id": "qwen3_1_7b", "voice_key": owner_key}
+        for request in requests
+    )
 
 
 def test_voice_save_succeeds_after_preview_returns_tts_failed(
@@ -942,6 +1038,91 @@ def test_force_delete_tombstones_voice_and_characters_show_unavailable_state(
     assert character_detail.json()["default_voice_label"] == "Voice unavailable"
     assert character_detail.json()["default_voice"]["id"] == voice.voice_id
     assert character_detail.json()["default_voice"]["deleted_name"] == "Referenced voice"
+
+
+def test_qwen_delete_invalidates_matching_owner_and_leaves_unrelated_voice_usable(
+    voice_fixture: VoiceFixture,
+) -> None:
+    from app.domain.voice_service import qwen3_voice_key
+
+    first = _create_qwen_voice(voice_fixture.client, name="Delete matching Qwen")
+    second = _create_qwen_voice(voice_fixture.client, name="Keep unrelated Qwen")
+    voice_fixture.processor.invalidate_active_cancelled = True
+
+    deleted = voice_fixture.client.delete(f"/api/voices/{first.voice_id}")
+    repeated = voice_fixture.client.delete(f"/api/voices/{first.voice_id}")
+    unrelated_test_play = voice_fixture.client.post(
+        f"/api/voices/{second.voice_id}/test-play",
+        json={"text": "The unrelated voice still works.", "use_default_engine": True},
+    )
+
+    assert deleted.status_code == 200, deleted.text
+    assert deleted.json()["prompt_invalidation"] == {
+        "engine_id": "qwen3_1_7b",
+        "voice_key": qwen3_voice_key(first.voice_id),
+        "status": "invalidated",
+        "matched": True,
+        "active_cancelled": True,
+    }
+    assert repeated.status_code == 200
+    assert repeated.json()["strategy"] == "soft_delete"
+    assert unrelated_test_play.status_code == 200, unrelated_test_play.text
+    invalidate_calls = [
+        call
+        for call in voice_fixture.processor.calls or []
+        if call["operation"] == "invalidate_qwen_prompt"
+    ]
+    assert invalidate_calls == [
+        {
+            "operation": "invalidate_qwen_prompt",
+            "voice_key": qwen3_voice_key(first.voice_id),
+        }
+    ]
+    assert voice_fixture.processor.calls[-1]["operation"] == "test_play"
+    assert voice_fixture.processor.calls[-1]["voice_id"] == qwen3_voice_key(
+        second.voice_id
+    )
+
+
+def test_non_qwen_delete_does_not_invoke_prompt_invalidation(
+    voice_fixture: VoiceFixture,
+) -> None:
+    voice = _create_voice(voice_fixture.client, name="Delete F5 only")
+
+    deleted = voice_fixture.client.delete(f"/api/voices/{voice.voice_id}")
+
+    assert deleted.status_code == 200
+    assert "prompt_invalidation" not in deleted.json()
+    assert not any(
+        call["operation"] == "invalidate_qwen_prompt"
+        for call in voice_fixture.processor.calls or []
+    )
+
+
+def test_qwen_delete_failure_is_retryable_sanitized_and_does_not_tombstone(
+    voice_fixture: VoiceFixture,
+) -> None:
+    voice = _create_qwen_voice(voice_fixture.client, name="Retry deletion")
+    voice_fixture.processor.fail_invalidate = True
+
+    failed = voice_fixture.client.delete(f"/api/voices/{voice.voice_id}")
+    still_available = voice_fixture.client.get(f"/api/voices/{voice.voice_id}")
+
+    assert failed.status_code == 502
+    assert failed.json() == {
+        "error": {
+            "code": "qwen3_invalidate_failed",
+            "message": "Voice prompt removal failed",
+        },
+        "retry_allowed": True,
+        "deleted": False,
+    }
+    assert still_available.status_code == 200
+    assert still_available.json()["status"] == "available"
+    serialized = json.dumps(failed.json())
+    assert "Traceback" not in serialized
+    assert "private" not in serialized.lower()
+    assert "secret transcript" not in serialized
 
 
 def test_delete_referenced_voice_requires_force_and_returns_readable_referents(
