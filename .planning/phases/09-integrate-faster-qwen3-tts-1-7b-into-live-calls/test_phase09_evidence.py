@@ -652,6 +652,23 @@ def test_runner_anchor_hashes_are_bound_to_each_actual_wav_and_mismatch_fails() 
         )
 
 
+def test_soak_reset_seed_anchors_use_identical_text_while_other_turns_stay_mixed() -> None:
+    runner = _runner_module("phase09_runner_anchor_inputs")
+    anchors = {1, 10, 20, 30, 40, 50}
+
+    anchor_texts = {
+        runner._soak_target_text(turn, anchor_turns=anchors) for turn in anchors
+    }
+    non_anchor_texts = {
+        runner._soak_target_text(turn, anchor_turns=anchors)
+        for turn in range(1, 10)
+        if turn not in anchors
+    }
+
+    assert anchor_texts == {runner.SOAK_ANCHOR_TARGET_TEXT}
+    assert non_anchor_texts == set(runner.SOAK_TARGET_TEXTS)
+
+
 def test_runner_source_owns_production_routes_and_forbids_direct_generation_imports() -> None:
     source = RUNNER_PATH.read_text(encoding="utf-8")
     assert "/api/voices" in source

@@ -71,6 +71,12 @@ DECISION_FILENAMES = {
 WAVLM_REVISION = "feb593a6c23c1cc3d9510425c29b0a14d2b07b1e"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
+SOAK_TARGET_TEXTS = (
+    "Thanks for calling. I can help with that now.",
+    "I checked the details, and everything is ready for the next practical step.",
+    "Let me explain the answer carefully, keep the call moving, and pause when the complete thought is finished.",
+)
+SOAK_ANCHOR_TARGET_TEXT = SOAK_TARGET_TEXTS[0]
 
 # These route constants make the production topology explicit and auditable.
 VOICE_ROUTE = "/api/voices"
@@ -349,6 +355,14 @@ def bind_and_validate_actual_anchor_hashes(
         raise EvidenceRunnerError(
             "Reset-seed anchor WAVs are not bit-identical; release evidence failed"
         )
+
+
+def _soak_target_text(turn: int, *, anchor_turns: set[int]) -> str:
+    if turn < 1:
+        raise EvidenceRunnerError("Soak turn must be positive")
+    if turn in anchor_turns:
+        return SOAK_ANCHOR_TARGET_TEXT
+    return SOAK_TARGET_TEXTS[(turn - 1) % len(SOAK_TARGET_TEXTS)]
 
 
 def _alignment_scores(approved: str, observed: str) -> tuple[float, float]:
@@ -789,13 +803,7 @@ class RayMeProductionPath:
         anchor_turns = set(anchor_turns_list)
         seed_base = int(self.manifest["seed_policy"]["evidence_seed_base"])
         for turn in range(1, int(thresholds["required_soak_turns"]) + 1):
-            target = (
-                "Thanks for calling. I can help with that now."
-                if turn % 3 == 1
-                else "I checked the details, and everything is ready for the next practical step."
-                if turn % 3 == 2
-                else "Let me explain the answer carefully, keep the call moving, and pause when the complete thought is finished."
-            )
+            target = _soak_target_text(turn, anchor_turns=anchor_turns)
             generation_seed = seed_base if turn in anchor_turns else seed_base + turn
             row_scenario = {
                 **scenario,
