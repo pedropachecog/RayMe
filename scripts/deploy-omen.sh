@@ -573,6 +573,8 @@ if ($verifyQwen3Tracer) {
   New-Item -ItemType Directory -Path $tracerDir -Force | Out-Null
   $tracerScript = Join-Path $repo ".planning\phases\09-integrate-faster-qwen3-tts-1-7b-into-live-calls\09-run-hardware-tracer.py"
   $tracerJson = Join-Path $tracerDir "qwen3-hardware-tracer.json"
+  $previousErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
   $tracerOutput = & "$repo\ai-backend\.venv\Scripts\python.exe" $tracerScript `
     --run-hardware-tracer `
     --expected-commit $actualHead `
@@ -580,8 +582,16 @@ if ($verifyQwen3Tracer) {
     --work-dir $tracerDir `
     --output $tracerJson 2>&1
   $tracerStatus = $LASTEXITCODE
-  $tracerOutput | ForEach-Object { Write-Host $_ }
-  if ($tracerStatus -ne 0) { throw "Production Qwen hardware tracer failed" }
+  $ErrorActionPreference = $previousErrorActionPreference
+  $tracerSafeLines = $tracerOutput | Where-Object {
+    $_ -like "FAIL:*" -or $_ -like "__RAYME_QWEN3_TRACER_JSON__*"
+  }
+  $tracerSafeLines | ForEach-Object { Write-Host $_ }
+  if ($tracerStatus -ne 0) {
+    $failureLine = $tracerSafeLines | Where-Object { $_ -like "FAIL:*" } | Select-Object -Last 1
+    if (-not $failureLine) { $failureLine = "FAIL: hardware tracer returned no sanitized diagnostic" }
+    throw "Production Qwen hardware tracer failed: $failureLine"
+  }
   $tracerLine = $tracerOutput | Where-Object { $_ -like "__RAYME_QWEN3_TRACER_JSON__*" } | Select-Object -Last 1
   if (-not $tracerLine) { throw "Qwen hardware tracer did not emit commit-matched JSON evidence" }
   Write-Host "__RAYME_QWEN3_RUNTIME_JSON__$($script:QwenRuntimeIdentity | ConvertTo-Json -Depth 8 -Compress)"

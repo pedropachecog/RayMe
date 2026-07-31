@@ -1421,18 +1421,25 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = _parse_args()
-    if args.self_test_reference_authorization:
-        _self_test_reference_authorization()
-        return 0
-    if args.verify_results:
-        _verify_results(Path(args.verify_results), str(args.expected_commit or "").strip())
-        return 0
-    if args.run_hardware_tracer:
-        payload = asyncio.run(_generate_hardware_evidence(args))
-        _write_results(payload, Path(args.output))
-        print(RESULT_MARKER + json.dumps(payload, separators=(",", ":"), sort_keys=True))
-        return 0
-    raise SystemExit("a tracer operation is required")
+    try:
+        if args.self_test_reference_authorization:
+            _self_test_reference_authorization()
+            return 0
+        if args.verify_results:
+            _verify_results(Path(args.verify_results), str(args.expected_commit or "").strip())
+            return 0
+        if args.run_hardware_tracer:
+            payload = asyncio.run(_generate_hardware_evidence(args))
+            _write_results(payload, Path(args.output))
+            print(RESULT_MARKER + json.dumps(payload, separators=(",", ":"), sort_keys=True))
+            return 0
+        raise TracerFailure("A tracer operation is required")
+    except TracerFailure as exc:
+        print(f"FAIL: {exc}")
+        return 1
+    except Exception as exc:
+        print(f"FAIL: unexpected tracer error ({exc.__class__.__name__})")
+        return 1
 
 
 if __name__ == "__main__":
