@@ -1098,12 +1098,38 @@ class CallSession:
         producer_task: asyncio.Task[Any] | None = None
         bridge_queue_high_water = 0
         producer_block_time_ms = 0.0
+        bridge_producer_block_count = 0
+        generation_complete_ms: float | None = None
+        playout_complete_ms: float | None = None
+        playout_wait_completed: bool | None = None
+        stream_completed_normally = False
+
+        reset_track_metrics = getattr(
+            self.outbound_audio_track,
+            "reset_playout_metrics",
+            None,
+        )
+        if callable(reset_track_metrics):
+            reset_track_metrics()
 
         def elapsed_ms() -> float:
             return round((time.perf_counter() - started_at) * 1000, 1)
 
-        def final_metrics(total_generation_ms: float | None = None) -> dict[str, Any]:
-            generation_ms = elapsed_ms() if total_generation_ms is None else total_generation_ms
+        def track_metrics() -> dict[str, Any]:
+            snapshot = getattr(self.outbound_audio_track, "playout_metrics", None)
+            if not callable(snapshot):
+                return {}
+            return {
+                f"track_{key}": value
+                for key, value in dict(snapshot()).items()
+            }
+
+        def final_metrics() -> dict[str, Any]:
+            generation_ms = (
+                elapsed_ms()
+                if generation_complete_ms is None
+                else generation_complete_ms
+            )
             generated_audio_ms = round(generated_audio_seconds * 1000, 1)
             total_playback_ms = round(playback_seconds * 1000, 1)
             realtime_generation_ratio = 0.0
@@ -1123,6 +1149,16 @@ class CallSession:
                 "bridge_queue_capacity": CALL_TTS_STREAM_BRIDGE_CAPACITY,
                 "bridge_queue_high_water": bridge_queue_high_water,
                 "producer_block_time_ms": round(producer_block_time_ms, 1),
+                "bridge_producer_block_count": bridge_producer_block_count,
+                "generation_complete_ms": round(generation_ms, 1),
+                "playout_complete_ms": (
+                    round(playout_complete_ms, 1)
+                    if playout_complete_ms is not None
+                    else None
+                ),
+                "playout_wait_completed": playout_wait_completed,
+                "natural_eos": stream_completed_normally,
+                **track_metrics(),
             }
 
         def pending_audio_seconds() -> float:
@@ -1154,15 +1190,23 @@ class CallSession:
             if playback_started or not pending_chunks:
                 return
 
-            first_chunk = pending_chunks[0]
-            for index, chunk in enumerate(pending_chunks):
+            startup_chunks = list(pending_chunks)
+            first_chunk = startup_chunks[0]
+            startup_audio_seconds = sum(
+                float(chunk["playback_seconds"])
+                for chunk in startup_chunks
+            )
+            for index, chunk in enumerate(startup_chunks):
                 await enqueue_stream_chunk(chunk, first=index == 0)
+                if turn_id in self._cancelled_ai_turns:
+                    pending_chunks.clear()
+                    return
 
             first_chunk_enqueued_ms = elapsed_ms()
             self.state = "speaking"
             ai_audio_started_ms = elapsed_ms()
             buffered_audio_ms = round(
-                pending_audio_seconds() * 1000,
+                startup_audio_seconds * 1000,
                 1,
             )
             startup_wait_ms = 0.0
@@ -1182,9 +1226,8 @@ class CallSession:
                     "first_chunk_generated_ms": first_chunk["generated_at_ms"],
                     "first_chunk_enqueued_ms": first_chunk_enqueued_ms,
                     "ai_audio_started_ms": ai_audio_started_ms,
-                    "chunk_count_at_start": len(pending_chunks),
-                    "inter_chunk_gaps_ms": list(inter_chunk_gaps_ms),
-                    "startup_buffered_chunks": len(pending_chunks),
+                    "chunk_count_at_start": len(startup_chunks),
+                    "startup_buffered_chunks": len(startup_chunks),
                     "startup_buffered_audio_ms": buffered_audio_ms,
                     "startup_buffer_wait_ms": startup_wait_ms,
                     "startup_buffer_target_ms": round(
@@ -1198,6 +1241,7 @@ class CallSession:
                 },
             )
             playback_started = True
+            pending_chunks.clear()
             await self.emit_event(audio_started_event)
 
         async def next_stream_item() -> Any:
@@ -1243,7 +1287,7 @@ class CallSession:
                 )
 
             def put_threadsafe(item: Any) -> bool:
-                nonlocal producer_block_time_ms
+                nonlocal producer_block_time_ms, bridge_producer_block_count
                 try:
                     publish = asyncio.run_coroutine_threadsafe(
                         put_bridge_item(item),
@@ -1253,6 +1297,7 @@ class CallSession:
                     return False
 
                 wait_started = time.perf_counter()
+                blocked = False
                 while True:
                     try:
                         publish.result(timeout=0.05)
@@ -1261,6 +1306,9 @@ class CallSession:
                         ) * 1000
                         return True
                     except concurrent.futures.TimeoutError:
+                        if not blocked:
+                            blocked = True
+                            bridge_producer_block_count += 1
                         if turn_id in self._cancelled_ai_turns:
                             publish.cancel()
                             producer_block_time_ms += (
@@ -1304,6 +1352,7 @@ class CallSession:
             while True:
                 item = await next_stream_item()
                 if item is sentinel:
+                    stream_completed_normally = True
                     break
                 if isinstance(item, Exception):
                     raise item
@@ -1331,25 +1380,24 @@ class CallSession:
                     target_sample_rate=int(getattr(self.outbound_audio_track, "sample_rate", 48000)),
                 )
                 chunk_playback_seconds = float(audio_stats.get("duration_ms", 0.0)) / 1000.0
-                pending_chunks.append(
-                    {
-                        "wav_bytes": wav_bytes,
-                        "generated_at_ms": generated_at_ms,
-                        "audio_stats": audio_stats,
-                        "playback_seconds": chunk_playback_seconds,
-                    }
-                )
+                current_chunk = {
+                    "wav_bytes": wav_bytes,
+                    "generated_at_ms": generated_at_ms,
+                    "audio_stats": audio_stats,
+                    "playback_seconds": chunk_playback_seconds,
+                }
                 generated_audio_seconds += chunk_playback_seconds
                 chunk_count += 1
 
                 if not playback_started:
+                    pending_chunks.append(current_chunk)
                     # RayMe is a live phone call. Never wait for full TTS stream
                     # completion before first playback as a smoothness fix.
                     if startup_buffer_ready():
                         await start_playback_from_buffer()
                     continue
 
-                await enqueue_stream_chunk(pending_chunks[-1], first=False)
+                await enqueue_stream_chunk(current_chunk, first=False)
 
             if producer_task is not None:
                 await producer_task
@@ -1370,8 +1418,11 @@ class CallSession:
                     cancelled_event["ai_audio_started_event"] = audio_started_event
                 return cancelled_event
 
-            await self._wait_for_outbound_audio_playback(playback_seconds)
-            playback_final = final_metrics(generation_complete_ms)
+            playout_wait_completed = await self._wait_for_outbound_audio_playback(
+                playback_seconds
+            )
+            playout_complete_ms = elapsed_ms()
+            playback_final = final_metrics()
 
             if turn_id in self._cancelled_ai_turns:
                 self.state = "listening"
@@ -2218,10 +2269,10 @@ class CallSession:
             return enqueue(wav_bytes, preroll_seconds=preroll_seconds)
         return enqueue(wav_bytes)
 
-    async def _wait_for_outbound_audio_playback(self, playback_seconds: float) -> None:
+    async def _wait_for_outbound_audio_playback(self, playback_seconds: float) -> bool:
         wait_until_idle = getattr(self.outbound_audio_track, "wait_until_idle", None)
         if not callable(wait_until_idle):
-            return
+            return True
         timeout = max(playback_seconds + 2.0, 2.0)
         logger.info(
             "[rayme-call] tts.playback_wait session=%s expected_ms=%d timeout_ms=%d",
@@ -2243,6 +2294,7 @@ class CallSession:
                 int(CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS * 1000),
             )
             await asyncio.sleep(CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS)
+        return bool(completed)
 
 
 class CallSessionManager:

@@ -54,12 +54,42 @@ class OutboundAudioBuffer:
 class QueuedAudioOutputTrack(MediaStreamTrack):
     kind = "audio"
 
-    def __init__(self, *, sample_rate: int = 48000, frame_ms: int = 20) -> None:
+    def __init__(
+        self,
+        *,
+        sample_rate: int = 48000,
+        frame_ms: int = 20,
+        max_pending_audio_seconds: float = 1.5,
+    ) -> None:
         super().__init__()
         self.sample_rate = sample_rate
         self.frame_samples = max(int(sample_rate * frame_ms / 1000), 1)
-        self._queue: asyncio.Queue[np.ndarray | None] = asyncio.Queue()
+        self.max_pending_samples = max(
+            int(sample_rate * max(max_pending_audio_seconds, frame_ms / 1000)),
+            self.frame_samples,
+        )
+        # Queue entry count is deliberately not the bound: native TTS chunks have
+        # different durations. Admission credit below bounds the actual audio
+        # debt held by both this queue and the internal frame buffer.
+        self._queue: asyncio.Queue[tuple[int, np.ndarray] | None] = asyncio.Queue()
         self._buffer = np.asarray([], dtype=np.int16)
+        self._pending_condition = asyncio.Condition()
+        self._pending_samples = 0
+        self._pending_samples_high_water = 0
+        self._playout_epoch = 0
+        self._next_sequence = 0
+        self._last_consumed_sequence: int | None = None
+        self._admission_block_count = 0
+        self._admission_block_time_ms = 0.0
+        self._underflow_frames = 0
+        self._enqueued_chunks = 0
+        self._played_samples = 0
+        self._discarded_chunks = 0
+        self._discarded_samples = 0
+        self._join_count = 0
+        self._order_violation_count = 0
+        self._idle_wait_completed_count = 0
+        self._idle_wait_timeout_count = 0
         self._pts = 0
         self._recv_count = 0
         self._idle_frame_count = 0
@@ -71,6 +101,50 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
             "peak": 0.0,
         }
         self._nonzero_send_logged = False
+
+    @property
+    def pending_samples(self) -> int:
+        return self._pending_samples
+
+    def reset_playout_metrics(self) -> None:
+        """Start one turn's measurement without changing queued audio."""
+        self._pending_samples_high_water = self._pending_samples
+        self._admission_block_count = 0
+        self._admission_block_time_ms = 0.0
+        self._underflow_frames = 0
+        self._enqueued_chunks = 0
+        self._played_samples = 0
+        self._discarded_chunks = 0
+        self._discarded_samples = 0
+        self._join_count = 0
+        self._order_violation_count = 0
+        self._idle_wait_completed_count = 0
+        self._idle_wait_timeout_count = 0
+
+    def playout_metrics(self) -> dict[str, float | int | bool]:
+        pending_ms = self._samples_to_ms(self._pending_samples)
+        high_water_ms = self._samples_to_ms(self._pending_samples_high_water)
+        return {
+            "admission_capacity_samples": self.max_pending_samples,
+            "admission_capacity_ms": self._samples_to_ms(self.max_pending_samples),
+            "pending_samples": self._pending_samples,
+            "pending_audio_ms": pending_ms,
+            "pending_samples_high_water": self._pending_samples_high_water,
+            "pending_audio_high_water_ms": high_water_ms,
+            "admission_block_count": self._admission_block_count,
+            "admission_block_time_ms": round(self._admission_block_time_ms, 1),
+            "underflow_frames": self._underflow_frames,
+            "playout_debt_ms": pending_ms,
+            "playout_debt_high_water_ms": high_water_ms,
+            "enqueued_chunks": self._enqueued_chunks,
+            "played_samples": self._played_samples,
+            "discarded_chunks": self._discarded_chunks,
+            "discarded_samples": self._discarded_samples,
+            "join_count": self._join_count,
+            "order_violation_count": self._order_violation_count,
+            "idle_wait_completed_count": self._idle_wait_completed_count,
+            "idle_wait_timeout_count": self._idle_wait_timeout_count,
+        }
 
     async def recv(self) -> Any:
         from av import AudioFrame
@@ -115,55 +189,96 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
             self.last_enqueue_stats["peak"],
         )
         if samples.size:
-            await self._queue.put(samples)
+            await self._admit_samples(samples)
         return duration_seconds
 
     async def wait_until_idle(self, *, timeout: float | None = None) -> bool:
-        deadline = None
-        if timeout is not None:
-            deadline = asyncio.get_running_loop().time() + max(timeout, 0.0)
-
-        while self.readyState != "ended":
-            if self._queue.empty() and self._buffer.size == 0:
-                return True
-            if deadline is not None and asyncio.get_running_loop().time() >= deadline:
-                logger.info(
-                    "[rayme-call] track.wait_until_idle.timeout recv_count=%d "
-                    "queue_size=%d buffer_size=%d",
-                    self._recv_count,
-                    self._queue.qsize(),
-                    self._buffer.size,
-                )
-                return False
-            await asyncio.sleep(self.frame_samples / self.sample_rate)
-        return False
+        loop = asyncio.get_running_loop()
+        deadline = None if timeout is None else loop.time() + max(timeout, 0.0)
+        async with self._pending_condition:
+            while self.readyState != "ended" and self._pending_samples > 0:
+                if deadline is None:
+                    await self._pending_condition.wait()
+                    continue
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    self._idle_wait_timeout_count += 1
+                    logger.info(
+                        "[rayme-call] track.wait_until_idle.timeout recv_count=%d "
+                        "queue_size=%d buffer_size=%d pending_samples=%d",
+                        self._recv_count,
+                        self._queue.qsize(),
+                        self._buffer.size,
+                        self._pending_samples,
+                    )
+                    return False
+                try:
+                    await asyncio.wait_for(
+                        self._pending_condition.wait(),
+                        timeout=remaining,
+                    )
+                except asyncio.TimeoutError:
+                    self._idle_wait_timeout_count += 1
+                    return False
+            completed = self.readyState != "ended" and self._pending_samples == 0
+            if completed:
+                self._idle_wait_completed_count += 1
+            return completed
 
     async def stop_current(self) -> None:
-        while not self._queue.empty():
-            self._queue.get_nowait()
-            self._queue.task_done()
-        self._buffer = np.asarray([], dtype=np.int16)
+        async with self._pending_condition:
+            self._playout_epoch += 1
+            discarded_entries = 0
+            while not self._queue.empty():
+                item = self._queue.get_nowait()
+                self._queue.task_done()
+                if item is not None:
+                    discarded_entries += 1
+            if self._buffer.size:
+                discarded_entries += 1
+            if self._pending_samples:
+                self._discarded_samples += self._pending_samples
+            self._discarded_chunks += discarded_entries
+            self._pending_samples = 0
+            self._buffer = np.asarray([], dtype=np.int16)
+            self._last_consumed_sequence = None
+            self._pending_condition.notify_all()
 
     def stop(self) -> None:
+        self._discard_pending_now()
         super().stop()
         self._queue.put_nowait(None)
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._notify_pending_waiters())
 
     async def _next_samples(self) -> np.ndarray:
         while self._buffer.size < self.frame_samples and self.readyState != "ended":
             try:
-                chunk = self._queue.get_nowait()
+                item = self._queue.get_nowait()
             except asyncio.QueueEmpty:
                 break
             except asyncio.CancelledError:
                 break
-            if chunk is None:
+            if item is None:
                 break
+            sequence, chunk = item
+            if (
+                self._last_consumed_sequence is not None
+                and sequence <= self._last_consumed_sequence
+            ):
+                self._order_violation_count += 1
+            self._last_consumed_sequence = sequence
             self._buffer = np.concatenate([self._buffer, chunk])
             self._queue.task_done()
 
-        if self._buffer.size >= self.frame_samples:
+        consumed_samples = min(self._buffer.size, self.frame_samples)
+        if consumed_samples >= self.frame_samples:
             samples = self._buffer[: self.frame_samples]
             self._buffer = self._buffer[self.frame_samples :]
+            await self._release_pending_samples(consumed_samples)
             peak = float(np.max(np.abs(samples.astype(np.float32))))
             if not self._nonzero_send_logged and peak >= 128:
                 self._nonzero_send_logged = True
@@ -176,9 +291,10 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
             return samples
 
         samples = np.zeros(self.frame_samples, dtype=np.int16)
-        if self._buffer.size:
-            samples[: self._buffer.size] = self._buffer
+        if consumed_samples:
+            samples[:consumed_samples] = self._buffer[:consumed_samples]
             self._buffer = np.asarray([], dtype=np.int16)
+            await self._release_pending_samples(consumed_samples)
             peak = float(np.max(np.abs(samples.astype(np.float32))))
             if not self._nonzero_send_logged and peak >= 128:
                 self._nonzero_send_logged = True
@@ -188,12 +304,87 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
                     float(np.sqrt(np.mean(np.square(samples.astype(np.float32))))),
                     peak,
                 )
-        else:
+        if consumed_samples < self.frame_samples:
+            self._underflow_frames += 1
+        if not consumed_samples:
             # Emit silence while no AI audio is queued so recv() continues to
             # produce RTP frames during STT/LLM/TTS gaps. The browser can keep
             # the remote media element audible without leaking a carrier tone.
             self._idle_frame_count += 1
         return samples
+
+    async def _admit_samples(self, samples: np.ndarray) -> None:
+        epoch = self._playout_epoch
+        offset = 0
+        self._enqueued_chunks += 1
+        if self._pending_samples > 0:
+            self._join_count += 1
+
+        while offset < samples.size:
+            blocked_at: float | None = None
+            async with self._pending_condition:
+                while (
+                    epoch == self._playout_epoch
+                    and self.readyState != "ended"
+                    and self._pending_samples >= self.max_pending_samples
+                ):
+                    if blocked_at is None:
+                        blocked_at = time.perf_counter()
+                        self._admission_block_count += 1
+                    await self._pending_condition.wait()
+                if blocked_at is not None:
+                    self._admission_block_time_ms += (
+                        time.perf_counter() - blocked_at
+                    ) * 1000
+                if epoch != self._playout_epoch or self.readyState == "ended":
+                    self._discarded_samples += int(samples.size - offset)
+                    self._discarded_chunks += 1
+                    return
+
+                available = self.max_pending_samples - self._pending_samples
+                admitted = min(available, int(samples.size - offset))
+                if admitted <= 0:
+                    continue
+                sequence = self._next_sequence
+                self._next_sequence += 1
+                chunk = np.asarray(samples[offset : offset + admitted], dtype=np.int16).copy()
+                self._queue.put_nowait((sequence, chunk))
+                offset += admitted
+                self._pending_samples += admitted
+                self._pending_samples_high_water = max(
+                    self._pending_samples_high_water,
+                    self._pending_samples,
+                )
+
+    async def _release_pending_samples(self, sample_count: int) -> None:
+        async with self._pending_condition:
+            released = min(max(int(sample_count), 0), self._pending_samples)
+            self._pending_samples -= released
+            self._played_samples += released
+            self._pending_condition.notify_all()
+
+    def _discard_pending_now(self) -> None:
+        self._playout_epoch += 1
+        discarded_entries = 0
+        while not self._queue.empty():
+            item = self._queue.get_nowait()
+            self._queue.task_done()
+            if item is not None:
+                discarded_entries += 1
+        if self._buffer.size:
+            discarded_entries += 1
+        self._discarded_samples += self._pending_samples
+        self._discarded_chunks += discarded_entries
+        self._pending_samples = 0
+        self._buffer = np.asarray([], dtype=np.int16)
+        self._last_consumed_sequence = None
+
+    async def _notify_pending_waiters(self) -> None:
+        async with self._pending_condition:
+            self._pending_condition.notify_all()
+
+    def _samples_to_ms(self, sample_count: int) -> float:
+        return round(float(sample_count) * 1000.0 / max(self.sample_rate, 1), 1)
 
     async def _pace_realtime(self) -> None:
         frame_duration = self.frame_samples / max(self.sample_rate, 1)
