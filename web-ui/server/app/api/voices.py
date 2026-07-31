@@ -65,6 +65,14 @@ class VoicePreview(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     default_engine: str | None = Field(default=None, max_length=80)
     reference_transcript: str | None = None
+    voice_data_steward: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=200,
+        title="Reference source",
+    )
+    authorization_basis: str | None = Field(default=None, min_length=1, max_length=200)
+    use_scope: str | None = Field(default=None, min_length=1, max_length=80)
     preview_text: str | None = None
     use_default_engine: bool = True
     engine: str | None = Field(default=None, max_length=80)
@@ -106,6 +114,9 @@ class AiBackendVoiceProcessor:
 
     async def test_play(self, **payload: Any) -> dict[str, Any]:
         return await self._synthesize(kind="test_play", **payload)
+
+    async def preparation_status(self) -> dict[str, Any]:
+        return await self.client.get_tts_preparation_status(self.base_url)
 
     async def _synthesize(self, *, kind: str, **payload: Any) -> dict[str, Any]:
         try:
@@ -201,9 +212,7 @@ async def preview_voice(
     payload: VoicePreview,
     service: VoiceService = Depends(get_voice_service),
 ) -> dict[str, Any]:
-    payload_state = payload.model_dump()
-    if "metadata" not in payload.model_fields_set:
-        payload_state.pop("metadata", None)
+    payload_state = payload.model_dump(exclude_unset=True)
     try:
         return await service.preview_voice(payload_state)
     except VoiceAssetNotFoundError as exc:
@@ -236,6 +245,23 @@ async def save_voice(
 @router.get("")
 async def list_voices(service: VoiceService = Depends(get_voice_service)) -> dict[str, Any]:
     return {"items": await service.list_voices()}
+
+
+@router.get("/preparation-status")
+async def read_voice_preparation_status(
+    service: VoiceService = Depends(get_voice_service),
+) -> dict[str, Any]:
+    try:
+        return await service.preparation_status()
+    except (AiBackendClientError, VoiceSynthesisFailedError) as exc:
+        if isinstance(exc, AiBackendClientError):
+            detail = exc.to_public_dict()
+        else:
+            detail = {
+                "code": "voice_preparation_status_unavailable",
+                "message": "Voice preparation status is unavailable",
+            }
+        raise HTTPException(status_code=502, detail=detail) from exc
 
 
 @router.get("/{voice_id}")

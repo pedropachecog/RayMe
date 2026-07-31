@@ -14,6 +14,26 @@ TRANSCRIPTION_FAILED_MESSAGE = "Transcription failed"
 SYNTHESIS_FAILED_MESSAGE = "Synthesis failed"
 WEBRTC_FAILED_MESSAGE = "Call control request failed"
 WEBRTC_OFFER_FAILED_MESSAGE = "WebRTC offer could not be accepted"
+SAFE_PROCESSING_MESSAGES = {
+    "qwen3_reference_audio_required": "Reference audio is required",
+    "qwen3_reference_audio_invalid": "Reference audio is invalid",
+    "qwen3_transcript_required": "Matching reference transcript is required",
+    "qwen3_transcript_mismatch": "Reference audio and transcript do not match",
+    "qwen3_alignment_failed": "Reference alignment could not be verified",
+    "qwen3_prompt_failed": "Voice preparation failed",
+    "qwen3_prompt_not_ready": "Selected voice is not ready",
+    "qwen3_target_required": "Speech text is required",
+    "qwen3_target_too_long": "Speech segment is too long",
+    "qwen3_generation_ceiling": "Speech request exceeded its safety limit",
+    "qwen3_no_audio": "Speech generation produced no audio",
+    "qwen3_worker_protocol": "Qwen3-TTS runtime failed",
+    "qwen3_worker_timeout": "Qwen3-TTS runtime timed out",
+    "qwen3_worker_stopped": "Qwen3-TTS runtime stopped",
+    "call_tts_prepare_mismatch": "Selected voice does not match the call",
+    "call_tts_prepare_unavailable": "Voice preparation is unavailable",
+    "call_tts_prepare_failed": "Voice preparation failed",
+    "webrtc_offer_failed": WEBRTC_OFFER_FAILED_MESSAGE,
+}
 
 
 class EngineStatus(BaseModel):
@@ -153,6 +173,55 @@ class AiBackendClient:
             raise _invalid_response()
         return dict(payload)
 
+    async def get_tts_preparation_status(self, base_url: str) -> dict[str, Any]:
+        payload = await self.get_webrtc_status(base_url)
+        raw_model = payload.get("tts_model")
+        model = raw_model if isinstance(raw_model, dict) else {}
+        resident_engine = _safe_identifier(model.get("resident_engine"))
+        loading_engine = _safe_identifier(model.get("loading_engine"))
+        if loading_engine is not None:
+            model_state = "loading"
+            model_engine = loading_engine
+        elif resident_engine is not None:
+            model_state = "resident"
+            model_engine = resident_engine
+        else:
+            model_state = "idle"
+            model_engine = None
+
+        raw_prompt = payload.get("selected_voice_prompt")
+        prompt = raw_prompt if isinstance(raw_prompt, dict) else {}
+        prompt_state = prompt.get("state")
+        if prompt_state not in {"none", "prewarming", "ready", "failed"}:
+            prompt_state = "none"
+        return {
+            "model": {"state": model_state, "engine_id": model_engine},
+            "prompt": {
+                "state": prompt_state,
+                "voice_key": _safe_identifier(prompt.get("voice_key")),
+                "error_code": _safe_identifier(prompt.get("error_code")),
+            },
+        }
+
+    async def prepare_call_speech(
+        self,
+        base_url: str,
+        session_id: str,
+        payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        response = await self._request(
+            "POST",
+            _join_endpoint(base_url, f"/webrtc/sessions/{session_id}/prepare"),
+            json=dict(payload),
+            processing_message="Voice preparation failed",
+            processing_code="call_tts_prepare_failed",
+            timeout=self._synthesis_timeout,
+        )
+        response_payload = _json_payload(response)
+        if not isinstance(response_payload, dict):
+            raise _invalid_response()
+        return dict(response_payload)
+
     async def create_webrtc_offer(
         self,
         base_url: str,
@@ -285,10 +354,10 @@ class AiBackendClient:
         except (httpx.TimeoutException, httpx.NetworkError, httpx.TransportError) as exc:
             raise AiBackendUnavailable(code="unreachable", message=UNREACHABLE_MESSAGE) from exc
 
-        if response.status_code >= 500 and processing_message and processing_code:
-            raise _processing_error_from_response(response, processing_code, processing_message)
         if response.status_code in {401, 403}:
             raise AiBackendUnavailable(code="unauthorized", message=UNREACHABLE_MESSAGE)
+        if response.status_code >= 400 and processing_message and processing_code:
+            raise _processing_error_from_response(response, processing_code, processing_message)
         if response.status_code >= 400:
             raise AiBackendUnavailable(code="unreachable", message=UNREACHABLE_MESSAGE)
         return response
@@ -313,12 +382,18 @@ def _processing_error_from_response(
         detail = payload if isinstance(payload, dict) else {}
 
     code = detail.get("code")
-    message = detail.get("message")
     if not isinstance(code, str) or not code:
         code = fallback_code
-    if not isinstance(message, str) or not message:
-        message = fallback_message
+    message = SAFE_PROCESSING_MESSAGES.get(code, fallback_message)
     return AiBackendProcessingError(code=code, message=message)
+
+
+def _safe_identifier(value: Any) -> str | None:
+    if not isinstance(value, str) or not value or len(value) > 160:
+        return None
+    if not all(character.isalnum() or character in "_.:-" for character in value):
+        return None
+    return value
 
 
 def _json_payload(response: httpx.Response) -> Any:
