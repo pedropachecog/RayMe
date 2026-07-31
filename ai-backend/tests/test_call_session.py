@@ -1471,6 +1471,7 @@ def test_voxcpm2_slow_stream_starts_playback_before_stream_completion(monkeypatc
 def test_qwen_slow_stream_starts_playback_before_stream_completion(monkeypatch: Any) -> None:
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.2)
     events: list[dict[str, Any]] = []
+    adapter = SlowQwenStreamingTtsAdapter()
 
     async def scenario() -> dict[str, Any]:
         audio_started = asyncio.Event()
@@ -1481,7 +1482,6 @@ def test_qwen_slow_stream_starts_playback_before_stream_completion(monkeypatch: 
                 audio_started.set()
 
         track = ObservableStreamingOutboundAudioTrack()
-        adapter = SlowQwenStreamingTtsAdapter()
         session, _ = _new_session(
             tts_adapter=adapter,
             outbound_audio_track=track,
