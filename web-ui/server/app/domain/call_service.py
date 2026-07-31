@@ -13,8 +13,6 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-logger = logging.getLogger(__name__)
-
 from app.domain.thread_service import (
     CharacterUnavailableError,
     ThreadNotFoundError,
@@ -22,11 +20,18 @@ from app.domain.thread_service import (
     new_message_id,
 )
 from app.domain.voice_service import (
+    QWEN3_ENGINE_ID,
     VOXCPM2_ENGINE_ID,
+    VoiceAssetNotFoundError,
     VoiceMetadataValidationError,
+    VoiceService,
+    canonical_voice_engine_id_for_read,
     normalize_voxcpm2_engine_settings,
+    validate_saved_qwen3_reference,
 )
-from app.storage.models import Character, Message, Thread, Voice, VoiceAsset, utc_now
+from app.storage.models import Character, Message, Thread, Voice, utc_now
+
+logger = logging.getLogger(__name__)
 
 CALL_VOICE_REQUIRED = "call_voice_required"
 CALL_VOICE_UNAVAILABLE = "call_voice_unavailable"
@@ -105,6 +110,14 @@ class ActiveCall:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class CallVoicePreparation:
+    voice_id: str
+    backend_voice_id: str
+    engine_id: str
+    reference_payload: dict[str, Any] | None = None
+
+
 _ACTIVE_CALLS: dict[str, ActiveCall] = {}
 
 
@@ -127,6 +140,7 @@ class CallService:
         *,
         thread_id: str | None = None,
         character_id: str | None = None,
+        preflight: CallVoicePreparation,
     ) -> dict[str, Any]:
         if not thread_id and not character_id:
             raise ThreadNotFoundError("thread_id or character_id is required")
@@ -139,13 +153,16 @@ class CallService:
         thread = await self._get_thread(thread_id)
         character = await self._character_for_thread(thread)
         voice = await self._required_available_voice(character.default_voice_id)
+        engine_id = canonical_voice_engine_id_for_read(voice.default_engine)
+        if voice.id != preflight.voice_id or engine_id != preflight.engine_id:
+            raise CallVoiceUnavailableError()
         started_at = utc_now()
         call = ActiveCall(
             call_id=new_call_id(),
             session_id=new_rtc_session_id(),
             thread_id=thread.id,
             voice_id=voice.id,
-            engine_id=voice.default_engine,
+            engine_id=engine_id,
             character_name=character.name,
             voice_name=voice.name,
             started_at=started_at,
@@ -158,6 +175,24 @@ class CallService:
             role="event",
         )
         return call.to_public_dict()
+
+    async def preflight_call_voice(
+        self,
+        *,
+        thread_id: str | None,
+        character_id: str | None,
+        voice_blob_dir: Path,
+    ) -> CallVoicePreparation:
+        """Validate the selected saved voice before any backend request."""
+        if not thread_id and not character_id:
+            raise ThreadNotFoundError("thread_id or character_id is required")
+        if thread_id is not None:
+            character = await self._character_for_thread(await self._get_thread(thread_id))
+        else:
+            assert character_id is not None
+            character = await self._get_character(character_id)
+        voice = await self._required_available_voice(character.default_voice_id)
+        return await self._voice_preparation(voice, voice_blob_dir)
 
     def attach_session(self, call_id: str, session_id: str) -> dict[str, Any]:
         call = self._active_call(call_id)
@@ -218,50 +253,13 @@ class CallService:
     async def voice_reference_for_call(self, call_id: str, voice_blob_dir: Path) -> dict[str, Any]:
         call = self._active_call(call_id)
         voice = await self._required_available_voice(call.voice_id)
-        logger.info(
-            "[voice-ref] call=%s voice_id=%s voice_name=%s blob_dir=%s",
-            call_id, voice.id, voice.name, voice_blob_dir,
-        )
-        result = await self.session.execute(
-            select(VoiceAsset)
-            .where(VoiceAsset.voice_id == voice.id, VoiceAsset.asset_kind == "sample")
-            .order_by(VoiceAsset.created_at.desc())
-        )
-        asset = result.scalars().first()
-        if asset is None:
-            logger.warning(
-                "[voice-ref] NO_ASSET_RECORD call=%s voice_id=%s — no VoiceAsset with "
-                "asset_kind='sample' for this voice",
-                call_id, voice.id,
-            )
+        preparation = await self._voice_preparation(voice, voice_blob_dir)
+        if preparation.engine_id != call.engine_id:
             raise CallVoiceUnavailableError()
-        storage_name = Path(asset.storage_path).name
-        if storage_name != asset.storage_path:
-            logger.warning(
-                "[voice-ref] STORAGE_PATH_NOT_PLAIN call=%s voice_id=%s asset_id=%s "
-                "storage_path=%r storage_name=%r — path contains directory components",
-                call_id, voice.id, asset.id, asset.storage_path, storage_name,
-            )
-            raise CallVoiceUnavailableError()
-        sample_path = voice_blob_dir / storage_name
-        if not sample_path.is_file():
-            logger.warning(
-                "[voice-ref] FILE_MISSING call=%s voice_id=%s asset_id=%s "
-                "expected_path=%s blob_dir_exists=%s blob_dir_contents=%s",
-                call_id, voice.id, asset.id, sample_path,
-                voice_blob_dir.is_dir(),
-                list(voice_blob_dir.iterdir()) if voice_blob_dir.is_dir() else "N/A",
-            )
-            raise CallVoiceUnavailableError()
-        logger.info(
-            "[voice-ref] OK call=%s voice_id=%s asset_id=%s file_size=%d",
-            call_id, voice.id, asset.id, sample_path.stat().st_size,
-        )
-        voice_reference = {
-            "reference_audio_base64": base64.b64encode(sample_path.read_bytes()).decode("ascii"),
-            "reference_audio_content_type": asset.content_type,
-            "reference_transcript": voice.reference_transcript,
-        }
+        if preparation.reference_payload is not None:
+            voice_reference = dict(preparation.reference_payload)
+        else:
+            voice_reference = await self._standard_voice_reference(voice, voice_blob_dir)
         if call.engine_id == VOXCPM2_ENGINE_ID:
             try:
                 voice_reference.update(_voxcpm2_call_fields(voice.metadata_json))
@@ -273,6 +271,18 @@ class CallService:
                 )
                 raise CallVoiceUnavailableError() from None
         return voice_reference
+
+    async def voice_preparation_for_call(
+        self,
+        call_id: str,
+        voice_blob_dir: Path,
+    ) -> CallVoicePreparation:
+        call = self._active_call(call_id)
+        voice = await self._required_available_voice(call.voice_id)
+        preparation = await self._voice_preparation(voice, voice_blob_dir)
+        if preparation.engine_id != call.engine_id:
+            raise CallVoiceUnavailableError()
+        return preparation
 
     async def end_call(self, call_id: str, reason: str = "hangup") -> dict[str, Any]:
         call = self._active_call(call_id)
@@ -311,6 +321,18 @@ class CallService:
             raise CharacterUnavailableError(thread.character_id)
         return character
 
+    async def _get_character(self, character_id: str) -> Character:
+        result = await self.session.execute(
+            select(Character).where(
+                Character.id == character_id,
+                Character.deleted_at.is_(None),
+            )
+        )
+        character = result.scalar_one_or_none()
+        if character is None:
+            raise CharacterUnavailableError(character_id)
+        return character
+
     async def _required_available_voice(self, voice_id: str | None) -> Voice:
         if not voice_id:
             raise CallVoiceRequiredError()
@@ -320,6 +342,72 @@ class CallService:
         if voice is None or voice.deleted_at is not None:
             raise CallVoiceUnavailableError()
         return voice
+
+    async def _voice_preparation(
+        self,
+        voice: Voice,
+        voice_blob_dir: Path,
+    ) -> CallVoicePreparation:
+        engine_id = canonical_voice_engine_id_for_read(voice.default_engine)
+        if engine_id != QWEN3_ENGINE_ID:
+            return CallVoicePreparation(
+                voice_id=voice.id,
+                backend_voice_id=voice.id,
+                engine_id=engine_id,
+            )
+
+        voice_service = VoiceService(self.session, voice_blob_dir, processor=object())
+        try:
+            asset = await voice_service.asset_for_voice(voice.id)
+            if asset is None:
+                raise VoiceAssetNotFoundError(voice.id)
+            sample = await voice_service.sample_blob(asset.id)
+            authorized = validate_saved_qwen3_reference(
+                voice,
+                asset,
+                reference_bytes=sample.path.read_bytes(),
+                content_type=sample.content_type,
+            )
+        except (OSError, VoiceAssetNotFoundError, VoiceMetadataValidationError):
+            logger.warning(
+                "[voice-ref] qwen_reference_rejected voice_id=%s",
+                voice.id,
+            )
+            raise CallVoiceUnavailableError() from None
+        return CallVoicePreparation(
+            voice_id=voice.id,
+            backend_voice_id=authorized.voice_key,
+            engine_id=engine_id,
+            reference_payload={
+                "voice_id": authorized.voice_key,
+                "reference_audio_base64": base64.b64encode(authorized.reference_bytes).decode(
+                    "ascii"
+                ),
+                "reference_audio_content_type": authorized.content_type,
+                "reference_transcript": authorized.reference_transcript,
+            },
+        )
+
+    async def _standard_voice_reference(
+        self,
+        voice: Voice,
+        voice_blob_dir: Path,
+    ) -> dict[str, Any]:
+        voice_service = VoiceService(self.session, voice_blob_dir, processor=object())
+        asset = await voice_service.asset_for_voice(voice.id)
+        if asset is None:
+            raise CallVoiceUnavailableError()
+        try:
+            sample = await voice_service.sample_blob(asset.id)
+            reference_bytes = sample.path.read_bytes()
+        except (OSError, VoiceAssetNotFoundError):
+            logger.warning("[voice-ref] saved_reference_unavailable voice_id=%s", voice.id)
+            raise CallVoiceUnavailableError() from None
+        return {
+            "reference_audio_base64": base64.b64encode(reference_bytes).decode("ascii"),
+            "reference_audio_content_type": asset.content_type,
+            "reference_transcript": voice.reference_transcript,
+        }
 
     async def _append_message(
         self,
@@ -372,7 +460,9 @@ class CallService:
 
 def _voxcpm2_call_fields(metadata: Any) -> dict[str, Any]:
     engine_settings = metadata.get("engine_settings") if isinstance(metadata, dict) else None
-    raw_settings = engine_settings.get(VOXCPM2_ENGINE_ID) if isinstance(engine_settings, dict) else None
+    raw_settings = (
+        engine_settings.get(VOXCPM2_ENGINE_ID) if isinstance(engine_settings, dict) else None
+    )
     settings = normalize_voxcpm2_engine_settings(raw_settings)
     return {
         "voxcpm2_cloning_mode": settings["cloning_mode"],

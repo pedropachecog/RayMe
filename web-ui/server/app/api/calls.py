@@ -15,10 +15,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-logger = logging.getLogger(__name__)
-
 from app.config import Settings
-from app.domain.ai_backend_client import AiBackendClient, AiBackendClientError, AiBackendUnavailable
+from app.domain.ai_backend_client import (
+    AiBackendClient,
+    AiBackendClientError,
+    AiBackendProcessingError,
+    AiBackendUnavailable,
+)
 from app.domain.call_service import (
     CALL_SESSION_NOT_FOUND,
     CallService,
@@ -31,6 +34,8 @@ from app.domain.settings_service import SettingsService
 from app.domain.thread_service import CharacterUnavailableError, ThreadNotFoundError
 from app.storage.session import SERVER_ROOT, get_session
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/api/calls", tags=["calls"])
 DEFAULT_CALL_VOICE_BLOB_DIR = SERVER_ROOT / "data" / "blobs" / "voices"
 
@@ -40,9 +45,7 @@ CALL_ORIGIN_NOT_ALLOWED = "call_origin_not_allowed"
 CALL_SESSION_NOT_FOUND_CODE = "call_session_not_found"
 CALL_GENERATION_FAILED = "call_generation_failed"
 RAYME_EVENTS_CHANNEL = "rayme-events"
-CALL_BACKEND_NOT_READY_MESSAGE = (
-    "RayMe voice backend is not ready. Check Settings, then try again."
-)
+CALL_BACKEND_NOT_READY_MESSAGE = "RayMe voice backend is not ready. Check Settings, then try again."
 _ACTIVE_LLM_TURNS: dict[str, asyncio.Task[Any]] = {}
 
 
@@ -190,19 +193,31 @@ async def enforce_same_origin_for_calls(
         )
 
 
-@router.post("/start", status_code=status.HTTP_201_CREATED, dependencies=[Depends(enforce_same_origin_for_calls)])
+@router.post(
+    "/start",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(enforce_same_origin_for_calls)],
+)
 async def start_call(
     payload: CallStartRequest,
     session: AsyncSession = Depends(get_call_session),
     runtime_settings: Settings = Depends(get_call_runtime_settings),
     backend: Any = Depends(get_call_backend_client),
+    voice_blob_dir: Path = Depends(get_call_voice_blob_dir),
 ) -> dict[str, Any]:
     endpoint_settings = await SettingsService(session, runtime_settings).read()
-    await _ensure_backend_ready(backend, endpoint_settings.ai_backend_url)
+    service = CallService(session)
     try:
-        return await CallService(session).start_call(
+        preflight = await service.preflight_call_voice(
             thread_id=payload.thread_id,
             character_id=payload.character_id,
+            voice_blob_dir=voice_blob_dir,
+        )
+        await _ensure_backend_ready(backend, endpoint_settings.ai_backend_url)
+        return await service.start_call(
+            thread_id=payload.thread_id,
+            character_id=payload.character_id,
+            preflight=preflight,
         )
     except CallServiceError as exc:
         raise _call_error(exc) from exc
@@ -217,6 +232,7 @@ async def create_call_offer(
     session: AsyncSession = Depends(get_call_session),
     runtime_settings: Settings = Depends(get_call_runtime_settings),
     backend: Any = Depends(get_call_backend_client),
+    voice_blob_dir: Path = Depends(get_call_voice_blob_dir),
 ) -> dict[str, Any]:
     service = CallService(session)
     try:
@@ -224,11 +240,15 @@ async def create_call_offer(
         _reject_mismatched_session(stored_session_id, payload.session_id)
         call = service.attach_session(call_id, stored_session_id)
         endpoint_settings = await SettingsService(session, runtime_settings).read()
+        voice_preparation = await service.voice_preparation_for_call(
+            call_id,
+            voice_blob_dir,
+        )
         offer_payload = {
             "session_id": stored_session_id,
             "thread_id": call["thread_id"],
-            "voice_id": call["voice_id"],
-            "engine_id": call["engine_id"],
+            "voice_id": voice_preparation.backend_voice_id,
+            "engine_id": voice_preparation.engine_id,
             "prompt_messages": await build_call_prompt_context(
                 call["thread_id"],
                 repository=SqlAlchemyPromptRepository(session),
@@ -239,12 +259,22 @@ async def create_call_offer(
         response = await _create_offer(backend, endpoint_settings.ai_backend_url, offer_payload)
         returned_session_id = str(response.get("session_id") or stored_session_id)
         service.attach_session(call_id, returned_session_id)
-        return {
+        result = {
             "call_id": call_id,
             "session_id": returned_session_id,
             "answer": response.get("answer"),
             "event_channel": RAYME_EVENTS_CHANNEL,
         }
+        if voice_preparation.reference_payload is not None:
+            result["preparation"] = await _prepare_call_voice(
+                backend,
+                endpoint_settings.ai_backend_url,
+                returned_session_id,
+                engine_id=voice_preparation.engine_id,
+                voice_id=voice_preparation.backend_voice_id,
+                reference_payload=voice_preparation.reference_payload,
+            )
+        return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except CallServiceError as exc:
@@ -340,9 +370,7 @@ async def create_call_turn(
                     }
                 )
 
-            return StreamingResponse(
-                _voice_unavailable_events(), media_type="text/event-stream"
-            )
+            return StreamingResponse(_voice_unavailable_events(), media_type="text/event-stream")
         endpoint_settings = await SettingsService(session, runtime_settings).read()
     except CallServiceError as exc:
         raise _call_error(exc) from exc
@@ -668,6 +696,121 @@ async def _create_offer(backend: Any, base_url: str, payload: Mapping[str, Any])
     return dict(await backend.create_webrtc_offer(base_url, payload))
 
 
+async def _prepare_call_voice(
+    backend: Any,
+    base_url: str,
+    session_id: str,
+    *,
+    engine_id: str,
+    voice_id: str,
+    reference_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not hasattr(backend, "prepare_call_speech"):
+        raise _missing_backend_method("prepare_call_speech")
+    preparation = dict(
+        await backend.prepare_call_speech(
+            base_url,
+            session_id,
+            {
+                "voice_id": voice_id,
+                "engine_id": engine_id,
+                "reference_audio_base64": reference_payload["reference_audio_base64"],
+                "reference_audio_content_type": reference_payload.get(
+                    "reference_audio_content_type"
+                ),
+                "reference_transcript": reference_payload["reference_transcript"],
+            },
+        )
+    )
+    readiness = _call_preparation_readiness(
+        preparation,
+        engine_id=engine_id,
+        voice_id=voice_id,
+    )
+    if readiness["prompt"]["state"] == "ready":
+        return readiness
+    _raise_failed_call_preparation(readiness)
+
+    if not hasattr(backend, "get_tts_preparation_status"):
+        raise _missing_backend_method("get_tts_preparation_status")
+    for _ in range(20):
+        status_payload = dict(await backend.get_tts_preparation_status(base_url))
+        readiness = _call_preparation_readiness(
+            status_payload,
+            engine_id=engine_id,
+            voice_id=voice_id,
+        )
+        if readiness["prompt"]["state"] == "ready":
+            return readiness
+        _raise_failed_call_preparation(readiness)
+        await asyncio.sleep(0.05)
+    raise AiBackendProcessingError(
+        code="call_tts_prepare_failed",
+        message="Voice preparation failed",
+    )
+
+
+def _call_preparation_readiness(
+    payload: Mapping[str, Any],
+    *,
+    engine_id: str,
+    voice_id: str,
+) -> dict[str, Any]:
+    raw_model = payload.get("model")
+    raw_prompt = payload.get("prompt")
+    model = raw_model if isinstance(raw_model, Mapping) else {}
+    prompt = raw_prompt if isinstance(raw_prompt, Mapping) else {}
+    model_state = model.get("state", payload.get("model_state"))
+    model_engine = model.get("engine_id", payload.get("engine_id"))
+    if model_state == "ready":
+        model_state = "resident"
+    if model_state not in {"idle", "loading", "resident", "failed"}:
+        model_state = "idle"
+    if model_engine != engine_id:
+        model_engine = None
+
+    prompt_state = prompt.get("state", payload.get("prompt_state"))
+    prompt_voice_key = prompt.get("voice_key", payload.get("voice_key"))
+    error_code = prompt.get("error_code", payload.get("error_code"))
+    if prompt_state not in {"none", "prewarming", "ready", "failed"}:
+        prompt_state = "none"
+    if prompt_voice_key != voice_id:
+        prompt_state = "failed"
+        prompt_voice_key = None
+        error_code = "call_tts_prepare_mismatch"
+    if not isinstance(error_code, str) or error_code not in {
+        "qwen3_alignment_failed",
+        "qwen3_prompt_failed",
+        "qwen3_prompt_not_ready",
+        "qwen3_transcript_mismatch",
+        "qwen3_worker_protocol",
+        "qwen3_worker_timeout",
+        "qwen3_worker_stopped",
+        "call_tts_prepare_mismatch",
+        "call_tts_prepare_unavailable",
+        "call_tts_prepare_failed",
+    }:
+        error_code = None
+    return {
+        "model": {"state": model_state, "engine_id": model_engine},
+        "prompt": {
+            "state": prompt_state,
+            "voice_key": prompt_voice_key,
+            "error_code": error_code,
+        },
+    }
+
+
+def _raise_failed_call_preparation(readiness: Mapping[str, Any]) -> None:
+    prompt = readiness.get("prompt")
+    if not isinstance(prompt, Mapping) or prompt.get("state") != "failed":
+        return
+    code = prompt.get("error_code")
+    if not isinstance(code, str) or not code:
+        code = "call_tts_prepare_failed"
+    raise AiBackendProcessingError(code=code, message="Voice preparation failed")
+
+
 async def _mute_call(backend: Any, base_url: str, session_id: str, muted: bool) -> dict[str, Any]:
     if not hasattr(backend, "mute_call"):
         raise _missing_backend_method("mute_call")
@@ -748,8 +891,7 @@ async def _speak_call_sync(
         return True
     except AiBackendClientError as exc:
         logger.warning(
-            "[call-turn] speak_call.sync_failed turn=%s session=%s "
-            "code=%s message=%s",
+            "[call-turn] speak_call.sync_failed turn=%s session=%s code=%s message=%s",
             turn_id,
             session_id,
             exc.code,
@@ -810,7 +952,9 @@ def _decode_sse_event(raw_event: str) -> dict[str, Any]:
     return {}
 
 
-def _extract_ai_audio_started_event(speak_result: Mapping[str, Any] | None) -> dict[str, Any] | None:
+def _extract_ai_audio_started_event(
+    speak_result: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
     if speak_result is None:
         return None
     event = speak_result.get("event")
