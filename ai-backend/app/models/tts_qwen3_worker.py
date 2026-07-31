@@ -158,6 +158,9 @@ def _dispatch(command: QwenWorkerCommand) -> bool:
         try:
             if _RUNTIME is None:
                 raise RuntimeError("runtime not loaded")
+            # Capacity one means a failed replacement can never leave the
+            # previous prompt silently selectable under a changed reference.
+            _PREPARED_PROMPT = None
             prepared = prepare_voice_prompt(_RUNTIME, command)
             _PREPARED_PROMPT = prepared
             _emit_event(
@@ -324,12 +327,12 @@ def prepare_voice_prompt(runtime: Any, command: QwenPrewarmCommand) -> PreparedV
     )
     prompt_items = runtime.model.create_voice_clone_prompt(
         ref_audio=(audio, int(sample_rate)),
-        ref_text=command.reference_transcript.strip(),
+        ref_text=command.reference_transcript,
         x_vector_only_mode=False,
     )
     return PreparedVoicePrompt(
         voice_key=command.voice_key,
-        reference_transcript=command.reference_transcript.strip(),
+        reference_transcript=command.reference_transcript,
         prompt_items=prompt_items,
     )
 
@@ -387,7 +390,15 @@ def iter_generation_events(
                 return
             timing_steps = _timing_steps(timing)
             total_steps = max(last_steps + CHUNK_SIZE, timing_steps)
-            total_steps = min(total_steps, command.max_new_tokens)
+            if total_steps >= command.max_new_tokens:
+                yield QwenTerminalEvent(
+                    event="error",
+                    request_id=command.request_id,
+                    chunk_count=chunk_count,
+                    natural_eos=False,
+                    error_code="qwen3_generation_ceiling",
+                )
+                return
             if total_steps <= last_steps:
                 raise ValueError("non-monotonic Qwen3 generation steps")
             last_steps = total_steps
@@ -470,7 +481,11 @@ def _wav_bytes(audio: Any, sample_rate: int) -> bytes:
     import soundfile as sf
 
     wav = np.asarray(audio, dtype=np.float32).reshape(-1)
-    if wav.size == 0 or not np.isfinite(wav).all():
+    if (
+        wav.size == 0
+        or not np.isfinite(wav).all()
+        or float(np.max(np.abs(wav))) <= 1e-5
+    ):
         raise ValueError("invalid Qwen3 audio chunk")
     buffer = BytesIO()
     sf.write(buffer, wav, sample_rate, format="WAV")

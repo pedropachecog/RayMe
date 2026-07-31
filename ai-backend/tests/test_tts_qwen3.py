@@ -445,7 +445,11 @@ class ScriptedQwenWorkerProcess:
                                 "chunk_index": index,
                                 "wav_b64": _audio_b64(wav_bytes),
                                 "sample_rate": 24000,
-                                "duration_ms": 320.0,
+                                "duration_ms": (
+                                    120.0
+                                    if self.process.generate_mutation == "duration_mismatch"
+                                    else 320.0
+                                ),
                                 "generated_at_ms": 370.0 + 320.0 * index,
                                 "total_steps_so_far": 4 * (index + 1),
                             }
@@ -453,10 +457,19 @@ class ScriptedQwenWorkerProcess:
                     self.process.emit(
                         {
                             "schema_version": 1,
-                            "event": "done",
+                            "event": (
+                                "error"
+                                if self.process.generate_mutation == "ceiling"
+                                else "done"
+                            ),
                             "request_id": request_id,
                             "chunk_count": 2,
-                            "natural_eos": True,
+                            "natural_eos": self.process.generate_mutation != "ceiling",
+                            **(
+                                {"error_code": "qwen3_generation_ceiling"}
+                                if self.process.generate_mutation == "ceiling"
+                                else {}
+                            ),
                         }
                     )
             elif payload["op"] == "cancel" and self.process.acknowledge_cancel:
@@ -579,7 +592,10 @@ def test_qwen_adapter_owns_spawned_load_prewarm_stream_invalidate_unload_lifecyc
         "unload",
     ]
     generate = process.ops[2]
-    assert generate["voice_key"] == "voice_0123456789abcdef"
+    assert generate["voice_key"] == qwen.qwen_prompt_cache_key(
+        b"RIFF-reference",
+        "The exact spoken reference.",
+    )
     assert generate["max_new_tokens"] <= 384
     assert generate["hard_audio_seconds"] <= 32.0
     assert "reference_audio_b64" not in generate
@@ -650,7 +666,7 @@ def test_qwen_adapter_rejects_wrong_request_worker_event_and_contains_process(
     assert process.terminated is True
 
 
-@pytest.mark.parametrize("mutation", ["non_wav", "silent"])
+@pytest.mark.parametrize("mutation", ["non_wav", "silent", "duration_mismatch"])
 def test_qwen_adapter_rejects_malformed_or_silent_worker_audio_and_contains_process(
     mutation: str,
     qwen_runtime_available: None,
@@ -670,6 +686,64 @@ def test_qwen_adapter_rejects_malformed_or_silent_worker_audio_and_contains_proc
 
     assert raised.value.code == "qwen3_worker_protocol"
     assert process.terminated is True
+
+
+def test_qwen_adapter_exposes_ceiling_as_request_failure_without_poisoning_worker(
+    qwen_runtime_available: None,
+) -> None:
+    qwen = _qwen_module()
+    process = ScriptedQwenWorkerProcess(generate_mutation="ceiling")
+    adapter = qwen.Qwen3TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
+    adapter.load()
+    adapter.prewarm(
+        voice_key="voice_0123456789abcdef",
+        reference_audio=_valid_wav_bytes(),
+        reference_transcript="The exact spoken reference.",
+    )
+
+    with pytest.raises(qwen.Qwen3GenerationCeilingError) as raised:
+        list(adapter.stream(_request(), request_id="turn-ceiling"))
+
+    assert raised.value.code == "qwen3_generation_ceiling"
+    assert raised.value.marks_engine_unavailable is False
+    assert adapter.loaded is True
+    assert process.terminated is False
+
+
+def test_qwen_adapter_protocol_failure_drops_prompt_and_allows_clean_worker_reload(
+    qwen_runtime_available: None,
+) -> None:
+    qwen = _qwen_module()
+    failed_process = ScriptedQwenWorkerProcess(generate_mutation="wrong_request")
+    recovered_process = ScriptedQwenWorkerProcess()
+    processes = iter((failed_process, recovered_process))
+    adapter = qwen.Qwen3TtsAdapter(
+        process_factory=lambda *_args, **_kwargs: next(processes)
+    )
+    adapter.load()
+    adapter.prewarm(
+        voice_key="voice_0123456789abcdef",
+        reference_audio=_valid_wav_bytes(),
+        reference_transcript="The exact spoken reference.",
+    )
+
+    with pytest.raises(qwen.Qwen3WorkerProtocolError):
+        list(adapter.stream(_request(), request_id="turn-failed"))
+
+    assert adapter.loaded is False
+    assert adapter.selected_voice_key is None
+    adapter.load()
+    adapter.prewarm(
+        voice_key="voice_recovered",
+        reference_audio=_valid_wav_bytes(amplitude=1024),
+        reference_transcript="A new exact spoken reference.",
+    )
+    chunks = list(
+        adapter.stream(_request(), request_id="turn-recovered", voice_key="voice_recovered")
+    )
+
+    assert [chunk.chunk_index for chunk in chunks] == [0, 1]
+    assert recovered_process.terminated is False
 
 
 def test_qwen_prompt_cache_key_is_content_bound_but_uses_comparison_normalization() -> None:

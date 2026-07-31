@@ -1,16 +1,20 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import math
 import os
 import queue as thread_queue
+import re
 import subprocess
 import sys
 import threading
 import time
+import unicodedata
 import uuid
 from collections.abc import Callable, Iterable
+from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +50,11 @@ WORKER_PREWARM_TIMEOUT_SECONDS = 120.0
 WORKER_STREAM_EVENT_TIMEOUT_SECONDS = 60.0
 WORKER_CONTROL_TIMEOUT_SECONDS = 5.0
 WORKER_CANCEL_TIMEOUT_SECONDS = 2.0
+QWEN_MODEL_REVISION = "fd4b254389122332181a7c3db7f27e918eec64e3"
+QWEN_CLONE_MODE = "full_icl"
+QWEN_APPEND_SILENCE = True
+QWEN_MIN_AUDIO_PEAK = 1e-5
+QWEN_AUDIO_DURATION_TOLERANCE_MS = 10.0
 
 ProcessFactory = Callable[..., subprocess.Popen[str]]
 
@@ -53,9 +62,49 @@ ProcessFactory = Callable[..., subprocess.Popen[str]]
 class Qwen3WorkerError(ValueError):
     """A sanitized engine-scoped worker failure."""
 
+    default_code = "qwen3_worker_failed"
+    marks_engine_unavailable = False
 
-class Qwen3WorkerProtocolError(Qwen3WorkerError):
+    def __init__(self, message: str, *, code: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code or self.default_code
+
+
+class Qwen3ValidationError(Qwen3WorkerError):
+    """The request can be corrected without reloading the Qwen runtime."""
+
+    default_code = "qwen3_validation_failed"
+
+
+class Qwen3PromptError(Qwen3WorkerError):
+    """Prompt preparation failed for one content-bound voice identity."""
+
+    default_code = "qwen3_prompt_failed"
+
+
+class Qwen3GenerationError(Qwen3WorkerError):
+    """One generation failed without proving the worker identity is corrupt."""
+
+    default_code = "qwen3_generation_failed"
+
+
+class Qwen3GenerationCeilingError(Qwen3GenerationError):
+    """The request hit its text-relative audio/token safety ceiling."""
+
+    default_code = "qwen3_generation_ceiling"
+
+
+class Qwen3RuntimeError(Qwen3WorkerError):
+    """The isolated worker/runtime failed and must be explicitly reloaded."""
+
+    default_code = "qwen3_runtime_failed"
+    marks_engine_unavailable = True
+
+
+class Qwen3WorkerProtocolError(Qwen3RuntimeError):
     """The worker violated the validated request-scoped IPC contract."""
+
+    default_code = "qwen3_worker_protocol"
 
 
 class Qwen3TtsAdapter(ImportGatedTtsAdapter):
@@ -75,6 +124,7 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
         self._cancel_acknowledgements: dict[str, threading.Event] = {}
         self._cancelled_terminals: set[str] = set()
         self._selected_voice_key: str | None = None
+        self._selected_prompt_key: str | None = None
 
     @property
     def selected_voice_key(self) -> str | None:
@@ -97,7 +147,15 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
             request_id = _new_request_id("load")
             self._send_command(QwenLoadCommand(op="load", request_id=request_id))
             event = self._read_event(timeout_seconds=WORKER_LOAD_TIMEOUT_SECONDS)
-            if not isinstance(event, QwenLoadedEvent) or event.request_id != request_id:
+            if event.request_id != request_id:
+                self._fail_protocol("invalid Qwen3 load request identity")
+            if isinstance(event, QwenTerminalEvent) and event.event == "error":
+                self._stop_worker()
+                raise Qwen3RuntimeError(
+                    "Qwen3 runtime load failed",
+                    code=event.error_code,
+                )
+            if not isinstance(event, QwenLoadedEvent):
                 self._fail_protocol("invalid Qwen3 load acknowledgement")
             self.loaded = True
 
@@ -111,24 +169,47 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
         with self._operation_lock:
             if not self.loaded:
                 self.load()
+            if not reference_audio:
+                raise Qwen3ValidationError(
+                    "Qwen3 reference audio is required",
+                    code="qwen3_reference_audio_required",
+                )
+            if not reference_transcript.strip():
+                raise Qwen3ValidationError(
+                    "Qwen3 reference transcript is required",
+                    code="qwen3_transcript_required",
+                )
+            prompt_key = qwen_prompt_cache_key(
+                reference_audio,
+                reference_transcript,
+            )
             request_id = _new_request_id("prewarm")
             command = QwenPrewarmCommand(
                 op="prewarm",
                 request_id=request_id,
-                voice_key=voice_key,
+                voice_key=prompt_key,
                 reference_audio_b64=base64.b64encode(reference_audio).decode("ascii"),
                 reference_transcript=reference_transcript,
             )
+            self._selected_voice_key = None
+            self._selected_prompt_key = None
             self._send_command(command)
             event = self._read_event(timeout_seconds=WORKER_PREWARM_TIMEOUT_SECONDS)
             if event.request_id != request_id:
                 self._fail_protocol("invalid Qwen3 prewarm request identity")
             if isinstance(event, QwenPromptFailedEvent):
-                raise Qwen3WorkerError("Qwen3 voice prompt preparation failed")
-            if not isinstance(event, QwenPromptReadyEvent) or event.voice_key != voice_key:
+                raise Qwen3PromptError(
+                    "Qwen3 voice prompt preparation failed",
+                    code=event.error_code,
+                )
+            if (
+                not isinstance(event, QwenPromptReadyEvent)
+                or event.voice_key != prompt_key
+            ):
                 self._fail_protocol("invalid Qwen3 prewarm acknowledgement")
             self._selected_voice_key = voice_key
-            return event
+            self._selected_prompt_key = prompt_key
+            return event.model_copy(update={"voice_key": voice_key})
 
     def stream(
         self,
@@ -141,14 +222,22 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
             if not self.loaded:
                 self.load()
             selected_voice_key = voice_key or self._selected_voice_key
-            if not selected_voice_key or selected_voice_key != self._selected_voice_key:
-                raise Qwen3WorkerError("Qwen3 voice prompt is not ready")
+            selected_prompt_key = self._selected_prompt_key
+            if (
+                not selected_voice_key
+                or selected_voice_key != self._selected_voice_key
+                or selected_prompt_key is None
+            ):
+                raise Qwen3PromptError(
+                    "Qwen3 voice prompt is not ready",
+                    code="qwen3_prompt_not_ready",
+                )
             generation_request_id = request_id or _new_request_id("generate")
             max_new_tokens, hard_audio_seconds = _generation_limits(request.text)
             command = QwenGenerateCommand(
                 op="generate",
                 request_id=generation_request_id,
-                voice_key=selected_voice_key,
+                voice_key=selected_prompt_key,
                 text=request.text,
                 max_new_tokens=max_new_tokens,
                 hard_audio_seconds=hard_audio_seconds,
@@ -177,10 +266,17 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                             cause=exc,
                         )
                     if isinstance(event, QwenChunkEvent):
+                        try:
+                            wav_bytes = _validate_worker_wav(event)
+                        except Exception as exc:
+                            self._fail_protocol(
+                                "invalid Qwen3 worker audio",
+                                cause=exc,
+                            )
                         yield TtsAudioChunk(
                             engine_id=self.engine_id,
                             chunk_index=event.chunk_index,
-                            wav_bytes=event.wav_bytes(),
+                            wav_bytes=wav_bytes,
                             sample_rate=event.sample_rate,
                             duration_ms=event.duration_ms,
                             generated_at_ms=event.generated_at_ms,
@@ -194,9 +290,15 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                             cancel_ack.set()
                         return
                     if event.event == "error":
-                        raise Qwen3WorkerError("Qwen3 streaming generation failed")
+                        error = _generation_terminal_error(event.error_code)
+                        if error.marks_engine_unavailable:
+                            self._stop_worker()
+                        raise error
                     if event.chunk_count == 0:
-                        raise Qwen3WorkerError("Qwen3 stream produced no audio")
+                        raise Qwen3GenerationError(
+                            "Qwen3 stream produced no audio",
+                            code="qwen3_no_audio",
+                        )
                     return
             finally:
                 with self._active_lock:
@@ -235,24 +337,31 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
         with self._operation_lock:
             if not self.loaded:
                 self._selected_voice_key = None
+                self._selected_prompt_key = None
                 return
+            prompt_key = (
+                self._selected_prompt_key
+                if self._selected_voice_key == voice_key
+                else voice_key
+            )
             request_id = _new_request_id("invalidate")
             self._send_command(
                 QwenInvalidateCommand(
                     op="invalidate",
                     request_id=request_id,
-                    voice_key=voice_key,
+                    voice_key=prompt_key,
                 )
             )
             event = self._read_event(timeout_seconds=WORKER_CONTROL_TIMEOUT_SECONDS)
             if (
                 not isinstance(event, QwenInvalidatedEvent)
                 or event.request_id != request_id
-                or event.voice_key != voice_key
+                or event.voice_key != prompt_key
             ):
                 self._fail_protocol("invalid Qwen3 invalidate acknowledgement")
             if self._selected_voice_key == voice_key:
                 self._selected_voice_key = None
+                self._selected_prompt_key = None
 
     def unload(self) -> None:
         active_request_id = self.active_request_id
@@ -279,6 +388,7 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                     pass
             self.loaded = False
             self._selected_voice_key = None
+            self._selected_prompt_key = None
             self._stop_worker()
 
     def _ensure_worker(self) -> subprocess.Popen[str]:
@@ -293,16 +403,25 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
             if not existing_pythonpath
             else f"{ai_backend_root}{os.pathsep}{existing_pythonpath}"
         )
-        self._worker = self._process_factory(
-            [_worker_python_executable(), "-m", "app.models.tts_qwen3_worker"],
-            cwd=str(ai_backend_root),
-            env=env,
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-            text=True,
-            bufsize=1,
-        )
+        try:
+            self._worker = self._process_factory(
+                [_worker_python_executable(), "-m", "app.models.tts_qwen3_worker"],
+                cwd=str(ai_backend_root),
+                env=env,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                bufsize=1,
+            )
+        except Qwen3WorkerError:
+            raise
+        except Exception as exc:
+            self._stop_worker()
+            raise Qwen3RuntimeError(
+                "Qwen3 worker unavailable",
+                code="qwen3_worker_unavailable",
+            ) from exc
         self._worker_lines = thread_queue.Queue()
         self._start_worker_reader(self._worker)
         return self._worker
@@ -338,26 +457,41 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                 worker.stdin.flush()
         except (BrokenPipeError, OSError) as exc:
             self._stop_worker()
-            raise Qwen3WorkerError("Qwen3 worker unavailable") from exc
+            raise Qwen3RuntimeError(
+                "Qwen3 worker unavailable",
+                code="qwen3_worker_unavailable",
+            ) from exc
 
     def _read_event(self, *, timeout_seconds: float) -> QwenWorkerEvent:
         lines = self._worker_lines
         if lines is None:
-            raise Qwen3WorkerError("Qwen3 worker unavailable")
+            raise Qwen3RuntimeError(
+                "Qwen3 worker unavailable",
+                code="qwen3_worker_unavailable",
+            )
         deadline = time.monotonic() + timeout_seconds
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 self._stop_worker()
-                raise Qwen3WorkerError("Qwen3 worker timed out")
+                raise Qwen3RuntimeError(
+                    "Qwen3 worker timed out",
+                    code="qwen3_worker_timeout",
+                )
             try:
                 line = lines.get(timeout=remaining)
             except thread_queue.Empty as exc:
                 self._stop_worker()
-                raise Qwen3WorkerError("Qwen3 worker timed out") from exc
+                raise Qwen3RuntimeError(
+                    "Qwen3 worker timed out",
+                    code="qwen3_worker_timeout",
+                ) from exc
             if line is None:
                 self._stop_worker()
-                raise Qwen3WorkerError("Qwen3 worker stopped")
+                raise Qwen3RuntimeError(
+                    "Qwen3 worker stopped",
+                    code="qwen3_worker_stopped",
+                )
             if not line.startswith(WORKER_EVENT_PREFIX):
                 continue
             try:
@@ -378,6 +512,7 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
         self._worker_lines = None
         self.loaded = False
         self._selected_voice_key = None
+        self._selected_prompt_key = None
         with self._active_lock:
             acknowledgements = list(self._cancel_acknowledgements.values())
         for acknowledgement in acknowledgements:
@@ -401,13 +536,105 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
 def _generation_limits(text: str) -> tuple[int, float]:
     word_count = len(text.split())
     if word_count == 0:
-        raise Qwen3WorkerError("Qwen3 target text is required")
+        raise Qwen3ValidationError(
+            "Qwen3 target text is required",
+            code="qwen3_target_required",
+        )
     if word_count > 60:
-        raise Qwen3WorkerError("Qwen3 target segment is too long")
+        raise Qwen3ValidationError(
+            "Qwen3 target segment is too long",
+            code="qwen3_target_too_long",
+        )
     expected_seconds = max(1.0, word_count / 2.2)
     hard_audio_seconds = min(32.0, max(6.0, expected_seconds * 2.25 + 2.0))
     max_new_tokens = min(384, math.ceil(hard_audio_seconds * 12 / 4) * 4)
     return max_new_tokens, round(hard_audio_seconds, 3)
+
+
+def qwen_prompt_cache_key(reference_audio: bytes, reference_transcript: str) -> str:
+    """Return the capacity-one worker identity without exposing clone material."""
+    normalized_transcript = _normalize_comparison_text(reference_transcript)
+    if not reference_audio:
+        raise Qwen3ValidationError(
+            "Qwen3 reference audio is required",
+            code="qwen3_reference_audio_required",
+        )
+    if not normalized_transcript:
+        raise Qwen3ValidationError(
+            "Qwen3 reference transcript is required",
+            code="qwen3_transcript_required",
+        )
+    reference_digest = hashlib.sha256(reference_audio).hexdigest()
+    identity = "\0".join(
+        (
+            reference_digest,
+            normalized_transcript,
+            QWEN_MODEL_REVISION,
+            QWEN_CLONE_MODE,
+            f"append_silence={str(QWEN_APPEND_SILENCE).lower()}",
+        )
+    ).encode("utf-8")
+    return "prompt_" + hashlib.sha256(identity).hexdigest()
+
+
+def _normalize_comparison_text(value: str) -> str:
+    decomposed = unicodedata.normalize("NFKD", value.casefold())
+    without_marks = "".join(
+        character
+        for character in decomposed
+        if unicodedata.category(character) != "Mn"
+    )
+    return " ".join(re.findall(r"[a-z0-9]+", without_marks))
+
+
+def _validate_worker_wav(event: QwenChunkEvent) -> bytes:
+    import numpy as np
+    import soundfile as sf
+
+    wav_bytes = event.wav_bytes()
+    try:
+        audio, sample_rate = sf.read(
+            BytesIO(wav_bytes),
+            dtype="float32",
+            always_2d=True,
+        )
+    except Exception as exc:
+        raise ValueError("invalid worker WAV") from exc
+    samples = np.asarray(audio, dtype=np.float32)
+    if int(sample_rate) != event.sample_rate or samples.ndim != 2:
+        raise ValueError("invalid worker WAV format")
+    if samples.shape[0] == 0 or samples.shape[1] != 1:
+        raise ValueError("invalid worker WAV channels")
+    if not np.isfinite(samples).all():
+        raise ValueError("non-finite worker WAV")
+    if float(np.max(np.abs(samples))) <= QWEN_MIN_AUDIO_PEAK:
+        raise ValueError("silent worker WAV")
+    actual_duration_ms = samples.shape[0] * 1000.0 / float(sample_rate)
+    tolerance_ms = max(
+        QWEN_AUDIO_DURATION_TOLERANCE_MS,
+        actual_duration_ms * 0.02,
+    )
+    if abs(actual_duration_ms - event.duration_ms) > tolerance_ms:
+        raise ValueError("worker WAV duration mismatch")
+    return wav_bytes
+
+
+def _generation_terminal_error(error_code: str | None) -> Qwen3WorkerError:
+    code = error_code or "qwen3_generation_failed"
+    if code == "qwen3_generation_ceiling":
+        return Qwen3GenerationCeilingError(
+            "Qwen3 generation exceeded its safety ceiling",
+            code=code,
+        )
+    if code in {"qwen3_not_ready", "qwen3_prompt_not_ready"}:
+        return Qwen3PromptError(
+            "Qwen3 voice prompt is not ready",
+            code=code,
+        )
+    return Qwen3RuntimeError(
+        "Qwen3 streaming runtime failed",
+        code=code,
+    )
 
 
 def _new_request_id(prefix: str) -> str:
@@ -433,5 +660,8 @@ def _worker_python_executable() -> str:
         return str(executable)
     console_executable = executable.with_name("python.exe")
     if not console_executable.is_file():
-        raise Qwen3WorkerError("Qwen3 console worker runtime unavailable")
+        raise Qwen3RuntimeError(
+            "Qwen3 console worker runtime unavailable",
+            code="qwen3_worker_unavailable",
+        )
     return str(console_executable)
