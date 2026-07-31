@@ -281,6 +281,7 @@ async def run_manifest_scenarios(
         rows.append(
             {
                 "scenario_id": scenario_id,
+                "seed": int(scenario["seed"]),
                 "observed_events": list(scenario.get("expected_events") or []),
                 "measurements": measurements,
             }
@@ -310,6 +311,29 @@ def _wer(target: str, observed: str) -> float:
             )
         previous = current
     return round(previous[-1] / len(left), 6)
+
+
+def bind_and_validate_actual_anchor_hashes(
+    rows: list[dict[str, Any]],
+    *,
+    anchor_turns: list[int],
+) -> None:
+    """Bind each anchor to its own captured WAV and require real equality."""
+
+    by_turn = {int(row.get("turn") or 0): row for row in rows}
+    actual_hashes: list[str] = []
+    for turn in anchor_turns:
+        row = by_turn.get(turn)
+        if row is None:
+            raise EvidenceRunnerError(f"Missing deterministic anchor turn {turn}")
+        audio_hash = str(row.get("audio_sha256") or "")
+        _require_sha(audio_hash, length=64, label=f"anchor turn {turn} audio")
+        row["anchor_sha256"] = audio_hash
+        actual_hashes.append(audio_hash)
+    if len(set(actual_hashes)) != 1:
+        raise EvidenceRunnerError(
+            "Reset-seed anchor WAVs are not bit-identical; release evidence failed"
+        )
 
 
 def _alignment_scores(approved: str, observed: str) -> tuple[float, float]:
@@ -576,6 +600,7 @@ class RayMeProductionPath:
             bucket_id=scenario_id,
             text=text,
             output_path=path,
+            release_evidence_seed=int(scenario["seed"]),
         )
         final = {**raw.get("final", {}), **self._latest_final(str(raw.get("turn_id") or ""))}
         immediate = raw.get("immediate") if isinstance(raw.get("immediate"), dict) else {}
@@ -742,8 +767,9 @@ class RayMeProductionPath:
 
     async def collect_soak(self, scenario: dict[str, Any]) -> dict[str, Any]:
         thresholds = self.manifest["thresholds"]
-        anchor_turns = set(self.manifest["seed_policy"]["anchor_turns"])
-        anchor_hash: str | None = None
+        anchor_turns_list = list(self.manifest["seed_policy"]["anchor_turns"])
+        anchor_turns = set(anchor_turns_list)
+        seed_base = int(self.manifest["seed_policy"]["evidence_seed_base"])
         for turn in range(1, int(thresholds["required_soak_turns"]) + 1):
             target = (
                 "Thanks for calling. I can help with that now."
@@ -752,21 +778,25 @@ class RayMeProductionPath:
                 if turn % 3 == 2
                 else "Let me explain the answer carefully, keep the call moving, and pause when the complete thought is finished."
             )
-            row_scenario = {**scenario, "scenario_id": f"soak-turn-{turn:02d}"}
+            generation_seed = seed_base if turn in anchor_turns else seed_base + turn
+            row_scenario = {
+                **scenario,
+                "scenario_id": f"soak-turn-{turn:02d}",
+                "seed": generation_seed,
+            }
             values, path = await self._run_stream(row_scenario, text=target)
             quality = _audio_metrics(path)
             stt = await self._stt(f"soak-{turn}", target, path)
             audio_hash = _sha256(path)
-            if turn in anchor_turns and anchor_hash is None:
-                anchor_hash = audio_hash
             identity = self.runtime_identity
             system_gpu_mib = float(self.health_payload.get("vram_used_mb") or 0.0)
             self.soak_turns.append(
                 {
                     "turn": turn,
+                    "seed": generation_seed,
                     "target_text_hash": hashlib.sha256(target.encode("utf-8")).hexdigest(),
                     "audio_sha256": audio_hash,
-                    "anchor_sha256": anchor_hash if turn in anchor_turns else None,
+                    "anchor_sha256": None,
                     "valid_audio": values["valid_audio"],
                     "natural_eos": values["natural_eos"],
                     "streaming_used": values["streaming_used"],
@@ -785,6 +815,10 @@ class RayMeProductionPath:
                     "final_word_pass": stt["final_word_pass"],
                 }
             )
+        bind_and_validate_actual_anchor_hashes(
+            self.soak_turns,
+            anchor_turns=anchor_turns_list,
+        )
         return {"turn_count": len(self.soak_turns)}
 
     async def collect_canonical_call(self, scenario: dict[str, Any]) -> dict[str, Any]:

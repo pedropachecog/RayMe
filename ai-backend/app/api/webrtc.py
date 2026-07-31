@@ -10,7 +10,7 @@ import time
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request, status
-from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.api.stt import _settings_from_app, _stt_adapter_from_app, _vad_adapter_from_app
 from app.api.tts import _qwen_error_detail, _qwen_http_status
@@ -94,6 +94,18 @@ class SpeakRequest(BaseModel):
     voxcpm2_inference_timesteps: int = Field(default=10, ge=4, le=30)
     voxcpm2_normalize: bool = True
     voxcpm2_denoise: bool = True
+    release_evidence_mode: Literal["phase09_release_evidence"] | None = None
+    release_evidence_seed: int | None = Field(
+        default=None,
+        ge=0,
+        le=4_294_967_295,
+    )
+
+    @model_validator(mode="after")
+    def require_paired_release_evidence_fields(self) -> "SpeakRequest":
+        if (self.release_evidence_mode is None) != (self.release_evidence_seed is None):
+            raise ValueError("release evidence mode and seed must be provided together")
+        return self
 
 
 class PrepareSpeechRequest(BaseModel):
@@ -427,6 +439,19 @@ async def speak_session(
 ) -> dict[str, Any]:
     session = _session_or_404(request, session_id)
     try:
+        if payload.release_evidence_mode is not None and (
+            payload.engine_id != "qwen3_1_7b"
+            or not session_id.startswith("phase09-evidence-")
+            or not payload.turn_id.startswith("evidence-")
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "qwen_release_evidence_scope_invalid",
+                    "message": "Release evidence seed is restricted to the Phase 09 evidence runner",
+                    "engine_id": payload.engine_id,
+                },
+            )
         _reject_oversized_reference_audio(payload.reference_audio_b64)
         if payload.engine_id == "qwen3_1_7b" and not str(
             payload.reference_transcript or ""
@@ -467,6 +492,8 @@ async def speak_session(
             voxcpm2_inference_timesteps=payload.voxcpm2_inference_timesteps,
             voxcpm2_normalize=payload.voxcpm2_normalize,
             voxcpm2_denoise=payload.voxcpm2_denoise,
+            qwen3_release_evidence_mode=payload.release_evidence_mode,
+            qwen3_release_evidence_seed=payload.release_evidence_seed,
         )
     except asyncio.CancelledError:
         # The SSE generator on the web-ui side was cancelled (e.g., HTTP

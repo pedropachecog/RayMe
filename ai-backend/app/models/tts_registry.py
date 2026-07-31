@@ -5,7 +5,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from enum import Enum
 from typing import Literal, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 try:
     from enum import StrEnum
@@ -82,6 +82,20 @@ class TtsSynthesisInput(BaseModel):
     voxcpm2_inference_timesteps: int = Field(default=10, ge=4, le=30)
     voxcpm2_normalize: bool = True
     voxcpm2_denoise: bool = True
+    qwen3_release_evidence_mode: Literal["phase09_release_evidence"] | None = None
+    qwen3_release_evidence_seed: int | None = Field(
+        default=None,
+        ge=0,
+        le=4_294_967_295,
+    )
+
+    @model_validator(mode="after")
+    def require_paired_qwen3_release_evidence_fields(self) -> "TtsSynthesisInput":
+        if (self.qwen3_release_evidence_mode is None) != (
+            self.qwen3_release_evidence_seed is None
+        ):
+            raise ValueError("Qwen release evidence mode and seed must be provided together")
+        return self
 
 
 class TtsSynthesisOutput(BaseModel):

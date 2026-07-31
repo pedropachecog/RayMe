@@ -668,8 +668,9 @@ def _speak_payload(
     voice_id: str,
     reference_audio: bytes,
     transcript: str,
+    release_evidence_seed: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    payload = {
         "turn_id": turn_id,
         "text": text,
         "voice_id": voice_id,
@@ -679,6 +680,14 @@ def _speak_payload(
         "reference_transcript": transcript,
         "reference_audio_content_type": "audio/wav",
     }
+    if release_evidence_seed is not None:
+        payload.update(
+            {
+                "release_evidence_mode": "phase09_release_evidence",
+                "release_evidence_seed": release_evidence_seed,
+            }
+        )
+    return payload
 
 
 def _number(value: Any, label: str) -> float:
@@ -805,8 +814,10 @@ async def _run_normal_sample(
     bucket_id: str,
     text: str,
     output_path: Path,
+    release_evidence_seed: int | None = None,
 ) -> dict[str, Any]:
-    turn_id = f"trace-{bucket_id}-{uuid.uuid4().hex[:16]}"
+    turn_prefix = "evidence" if release_evidence_seed is not None else "trace"
+    turn_id = f"{turn_prefix}-{bucket_id}-{uuid.uuid4().hex[:16]}"
     event_start = len(peer.events)
     peer.start_capture(turn_id)
     request_started = time.perf_counter()
@@ -821,6 +832,7 @@ async def _run_normal_sample(
                 voice_id=voice_id,
                 reference_audio=reference_audio,
                 transcript=transcript,
+                release_evidence_seed=release_evidence_seed,
             ),
         )
     )

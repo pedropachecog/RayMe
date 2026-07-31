@@ -950,6 +950,8 @@ class CallSession:
         voxcpm2_inference_timesteps: int = 10,
         voxcpm2_normalize: bool = True,
         voxcpm2_denoise: bool = True,
+        qwen3_release_evidence_mode: str | None = None,
+        qwen3_release_evidence_seed: int | None = None,
     ) -> dict[str, Any]:
         self._cancelled_ai_turns.discard(turn_id)
         self.state = "rehearsing"
@@ -983,6 +985,8 @@ class CallSession:
                     reference_transcript=reference_transcript,
                     reference_audio_content_type=reference_audio_content_type,
                     voxcpm2_options=voxcpm2_options,
+                    qwen3_release_evidence_mode=qwen3_release_evidence_mode,
+                    qwen3_release_evidence_seed=qwen3_release_evidence_seed,
                 )
 
             result = await self._synthesize_speech(
@@ -1123,6 +1127,8 @@ class CallSession:
         reference_transcript: str | None,
         reference_audio_content_type: str | None,
         voxcpm2_options: dict[str, Any],
+        qwen3_release_evidence_mode: str | None,
+        qwen3_release_evidence_seed: int | None,
     ) -> dict[str, Any]:
         started_at = time.perf_counter()
         queue: asyncio.Queue[Any] = asyncio.Queue(
@@ -1335,6 +1341,8 @@ class CallSession:
                 reference_transcript=reference_transcript,
                 reference_audio_content_type=reference_audio_content_type,
                 voxcpm2_options=_voxcpm2_live_stream_options(engine_id, voxcpm2_options),
+                qwen3_release_evidence_mode=qwen3_release_evidence_mode,
+                qwen3_release_evidence_seed=qwen3_release_evidence_seed,
             )
             loop = asyncio.get_running_loop()
 
@@ -2231,6 +2239,8 @@ class CallSession:
         reference_transcript: str | None,
         reference_audio_content_type: str | None,
         voxcpm2_options: dict[str, Any],
+        qwen3_release_evidence_mode: str | None = None,
+        qwen3_release_evidence_seed: int | None = None,
     ) -> TtsSynthesisInput:
         if not reference_audio_b64:
             raise ValueError("call TTS reference audio is required")
@@ -2243,6 +2253,8 @@ class CallSession:
             turn_id=turn_id,
             voice_key=voice_id,
             speech_speed=1.0,
+            qwen3_release_evidence_mode=qwen3_release_evidence_mode,
+            qwen3_release_evidence_seed=qwen3_release_evidence_seed,
             **voxcpm2_options,
         )
 

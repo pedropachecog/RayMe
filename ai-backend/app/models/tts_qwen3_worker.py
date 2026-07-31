@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import importlib.metadata
 import json
 import os
 import queue
+import random
 import sys
 import threading
 import time
@@ -197,13 +199,19 @@ def _dispatch(command: QwenWorkerCommand) -> bool:
                 _PENDING_CANCELS.remove(command.request_id)
                 cancelled.set()
         try:
-            for event in iter_generation_events(
-                _RUNTIME,
-                _PREPARED_PROMPT,
-                command,
-                cancelled,
-            ):
-                _emit_event(event)
+            rng_scope = (
+                _release_evidence_rng_scope(command.release_evidence_seed)
+                if command.release_evidence_seed is not None
+                else contextlib.nullcontext()
+            )
+            with rng_scope:
+                for event in iter_generation_events(
+                    _RUNTIME,
+                    _PREPARED_PROMPT,
+                    command,
+                    cancelled,
+                ):
+                    _emit_event(event)
         except Exception:
             _emit_error(command.request_id, "qwen3_generation_failed")
         finally:
@@ -243,6 +251,30 @@ def _dispatch(command: QwenWorkerCommand) -> bool:
         return False
 
     return True
+
+
+@contextlib.contextmanager
+def _release_evidence_rng_scope(seed: int) -> Iterator[None]:
+    """Reset all generation RNGs for one evidence request, then restore them."""
+
+    import numpy as np
+    import torch
+
+    python_state = random.getstate()
+    numpy_state = np.random.get_state()
+    torch_state = torch.random.get_rng_state()
+    cuda_states = torch.cuda.get_rng_state_all()
+    try:
+        random.seed(seed)
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+        yield
+    finally:
+        random.setstate(python_state)
+        np.random.set_state(numpy_state)
+        torch.random.set_rng_state(torch_state)
+        torch.cuda.set_rng_state_all(cuda_states)
 
 
 def _load_runtime_from_environment() -> Any:

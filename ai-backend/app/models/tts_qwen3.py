@@ -253,6 +253,8 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                 text=request.text,
                 max_new_tokens=max_new_tokens,
                 hard_audio_seconds=hard_audio_seconds,
+                release_evidence_mode=request.qwen3_release_evidence_mode,
+                release_evidence_seed=request.qwen3_release_evidence_seed,
             )
             validator = QwenStreamEventValidator(
                 request_id=generation_request_id,

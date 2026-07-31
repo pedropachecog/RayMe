@@ -24,6 +24,8 @@ MAX_CHUNK_B64_LENGTH = 12 * 1024 * 1024
 MAX_REFERENCE_TRANSCRIPT_LENGTH = 20_000
 MAX_TARGET_TEXT_LENGTH = 8_000
 MAX_ERROR_CODE_LENGTH = 96
+RELEASE_EVIDENCE_MODE = "phase09_release_evidence"
+MAX_RELEASE_EVIDENCE_SEED = 4_294_967_295
 REQUEST_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
 VOICE_KEY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
 
@@ -100,6 +102,12 @@ class QwenGenerateCommand(_CommandBase):
     text: str = Field(min_length=1, max_length=MAX_TARGET_TEXT_LENGTH)
     max_new_tokens: int = Field(ge=4, le=384, multiple_of=4)
     hard_audio_seconds: float = Field(ge=0.1, le=32.0)
+    release_evidence_mode: Literal["phase09_release_evidence"] | None = None
+    release_evidence_seed: int | None = Field(
+        default=None,
+        ge=0,
+        le=MAX_RELEASE_EVIDENCE_SEED,
+    )
 
     @field_validator("text")
     @classmethod
@@ -107,6 +115,12 @@ class QwenGenerateCommand(_CommandBase):
         if not value.strip():
             raise ValueError("target text is required")
         return value
+
+    @model_validator(mode="after")
+    def require_paired_release_evidence_fields(self) -> "QwenGenerateCommand":
+        if (self.release_evidence_mode is None) != (self.release_evidence_seed is None):
+            raise ValueError("release evidence mode and seed must be provided together")
+        return self
 
 
 class QwenCancelCommand(_CommandBase):
