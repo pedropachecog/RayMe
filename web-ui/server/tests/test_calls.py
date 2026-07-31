@@ -8,6 +8,7 @@ import hashlib
 import importlib
 import json
 import logging
+import threading
 from collections.abc import AsyncIterator, Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -660,6 +661,103 @@ def test_qwen_offer_prepares_exact_authorized_reference_and_turn_uses_opaque_key
     speak_payload = call_fixture.backend.speak_calls[-1]["payload"]
     assert speak_payload["voice_id"] == prepare_payload["voice_id"]
     assert speak_payload["reference_transcript"] == prepare_payload["reference_transcript"]
+
+
+def test_qwen_slow_llm_submits_first_safe_segment_before_stream_completion(
+    call_fixture: CallFixture,
+) -> None:
+    first_submission = threading.Event()
+    release_llm = threading.Event()
+    response_holder: list[Any] = []
+
+    class HeldOpenCompletionClient:
+        async def stream_chat_completion_tokens(
+            self,
+            settings: Any,
+            messages: Any,
+        ) -> AsyncIterator[str]:
+            del settings, messages
+            yield "This is the first safe sentence."
+            while not release_llm.is_set():
+                await asyncio.sleep(0.01)
+            yield " A final tail remains"
+
+    class EarlyAcceptanceBackend(ScriptedCallBackend):
+        async def speak_call(
+            self,
+            base_url: str,
+            session_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            self.speak_calls.append(
+                {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
+            )
+            if not payload["final_chunk"]:
+                first_submission.set()
+                return {
+                    "session_id": session_id,
+                    "event": {
+                        "status": "queued",
+                        "turn_id": payload["turn_id"],
+                        "tts_playback_final": {"playout_wait_completed": True},
+                    },
+                }
+            return {
+                "session_id": session_id,
+                "event": {
+                    "type": "ai_done",
+                    "turn_id": payload["turn_id"],
+                    "tts_playback_final": {"playout_wait_completed": True},
+                },
+            }
+
+    thread_id, _ = asyncio.run(
+        _insert_qwen_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    calls_module = importlib.import_module("app.api.calls")
+    backend = EarlyAcceptanceBackend()
+    call_fixture.app.dependency_overrides[calls_module.get_call_backend_client] = lambda: backend
+    call_fixture.app.dependency_overrides[calls_module.get_call_completion_client] = (
+        HeldOpenCompletionClient
+    )
+
+    def request_turn() -> None:
+        response_holder.append(
+            call_fixture.client.post(
+                f"/api/calls/{started['call_id']}/turns",
+                json={
+                    "session_id": started["session_id"],
+                    "turn_id": "turn-qwen-slow-llm",
+                    "text": "Keep the LLM stream open.",
+                    "source": "user_final",
+                },
+            )
+        )
+
+    request_thread = threading.Thread(target=request_turn, daemon=True)
+    request_thread.start()
+    try:
+        assert first_submission.wait(timeout=2.0), (
+            "Qwen speech was not submitted while the LLM stream remained open"
+        )
+        assert request_thread.is_alive()
+        assert backend.speak_calls[0]["payload"]["text"] == (
+            "This is the first safe sentence."
+        )
+        assert backend.speak_calls[0]["payload"]["final_chunk"] is False
+        assert backend.speak_calls[0]["payload"]["engine_id"] == "qwen3_1_7b"
+    finally:
+        release_llm.set()
+        request_thread.join(timeout=3.0)
+
+    assert not request_thread.is_alive()
+    assert response_holder[0].status_code == 200
+    assert [call["payload"]["text"] for call in backend.speak_calls] == [
+        "This is the first safe sentence.",
+        "A final tail remains",
+    ]
+    assert backend.speak_calls[-1]["payload"]["final_chunk"] is True
 
 
 def test_qwen_offer_polls_shared_readiness_without_repeating_preparation(
