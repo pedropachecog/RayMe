@@ -25,6 +25,11 @@ from app.api.characters import get_character_session
 from app.api.chat import get_chat_session
 from app.api.threads import get_thread_session
 from app.api.voices import get_voice_session
+from app.domain.ai_backend_client import (
+    AiBackendProcessingError,
+    SpeechTurn,
+    SpeechTurnClosedError,
+)
 from app.main import create_app
 from app.domain.call_service import CallService
 from app.storage.models import Base, Character, Message, Thread, Voice, VoiceAsset
@@ -1025,6 +1030,357 @@ def test_two_turns_stream_tokens_and_write_exact_speech_rows_before_call_end(
     assert all(call["session_id"] == started["session_id"] for call in call_fixture.backend.speak_calls)
 
 
+def test_qwen_normal_multi_segment_turn_persists_once_after_one_normal_terminal(
+    call_fixture: CallFixture,
+) -> None:
+    class SegmentAwareBackend(ScriptedCallBackend):
+        async def speak_call(
+            self,
+            base_url: str,
+            session_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            self.speak_calls.append(
+                {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
+            )
+            event: dict[str, Any] = {
+                "turn_id": payload["turn_id"],
+                "tts_playback_final": {"playout_wait_completed": True},
+            }
+            if payload["final_chunk"]:
+                event["type"] = "ai_done"
+            else:
+                event["status"] = "queued"
+            return {"session_id": session_id, "event": event}
+
+    visible_text = (
+        "This is the first natural sentence."
+        " This is the second natural sentence."
+        " A final tail remains"
+    )
+    call_fixture.completion.token_sequences = [
+        [
+            "This is the first natural sentence.",
+            " This is the second natural sentence.",
+            " A final tail remains",
+        ]
+    ]
+    thread_id, _ = asyncio.run(
+        _insert_qwen_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    calls_module = importlib.import_module("app.api.calls")
+    backend = SegmentAwareBackend()
+    call_fixture.app.dependency_overrides[calls_module.get_call_backend_client] = lambda: backend
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-qwen-multi-segment",
+            "text": "Speak a longer answer.",
+            "source": "user_final",
+        },
+    )
+
+    assert response.status_code == 200
+    assert [call["payload"]["final_chunk"] for call in backend.speak_calls] == [
+        False,
+        False,
+        True,
+    ]
+    events = _sse_events(response.text)
+    assert sum(event.get("type") == "ai_done" for event in events) == 1
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert [row for row in rows if row[0] == "ai_speech"] == [
+        ("ai_speech", "assistant", visible_text)
+    ]
+
+
+@pytest.mark.parametrize("after_audio", [False, True])
+def test_cancelled_qwen_turn_never_persists_complete_speech_or_normal_done(
+    call_fixture: CallFixture,
+    after_audio: bool,
+) -> None:
+    class CancelledBackend(ScriptedCallBackend):
+        async def speak_call(
+            self,
+            base_url: str,
+            session_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            self.speak_calls.append(
+                {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
+            )
+            event: dict[str, Any] = {
+                "status": "cancelled",
+                "turn_id": payload["turn_id"],
+            }
+            if after_audio:
+                event["ai_audio_started_event"] = {
+                    "type": "ai_audio_started",
+                    "turn_id": payload["turn_id"],
+                    "session_id": session_id,
+                }
+            return {"session_id": session_id, "event": event}
+
+    call_fixture.completion.token_sequences = [["This Qwen answer is cancelled"]]
+    thread_id, _ = asyncio.run(
+        _insert_qwen_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    calls_module = importlib.import_module("app.api.calls")
+    backend = CancelledBackend()
+    call_fixture.app.dependency_overrides[calls_module.get_call_backend_client] = lambda: backend
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": f"turn-qwen-cancel-{after_audio}",
+            "text": "Cancel this speech.",
+            "source": "user_final",
+        },
+    )
+
+    events = _sse_events(response.text)
+    assert any(event.get("type") == "ai_token" for event in events)
+    assert not any(event.get("type") == "ai_done" for event in events)
+    assert any(event.get("type") == "ai_audio_started" for event in events) is after_audio
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert not any(row[0] == "ai_speech" for row in rows)
+
+
+def test_qwen_worker_error_is_sanitized_and_does_not_persist_or_emit_normal_done(
+    call_fixture: CallFixture,
+) -> None:
+    class FailingQwenBackend(ScriptedCallBackend):
+        async def speak_call(
+            self,
+            base_url: str,
+            session_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            self.speak_calls.append(
+                {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
+            )
+            raise AiBackendProcessingError(
+                code="qwen3_generation_ceiling",
+                message=r"private transcript C:\\Users\\pmpg\\model-cache",
+            )
+
+    call_fixture.completion.token_sequences = [["This Qwen answer reaches a ceiling"]]
+    thread_id, _ = asyncio.run(
+        _insert_qwen_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    calls_module = importlib.import_module("app.api.calls")
+    backend = FailingQwenBackend()
+    call_fixture.app.dependency_overrides[calls_module.get_call_backend_client] = lambda: backend
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-qwen-ceiling",
+            "text": "Trigger the safe ceiling.",
+            "source": "user_final",
+        },
+    )
+
+    events = _sse_events(response.text)
+    assert events[-1] == {
+        "type": "error",
+        "turn_id": "turn-qwen-ceiling",
+        "code": "call_tts_failed",
+        "message": "Speech playback failed",
+    }
+    assert not any(event.get("type") == "ai_done" for event in events)
+    assert "private transcript" not in response.text
+    assert r"C:\\Users" not in response.text
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert not any(row[0] == "ai_speech" for row in rows)
+
+
+def test_blank_assistant_output_creates_no_speech_request_state_or_persistence(
+    call_fixture: CallFixture,
+) -> None:
+    call_fixture.completion.token_sequences = [["   "]]
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-blank-assistant",
+            "text": "Return no spoken text.",
+            "source": "user_final",
+        },
+    )
+
+    events = _sse_events(response.text)
+    assert call_fixture.backend.speak_calls == []
+    assert not any(event.get("type") == "state" for event in events)
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert not any(row[0] == "ai_speech" for row in rows)
+
+
+@pytest.mark.parametrize("control_route", ["interrupt", "end"])
+def test_terminal_call_control_during_incremental_qwen_turn_writes_no_complete_speech(
+    call_fixture: CallFixture,
+    control_route: str,
+) -> None:
+    speech_started = threading.Event()
+    release_llm = threading.Event()
+    control_received = threading.Event()
+    response_holder: list[Any] = []
+
+    class HeldOpenCompletionClient:
+        async def stream_chat_completion_tokens(
+            self,
+            settings: Any,
+            messages: Any,
+        ) -> AsyncIterator[str]:
+            del settings, messages
+            yield "This is an early Qwen sentence."
+            while not release_llm.is_set():
+                await asyncio.sleep(0.01)
+            yield " This tail must never persist"
+
+    class ControlledBackend(ScriptedCallBackend):
+        async def speak_call(
+            self,
+            base_url: str,
+            session_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            self.speak_calls.append(
+                {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
+            )
+            speech_started.set()
+            while not control_received.is_set():
+                await asyncio.sleep(0.01)
+            return {
+                "session_id": session_id,
+                "event": {"status": "cancelled", "turn_id": payload["turn_id"]},
+            }
+
+        async def interrupt_call(self, base_url: str, session_id: str) -> dict[str, Any]:
+            control_received.set()
+            return await super().interrupt_call(base_url, session_id)
+
+        async def end_call(self, base_url: str, session_id: str, reason: str) -> dict[str, Any]:
+            control_received.set()
+            return {"session_id": session_id, "reason": reason}
+
+    thread_id, _ = asyncio.run(
+        _insert_qwen_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    calls_module = importlib.import_module("app.api.calls")
+    backend = ControlledBackend()
+    call_fixture.app.dependency_overrides[calls_module.get_call_backend_client] = lambda: backend
+    call_fixture.app.dependency_overrides[calls_module.get_call_completion_client] = (
+        HeldOpenCompletionClient
+    )
+
+    def request_turn() -> None:
+        response_holder.append(
+            call_fixture.client.post(
+                f"/api/calls/{started['call_id']}/turns",
+                json={
+                    "session_id": started["session_id"],
+                    "turn_id": f"turn-qwen-{control_route}",
+                    "text": "Stop this incremental turn.",
+                    "source": "user_final",
+                },
+            )
+        )
+
+    request_thread = threading.Thread(target=request_turn, daemon=True)
+    request_thread.start()
+    try:
+        assert speech_started.wait(timeout=2.0)
+        control_payload = {"session_id": started["session_id"]}
+        if control_route == "end":
+            control_payload["reason"] = "hangup"
+        control_response = call_fixture.client.post(
+            f"/api/calls/{started['call_id']}/{control_route}",
+            json=control_payload,
+        )
+        assert control_response.status_code == 200
+    finally:
+        release_llm.set()
+        control_received.set()
+        request_thread.join(timeout=3.0)
+
+    assert not request_thread.is_alive()
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert not any(row[0] == "ai_speech" for row in rows)
+    if response_holder:
+        assert not any(
+            event.get("type") == "ai_done"
+            for event in _sse_events(response_holder[0].text)
+        )
+
+
+def test_speech_turn_rejects_post_cancel_submission_and_a_later_turn_can_finish() -> None:
+    class RecoverableBackend:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def speak_call(
+            self,
+            base_url: str,
+            session_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            del base_url, session_id
+            self.calls += 1
+            if self.calls == 1:
+                return {"event": {"status": "cancelled", "turn_id": payload["turn_id"]}}
+            return {
+                "event": {
+                    "type": "ai_done",
+                    "turn_id": payload["turn_id"],
+                    "tts_playback_final": {"playout_wait_completed": True},
+                }
+            }
+
+    async def scenario() -> None:
+        backend = RecoverableBackend()
+        first = SpeechTurn(
+            backend=backend,
+            base_url="https://127.0.0.1:9443",
+            session_id="session-one",
+            turn_id="turn-cancelled",
+            voice_id="voice-one",
+            engine_id="qwen3_1_7b",
+            voice_reference={},
+        )
+        cancelled = await first.finalize("Cancel this sentence")
+        assert cancelled.status == "cancelled"
+        assert cancelled.playout_completed is False
+        with pytest.raises(SpeechTurnClosedError):
+            await first.submit("late private segment")
+
+        second = SpeechTurn(
+            backend=backend,
+            base_url="https://127.0.0.1:9443",
+            session_id="session-two",
+            turn_id="turn-normal",
+            voice_id="voice-two",
+            engine_id="qwen3_1_7b",
+            voice_reference={},
+        )
+        normal = await second.finalize("A later turn succeeds")
+        assert normal.status == "normal"
+        assert normal.playout_completed is True
+
+    asyncio.run(scenario())
+
+
 def test_voxcpm2_call_voice_reference_forwards_mode_and_style(
     call_fixture: CallFixture,
 ) -> None:
@@ -1150,7 +1506,7 @@ def test_voxcpm2_call_tts_failure_is_sanitized_and_truthful(
     assert "openbmb/VoxCPM2" not in public_body
     rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
     assert ("user_speech", "user", "Persist this exact VoxCPM2 user speech.") in rows
-    assert any(row == ("ai_speech", "assistant", "Audio will fail after text.") for row in rows)
+    assert not any(row[0] == "ai_speech" for row in rows)
     assert failing_backend.speak_calls[-1]["payload"]["engine_id"] == "voxcpm2"
 
 
