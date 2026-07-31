@@ -556,21 +556,17 @@ The first RED test must hold the LLM stream open after emitting a complete first
 |---|-------|---------|---------------|
 | — | None. Proposed implementation details are recommendations within explicitly delegated discretion; runtime values, thresholds, identities, and current-code claims were verified against official or repository sources. | — | — |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Resolved: young-package trust decision**
    - Resolution: The product owner's repository provenance, accepted `v0.3.2` spike output, explicit 1.7B selection, and deployment authorization satisfy the human trust decision for the exact source commit. The SUS telemetry remains recorded and cannot authorize any different source/version.
    - Execution gate: Run the exact package-legitimacy, PyPI metadata, tag/commit, lock-check, and lock-commit assertions named in the Package Legitimacy Audit. Any mismatch blocks installation; no additional human checkpoint is required for this already approved source.
 
-2. **Other installations may contain compatibility rows**
-   - What we know: The current OMEN database has zero old Qwen rows; schema and fixtures allow arbitrary engine strings. [VERIFIED: read-only OMEN query; web-ui/server/app/storage/models.py:184-192]
-   - What's unclear: Whether a copied/local user database not present in this workspace contains `qwen3_0_6b`.
-   - Recommendation: Ship the idempotent migration and read-boundary normalization regardless of the current zero count.
+2. **Resolved: compatibility rows outside the current OMEN database**
+   - Resolution: Ship an idempotent exact-id data migration plus read-boundary normalization for every installation. Rewrite only `voices.default_engine == "qwen3_0_6b"` and exact endpoint-settings `tts_default_engine == "qwen3_0_6b"` to `qwen3_1_7b`; preserve unknown engine strings and unrelated JSON. The current OMEN zero-row case is simply the idempotent no-op fixture, not a reason to omit compatibility behavior. [VERIFIED: read-only OMEN query; web-ui/server/app/storage/models.py:184-192; Phase 09 Plan 09-07]
 
-3. **Physical-call acceptance remains intentionally human**
-   - What we know: Automated local, browser, OMEN runtime, call-flow, cancellation, and 50-turn gates can all be completed autonomously; audible likeness/naturalness and the final physical call are human product acceptance. [VERIFIED: .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-AI-SPEC.md:595-719]
-   - What's unclear: The builder's final perception on the integrated phone path.
-   - Recommendation: Do not ask for that test until all automated/deployed gates and artifacts pass; then hand off one exact selected-voice call workflow.
+3. **Resolved: physical-call acceptance is a post-deployment human gate**
+   - Resolution: Audible likeness/naturalness and the builder's final perception on the integrated phone path are intentionally outside autonomous implementation proof. Complete local, browser, OMEN runtime, call-flow, cancellation, privacy, and 50-turn gates first; record `autonomous_release_ready` separately from `integrated_human_listening_status=pending` and `physical_call_status=pending`; then hand off one exact selected-voice call workflow. This is a deliberate acceptance boundary, not an implementation unknown. [VERIFIED: .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-AI-SPEC.md:595-719; Phase 09 Plan 09-15]
 
 ## Environment Availability
 

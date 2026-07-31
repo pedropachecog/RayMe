@@ -34,12 +34,12 @@ created: 2026-07-31
 | 09-01 | 1 | REQ-22 | package-legitimacy/PyPI/tag/commit checks; `uv lock --check`; roster/health pytest | pending |
 | 09-02 | 2 | REQ-22/45 | `test_tts_qwen3.py` fake protocol/worker/adapter suite | pending |
 | 09-03 | 3 | REQ-22/45/46 | manager/WebRTC/CallSession slow stream/cancel plus VoxCPM2 regressions | pending |
-| 09-04 | 4 | REQ-22/45/46 | `RAYME_OMEN_VERIFY_QWEN3_TRACER=1 scripts/deploy-omen.sh` and commit-matched tracer verifier | pending |
+| 09-04 | 4 | REQ-22/45/46 | hash-bound sidecar self-test; `RAYME_OMEN_VERIFY_QWEN3_TRACER=1 scripts/deploy-omen.sh`; commit-matched tracer verifier | pending |
 | 09-05 | 5 | REQ-22/45 | alignment/ceiling/protocol/cache/error pytest | pending |
 | 09-06 | 6 | REQ-22 | backend and server delete→invalidate/evict tests with unrelated-voice recovery | pending |
 | 09-07 | 5 | REQ-22/45 | migration/voice/call server pytest plus Alembic upgrade | pending |
-| 09-08 | 6 | REQ-22/45/46 | focused Voice Lab/settings Vitest readiness states | pending |
-| 09-09 | 7 | REQ-22/45/46 | fast Playwright `--list`, then saved mocked readiness UI wave acceptance | pending |
+| 09-08 | 6 | REQ-22/45/46 | focused Voice Lab/Voice Library/EndpointSettingsPanel Vitest identity, authorization, readiness, retry, focus/a11y/mobile states | pending |
+| 09-09 | 7 | REQ-22/45/46 | fast Playwright `--list`, then saved mocked Voice Lab/Library/Settings/call readiness UI wave acceptance | pending |
 | 09-10 | 7 | REQ-22/45/46 | slow-LLM segment/persistence server pytest | pending |
 | 09-11 | 6 | REQ-45/46 | slow producer/consumer, paced bound, metrics, all control causes, Vox regression pytest | pending |
 | 09-12 | 8 | REQ-22/45/46 | manifest/scorer tests; verifier `--contracts-only` and named `--self-test` | pending |
@@ -50,12 +50,12 @@ created: 2026-07-31
 ## Required Regression Inventory
 
 - Protocol: schema/version/request/index/time/audio/terminal mutations, crash/hang/restart, exact immutable identity.
-- Reference: blank/missing/known mismatch reject before generation; punctuation/case/accent tolerance; exact transcript preserved.
+- Reference: blank/missing/known mismatch reject before generation; punctuation/case/accent tolerance; exact transcript preserved; Phase 005 sidecar missing/malformed/wrong-reference-hash/wrong-transcript-hash/wrong-scope automatically selects deterministic non-person fallback before private bytes are used.
 - Streaming: slow LLM submission before completion; slow native first playback before completion; no Qwen or VoxCPM2 whole fallback.
 - Bounds: segment scheduler, bridge capacity two, paced-track pending-audio credit, prompt capacity one, output ceilings.
 - Cancellation: before/after audio, VAD/button/hangup/switch/close/delete; zero late audio/done/complete persistence; recovery.
 - Deletion: matching prompt tensors/cache are evicted; unrelated saved voice remains usable.
-- UI: canonical identity; dynamic metadata; Loading/Resident versus Prewarming/Ready/Failed; retry; no premature Listening.
+- UI: canonical identity in EndpointSettingsPanel available/resident/loading fields; dynamic metadata; Loading/Resident versus Prewarming/Ready/Failed; three-field authorization block; VoiceLibraryRow/List `Preparing voice…` versus `Testing voice…`; retry and unrelated-row responsiveness; fixed role=status/alert, focus, reduced-motion, 44px/mobile; no premature Listening.
 - Browser release: after deploy only, `RAYME_ENABLE_LIVE_E2E=1`, canonical URLs, qwen3_1_7b, permitted fixture, deployed-commit assertion.
 - Evidence self-test: false overall status, stale/commit mismatch, fallback, missing gate, unbounded queue, speaker drop, private leak.
 - Longitudinal: 50 valid/natural/realtime turns, STT/WER, acoustics, memory, anchors, WavLM baseline/early/middle/late cosine.

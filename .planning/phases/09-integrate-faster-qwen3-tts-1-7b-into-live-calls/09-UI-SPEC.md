@@ -124,7 +124,7 @@ When `qwen3_1_7b` is selected, render one compact raised panel immediately after
 
 - Heading: `Reference authorization`
 - Body: `Add where this recording came from, why you are authorized to use it, and its permitted RayMe scope.`
-- Render the three required typed values from the Phase 09 voice API with labels `Reference source`, `Authorization basis`, and `Use scope`. Use the existing 44px input/select pattern and server-defined option values; do not invent permission, preselect a consent claim, or infer authorization from upload.
+- Render the three required typed values from the Phase 09 voice API with labels `Reference source`, `Authorization basis`, and `Use scope`. `Reference source` maps to `voice_data_steward` and must name the speaker/data steward or an opaque steward id; the server binds these three values to its computed reference/transcript SHA-256 values. Use the existing 44px input/select pattern and server-defined option values; do not invent permission, preselect a consent claim, or infer authorization from upload or prior listening.
 - All three values begin unconfirmed for a new real-person Qwen voice. Synthetic/evidence values are test-only and must not appear as convenient real-person defaults.
 - Preserve these values, the sample, transcript, name, preview text, and engine choice across preview, prewarm, alignment, worker, or network failure and across Qwen/non-Qwen engine switches.
 - For Qwen, Save Voice and Preview Voice are disabled until sample, editable nonblank transcript, required authorization values, engine, and relevant target text are locally valid. Server/backend validation remains authoritative.

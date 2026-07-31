@@ -53,10 +53,10 @@ All required source items are executable. Deferred CONTEXT items and COVERAGE op
 | AI-SPEC | C-01–C-05 | Identity, reference integrity, streaming, timing, interruption | 09-01–09-15 | COVERED | Critical paths have local plus hardware evidence. |
 | AI-SPEC | C-06–C-07 | Message integrity/endings and longitudinal stability | 09-12–09-15 | COVERED | STT/EOS/50-turn/acoustics/speaker. |
 | AI-SPEC | H-01 | Clone likeness/naturalness/joins | 09-04, 09-11–09-15 | COVERED | Automated speaker/join readiness; integrated human listening remains explicitly pending. |
-| AI-SPEC | H-02/C-08 | Visible containment and voice-data safety | 09-04, 09-06–09-09, 09-12–09-15 | COVERED | Permission-safe fixture, delete eviction, leak self-test. |
-| UI-SPEC | — | Canonical engine identity, independent readiness, authorized-reference form, row-scoped progress, truthful call gate, responsive/a11y states | 09-08–09-09, 09-15 | COVERED | Approved six-dimension contract with resolved UI considerations and real deployed browser acceptance. |
+| AI-SPEC | H-02/C-08 | Visible containment and voice-data safety | 09-04, 09-06–09-09, 09-12–09-15 | COVERED | Hash-bound steward/basis/LAN-scope authorization sidecar with automatic non-person fallback, delete eviction, and leak self-test. |
+| UI-SPEC | — | Canonical engine identity, independent readiness, three-field authorized-reference form, row-scoped prepare/synthesis/retry, truthful call gate, fixed live-region/focus/reduced-motion/44px contracts | 09-08–09-09, 09-15 | COVERED | Production tasks name EndpointSettingsPanel, VoiceLibraryRow/List, Voice Lab, and call route; Playwright is the wave acceptance and deployed browser gate. |
 | EDGE | E-01–E-06 | Empty input, byte hash/exact transcript, idempotency, concurrency, REQ-45/46 concrete gates | 09-01–09-15 | COVERED | Named behaviors/assumptions in task contracts. |
-| PROHIBITION | P-01 | No arbitrary/unapproved reference | 09-04, 09-06–09-07, 09-09, 09-13–09-15 | COVERED | Phase 005 or mechanical fallback only. |
+| PROHIBITION | P-01 | No arbitrary/unapproved reference | 09-04, 09-06–09-07, 09-09, 09-13–09-15 | COVERED | Phase 005 requires a matching hash-bound speaker/data-steward authorization sidecar; missing/malformed/wrong-hash/wrong-scope metadata automatically selects the deterministic mechanical fallback. |
 | PROHIBITION | P-02 | No hosted/private voice leakage | 09-02, 09-04–09-15 | COVERED | Local-only audio/scorer plus leak mutation. |
 | PROHIBITION | P-03 | No model/CPU/x-vector/whole-WAV substitution | 09-01–09-05, 09-11–09-15 | COVERED | Identity/fallback checks and COVERAGE opt-outs. |
 | PROHIBITION | P-04 | No hidden loading/full buffering | 09-03–09-04, 09-08–09-15 | COVERED | Fast, mocked, real hardware/browser proof. |
@@ -65,4 +65,4 @@ All required source items are executable. Deferred CONTEXT items and COVERAGE op
 
 0.6B selectable engine; generic `generate()` default voice; Torch use of GGML-only `ref_spk`/`ref_rvq`/`ref_spk_emb`/`ref_codes`; whole `generate_voice_clone()`; CustomVoice and its streaming method; VoiceDesign and its streaming method; x-vector/promptless, multilingual, GGML/quantized/Triton/vLLM/server/demo paths; broad UI redesign.
 
-**Audit result:** PASS — no source item is missing from the 14-plan executable set.
+**Audit result:** PASS — no source item is missing from the 15-plan executable set.
