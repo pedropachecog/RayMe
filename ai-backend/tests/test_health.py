@@ -89,7 +89,7 @@ def test_health_returns_phase_two_model_residency_contract() -> None:
     assert engine_ids == {
         "f5",
         "xtts_v2",
-        "qwen3_0_6b",
+        "qwen3_1_7b",
         "luxtts",
         "chatterbox_turbo",
         "tada_1b",
@@ -103,6 +103,11 @@ def test_health_returns_phase_two_model_residency_contract() -> None:
         or engine.get("availability") == "resident"
     ]
     assert resident_engines == ["f5"]
+    qwen_status = next(
+        engine for engine in available_engines if engine["id"] == "qwen3_1_7b"
+    )
+    assert qwen_status["label"] == "Qwen3-TTS 1.7B-Base"
+    assert qwen_status["state"] == "idle"
 
 
 def test_health_does_not_return_raw_exception_text_in_public_payload() -> None:

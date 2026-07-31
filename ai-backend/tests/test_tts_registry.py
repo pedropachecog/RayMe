@@ -19,7 +19,7 @@ from app.main import create_app
 EXPECTED_ENGINE_LABELS = {
     "f5": "F5-TTS",
     "xtts_v2": "XTTS v2",
-    "qwen3_0_6b": "Qwen3-TTS 0.6B-Base",
+    "qwen3_1_7b": "Qwen3-TTS 1.7B-Base",
     "luxtts": "LuxTTS",
     "chatterbox_turbo": "Chatterbox Turbo",
     "tada_1b": "TADA 1B",
@@ -49,10 +49,10 @@ ENGINE_REQUIREMENTS = {
         "requires_transcript": False,
         "supports_streaming": True,
     },
-    "qwen3_0_6b": {
+    "qwen3_1_7b": {
         "model_license": "Apache-2.0",
-        "requires_transcript": False,
-        "supports_streaming": False,
+        "requires_transcript": True,
+        "supports_streaming": True,
     },
     "voxcpm2": {
         "code_license": "Apache-2.0",
@@ -186,10 +186,14 @@ def test_registry_metadata_captures_engine_specific_contracts_registry_metadata(
     assert "Requires transcript" in by_id["f5"]["caveat_chips"]
     assert "Reference audio is sufficient" in by_id["xtts_v2"]["quality_notes"]
     assert "Native streaming inside safe chunks" in by_id["xtts_v2"]["quality_notes"]
-    assert "Opt-in" in by_id["qwen3_0_6b"]["caveat_chips"]
-    assert "0.6B-Base" in by_id["qwen3_0_6b"]["quality_notes"]
-    assert "latency" in by_id["qwen3_0_6b"]["quality_notes"].lower()
-    assert "accent" in by_id["qwen3_0_6b"]["quality_notes"].lower()
+    assert "Voice cloning" in by_id["qwen3_1_7b"]["caveat_chips"]
+    assert "Requires transcript" in by_id["qwen3_1_7b"]["caveat_chips"]
+    assert "Native streaming" in by_id["qwen3_1_7b"]["caveat_chips"]
+    assert "1.7B-Base" in by_id["qwen3_1_7b"]["quality_notes"]
+    assert "matching transcript" in by_id["qwen3_1_7b"]["quality_notes"].lower()
+    assert "50-turn" in by_id["qwen3_1_7b"]["runtime_evidence"]
+    assert "RTX 3060" in by_id["qwen3_1_7b"]["runtime_evidence"]
+    assert "qwen3_0_6b" not in by_id
     assert by_id["luxtts"]["runtime_evidence"]
     assert by_id["chatterbox_turbo"]["runtime_evidence"]
     assert by_id["tada_1b"]["runtime_evidence"]
@@ -268,7 +272,7 @@ class ScriptedSwitchingManager:
         self.tts_adapters = {
             "f5": adapter,
             "xtts_v2": adapter,
-            "qwen3_0_6b": adapter,
+            "qwen3_1_7b": adapter,
             "luxtts": adapter,
             "chatterbox_turbo": adapter,
             "tada_1b": adapter,
