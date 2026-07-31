@@ -255,7 +255,7 @@ def _generate_sapi_wav(output_path: Path, transcript: str) -> None:
         (
             "$ErrorActionPreference = 'Stop'",
             "$speaker = New-Object -ComObject SAPI.SpVoice",
-            "$voice = $speaker.GetVoices() | Where-Object { $_.GetDescription() -eq 'Microsoft David Desktop' } | Select-Object -First 1",
+            "$voice = $speaker.GetVoices() | Where-Object { $_.GetAttribute('Name') -eq 'Microsoft David Desktop' } | Select-Object -First 1",
             "if (-not $voice) { throw 'Deterministic SAPI voice is unavailable' }",
             "$speaker.Voice = $voice",
             "$speaker.Rate = -1",
