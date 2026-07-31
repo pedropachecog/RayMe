@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Mapping
+from dataclasses import dataclass
 from typing import Any, Literal
 
 import httpx
@@ -14,6 +16,7 @@ TRANSCRIPTION_FAILED_MESSAGE = "Transcription failed"
 SYNTHESIS_FAILED_MESSAGE = "Synthesis failed"
 WEBRTC_FAILED_MESSAGE = "Call control request failed"
 WEBRTC_OFFER_FAILED_MESSAGE = "WebRTC offer could not be accepted"
+SPEECH_TURN_QUEUE_CAPACITY = 2
 SAFE_PROCESSING_MESSAGES = {
     "qwen3_reference_audio_required": "Reference audio is required",
     "qwen3_reference_audio_invalid": "Reference audio is invalid",
@@ -123,6 +126,239 @@ class AiBackendUnavailable(AiBackendClientError):
 
 class AiBackendProcessingError(AiBackendClientError):
     """The backend reached a processing path but could not complete it."""
+
+
+class SpeechTurnClosedError(AiBackendProcessingError):
+    """A segment was offered after the turn reached a terminal state."""
+
+    def __init__(self) -> None:
+        super().__init__(code="call_tts_failed", message="Speech playback failed")
+
+
+@dataclass(frozen=True, slots=True)
+class SpeechTurnTerminal:
+    """One sanitized terminal result for a multi-segment speech turn."""
+
+    status: Literal["normal", "cancelled", "error"]
+    playout_completed: bool
+    response: dict[str, Any] | None = None
+    error_code: str | None = None
+    error_message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _SpeechSubmission:
+    text: str
+    final_chunk: bool
+
+
+_SPEECH_TURN_FINISH = object()
+
+
+class SpeechTurn:
+    """Bounded sequential scheduler over the existing WebRTC speak endpoint.
+
+    `submit` returns once a natural segment has entered the capacity-two
+    scheduler. One background worker owns calls to the backend, so one native
+    Qwen generation runs at a time. `finalize` is the only terminal wait.
+    """
+
+    def __init__(
+        self,
+        *,
+        backend: Any,
+        base_url: str,
+        session_id: str,
+        turn_id: str,
+        voice_id: str,
+        engine_id: str,
+        voice_reference: Mapping[str, Any],
+        queue_capacity: int = SPEECH_TURN_QUEUE_CAPACITY,
+    ) -> None:
+        if queue_capacity < 1:
+            raise ValueError("speech turn queue capacity must be positive")
+        self._backend = backend
+        self._base_url = base_url
+        self._session_id = session_id
+        self._turn_id = turn_id
+        self._common_payload = {
+            "voice_id": voice_id,
+            "engine_id": engine_id,
+            **dict(voice_reference),
+        }
+        self._queue: asyncio.Queue[_SpeechSubmission | object] = asyncio.Queue(
+            maxsize=queue_capacity
+        )
+        self._worker: asyncio.Task[None] | None = None
+        self._closed = False
+        self._terminal: SpeechTurnTerminal | None = None
+        self._last_response: dict[str, Any] | None = None
+
+    @property
+    def terminal(self) -> SpeechTurnTerminal | None:
+        return self._terminal
+
+    async def submit(self, text: str) -> None:
+        segment = text.strip()
+        if not segment:
+            return
+        self._require_open()
+        await self._queue.put(_SpeechSubmission(text=segment, final_chunk=False))
+        self._ensure_worker()
+        if self._terminal is not None:
+            raise SpeechTurnClosedError()
+
+    async def finalize(self, tail: str | None = None) -> SpeechTurnTerminal:
+        self._require_open()
+        final_text = str(tail or "").strip()
+        if final_text:
+            await self._queue.put(_SpeechSubmission(text=final_text, final_chunk=True))
+        else:
+            await self._queue.put(_SPEECH_TURN_FINISH)
+        self._closed = True
+        self._ensure_worker()
+        assert self._worker is not None
+        await self._worker
+        if self._terminal is None:
+            self._terminal = _speech_error_terminal("call_tts_failed")
+        return self._terminal
+
+    async def cancel(self) -> SpeechTurnTerminal:
+        self._closed = True
+        if self._worker is not None and not self._worker.done():
+            self._worker.cancel()
+            await asyncio.gather(self._worker, return_exceptions=True)
+        if self._terminal is None or self._terminal.status == "normal":
+            self._terminal = SpeechTurnTerminal(
+                status="cancelled",
+                playout_completed=False,
+            )
+        self._discard_pending()
+        return self._terminal
+
+    def _require_open(self) -> None:
+        if self._closed or self._terminal is not None:
+            raise SpeechTurnClosedError()
+
+    def _ensure_worker(self) -> None:
+        if self._worker is None:
+            self._worker = asyncio.create_task(self._run())
+
+    async def _run(self) -> None:
+        try:
+            while True:
+                item = await self._queue.get()
+                if item is _SPEECH_TURN_FINISH:
+                    self._terminal = _speech_terminal_from_response(
+                        self._last_response,
+                        require_final=False,
+                    )
+                    return
+                assert isinstance(item, _SpeechSubmission)
+                if self._terminal is not None:
+                    return
+                try:
+                    result = await self._speak(item)
+                except AiBackendClientError as exc:
+                    self._terminal = _speech_error_terminal(exc.code)
+                    return
+                except asyncio.CancelledError:
+                    self._terminal = SpeechTurnTerminal(
+                        status="cancelled",
+                        playout_completed=False,
+                    )
+                    raise
+                except Exception:
+                    self._terminal = _speech_error_terminal("call_tts_failed")
+                    return
+
+                self._last_response = result
+                observed = _speech_terminal_from_response(
+                    result,
+                    require_final=item.final_chunk,
+                )
+                if observed.status != "normal" or item.final_chunk:
+                    self._terminal = observed
+                    return
+        finally:
+            self._discard_pending()
+
+    async def _speak(self, item: _SpeechSubmission) -> dict[str, Any]:
+        speak_call = getattr(self._backend, "speak_call", None)
+        if not callable(speak_call):
+            raise AiBackendUnavailable(
+                code="call_backend_client_misconfigured",
+                message="AI backend unreachable",
+            )
+        payload = {
+            "turn_id": self._turn_id,
+            "text": item.text,
+            "final_chunk": item.final_chunk,
+            **self._common_payload,
+        }
+        result = await speak_call(self._base_url, self._session_id, payload)
+        if not isinstance(result, Mapping):
+            raise AiBackendUnavailable(
+                code="invalid_response",
+                message=INVALID_RESPONSE_MESSAGE,
+            )
+        return dict(result)
+
+    def _discard_pending(self) -> None:
+        while True:
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                return
+
+
+def _speech_terminal_from_response(
+    response: Mapping[str, Any] | None,
+    *,
+    require_final: bool,
+) -> SpeechTurnTerminal:
+    if response is None:
+        return _speech_error_terminal("call_tts_failed")
+    raw_event = response.get("event")
+    event = raw_event if isinstance(raw_event, Mapping) else response
+    event_type = event.get("type")
+    event_status = event.get("status")
+    if event_status == "cancelled" or event_type == "cancelled":
+        return SpeechTurnTerminal(
+            status="cancelled",
+            playout_completed=False,
+            response=dict(response),
+        )
+    if event_type in {"failed", "error"} or event_status == "error":
+        return _speech_error_terminal("call_tts_failed", response=response)
+
+    raw_playout = event.get("tts_playback_final")
+    playout = raw_playout if isinstance(raw_playout, Mapping) else {}
+    playout_completed = playout.get("playout_wait_completed") is not False
+    normal_shape = event_type == "ai_done" or (
+        not require_final and event_status in {"queued", "normal"}
+    )
+    if not normal_shape or not playout_completed:
+        return _speech_error_terminal("call_tts_failed", response=response)
+    return SpeechTurnTerminal(
+        status="normal",
+        playout_completed=True,
+        response=dict(response),
+    )
+
+
+def _speech_error_terminal(
+    code: str,
+    *,
+    response: Mapping[str, Any] | None = None,
+) -> SpeechTurnTerminal:
+    return SpeechTurnTerminal(
+        status="error",
+        playout_completed=False,
+        response=dict(response) if response is not None else None,
+        error_code="call_tts_failed",
+        error_message="Speech playback failed",
+    )
 
 
 class AiBackendClient:
@@ -455,6 +691,10 @@ __all__ = [
     "AiBackendUnavailable",
     "EngineStatus",
     "QwenPromptInvalidationResult",
+    "SPEECH_TURN_QUEUE_CAPACITY",
+    "SpeechTurn",
+    "SpeechTurnClosedError",
+    "SpeechTurnTerminal",
     "SynthesisResult",
     "TranscriptionResult",
 ]

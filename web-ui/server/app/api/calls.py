@@ -21,7 +21,9 @@ from app.domain.ai_backend_client import (
     AiBackendClientError,
     AiBackendProcessingError,
     AiBackendUnavailable,
+    SpeechTurn,
 )
+from app.domain.call_tts_segments import CallTtsSegmenter
 from app.domain.call_service import (
     CALL_SESSION_NOT_FOUND,
     CallService,
@@ -387,6 +389,9 @@ async def create_call_turn(
         if current_task is not None:
             _ACTIVE_LLM_TURNS[call_id] = current_task
         accumulated: list[str] = []
+        speech_turn: SpeechTurn | None = None
+        segmenter = CallTtsSegmenter() if call["engine_id"] == "qwen3_1_7b" else None
+        rehearsing_sent = False
         llm_started = time.perf_counter()
         first_token_logged = False
         try:
@@ -412,8 +417,32 @@ async def create_call_turn(
                         )
                     accumulated.append(token)
                     yield _sse({"type": "ai_token", "turn_id": payload.turn_id, "text": token})
+                    if segmenter is not None:
+                        for segment in segmenter.feed(token):
+                            if speech_turn is None:
+                                speech_turn = SpeechTurn(
+                                    backend=backend,
+                                    base_url=endpoint_settings.ai_backend_url,
+                                    session_id=session_id,
+                                    turn_id=payload.turn_id,
+                                    voice_id=str(call["voice_id"]),
+                                    engine_id=str(call["engine_id"]),
+                                    voice_reference=voice_reference,
+                                )
+                            if not rehearsing_sent:
+                                rehearsing_sent = True
+                                yield _sse(
+                                    {
+                                        "type": "state",
+                                        "turn_id": payload.turn_id,
+                                        "state": "rehearsing",
+                                    }
+                                )
+                            await speech_turn.submit(segment)
                     continue
                 if event.get("type") == "error":
+                    if speech_turn is not None:
+                        await speech_turn.cancel()
                     yield _sse(
                         {
                             "type": "error",
@@ -432,8 +461,28 @@ async def create_call_turn(
                 int((time.perf_counter() - llm_started) * 1000),
                 len(visible_text),
             )
-            if visible_text:
-                message = await service.record_ai_speech(call_id, visible_text)
+            if not visible_text.strip():
+                yield _sse(
+                    {
+                        "type": "ai_done",
+                        "turn_id": payload.turn_id,
+                        "message": None,
+                    }
+                )
+                return
+
+            if speech_turn is None:
+                speech_turn = SpeechTurn(
+                    backend=backend,
+                    base_url=endpoint_settings.ai_backend_url,
+                    session_id=session_id,
+                    turn_id=payload.turn_id,
+                    voice_id=str(call["voice_id"]),
+                    engine_id=str(call["engine_id"]),
+                    voice_reference=voice_reference,
+                )
+            if not rehearsing_sent:
+                rehearsing_sent = True
                 yield _sse(
                     {
                         "type": "state",
@@ -441,70 +490,42 @@ async def create_call_turn(
                         "state": "rehearsing",
                     }
                 )
-                # Block the SSE stream until TTS synthesis completes and audio
-                # is enqueued to the WebRTC outbound track. This keeps the
-                # browser in 'speaking' state (SSE stream active), which
-                # prevents Android Chrome from suspending the tab and dropping
-                # the WebRTC ICE connection during the TTS gap.
-                # ai_audio_started / ai_done for the media pipeline are still
-                # delivered via the WebRTC data channel independently.
-                #
-                # We yield SSE keepalive comments during the wait to prevent
-                # FastAPI's StreamingResponse from timing out the idle HTTP
-                # connection. An idle SSE connection is cancelled, which
-                # propagates CancelledError to _synthesize_speech on the AI
-                # backend, aborting F5-TTS mid-inference.
-                tts_task = asyncio.create_task(
-                    _speak_call(
-                        backend,
-                        endpoint_settings.ai_backend_url,
-                        session_id,
-                        {
-                            "turn_id": payload.turn_id,
-                            "text": visible_text,
-                            "voice_id": call["voice_id"],
-                            "engine_id": call["engine_id"],
-                            "final_chunk": True,
-                            **voice_reference,
-                        },
-                    ),
-                )
-                speak_result: dict[str, Any] | None = None
-                while not tts_task.done():
-                    await asyncio.sleep(2.0)
-                    # SSE comment — keeps the HTTP connection alive without
-                    # being interpreted as an event by the client
-                    yield ": keepalive\n\n"
-                try:
-                    speak_result = await tts_task
-                except AiBackendClientError as exc:
-                    logger.warning(
-                        "[call-turn] speak_call.sync_failed call=%s turn=%s "
-                        "code=%s message=%s — yielding sanitized TTS error",
-                        call_id,
-                        payload.turn_id,
-                        exc.code,
-                        exc.message,
-                    )
-                    yield _sse(
-                        {
-                            "type": "error",
-                            "turn_id": payload.turn_id,
-                            "code": "call_tts_failed",
-                            "message": "Speech playback failed",
-                        }
-                    )
-                audio_started_event = _extract_ai_audio_started_event(speak_result)
-                if audio_started_event is not None:
-                    yield _sse(audio_started_event)
-                logger.info(
-                    "[call-turn] ai_done call=%s turn=%s visible_text_len=%d",
+
+            # Task 2 moves this durable write behind the normal terminal gate.
+            message = await service.record_ai_speech(call_id, visible_text)
+            final_text = segmenter.finish() if segmenter is not None else visible_text
+            terminal_task = asyncio.create_task(speech_turn.finalize(final_text))
+            while not terminal_task.done():
+                await asyncio.sleep(2.0)
+                yield ": keepalive\n\n"
+            terminal = await terminal_task
+            audio_started_event = _extract_ai_audio_started_event(terminal.response)
+            if audio_started_event is not None:
+                yield _sse(audio_started_event)
+            if terminal.status == "cancelled":
+                return
+            if terminal.status != "normal" or not terminal.playout_completed:
+                logger.warning(
+                    "[call-turn] speech_turn.failed call=%s turn=%s code=%s",
                     call_id,
                     payload.turn_id,
-                    len(visible_text),
+                    terminal.error_code or "call_tts_failed",
                 )
-            else:
-                message = None
+                yield _sse(
+                    {
+                        "type": "error",
+                        "turn_id": payload.turn_id,
+                        "code": "call_tts_failed",
+                        "message": "Speech playback failed",
+                    }
+                )
+                return
+            logger.info(
+                "[call-turn] ai_done call=%s turn=%s visible_text_len=%d",
+                call_id,
+                payload.turn_id,
+                len(visible_text),
+            )
             yield _sse(
                 {
                     "type": "ai_done",
@@ -513,8 +534,12 @@ async def create_call_turn(
                 }
             )
         except asyncio.CancelledError:
+            if speech_turn is not None:
+                await speech_turn.cancel()
             return
         except AiBackendClientError:
+            if speech_turn is not None:
+                await speech_turn.cancel()
             yield _sse(
                 {
                     "type": "error",
@@ -524,6 +549,8 @@ async def create_call_turn(
                 }
             )
         except Exception:
+            if speech_turn is not None:
+                await speech_turn.cancel()
             yield _sse(
                 {
                     "type": "error",
@@ -533,6 +560,8 @@ async def create_call_turn(
                 }
             )
         finally:
+            if speech_turn is not None and speech_turn.terminal is None:
+                await speech_turn.cancel()
             if current_task is not None and _ACTIVE_LLM_TURNS.get(call_id) is current_task:
                 _ACTIVE_LLM_TURNS.pop(call_id, None)
 
