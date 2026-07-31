@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready_to_execute
-stopped_at: Completed 09-11-PLAN.md
-last_updated: "2026-07-31T20:00:25.910Z"
+stopped_at: Completed 09-09-PLAN.md
+last_updated: "2026-07-31T20:33:40.891Z"
 last_activity: 2026-07-31
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 112
-  completed_plans: 102
+  completed_plans: 103
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
-last_activity_desc: "Completed Phase 09 Plan 11: paced playout credit, truthful terminal metrics, and request-scoped call cancellation"
+last_activity_desc: "Completed Phase 09 Plan 09: mocked Qwen readiness and commit-matched deployed browser acceptance"
 ---
 
 ## Phase Status
@@ -260,8 +260,8 @@ last_activity_desc: "Completed Phase 09 Plan 11: paced playout credit, truthful 
 ## Session Continuity
 
 Last activity: 2026-07-31
-Last session: 2026-07-31T20:00:25.593Z
-Stopped at: Completed 09-11-PLAN.md
+Last session: 2026-07-31T20:33:40.538Z
+Stopped at: Completed 09-09-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -279,6 +279,7 @@ Resume file: None
 | Phase 09 P06 | 20min | 2 tasks | 12 files |
 | Phase 09 P08 | 26min | 3 tasks | 13 files |
 | Phase 09 P11 | 23min | 2 tasks | 5 files |
+| Phase 09 P09 | 23min | 2 tasks | 8 files |
 
 ## Decisions
 
@@ -313,3 +314,6 @@ Resume file: None
 - [Phase 09]: Bound live-call playout by pending PCM samples across the queue and frame buffer, releasing credit only on paced 20 ms consumption.
 - [Phase 09]: Keep first-audio startup evidence separate from terminal generation, playout, EOS, debt, underflow, join, order, and discard metrics.
 - [Phase 09]: Every terminal call control cancels the exact turn and request before normal completion, and late audio or ai_done is discarded.
+- [Phase 09]: Saved Qwen browser readiness evidence is labeled mocked_contract and cannot satisfy deployed release proof.
+- [Phase 09]: The live Qwen suite requires canonical OMEN URLs, the exact deployed commit, and a hash-bound local transcript/provenance fixture without fabricated permission.
+- [Phase 09]: Busy Qwen actions preserve initiating focus through guarded aria-disabled state while invalid actions remain natively disabled.
