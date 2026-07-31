@@ -21,6 +21,7 @@ dependencies = [
 tts = [
   "f5-tts==1.1.17",
   "coqui-tts==0.27.5",
+  "faster-qwen3-tts @ git+https://github.com/andimarafioti/faster-qwen3-tts@a70afc0f81f7f5f8801c3227968f1102f43f211c",
   "qwen-tts==0.1.1",
   "voxcpm==2.0.2",
 ]
