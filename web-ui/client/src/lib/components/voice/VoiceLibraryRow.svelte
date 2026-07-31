@@ -40,6 +40,9 @@
   $: promptStatusCopy = promptReadinessCopy(promptReadiness);
 
   function playVoice() {
+    if (operation === 'preparing' || operation === 'testing') {
+      return;
+    }
     onTestPlay(voice, testPayload());
   }
 
@@ -157,7 +160,7 @@
   <div class="actions">
     <button
       type="button"
-      disabled={operation === 'preparing' || operation === 'testing'}
+      aria-disabled={operation === 'preparing' || operation === 'testing'}
       on:click={operation === 'failed' && isQwenVoice ? retryVoice : playVoice}
     >
       {#if operation === 'preparing' || (operation === 'failed' && isQwenVoice)}

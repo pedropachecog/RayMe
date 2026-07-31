@@ -66,7 +66,7 @@ const staleSettings: SettingsState = {
     stt_model: 'distil-large-v3',
     vad_ready: true,
     resident_tts_engine: 'f5',
-    available_engines: ['f5', 'xtts_v2', 'qwen3_0_6b'],
+    available_engines: ['f5', 'xtts_v2', 'qwen3_1_7b'],
     loading_engine: null,
     vram_used_mb: 2104,
     vram_headroom_mb: 9896

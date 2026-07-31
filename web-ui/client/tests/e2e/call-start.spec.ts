@@ -46,6 +46,8 @@ type StartupRouteCounters = {
 type CallStartRouteOptions = {
   failOffer?: boolean;
   offerGate?: Promise<void>;
+  qwenPreparation?: boolean;
+  qwenPromptState?: 'ready' | 'failed';
 };
 
 type MockCallMediaSnapshot = {
@@ -109,6 +111,55 @@ test('keeps startup in Connecting until microphone access and WebRTC offer compl
 
   resolveOffer();
   await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  assertNoBrowserErrors();
+});
+
+test('keeps a Qwen call in Preparing voice until model and saved prompt are authoritative', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  let resolveOffer: () => void = () => {};
+  const offerGate = new Promise<void>((resolve) => {
+    resolveOffer = resolve;
+  });
+  const counters = await installCallStartRoutes(page, { qwenPreparation: true, offerGate });
+
+  await page.goto(`/chat/${threadId}`);
+  await page.getByRole('button', { name: 'Start call' }).click();
+
+  await expect.poll(() => counters.offerCount).toBe(1);
+  const preparationPanel = page.getByRole('status').filter({ hasText: 'Preparing voice' });
+  await expect(preparationPanel.getByRole('heading', { name: 'Preparing voice' })).toBeVisible();
+  await expect(preparationPanel).toContainText('Loading Qwen3-TTS 1.7B…');
+  await expect(preparationPanel).toContainText('Preparing Call Start Voice…');
+  await expect(page.getByText('Listening', { exact: true })).toHaveCount(0);
+  await expect(page.getByTestId('voice-visualizer')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'End Call' })).toHaveCount(0);
+
+  resolveOffer();
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  assertNoBrowserErrors();
+});
+
+test('focuses a fixed Qwen preparation failure without exposing backend detail', async ({ page }) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  await installCallStartRoutes(page, {
+    qwenPreparation: true,
+    qwenPromptState: 'failed'
+  });
+
+  await page.goto(`/call/${threadId}`);
+
+  const failure = page.getByRole('alert');
+  await expect(failure.getByRole('heading', { name: 'Voice preparation failed' })).toBeFocused();
+  await expect(failure).toContainText(
+    'RayMe could not prepare this voice for the call. Retry preparation, choose another voice, or check Settings.'
+  );
+  await expect(failure.getByRole('button', { name: 'Retry Preparation' })).toBeVisible();
+  await expect(page.getByText(/private|traceback|worker|cache path/i)).toHaveCount(0);
+  await expect(page.getByTestId('voice-visualizer')).toHaveCount(0);
   assertNoBrowserErrors();
 });
 
@@ -1021,7 +1072,7 @@ async function installCallStartRoutes(page: Page, options: CallStartRouteOptions
     default_voice: {
       id: 'voice-call-start',
       name: 'Call Start Voice',
-      default_engine: 'f5',
+      default_engine: options.qwenPreparation ? 'qwen3_1_7b' : 'f5',
       reference_transcript: 'Reference text.',
       sample_asset_id: 'asset-call-start',
       preview_audio_url: null,
@@ -1055,6 +1106,17 @@ async function installCallStartRoutes(page: Page, options: CallStartRouteOptions
   await page.route('**/api/characters/*/portrait**', async (route) => {
     await route.fulfill({ status: 204 });
   });
+  if (options.qwenPreparation) {
+    await page.route('**/api/voices/voice-call-start', async (route) => {
+      await fulfillJson(route, character.default_voice);
+    });
+    await page.route('**/api/voices/preparation-status', async (route) => {
+      await fulfillJson(route, {
+        model: { state: 'loading', engine_id: 'qwen3_1_7b' },
+        prompt: { state: 'prewarming', voice_key: 'opaque-call-voice' }
+      });
+    });
+  }
   await page.route('**/api/calls/start', async (route: Route) => {
     expect(route.request().method()).toBe('POST');
     counters.startCount += 1;
@@ -1063,6 +1125,8 @@ async function installCallStartRoutes(page: Page, options: CallStartRouteOptions
       call_id: 'call-start-01',
       session_id: 'rtc-call-start-01',
       thread_id: threadId,
+      voice_id: options.qwenPreparation ? 'voice-call-start' : null,
+      engine_id: options.qwenPreparation ? 'qwen3_1_7b' : 'f5',
       state: 'listening'
     }, 201);
   });
@@ -1084,7 +1148,20 @@ async function installCallStartRoutes(page: Page, options: CallStartRouteOptions
       call_id: 'call-start-01',
       session_id: 'rtc-call-start-01',
       answer: { type: 'answer', sdp: 'v=0\r\n' },
-      event_channel: 'rayme-events'
+      event_channel: 'rayme-events',
+      ...(options.qwenPreparation
+        ? {
+            preparation: {
+              model: { state: 'resident', engine_id: 'qwen3_1_7b' },
+              prompt: {
+                state: options.qwenPromptState ?? 'ready',
+                voice_key: 'opaque-call-voice',
+                error_code:
+                  options.qwenPromptState === 'failed' ? 'qwen3_prompt_failed' : null
+              }
+            }
+          }
+        : {})
     });
   });
   await page.route('**/api/calls/*/events/recover', async (route) => {

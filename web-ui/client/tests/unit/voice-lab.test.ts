@@ -510,7 +510,8 @@ describe('Voice Lab Phase 2 source contract', () => {
     expect(libraryRowSource).toContain('role="alert"');
     expect(libraryRowSource).toContain('min-height: 44px');
     expect(libraryRowSource).toContain('prefers-reduced-motion: reduce');
-    expect(libraryRowSource).toMatch(/disabled={operation === 'preparing' \|\| operation === 'testing'}/);
+    expect(libraryRowSource).toMatch(/aria-disabled={operation === 'preparing' \|\| operation === 'testing'}/);
+    expect(libraryRowSource).toContain("if (operation === 'preparing' || operation === 'testing')");
     expect(libraryRowSource).not.toMatch(/disabled=.*(?:onRename|onDelete)/);
     expect(libraryListSource).toMatch(/preparationByVoiceId\[voice\.voice_id\]/);
     expect(libraryListSource).toMatch(/operationByVoiceId\[voice\.voice_id\]/);

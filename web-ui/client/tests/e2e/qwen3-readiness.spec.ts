@@ -7,6 +7,11 @@ const QWEN_ENGINE_LABEL = 'Qwen3-TTS 1.7B-Base';
 const MOCKED_CONTRACT_ENVIRONMENT = 'environment=mocked_contract';
 const referenceTranscript = 'This exact transcript matches the permitted reference recording.';
 
+type Preparation =
+  | ReturnType<typeof loadingPreparation>
+  | ReturnType<typeof readyPreparation>
+  | ReturnType<typeof failedPreparation>;
+
 test.describe('Phase 09 Qwen readiness browser contract', () => {
   test.beforeEach(async ({}, testInfo) => {
     testInfo.annotations.push({
@@ -49,7 +54,7 @@ test.describe('Phase 09 Qwen readiness browser contract', () => {
     page
   }) => {
     const assertNoBrowserErrors = installBrowserErrorGuard(page);
-    let preparation = loadingPreparation();
+    let preparation: Preparation = loadingPreparation();
     let previewAttempt = 0;
     let resolveFirstPreview: () => void = () => {};
     let resolveRetryPreview: () => void = () => {};
@@ -127,7 +132,9 @@ test.describe('Phase 09 Qwen readiness browser contract', () => {
     await expect(authorizationBasis).toHaveValue('Direct permission for this LAN test');
     await expect(useScope).toHaveValue('rayme_lan_call_testing');
     await expect(page.getByLabel('Voice name')).toHaveValue('Persistent Qwen Voice');
-    await expect(page.getByLabel('Reference transcript')).toHaveValue(referenceTranscript);
+    await expect(page.getByRole('textbox', { name: 'Reference transcript' })).toHaveValue(
+      referenceTranscript
+    );
     await expect(page.getByLabel('Preview text')).toHaveValue(
       'Keep every field while preparation runs.'
     );
@@ -152,7 +159,7 @@ test.describe('Phase 09 Qwen readiness browser contract', () => {
     page
   }) => {
     const assertNoBrowserErrors = installBrowserErrorGuard(page);
-    let preparation = loadingPreparation();
+    let preparation: Preparation = loadingPreparation();
     let requestCount = 0;
     let resolveFirstTestPlay: () => void = () => {};
     const firstTestPlayGate = new Promise<void>((resolve) => {
@@ -216,7 +223,7 @@ test.describe('Phase 09 Qwen readiness browser contract', () => {
     page
   }) => {
     const assertNoBrowserErrors = installBrowserErrorGuard(page);
-    let preparation = loadingPreparation();
+    let preparation: Preparation = loadingPreparation();
     await page.setViewportSize({ width: 320, height: 720 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await installVoiceLibraryRoutes(page, {
@@ -283,7 +290,7 @@ function settingsPayload(qwenState: 'loading' | 'resident' | 'unavailable') {
 async function installVoiceLabRoutes(
   page: Page,
   options: {
-    getPreparation: () => ReturnType<typeof loadingPreparation>;
+    getPreparation: () => Preparation;
     preview: (route: Route) => Promise<void>;
   }
 ) {
@@ -307,7 +314,7 @@ async function installVoiceLabRoutes(
 async function installVoiceLibraryRoutes(
   page: Page,
   options: {
-    getPreparation: () => ReturnType<typeof loadingPreparation>;
+    getPreparation: () => Preparation;
     testPlay: (route: Route) => Promise<void>;
   }
 ) {
@@ -376,7 +383,9 @@ async function uploadAndTranscribeReference(page: Page) {
     buffer: makeTinyWav()
   });
   await page.getByRole('button', { name: 'Transcribe Sample' }).click();
-  await expect(page.getByLabel('Reference transcript')).toHaveValue(referenceTranscript);
+  await expect(page.getByRole('textbox', { name: 'Reference transcript' })).toHaveValue(
+    referenceTranscript
+  );
 }
 
 function loadingPreparation() {

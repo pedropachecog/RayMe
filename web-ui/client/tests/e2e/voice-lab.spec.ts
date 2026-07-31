@@ -9,7 +9,7 @@ import {
 const engineLabels = [
   'F5-TTS',
   'XTTS v2',
-  'Qwen3-TTS 0.6B-Base',
+  'Qwen3-TTS 1.7B-Base',
   'LuxTTS',
   'Chatterbox Turbo',
   'TADA 1B'
@@ -358,8 +358,8 @@ async function routeVoiceLabApis(
             unavailable_reason: 'engine synthesis is not implemented in Phase 02'
           },
           {
-            id: 'qwen3_0_6b',
-            label: 'Qwen3-TTS 0.6B-Base',
+            id: 'qwen3_1_7b',
+            label: 'Qwen3-TTS 1.7B-Base',
             available: false,
             state: 'unavailable',
             unavailable_reason: 'engine synthesis is not implemented in Phase 02'
@@ -536,7 +536,7 @@ async function routeVoiceLibraryApis(page: Page) {
         available_engines: [
           { id: 'f5', label: 'F5-TTS', available: true, state: 'resident' },
           { id: 'xtts_v2', label: 'XTTS v2', available: true, state: 'idle' },
-          { id: 'qwen3_0_6b', label: 'Qwen3-TTS 0.6B-Base', available: true, state: 'idle' },
+          { id: 'qwen3_1_7b', label: 'Qwen3-TTS 1.7B-Base', available: true, state: 'idle' },
           { id: 'luxtts', label: 'LuxTTS', available: true, state: 'idle' },
           { id: 'chatterbox_turbo', label: 'Chatterbox Turbo', available: true, state: 'idle' },
           { id: 'tada_1b', label: 'TADA 1B', available: true, state: 'idle' }

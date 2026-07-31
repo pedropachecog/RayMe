@@ -12,6 +12,7 @@
 
   let playing = false;
   let audioElement: HTMLAudioElement;
+  $: previewBusy = state === 'preparing' || state === 'synthesizing';
 
   $: if (audioUrl) {
     playing = false;
@@ -35,6 +36,13 @@
     void audioElement.play().catch(() => {
       playing = false;
     });
+  }
+
+  function handlePreview() {
+    if (disabled || previewBusy) {
+      return;
+    }
+    onPreview();
   }
 </script>
 
@@ -68,7 +76,13 @@
   </label>
 
   <div class="preview-actions">
-    <button class="primary" type="button" disabled={disabled || state === 'preparing' || state === 'synthesizing'} on:click={onPreview}>
+    <button
+      class="primary"
+      type="button"
+      disabled={disabled}
+      aria-disabled={disabled || previewBusy}
+      on:click={handlePreview}
+    >
       <RefreshCw size={16} strokeWidth={1.8} aria-hidden="true" />
       <span>{state === 'preparing' ? 'Preparing voice…' : state === 'synthesizing' ? 'Synthesizing…' : 'Preview Voice'}</span>
     </button>
