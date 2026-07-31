@@ -7,6 +7,7 @@ OMEN_BRANCH="${OMEN_BRANCH:-main}"
 RAYME_OMEN_VERIFY_VOXCPM2="${RAYME_OMEN_VERIFY_VOXCPM2:-0}"
 RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON="${RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON:-${RAYME_VOXCPM2_RUNTIME_SMOKE_JSON:-}}"
 RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON="${RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON:-${RAYME_VOXCPM2_VRAM_SOAK_JSON:-}}"
+RAYME_OMEN_VERIFY_QWEN3_TRACER="${RAYME_OMEN_VERIFY_QWEN3_TRACER:-0}"
 
 SCRIPT_DIR=$(
   CDPATH= cd -- "$(dirname -- "$0")"
@@ -16,6 +17,7 @@ REPO_ROOT=$(
   CDPATH= cd -- "$SCRIPT_DIR/.."
   pwd
 )
+RAYME_OMEN_QWEN3_TRACER_JSON="${RAYME_OMEN_QWEN3_TRACER_JSON:-$REPO_ROOT/.planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-hardware-tracer.json}"
 
 local_head="$(git rev-parse HEAD)"
 
@@ -36,6 +38,7 @@ remote_bootstrap="\$env:EXPECTED_HEAD=$(ps_single_quote "$local_head"); "
 remote_bootstrap+="\$env:OMEN_REPO=$(ps_single_quote "$OMEN_REPO"); "
 remote_bootstrap+="\$env:OMEN_BRANCH=$(ps_single_quote "$OMEN_BRANCH"); "
 remote_bootstrap+="\$env:RAYME_OMEN_VERIFY_VOXCPM2=$(ps_single_quote "$RAYME_OMEN_VERIFY_VOXCPM2"); "
+remote_bootstrap+="\$env:RAYME_OMEN_VERIFY_QWEN3_TRACER=$(ps_single_quote "$RAYME_OMEN_VERIFY_QWEN3_TRACER"); "
 remote_bootstrap+="Invoke-Expression ([Console]::In.ReadToEnd())"
 
 run_remote_deploy() {
@@ -47,6 +50,11 @@ $branch = $env:OMEN_BRANCH
 if (-not $branch) { $branch = "main" }
 $expectedHead = $env:EXPECTED_HEAD
 $verifyVoxCpm2 = $env:RAYME_OMEN_VERIFY_VOXCPM2 -eq "1"
+$verifyQwen3Tracer = $env:RAYME_OMEN_VERIFY_QWEN3_TRACER -eq "1"
+$qwenRuntimeCommit = "a70afc0f81f7f5f8801c3227968f1102f43f211c"
+$qwenModelId = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+$qwenModelRevision = "fd4b254389122332181a7c3db7f27e918eec64e3"
+$qwenModelDir = "C:\Users\pmpg\rayme\models\qwen3-tts-1.7b-$qwenModelRevision"
 
 Set-Location $repo
 Write-Host "== OMEN deploy: repo $(Get-Location)"
@@ -283,9 +291,129 @@ print("__RAYME_VOXCPM2_PROBE_JSON__" + json.dumps({
   $script:VoxCpm2VramSoak = $payload.vram_soak
 }
 
+function Invoke-RayMeQwen3Provisioning {
+  Write-Host "== Provisioning pinned Faster Qwen3-TTS runtime and model snapshot"
+
+  function Get-RayMeQwenUv {
+    $command = Get-Command uv -ErrorAction SilentlyContinue
+    if ($command) { return $command.Source }
+
+    $repoLocalUv = Join-Path $repo ".local\uv-bootstrap\Scripts\uv.exe"
+    if (-not (Test-Path $repoLocalUv)) {
+      Write-Host "== Bootstrapping repo-local uv CLI"
+      $uvVenv = Join-Path $repo ".local\uv-bootstrap"
+      & "$repo\ai-backend\.venv\Scripts\python.exe" -m venv $uvVenv
+      if ($LASTEXITCODE -ne 0) { throw "Failed to create repo-local uv bootstrap venv" }
+      & "$uvVenv\Scripts\python.exe" -m pip install --upgrade pip | Out-Host
+      if ($LASTEXITCODE -ne 0) { throw "Failed to upgrade pip in repo-local uv bootstrap venv" }
+      & "$uvVenv\Scripts\python.exe" -m pip install "uv==0.11.6" | Out-Host
+      if ($LASTEXITCODE -ne 0) { throw "Failed to install repo-local uv CLI" }
+    }
+    return $repoLocalUv
+  }
+
+  $uv = [string](Get-RayMeQwenUv | Select-Object -Last 1)
+  $pythonVersion = "3.11"
+  $env:UV_PYTHON = $pythonVersion
+  & $uv sync --project ai-backend --extra tts --python $pythonVersion
+  if ($LASTEXITCODE -ne 0) { throw "uv sync --project ai-backend --extra tts failed" }
+
+  Write-Host "== Reasserting CUDA PyTorch wheels after Qwen dependency sync"
+  & $uv pip install `
+    --python "$repo\ai-backend\.venv\Scripts\python.exe" `
+    --index-url "https://download.pytorch.org/whl/cu126" `
+    "torch==2.10.0+cu126" `
+    "torchaudio==2.10.0+cu126"
+  if ($LASTEXITCODE -ne 0) { throw "Failed to install CUDA PyTorch wheels for Qwen verification" }
+
+  New-Item -ItemType Directory -Path $qwenModelDir -Force | Out-Null
+  $env:PATH = "$cudaRuntimeBin;$env:PATH"
+  $env:RAYME_QWEN3_MODEL_DIR = $qwenModelDir
+  $env:RAYME_QWEN3_MODEL_REVISION = $qwenModelRevision
+  $env:RAYME_DEPLOYED_COMMIT = $actualHead
+  $env:RAYME_QWEN3_RUNTIME_COMMIT = $qwenRuntimeCommit
+  $env:RAYME_QWEN3_MODEL_ID = $qwenModelId
+
+  $probe = @'
+import importlib.metadata
+import json
+import os
+from pathlib import Path
+
+from huggingface_hub import snapshot_download
+
+EXPECTED_RUNTIME_VERSION = "0.3.2"
+EXPECTED_RUNTIME_COMMIT = os.environ["RAYME_QWEN3_RUNTIME_COMMIT"]
+EXPECTED_MODEL_ID = os.environ["RAYME_QWEN3_MODEL_ID"]
+EXPECTED_MODEL_REVISION = os.environ["RAYME_QWEN3_MODEL_REVISION"]
+MODEL_DIR = Path(os.environ["RAYME_QWEN3_MODEL_DIR"])
+
+resolved = Path(snapshot_download(
+    repo_id=EXPECTED_MODEL_ID,
+    revision=EXPECTED_MODEL_REVISION,
+    local_dir=MODEL_DIR,
+))
+if resolved.resolve() != MODEL_DIR.resolve():
+    raise RuntimeError("Qwen model snapshot resolved outside the canonical model directory")
+if not (MODEL_DIR / "config.json").is_file():
+    raise RuntimeError("Pinned Qwen model snapshot is incomplete")
+
+manifest = {
+    "model_id": EXPECTED_MODEL_ID,
+    "model_revision": EXPECTED_MODEL_REVISION,
+}
+(MODEL_DIR / "rayme-model-revision.json").write_text(
+    json.dumps(manifest, indent=2, sort_keys=True) + "\n",
+    encoding="utf-8",
+)
+
+runtime_version = importlib.metadata.version("faster-qwen3-tts")
+if runtime_version != EXPECTED_RUNTIME_VERSION:
+    raise RuntimeError("Unexpected Faster Qwen3-TTS version")
+direct_url = json.loads(
+    importlib.metadata.distribution("faster-qwen3-tts").read_text("direct_url.json") or "{}"
+)
+runtime_commit = (direct_url.get("vcs_info") or {}).get("commit_id")
+if runtime_commit != EXPECTED_RUNTIME_COMMIT:
+    raise RuntimeError("Unexpected Faster Qwen3-TTS source commit")
+
+import torch
+
+if torch.__version__ != "2.10.0+cu126":
+    raise RuntimeError("Unexpected Torch version for Qwen")
+if torch.version.cuda != "12.6" or not torch.cuda.is_available():
+    raise RuntimeError("Qwen CUDA 12.6 runtime is unavailable")
+gpu_name = torch.cuda.get_device_name(0)
+if gpu_name != "NVIDIA GeForce RTX 3060":
+    raise RuntimeError("Unexpected Qwen hardware target")
+
+print("__RAYME_QWEN3_RUNTIME_JSON__" + json.dumps({
+    "runtime_version": runtime_version,
+    "runtime_source_commit": runtime_commit,
+    "model_id": EXPECTED_MODEL_ID,
+    "model_revision": EXPECTED_MODEL_REVISION,
+    "torch_version": torch.__version__,
+    "torch_cuda_version": torch.version.cuda,
+    "cuda_available": True,
+    "gpu_name": gpu_name,
+    "sample_rate": 24000,
+}, sort_keys=True))
+'@
+  $probeOutput = $probe | & "$repo\ai-backend\.venv\Scripts\python.exe" -
+  if ($LASTEXITCODE -ne 0) { throw "Pinned Qwen runtime/model provisioning failed" }
+  $probeLine = $probeOutput | Where-Object { $_ -like "__RAYME_QWEN3_RUNTIME_JSON__*" } | Select-Object -Last 1
+  if (-not $probeLine) { throw "Qwen provisioning did not emit runtime identity" }
+  $script:QwenRuntimeIdentity = $probeLine.Substring("__RAYME_QWEN3_RUNTIME_JSON__".Length) | ConvertFrom-Json
+}
+
 if ($verifyVoxCpm2) {
   Stop-RayMePortOwners
   Invoke-RayMeVoxCpm2Verification
+}
+
+if ($verifyQwen3Tracer) {
+  Stop-RayMePortOwners
+  Invoke-RayMeQwen3Provisioning
 }
 
 Write-Host "== Verifying AI GPU runtime"
@@ -297,6 +425,9 @@ $aiLauncher = @"
 @echo off
 cd /d C:\Users\pmpg\rayme\RayMe
 set "PATH=$cudaRuntimeBin;%PATH%"
+set "RAYME_DEPLOYED_COMMIT=$actualHead"
+set "RAYME_QWEN3_MODEL_DIR=$qwenModelDir"
+set "RAYME_QWEN3_MODEL_REVISION=$qwenModelRevision"
 ai-backend\.venv\Scripts\pythonw.exe ai-backend\scripts\run_https.py --host 192.168.1.199 --port 9443 --cert C:\Users\pmpg\rayme\phase1-tls\rayme.local+1.pem --key C:\Users\pmpg\rayme\phase1-tls\rayme.local+1-key.pem >> C:\Users\pmpg\rayme\logs\ai-backend.run.log 2>>&1
 "@
 Set-Content -Path "C:\Users\pmpg\rayme\start-ai-backend.cmd" -Value $aiLauncher -Encoding ASCII
@@ -435,10 +566,30 @@ if ($verifyVoxCpm2) {
   Write-Host "__RAYME_VOXCPM2_RUNTIME_SMOKE_JSON__$($script:VoxCpm2RuntimeSmoke | ConvertTo-Json -Depth 8 -Compress)"
   Write-Host "__RAYME_VOXCPM2_VRAM_SOAK_JSON__$($script:VoxCpm2VramSoak | ConvertTo-Json -Depth 8 -Compress)"
 }
+
+if ($verifyQwen3Tracer) {
+  Write-Host "== Running production Qwen saved-voice/WebRTC hardware tracer"
+  $tracerDir = Join-Path $repo ".local\phase09-qwen3-tracer"
+  New-Item -ItemType Directory -Path $tracerDir -Force | Out-Null
+  $tracerScript = Join-Path $repo ".planning\phases\09-integrate-faster-qwen3-tts-1-7b-into-live-calls\09-run-hardware-tracer.py"
+  $tracerJson = Join-Path $tracerDir "qwen3-hardware-tracer.json"
+  $tracerOutput = & "$repo\ai-backend\.venv\Scripts\python.exe" $tracerScript `
+    --run-hardware-tracer `
+    --expected-commit $actualHead `
+    --deployment-branch $branch `
+    --work-dir $tracerDir `
+    --output $tracerJson 2>&1
+  $tracerStatus = $LASTEXITCODE
+  $tracerOutput | ForEach-Object { Write-Host $_ }
+  if ($tracerStatus -ne 0) { throw "Production Qwen hardware tracer failed" }
+  $tracerLine = $tracerOutput | Where-Object { $_ -like "__RAYME_QWEN3_TRACER_JSON__*" } | Select-Object -Last 1
+  if (-not $tracerLine) { throw "Qwen hardware tracer did not emit commit-matched JSON evidence" }
+  Write-Host "__RAYME_QWEN3_RUNTIME_JSON__$($script:QwenRuntimeIdentity | ConvertTo-Json -Depth 8 -Compress)"
+}
 POWERSHELL
 }
 
-if [[ "$RAYME_OMEN_VERIFY_VOXCPM2" == "1" ]]; then
+if [[ "$RAYME_OMEN_VERIFY_VOXCPM2" == "1" || "$RAYME_OMEN_VERIFY_QWEN3_TRACER" == "1" ]]; then
   deploy_log="$(mktemp)"
   set +e
   run_remote_deploy >"$deploy_log" 2>&1
@@ -449,13 +600,14 @@ if [[ "$RAYME_OMEN_VERIFY_VOXCPM2" == "1" ]]; then
     exit "$deploy_status"
   fi
 
-  runtime_json="$(sed -n 's/^__RAYME_VOXCPM2_RUNTIME_SMOKE_JSON__//p' "$deploy_log" | tail -n 1)"
-  if [[ -z "$runtime_json" ]]; then
-    echo "VoxCPM2 runtime smoke JSON marker was not found in deploy output" >&2
-    exit 1
-  fi
-  mkdir -p "$(dirname "$RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON")"
-  python3 - "$runtime_json" "$RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON" <<'PY'
+  if [[ "$RAYME_OMEN_VERIFY_VOXCPM2" == "1" ]]; then
+    runtime_json="$(sed -n 's/^__RAYME_VOXCPM2_RUNTIME_SMOKE_JSON__//p' "$deploy_log" | tail -n 1)"
+    if [[ -z "$runtime_json" ]]; then
+      echo "VoxCPM2 runtime smoke JSON marker was not found in deploy output" >&2
+      exit 1
+    fi
+    mkdir -p "$(dirname "$RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON")"
+    python3 - "$runtime_json" "$RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -464,14 +616,31 @@ payload = json.loads(sys.argv[1])
 Path(sys.argv[2]).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 PY
 
-  vram_json="$(sed -n 's/^__RAYME_VOXCPM2_VRAM_SOAK_JSON__//p' "$deploy_log" | tail -n 1)"
-  if [[ -n "$RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON" ]]; then
-    if [[ -z "$vram_json" ]]; then
-      echo "VoxCPM2 VRAM soak JSON marker was not found in deploy output" >&2
+    vram_json="$(sed -n 's/^__RAYME_VOXCPM2_VRAM_SOAK_JSON__//p' "$deploy_log" | tail -n 1)"
+    if [[ -n "$RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON" ]]; then
+      if [[ -z "$vram_json" ]]; then
+        echo "VoxCPM2 VRAM soak JSON marker was not found in deploy output" >&2
+        exit 1
+      fi
+      mkdir -p "$(dirname "$RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON")"
+      python3 - "$vram_json" "$RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(sys.argv[1])
+Path(sys.argv[2]).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+PY
+    fi
+  fi
+  if [[ "$RAYME_OMEN_VERIFY_QWEN3_TRACER" == "1" ]]; then
+    qwen_tracer_json="$(sed -n 's/^__RAYME_QWEN3_TRACER_JSON__//p' "$deploy_log" | tail -n 1)"
+    if [[ -z "$qwen_tracer_json" ]]; then
+      echo "Qwen3 hardware tracer JSON marker was not found in deploy output" >&2
       exit 1
     fi
-    mkdir -p "$(dirname "$RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON")"
-    python3 - "$vram_json" "$RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON" <<'PY'
+    mkdir -p "$(dirname "$RAYME_OMEN_QWEN3_TRACER_JSON")"
+    python3 - "$qwen_tracer_json" "$RAYME_OMEN_QWEN3_TRACER_JSON" <<'PY'
 import json
 import sys
 from pathlib import Path
