@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 import importlib
 import json
 import logging
@@ -57,14 +59,20 @@ class ScriptedCallBackend:
         self.voice_available = voice_available
         self.fail_end = False
         self.fail_offer = False
+        self.readiness_calls = 0
         self.created_sessions: list[dict[str, Any]] = []
         self.offer_calls: list[dict[str, Any]] = []
+        self.prepare_calls: list[dict[str, Any]] = []
+        self.preparation_status_calls = 0
+        self.preparation_result: dict[str, Any] | None = None
+        self.preparation_statuses: list[dict[str, Any]] = []
         self.backfill_calls: list[dict[str, Any]] = []
         self.drained_events: list[dict[str, Any]] = []
         self.speak_calls: list[dict[str, Any]] = []
         self.interrupt_calls: list[dict[str, Any]] = []
 
     async def readiness(self) -> dict[str, Any]:
+        self.readiness_calls += 1
         if not self.ready:
             return {
                 "ready": False,
@@ -93,6 +101,36 @@ class ScriptedCallBackend:
         return {
             "session_id": payload["session_id"],
             "answer": {"type": "answer", "sdp": "v=0\r\n"},
+        }
+
+    async def prepare_call_speech(
+        self,
+        base_url: str,
+        session_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        self.prepare_calls.append(
+            {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
+        )
+        return dict(
+            self.preparation_result
+            or {
+                "engine_id": "qwen3_1_7b",
+                "model_state": "resident",
+                "prompt_state": "ready",
+                "voice_key": payload["voice_id"],
+                "error_code": None,
+            }
+        )
+
+    async def get_tts_preparation_status(self, base_url: str) -> dict[str, Any]:
+        self.preparation_status_calls += 1
+        if self.preparation_statuses:
+            return dict(self.preparation_statuses.pop(0))
+        voice_key = self.prepare_calls[-1]["payload"]["voice_id"]
+        return {
+            "model": {"state": "resident", "engine_id": "qwen3_1_7b"},
+            "prompt": {"state": "ready", "voice_key": voice_key, "error_code": None},
         }
 
     async def speak_call(
@@ -519,6 +557,195 @@ def test_offer_failure_returns_backend_public_detail(call_fixture: CallFixture) 
     assert response.status_code == 502
     assert _public_error_code(response) == "webrtc_offer_failed"
     assert _public_error_message(response) == "WebRTC offer could not be accepted"
+
+
+@pytest.mark.parametrize(
+    "invalid_reference",
+    [
+        "missing_authorization",
+        "wrong_reference_hash",
+        "wrong_transcript_hash",
+        "wrong_scope",
+        "pending_authorization",
+        "unsafe_path",
+        "missing_file",
+    ],
+)
+def test_qwen_call_start_rejects_unauthorized_or_uncontained_reference_before_backend_work(
+    call_fixture: CallFixture,
+    invalid_reference: str,
+) -> None:
+    thread_id, voice_id = asyncio.run(
+        _insert_qwen_thread_with_character_and_voice(
+            call_fixture.sessionmaker,
+            invalid_reference=invalid_reference,
+        )
+    )
+    if invalid_reference == "missing_file":
+        (call_fixture.voice_blob_dir / f"voice_asset_{voice_id}.wav").unlink()
+
+    response = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id})
+
+    assert response.status_code == 409
+    assert _public_error_code(response) == "call_voice_unavailable"
+    assert _public_error_message(response) == (
+        "The assigned voice is unavailable. Choose another voice before calling."
+    )
+    assert call_fixture.backend.readiness_calls == 0
+    assert call_fixture.backend.offer_calls == []
+    public_body = response.text
+    assert "Reference transcript for Qwen call preparation" not in public_body
+    assert str(call_fixture.voice_blob_dir) not in public_body
+    assert "private.wav" not in public_body
+
+
+def test_qwen_offer_prepares_exact_authorized_reference_and_turn_uses_opaque_key(
+    call_fixture: CallFixture,
+) -> None:
+    call_fixture.completion.token_sequences = [["Prepared Qwen call reply."]]
+    thread_id, _ = asyncio.run(
+        _insert_qwen_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started_response = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id})
+    assert started_response.status_code == 201
+    started = started_response.json()
+
+    offer_response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/offer",
+        json={
+            "session_id": started["session_id"],
+            "offer": {"type": "offer", "sdp": "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"},
+        },
+    )
+
+    assert offer_response.status_code == 200
+    assert started["engine_id"] == "qwen3_1_7b"
+    assert len(call_fixture.backend.prepare_calls) == 1
+    prepare_payload = call_fixture.backend.prepare_calls[0]["payload"]
+    assert prepare_payload["voice_id"].startswith("qwen3_voice_")
+    assert prepare_payload["voice_id"] != started["voice_id"]
+    assert prepare_payload["engine_id"] == "qwen3_1_7b"
+    assert base64.b64decode(prepare_payload["reference_audio_base64"], validate=True) == (
+        b"voice sample bytes"
+    )
+    assert prepare_payload["reference_transcript"] == "Reference transcript for Qwen call preparation."
+    assert call_fixture.backend.offer_calls[0]["payload"]["voice_id"] == prepare_payload["voice_id"]
+    assert not {
+        "voice_data_steward",
+        "authorization_basis",
+        "use_scope",
+        "reference_sha256",
+        "transcript_sha256",
+    }.intersection(prepare_payload)
+    assert offer_response.json()["preparation"] == {
+        "model": {"state": "resident", "engine_id": "qwen3_1_7b"},
+        "prompt": {
+            "state": "ready",
+            "voice_key": prepare_payload["voice_id"],
+            "error_code": None,
+        },
+    }
+
+    turn_response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-qwen-prepared",
+            "text": "Use the prepared saved voice.",
+            "source": "user_final",
+        },
+    )
+
+    assert turn_response.status_code == 200
+    speak_payload = call_fixture.backend.speak_calls[-1]["payload"]
+    assert speak_payload["voice_id"] == prepare_payload["voice_id"]
+    assert speak_payload["reference_transcript"] == prepare_payload["reference_transcript"]
+
+
+def test_qwen_offer_polls_shared_readiness_without_repeating_preparation(
+    call_fixture: CallFixture,
+) -> None:
+    thread_id, _ = asyncio.run(
+        _insert_qwen_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    voice_key = _qwen_test_voice_key()
+    call_fixture.backend.preparation_result = {
+        "engine_id": "qwen3_1_7b",
+        "model_state": "loading",
+        "prompt_state": "prewarming",
+        "voice_key": voice_key,
+        "error_code": None,
+    }
+    call_fixture.backend.preparation_statuses = [
+        {
+            "model": {"state": "resident", "engine_id": "qwen3_1_7b"},
+            "prompt": {
+                "state": "prewarming",
+                "voice_key": voice_key,
+                "error_code": None,
+            },
+        },
+        {
+            "model": {"state": "resident", "engine_id": "qwen3_1_7b"},
+            "prompt": {"state": "ready", "voice_key": voice_key, "error_code": None},
+        },
+    ]
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/offer",
+        json={
+            "session_id": started["session_id"],
+            "offer": {"type": "offer", "sdp": "v=0\r\n"},
+        },
+    )
+
+    assert response.status_code == 200
+    assert len(call_fixture.backend.prepare_calls) == 1
+    assert call_fixture.backend.preparation_status_calls == 2
+    assert response.json()["preparation"]["prompt"]["state"] == "ready"
+
+
+def test_qwen_failed_preparation_is_safe_and_a_later_retry_remains_usable(
+    call_fixture: CallFixture,
+) -> None:
+    thread_id, _ = asyncio.run(
+        _insert_qwen_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    call_fixture.backend.preparation_result = {
+        "engine_id": "qwen3_1_7b",
+        "model_state": "resident",
+        "prompt_state": "failed",
+        "voice_key": _qwen_test_voice_key(),
+        "error_code": "qwen3_prompt_failed",
+        "diagnostic": r"C:\\private\\model secret transcript",
+    }
+    offer_payload = {
+        "session_id": started["session_id"],
+        "offer": {"type": "offer", "sdp": "v=0\r\n"},
+    }
+
+    failed = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/offer",
+        json=offer_payload,
+    )
+
+    assert failed.status_code == 502
+    assert _public_error_code(failed) == "qwen3_prompt_failed"
+    assert _public_error_message(failed) == "Voice preparation failed"
+    assert "private" not in failed.text
+    assert "secret transcript" not in failed.text
+
+    call_fixture.backend.preparation_result = None
+    recovered = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/offer",
+        json=offer_payload,
+    )
+
+    assert recovered.status_code == 200
+    assert recovered.json()["preparation"]["prompt"]["state"] == "ready"
+    assert len(call_fixture.backend.prepare_calls) == 2
 
 
 def test_offer_rejects_missing_backend_method_instead_of_returning_empty_answer(
@@ -1103,6 +1330,68 @@ async def _insert_voxcpm2_thread_with_character_and_voice(sessionmaker: async_se
     )
 
 
+async def _insert_qwen_thread_with_character_and_voice(
+    sessionmaker: async_sessionmaker,
+    *,
+    invalid_reference: str | None = None,
+) -> tuple[str, str]:
+    character_id = "char_qwen_call_ready"
+    voice_id = f"voice_{character_id}"
+    reference_bytes = b"voice sample bytes"
+    reference_transcript = "Reference transcript for Qwen call preparation."
+    authorization: dict[str, str] = {
+        "voice_data_steward": "steward_qwen_call_fixture",
+        "authorization_basis": "speaker_recorded_permission",
+        "use_scope": "rayme_lan_call_testing",
+        "reference_sha256": hashlib.sha256(reference_bytes).hexdigest(),
+        "transcript_sha256": hashlib.sha256(reference_transcript.encode("utf-8")).hexdigest(),
+        "authorization_status": "recorded",
+        "reference_kind": "real_person",
+    }
+    if invalid_reference == "missing_authorization":
+        metadata: dict[str, Any] = {}
+    else:
+        if invalid_reference == "wrong_reference_hash":
+            authorization["reference_sha256"] = "f" * 64
+        elif invalid_reference == "wrong_transcript_hash":
+            authorization["transcript_sha256"] = "e" * 64
+        elif invalid_reference == "wrong_scope":
+            authorization["use_scope"] = "hosted_service"
+        elif invalid_reference == "pending_authorization":
+            authorization["authorization_status"] = "needs_confirmation"
+        metadata = {"qwen3_authorization": authorization}
+    await _insert_voice(
+        sessionmaker,
+        voice_id=voice_id,
+        default_engine="qwen3_1_7b",
+        reference_transcript=reference_transcript,
+        metadata=metadata,
+    )
+    if invalid_reference == "unsafe_path":
+        async with sessionmaker() as session:
+            asset = await session.scalar(
+                select(VoiceAsset).where(VoiceAsset.voice_id == voice_id)
+            )
+            assert asset is not None
+            asset.storage_path = "../private.wav"
+            await session.commit()
+    await _insert_character(sessionmaker, character_id=character_id, default_voice_id=voice_id)
+    thread_id = await _insert_thread(
+        sessionmaker,
+        character_id=character_id,
+        thread_id="thread_qwen_call_ready",
+    )
+    return thread_id, voice_id
+
+
+def _qwen_test_voice_key() -> str:
+    digest = hashlib.sha256()
+    digest.update(b"voice sample bytes")
+    digest.update(b"\0")
+    digest.update(b"Reference transcript for Qwen call preparation.")
+    return f"qwen3_voice_{digest.hexdigest()[:32]}"
+
+
 async def _insert_f5_thread_with_character_and_voice(sessionmaker: async_sessionmaker) -> str:
     character_id = "char_f5_call_ready"
     voice_id = f"voice_{character_id}"
@@ -1140,9 +1429,10 @@ async def _insert_voice(
     reference_transcript: str = "Reference transcript for the assigned voice.",
     metadata: dict[str, Any] | None = None,
 ) -> None:
+    sample_bytes = b"voice sample bytes"
     if _TEST_VOICE_BLOB_DIR is not None:
         _TEST_VOICE_BLOB_DIR.mkdir(parents=True, exist_ok=True)
-        (_TEST_VOICE_BLOB_DIR / f"voice_asset_{voice_id}.wav").write_bytes(b"voice sample bytes")
+        (_TEST_VOICE_BLOB_DIR / f"voice_asset_{voice_id}.wav").write_bytes(sample_bytes)
     async with sessionmaker() as session:
         voice = Voice(
             id=voice_id,
@@ -1163,8 +1453,8 @@ async def _insert_voice(
                 asset_kind="sample",
                 storage_path=f"voice_asset_{voice_id}.wav",
                 content_type="audio/wav",
-                byte_size=256,
-                sha256="0" * 64,
+                byte_size=len(sample_bytes),
+                sha256=hashlib.sha256(sample_bytes).hexdigest(),
                 duration_seconds=7.0,
                 sample_rate_hz=24000,
                 channel_count=1,
