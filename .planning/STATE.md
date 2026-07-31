@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready_to_execute
-stopped_at: Completed 03.1-06-PLAN.md
-last_updated: "2026-07-31T15:26:42.750Z"
+stopped_at: Completed 09-01-PLAN.md
+last_updated: "2026-07-31T15:34:30.484Z"
 last_activity: 2026-07-31
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 112
-  completed_plans: 93
-last_activity_desc: "Completed quick task 260602-5bv: replaced OMEN desktop RayMe shortcut with a visible foreground console that streams logs and stops services when closed"
+  completed_plans: 94
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
+last_activity_desc: "Completed quick task 260602-5bv: replaced OMEN desktop RayMe shortcut with a visible foreground console that streams logs and stops services when closed"
 ---
 
 ## Phase Status
@@ -260,8 +260,19 @@ current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
 ## Session Continuity
 
 Last activity: 2026-07-31
-Last session: 2026-05-13T16:40:00.946Z
-Stopped at: Completed 03.1-06-PLAN.md
+Last session: 2026-07-31T15:34:30.167Z
+Stopped at: Completed 09-01-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
+
+## Performance Metrics
+
+| Plan | Duration | Tasks | Files |
+|------|----------|-------|-------|
+| Phase 09 P01 | 5min | 2 tasks | 6 files |
+
+## Decisions
+
+- [Phase 09]: Lock Faster Qwen3-TTS to approved commit a70afc0f81f7f5f8801c3227968f1102f43f211c instead of a mutable package or tag reference. — The product owner accepted this exact runtime, and the annotated v0.3.2 tag peels to this immutable commit.
+- [Phase 09]: Expose only qwen3_1_7b as the production roster identity, with matching-transcript and streaming capabilities, while leaving F5 as the sole global default. — The selected 1.7B Base model must be identified truthfully without changing unrelated defaults or one-hot residency.
