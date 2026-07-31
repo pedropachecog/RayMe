@@ -91,6 +91,7 @@ progress:
 - TTS v1 default baseline: `f5` from Phase 0; live-call default is `voxcpm2` after Phase 8 evidence.
 - TTS live-call default: voxcpm2 (Phase 8 evidence: results/voxcpm2-live-streaming-call-flow.json).
 - TTS v1 roster: `F5-TTS`, `XTTS v2`, `Qwen3-TTS 0.6B-Base`, and `VoxCPM2`.
+- Phase 9 target roster: replace the experimental Qwen3 0.6B product path with the pinned Faster Qwen3-TTS v0.3.2 `1.7B-Base` path after integration and deployment verification; use an honest new engine id plus explicit legacy compatibility handling.
 - Phase 03.1-02 receive-loop policy: disconnected backend audio receive loops recover when either ICE returns to connected/completed or aggregate peer `connectionState` returns to connected; failed/closed transports still record `connection_failed`.
 - Phase 03.1-02 TTS failure policy: `/webrtc/speak` continues returning fixed public `call_tts_failed` details with `engine_id` for both `voxcpm2` and `f5`, without traceback, local path, or model-cache disclosure.
 - Phase 03.1-03 diagnostics policy: browser call debug events are behavior-neutral, logged only, write no DB rows, call no AI backend method, and cap serialized detail to 800 characters including the truncation marker.
@@ -122,6 +123,7 @@ progress:
 - TTS quality notes: Spike 003 is closed as `PASS_WITH_CAVEATS`. LuxTTS optimized is very fast but has current user-sample quality failures; Chatterbox Turbo baseline long-form is gibberish, while optimized long-form normal and seed 1337 are fine on the listened long samples; TADA Windows optimized long is acceptable while WSL is caution; XTTS/F5 long samples need sample/tuning caveats.
 - Qwen3-TTS: included as an opt-in/non-default engine despite failing the acceptance gate; latency and accent-quality caveats still apply.
 - FlashAttention 2: not installed on Windows, so Qwen 1.7B is ineligible for v1.
+- Faster Qwen3-TTS Phase 9 superseding evidence: v0.3.2 1.7B Base is eligible on the target Windows RTX 3060 without the old `qwen-tts` FA2 path; the product owner accepted its audio and longitudinal stability on 2026-07-31. Product integration is pending Phase 9 execution.
 - VRAM soak: F5 `1990.2 MB`, XTTS `2104.0 MB`, Qwen3 `3010.0 MB`; all stable and within budget.
 - Phase 02-01 contract policy: voice APIs use stable internal voice IDs, voice save has no preview gate, voice deletes surface `Voice unavailable`, and Settings owns save-audio/VAD/status fields.
 - Phase 02-02 contract policy: AI backend health exposes STT/VAD/TTS residency, VRAM/headroom, one resident TTS engine, typed unavailable reasons without raw exception text, English-only STT defaults, VAD/manual-transcript fallback, and the full six-engine TTS registry with F5 as only default.
@@ -237,6 +239,7 @@ progress:
 
 ### Roadmap Evolution
 
+- Phase 9 added: Integrate Faster Qwen3-TTS 1.7B into live calls after Spikes 004a/004b/005/006 passed runtime, 50-turn stability, intelligibility, and bounded live-stream gates and the product owner selected 1.7B.
 - Plan 00-07.1 inserted into `00-measurement-gate`: benchmark TTS attention/optimization backends per engine before final writeback.
 - Plan 00-07.2 completed: benchmarked native Windows vs WSL runtime permutations before Phase 0 writeback.
 - 2026-04-23 TTS follow-up: shared chunking has been implemented and the Windows plus WSL matrix reran. Manual listening is partially scored but sufficient to close the spike with caveats: keep all engines, avoid raw latency-only defaults, tune F5 long-form stretch/duration, retest LuxTTS with better references, and keep Chatterbox optimized long-form while avoiding baseline/raw long-form.

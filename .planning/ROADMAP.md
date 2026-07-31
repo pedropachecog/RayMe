@@ -68,11 +68,13 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 **Requirements delivered:** None from the REQ set (this is a spike — outputs become Key Decisions in `PROJECT.md`, not shipped features). Establishes the empirical baseline for REQ-02, REQ-45, REQ-46, REQ-A1, REQ-A3.
 
 **Pitfalls owned:**
+
 - **#2 HTTPS / cert trust on mobile** — mkcert root CA installed on the builder's Android phone, `https://rayme.local` loads in Chrome, reproducible doc produced.
 - **#7 VRAM budget on 12 GB** — 30-minute soak with Whisper + Silero + each of the three TTS engines (F5, XTTS, Qwen3-TTS 0.6B-Base) under realistic cycling, peak tracked per engine.
 - Informs **#4 F5 streaming** (first-sentence TTFA measured), **#5/#6 Whisper WER on Spanish-accented English** (default STT rung picked from measurement), and **Qwen3-TTS acceptance gate** (TTFA + RTF + accent-preservation + FA2-Windows install — see `.planning/research/QWEN3-TTS.md` §7).
 
 **Success criteria** (observable, testable):
+
 1. The builder can load `https://rayme.local` on their Android phone with no cert warnings and `window.isSecureContext === true`, following a documented one-time setup procedure.
 2. A measurement rig has logged WER, latency, and peak VRAM for `distil-large-v3 INT8`, `large-v3-turbo INT8`, and `large-v3 FP16` on a 10-minute read-aloud of the builder's Spanish-accented English voice, and the team has picked a default rung.
 3. **TTS TTFA on the actual 3060** measured for: (a) F5-TTS with 7-step Sway sampling on a 3–5 word acknowledgment; (b) XTTS v2 first-chunk streaming; (c) Qwen3-TTS 0.6B-Base with the actual attention backend explicitly labeled (`eager`, `sdpa`, or `flash_attention_2` when available). If F5 TTFA >400 ms, XTTS or Qwen3-TTS is promoted to the v1 default (Resolved Tension #3 trigger). **Qwen3-TTS acceptance gate**: promoted to v1 third-engine status if TTFA <400 ms AND RTF <1 AND 30-min soak <11 GB AND builder's subjective listening test on Spanish-accented-English clone is acceptable; otherwise feature-flagged off for v1.
@@ -80,6 +82,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 5. **FlashAttention 2 install verified** on the builder's Windows 11 + Python 3.11/3.12 + CUDA 12.1 + RTX 3060 (Ampere sm_86). If install fails, Qwen3-TTS adoption is restricted to 0.6B-Base only (1.7B without FA2 blows the VRAM budget).
 
 **Plans:** 9 plans
+
 - [ ] 00-01-wave0-setup-PLAN.md - Python 3.11 venv, pinned Phase 0 packages, Whisper weight cache, probes/ scaffolding + bench_utils (Wave 1)
 - [ ] 00-02-https-android-PLAN.md - HTTPS on Android via mkcert on LAN, reproducible doc (Wave 2)
 - [ ] 00-03-whisper-wer-PLAN.md - Whisper WER/latency/VRAM across 3 rungs on builder voice, pick default rung (Wave 2)
@@ -105,6 +108,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 **Requirements delivered:** REQ-01, REQ-03, REQ-04, REQ-10, REQ-11, REQ-12, REQ-13, REQ-14, REQ-16, REQ-17, REQ-30, REQ-31, REQ-32, REQ-33, REQ-34, REQ-35, REQ-36, REQ-60, REQ-70, REQ-71, REQ-72, REQ-90 (partial: design tokens + Home + Gallery + Editor screens), REQ-A0 (partial: desktop + mobile text-chat reachability), REQ-A1.
 
 **Pitfalls owned:**
+
 - **#2 HTTPS / cert trust** — shipped cert workflow, first-launch precheck of `window.isSecureContext`.
 - **#14 Card XSS** — sanitized Markdown renderer + CSP from the first import.
 - **#15 v2/v3 card parse** — both formats + both tEXt keys (`ccv3` preferred, `chara` fallback); corpus test.
@@ -114,6 +118,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 - **#20 Audio storage atomicity (pattern only, no audio yet)** — establish the atomic-temp-rename + orphan-reaper pattern for avatars now, audio reuses it later.
 
 **Success criteria** (observable, testable):
+
 1. The builder can hit `https://rayme.local` from both desktop Chrome and Android Chrome on LAN; the three services (Web UI host, AI-backend health stub, LLM server) each answer `/health` and the Web UI Settings screen shows connection-test green for each.
 2. The builder can import a SillyTavern character card in any of four formats (v2 JSON, v3 JSON, v2 PNG, v3 PNG), see it in the Gallery with a portrait, open it in the Editor with all v2+v3 fields populated and a "Lorebook present — not used in v1" indicator where applicable, and export it back out as v2 JSON.
 3. The builder can start a new chat with an imported character, see its `first_mes` (or pick an alternate greeting from the v3 picker) as the opening AI turn, send a typed message, and watch the LLM reply stream in token-by-token.
@@ -123,6 +128,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 **Plans:** 24 plans
 
 Plans:
+
 - [x] 01-01-PLAN.md - Backend project harness and app factory (Wave 1)
 - [x] 01-02-PLAN.md - Backend chat/schema/message-action contracts, including LLM-backed action tests (Wave 2)
 - [x] 01-03-PLAN.md - Backend card/character/settings contracts (Wave 2)
@@ -163,6 +169,7 @@ Plans:
 **Requirements delivered:** Verification hardening for REQ-03, REQ-10, REQ-11, REQ-12, REQ-13, REQ-14, REQ-16, REQ-17, REQ-30, REQ-31, REQ-32, REQ-33, REQ-34, REQ-35, REQ-36, REQ-60, REQ-70, REQ-71, REQ-72, REQ-90, REQ-A0, REQ-A1.
 
 **Pitfalls owned:**
+
 - User manual testing is product-owner acceptance, not first-line QA; the agent must run backend/API/browser/deployed checks first.
 - UI behavior must be browser-verified by the agent before asking for physical-device testing.
 - Settings connection tests must use the currently configured form values, not stale persisted defaults.
@@ -170,6 +177,7 @@ Plans:
 - Local LLM endpoints remain configurable through Settings; no code hardcoding of `192.168.1.190:8001` or any other local endpoint.
 
 **Success criteria** (observable, testable):
+
 1. Playwright E2E tests cover PNG import portrait persistence, direct portrait upload persistence, reload persistence, gallery/home/chat portrait rendering, and deletion/replacement behavior.
 2. Playwright E2E tests cover Settings save-before-test behavior for Web UI, AI backend, and LLM, including an OpenAI-compatible local LLM with no API key.
 3. Playwright E2E tests cover the full Phase 1 user path: import/create/edit character, start chat, alternate greeting, stream reply, regenerate, swipe, continue, reload, and continue again.
@@ -180,6 +188,7 @@ Plans:
 **Plans:** 6 plans
 
 Plans:
+
 - [x] 01.1-01-PLAN.md - Shared Playwright acceptance helper and fixture foundation (Wave 0)
 - [x] 01.1-02-PLAN.md - Portrait persistence E2E coverage for import, upload, replacement, removal, and reload (Wave 1)
 - [x] 01.1-03-PLAN.md - Settings save-before-test and local no-key LLM E2E coverage (Wave 1)
@@ -200,6 +209,7 @@ Plans:
 **Requirements delivered:** REQ-02, REQ-05, REQ-15 (schema + default-voice UI; in-call usage verified in Phase 3), REQ-20, REQ-21, REQ-22, REQ-23, REQ-24, REQ-80 (partial: three-endpoint config + connection tests + save-audio toggles stored; VAD slider wired in Phase 4), REQ-A3 (STT default frozen from Phase 0 measurement), REQ-90 (partial: Voice Lab + Settings screens ported).
 
 **Pitfalls owned:**
+
 - **#6 Whisper hallucinations** — VAD-gated input + `condition_on_previous_text=False` + hallucination blocklist.
 - **#7 VRAM budget** — exactly one TTS engine resident, documented hot-swap registry for the full measured roster (`F5-TTS`, `XTTS v2`, `Qwen3-TTS 0.6B-Base`, `LuxTTS`, `Chatterbox Turbo`, `TADA 1B`), `expandable_segments` CUDA allocator config, startup self-test asserts headroom per engine.
 - **#9 F5 transcript error** — Voice Lab forces an editable-transcript step and offers synth-preview as a convenience, but save does not require a successful preview. (Same editable transcript is captured for Qwen3-TTS voices, which also require a reference transcript; XTTS does not require one but still stores it for portability.)
@@ -208,6 +218,7 @@ Plans:
 - **Qwen3-TTS install friction** — backend bringup script verifies `qwen-tts==0.1.1` load and FlashAttention 2 availability; falls back to 0.6B-Base without FA2 if the install fails. Pinned dependency prevents 0.2.x breaking upgrades.
 
 **Success criteria** (observable, testable):
+
 1. The AI backend boots, loads Whisper (Phase 0 default) + Silero VAD + one TTS engine (default per Phase 0 outcome — F5, XTTS, or Qwen3-TTS 0.6B-Base), and reports GPU residency < 11 GB in its `/health` response; the Web UI Settings screen shows all three endpoints green on connection-test.
 2. The builder can upload a 6–15 s WAV/MP3/FLAC voice sample in Voice Lab, see an auto-generated reference transcript appear within a few seconds or enter one manually after STT failure, edit it inline, pick any available engine from the full measured roster, optionally preview a stock phrase, and save the voice with a name without a preview gate.
 3. The Voice Library lists all saved voices and supports rename, delete with explicit force-delete handling for referents, and test-play with custom text.
@@ -217,6 +228,7 @@ Plans:
 **Plans:** 18 plans
 
 Plans:
+
 - [x] 02-01-PLAN.md — Wave 0 Web UI server voice/schema/settings validation scaffolding
 - [x] 02-02-PLAN.md — Wave 0 AI backend model/STT/TTS validation scaffolding
 - [x] 02-03-PLAN.md — Wave 0 client Voice Lab, Settings, and live E2E validation scaffolding
@@ -251,11 +263,13 @@ Plans:
 **Requirements delivered:** REQ-40, REQ-47 (start/end/mute/device pickers at MVP fidelity), REQ-48, REQ-49 (partial: state transitions wired; full three-state visual polish in Phase 4), REQ-50, REQ-63 (sliding-window hydration at call start), REQ-A0 (call loop verified on both desktop and mobile at MVP fidelity).
 
 **Pitfalls owned:**
+
 - **#3 AudioContext gesture unlock** — canonical idiom (create/resume inside tap, play 1-sample silent buffer), `statechange` handler for foreground resume.
 - **#11 TTS/user-turn boundary race (foundation)** — end-to-end timing instrumentation added to every call-session object (shared clock); exercised in Phase 4.
 - **#24 Mobile parity** — Android Chrome on the builder's phone is in every acceptance check from this phase onward.
 
 **Success criteria** (observable, testable):
+
 1. The builder can tap "Call" on a chat thread on desktop Chrome, grant mic permission on first attempt, hear a clear AI response read out by the assigned voice, and end the call; a `call_start` + one `user_speech` turn + one `ai_speech` turn + `call_end` row are written to the unified `messages` table with a call-summary row rendering in the thread.
 2. The same flow works on Android Chrome: mic permission prompt surfaces, AudioContext unlocks on the Start-Call tap with `state === 'running'` verified, TTS audio plays through `<audio>` / `MediaStreamAudioDestinationNode`.
 3. Muting on the call toolbar stops server-side audio consumption (not just local silencing), verified by inspecting server logs for incoming frame-rate drop.
@@ -265,6 +279,7 @@ Plans:
 **Plans:** 12 plans
 
 Plans:
+
 - [x] 03-01-PLAN.md - AI backend Wave 0 call session and WebRTC signaling contract tests
 - [x] 03-02-PLAN.md - Web UI server Wave 0 call bootstrap, call rows, readiness, and prompt tests
 - [x] 03-03-PLAN.md - Client Wave 0 call state, media helper, permissions, toolbar, transcript, summary, and mobile tests
@@ -292,6 +307,7 @@ Plans:
 **Plans:** 6/7 plans executed
 
 Plans:
+
 - [x] 03.1-01-PLAN.md - Wave 0 evidence-first defect triage, open phone-call debug coverage, Phase 03.1 evidence scaffold, dual-engine live smoke contract, and Phase 4 scope exclusions
 - [x] 03.1-02-PLAN.md - AI backend call lifecycle stabilization for mute, reconnect/drop/backfill, interrupt, end, and dual-engine TTS playback
 - [x] 03.1-03-PLAN.md - Web UI server call facade stabilization for same-origin controls, prompt context, diagnostics, and durable writeback
@@ -309,6 +325,7 @@ Plans:
 **Requirements delivered:** REQ-41, REQ-42, REQ-43, REQ-44, REQ-45, REQ-46, REQ-49 (full three-state Voice Visualizer), REQ-61 (call turns visually distinct in scrollback), REQ-80 (VAD sensitivity slider wired end-to-end).
 
 **Pitfalls owned:**
+
 - **#1 Echo loop** — TTS routed through `<audio>` / `MediaStreamAudioDestinationNode` so browser AEC sees the reference; server-side playback gate keyed to the TTS sample-accurate timeline.
 - **#4 TTS streaming/chunking across engines** — shared chunk planner on the LLM token stream; native streaming where available, chunked playback where not; enforce engine-specific limits such as XTTS's 400-token stream cap; system-prompt bias toward short acknowledgments.
 - **#5 STT endpointing** — Silero VAD endpoint with tuned silence window (500–700 ms default, adaptive shrink during AI playback for aggressive barge-in).
@@ -318,9 +335,12 @@ Plans:
 - **#23 Sentence boundary extraction / chunk planning** — abbreviation-aware splitter (`Dr.` `Mr.` `i.e.` etc.), short-first-sentence 150 ms flush, minimum useful chunk sizing, model-specific token/character caps, stitched-audio gap measurement, and fallback chunking for non-streaming engines.
 
 **Success criteria** (observable, testable):
+
 1. The builder can hold a 5-minute back-and-forth call on laptop speakers (no headphones) in Spanish-accented English with **no** self-interrupt ping-pongs, **no** false barge-in on breath or back-channel "mm-hmm", and confident barge-in when they genuinely interrupt a sentence.
 2. Time-to-first-audio measured end-to-end (user stops speaking → first TTS sample plays) lands under 800 ms in the warm pipeline on the 3060, with <500 ms as a stretch; numbers logged and tracked.
+
 2a. Long-form TTS is measured through the shared chunk planner for every enabled engine. Metrics include first-chunk TTFA, total stitched playback time, inter-chunk gaps, and a stitched WAV for listening; raw whole-generation fallback numbers are not accepted as final long-form engine comparisons.
+
 3. During a call, the Voice Call screen shows the user's STT partial captions updating within ~500 ms of speech and streaming AI tokens rendering ahead of TTS playback; interim vs final STT state is visually distinct per the DESIGN.md Transcription Chips treatment.
 4. On a barge-in, `nvidia-smi` shows the LLM server's GPU utilization drop to idle within ~200 ms and the wasted-token-count log is non-empty (confirming cancel reaches the GPU, not just the client).
 5. The Voice Visualizer cleanly transitions across listening (user RMS pulse) → thinking (indeterminate shimmer) → speaking (AI TTS waveform) with no flickers on the state transitions, matching DESIGN.md §5.
@@ -342,10 +362,12 @@ Plans:
 **Requirements delivered:** REQ-15 (per-chat override verified in a call), REQ-22 (all Phase-0-accepted engines live per voice — 2 or 3), REQ-61 (grouped collapsible "Call — Nm Ns" header treatment), REQ-62, REQ-63 (window now spans text + call turns; verified in call-after-text scenarios).
 
 **Pitfalls owned:**
+
 - **#7 VRAM (swap path)** — 2–8 s cold-swap between calls with UI feedback ("Switching voice…"); last-used engine cached; swap never mid-call. Six directed swap paths across three engines (or two, if Qwen3-TTS was rejected at Phase 0). Swap-correctness test matrix scales O(N²).
 - **#20 Audio storage** — atomic temp-rename writes for per-turn Opus blobs, orphan reaper on startup, storage size indicator in Settings.
 
 **Success criteria** (observable, testable):
+
 1. The builder can assign a voice built on F5-TTS as a character's default and have a call; then switch to a voice built on XTTS v2 (and, if Phase 0 accepted Qwen3-TTS, a third voice on Qwen3-TTS) for the same character in a different chat and have a call; each cold-swap between calls shows a "Switching voice…" state and completes without OOM across all pairwise engine transitions.
 2. A per-chat voice override is settable from the chat header, persists across resume, and shadows the character default for calls in that chat only — the underlying character card is not modified.
 3. Saved AI audio blobs have an inline play button per `ai_speech` turn that replays the exact call audio; the save-AI-audio toggle and save-mic-audio toggle in Settings take effect on the next call and retroactive replay shows "audio not saved" cleanly when toggled off.
@@ -369,12 +391,14 @@ Plans:
 **Requirements delivered:** REQ-A2 (PWA manifest + icons + `theme-color`), REQ-A0 (full mobile parity verified across the builder's Bluetooth headset, Wake Lock, visibilitychange), REQ-80 (full Settings surface complete including clear-all-data danger zone, VAD sensitivity tuned on real speech, retention/size indicator). Closes any remaining REQ gaps surfaced during the phase.
 
 **Pitfalls owned:**
+
 - **#21 Bluetooth routing on Android** — known-limitation banner where appropriate and `devicechange` event handling on mobile.
 - **#22 Screen-off / visibilitychange** — Wake Lock during active call, "call paused — tap to resume" overlay on background, clean end-on-background fallback.
 - **#24 Mobile parity (final gate)** — full checklist run on the builder's actual devices with the actual hardware (Android phone + Bluetooth headset + desktop Chrome).
 - **#20 Audio storage (final)** — retention policy configurable in Settings, storage-size indicator live, tested across months-of-use simulation.
 
 **Success criteria** (observable, testable):
+
 1. The builder can add RayMe to their Android home screen, launching it in standalone-launcher mode with the correct `theme-color` chrome, and successfully place a call from the installed PWA.
 2. An active call with the builder's Bluetooth headset connected routes audio correctly (or, if not, surfaces the documented known-limitation banner rather than failing silently); disconnecting the headset mid-call triggers a `devicechange`-driven warning with a reconnect affordance.
 3. Locking the Android phone screen during a call triggers Wake Lock where supported; backgrounding the tab shows a "Call paused — tap to resume" overlay instead of silent death, and returning to foreground either resumes cleanly or ends the call gracefully with the transcript intact.
@@ -515,6 +539,7 @@ Roadmap-level decisions that remain open after Phase-0 resolves the empirical qu
 **Wave summary:** Wave 0 creates RED contracts and evidence scaffolding; Wave 1 implements backend/server/client roster support; Wave 2 wires call-flow and scenario matrix evidence; Wave 3 runs OMEN runtime evidence through `scripts/deploy-omen.sh`; Wave 4 runs live matrix/call-flow artifact generation; Wave 5 runs manual quality and final promotion writeback.
 
 Plans:
+
 - [x] 07-01-PLAN.md - AI backend VoxCPM2 RED contracts for metadata, CUDA-only adapter behavior, synthesis options, and engine-scoped failures (Wave 0)
 - [x] 07-02-PLAN.md - Web UI server/client RED contracts for VoxCPM2 voice metadata, controls, fallback roster, and missing-transcript warning (Wave 0)
 - [x] 07-03-PLAN.md - Call-flow RED contracts for VoxCPM2 settings forwarding, sanitized call failures, and interrupt/cancel preservation (Wave 0)
@@ -540,6 +565,7 @@ Plans:
 **Wave summary:** Wave 1 creates the internal streaming adapter contract and Phase 8 evidence tooling in parallel; Wave 2 streams VoxCPM2 chunks through `CallSession`; Wave 3 preserves `/webrtc` and Web UI call semantics; Wave 4 records the OMEN dirty-checkout preflight, then runs canonical OMEN deployment plus live repeated warm evidence after the gate is clean/resolved; Wave 5 performs gated decision writeback.
 
 Plans:
+
 - [x] 08-01-PLAN.md - Internal AI-backend TTS streaming contract plus VoxCPM2 `generate_streaming` adapter (Wave 1)
 - [x] 08-02-PLAN.md - CallSession streamed chunk playback, first-audio metrics, interrupt-safe cancellation, and single completion (Wave 2)
 - [x] 08-03-PLAN.md - Existing `/webrtc` speak and Web UI call SSE semantics with streaming timing fields and one durable AI speech row (Wave 3)
@@ -548,6 +574,29 @@ Plans:
 - [x] 08-06-PLAN.md - Evidence-gated durable VoxCPM2 live-call default decision writeback (Wave 5)
 
 **Final outcome:** promoted_for_live_call_default. VoxCPM2 beat F5 by same-run warm median first-audio (`762.7 ms` vs `948.0 ms`) with `streaming_used=true` and `whole_wav_fallback_used=false`; VoxCPM2 is the preferred/default live-call TTS engine and F5 remains available as fallback/comparator.
+
+### Phase 9: Integrate Faster Qwen3-TTS 1.7B into live calls
+
+**Goal:** Make `faster-qwen3-tts==0.3.2` with `Qwen/Qwen3-TTS-12Hz-1.7B-Base` a first-class RayMe voice-cloning engine whose saved voices can be selected for real calls on OMEN, with visible load/prewarm state, transcript-alignment protection, bounded early streaming, barge-in cancellation, and no whole-synthesis fallback.
+
+**Requirements delivered:** REQ-22 (saved voice engine), REQ-45 (sentence/chunk streaming TTS), REQ-46 (<800 ms end-to-end target; <500 ms warmed TTS first-audio target from Spike 004b).
+
+**Depends on:** Phase 8 live streaming playback infrastructure and Spikes 004a/004b/005/006 runtime, longitudinal, and bounded-stream evidence.
+
+**User-goal preservation:** A technical integration is not complete unless the builder can select a 1.7B-cloned voice in RayMe, start a real call, hear early audio while later chunks are still generating, interrupt it, and continue the conversation without the voice degrading into muffling, whispering, noise, or unintelligibility over time.
+
+**Success criteria** (observable, testable):
+1. Faster Qwen3-TTS 1.7B is visible in Voice Lab and saved-voice metadata, requires a matching reference transcript for ICL cloning, and returns sanitized actionable errors for missing/misaligned inputs.
+2. OMEN loads the pinned CUDA runtime and model through RayMe's one-hot TTS manager with visible `loading`/`resident` state; reference prompt extraction is prewarmed before the first spoken call turn rather than hidden inside playback latency.
+3. Real call synthesis uses the streaming API only: a deliberately slow stream starts playback before completion, startup buffering is explicitly bounded, immediate/final metrics stay separate, and VoxCPM2 retains tests rejecting whole-synthesis fallback.
+4. Barge-in/hangup stops Faster Qwen3 generation promptly, discards late chunks, returns the session to listening, and cannot emit a normal `ai_done` after cancellation.
+5. Local backend/server/client regressions pass; `scripts/deploy-omen.sh` installs/verifies the pinned runtime, deploys the committed implementation, and post-deploy `/webrtc/status` plus a real call-flow evidence run prove the engine is ready for the builder's physical call test.
+
+**Plans:** 0 plans
+
+Plans:
+
+- [ ] TBD (run /gsd-plan-phase 9 to break down)
 
 ---
 
@@ -562,6 +611,7 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
+
 - [ ] 08.1-01-PLAN.md - Remove full-message live-call TTS buffering and install streaming/GSD invariant guardrails (Wave 1)
 - [ ] 08.1-02-PLAN.md - Isolate VoxCPM2 native runtime crashes and hangs from the AI backend process (Wave 1)
 - [ ] 08.1-03-PLAN.md - Measure and enforce VoxCPM2 realtime live-call viability to eliminate sustained stutter (Wave 1)

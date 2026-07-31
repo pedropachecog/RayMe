@@ -1,6 +1,8 @@
 # Faster Qwen3-TTS Human Listening Checkpoint
 
-Automated runtime, 50-turn stability, STT intelligibility, and live-stream contract gates passed. Product integration remains blocked until the product owner listens for the failure mode that motivated this work.
+**Status:** ACCEPTED on 2026-07-31.
+
+Automated runtime, 50-turn stability, STT intelligibility, and live-stream contract gates passed. The product owner listened to both model comparisons and the longitudinal reel, reported that both sounded great, and selected 1.7B for RayMe integration.
 
 ## Listen in this order
 
@@ -17,3 +19,7 @@ Automated runtime, 50-turn stability, STT intelligibility, and live-stream contr
 - **Accept 1.7B:** the longitudinal reel stays stable and 1.7B is at least as good as 0.6B.
 - **Prefer 0.6B:** the reel is stable, but 0.6B sounds better enough to justify its lower capacity and faster runtime.
 - **Reject:** either model has audible defects that should block RayMe integration.
+
+## Recorded decision
+
+**Accept 1.7B.** The listening gate is closed and no longer blocks product integration.

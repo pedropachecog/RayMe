@@ -3,7 +3,7 @@ spike: 005
 name: faster-qwen3-tts-longitudinal-quality
 type: standard
 validates: "Given one hot Faster Qwen3-TTS model and a fixed RayMe voice, when at least 50 sequential turns are generated, then early/middle/late evidence proves or rejects progressive degradation and state leakage."
-verdict: PENDING
+verdict: PASS
 related: [003, 004a, 004b, 006]
 tags: [tts, qwen3, soak, quality, intelligibility, regression]
 ---
@@ -43,15 +43,16 @@ Every turn records UTC time, model, seed policy, text class, wall time, TTFA, ge
 ## Investigation Trail
 
 - 2026-07-31: user-reported longitudinal collapse was promoted to the primary acceptance gate rather than treated as an anecdotal quality note.
-- 2026-07-31: advanced 1.7B to the soak because it passed the RTX 3060 runtime gates and preserves more model capacity than 0.6B. The 50-turn acoustic/runtime/STT gate passed; final verdict remains pending product-owner listening.
+- 2026-07-31: advanced 1.7B to the soak because it passed the RTX 3060 runtime gates and preserves more model capacity than 0.6B. The 50-turn acoustic/runtime/STT gate passed.
+- 2026-07-31: product owner listened to the 0.6B and 1.7B comparisons plus the longitudinal reel, accepted the quality, and selected 1.7B for RayMe integration.
 
 ## Results
 
-AUTOMATED PASS; HUMAN LISTENING PENDING.
+PASS — automated and human-listening gates are complete.
 
 - 50/50 sequential turns completed in one hot process with natural EOS, first playback before completion, faster-than-realtime synthesis, and valid audio.
 - Deterministic anchor turns 1/10/20/30/40/50 were bit-identical (`anchor_unique_hashes=1`).
 - GPU use stayed at 8,348 MiB during the run; reserved-memory growth from early to late was 0.0 MiB.
 - Early-to-late mean RMS changed by -0.248 dB, spectral-centroid ratio was 0.805, spectral-flatness change was -0.0002, RTFx ratio was 0.999, and TTFA changed by +3.17 ms.
 - RayMe Whisper accepted 50/50 WAVs. Early WER was 0.000, late WER was 0.000, and overall WER was 0.00736.
-- Product integration remains blocked on the listening checkpoint in `HUMAN-LISTENING-CHECKPOINT.md`.
+- Product-owner listening accepted the longitudinal stability and selected the 1.7B model for implementation.

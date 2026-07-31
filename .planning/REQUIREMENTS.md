@@ -48,8 +48,8 @@
   - *Source*: PROJECT.md Active.
 - **REQ-21** `[v1]` — Uploaded samples are transcribed by the STT engine into an editable reference transcript. User can edit before saving — the stored transcript is what F5-TTS and Qwen3-TTS consume (XTTS v2 does not require a transcript, but the same editable transcript is still captured for portability between engines).
   - *Source*: PROJECT.md Active (F5 and Qwen3 require transcript, STT auto-generates).
-- **REQ-22** `[v1]` — Voice save captures: name, engine (**F5-TTS**, **XTTS v2**, or **Qwen3-TTS** — user-selected per voice), sample audio path, reference transcript, timestamps. The Phase 0 measurements keep `F5-TTS` as the default, keep `XTTS v2` as the second engine, and include **Qwen3-TTS `0.6B-Base`** as an explicit opt-in builder override even though its acceptance gate failed on TTFA/RTF and accent approval. `1.7B` remains out of scope for v1 because FA2 did not install on Windows. See `.planning/research/QWEN3-TTS.md` §7 for the original gate criteria.
-  - *Source*: PROJECT.md Active + Key Decisions; amended 2026-04-17 to add Qwen3-TTS.
+- **REQ-22** `[v1]` — Voice save captures: name, engine (**F5-TTS**, **XTTS v2**, or **Qwen3-TTS** — user-selected per voice), sample audio path, reference transcript, timestamps. Qwen3-TTS uses the pinned `faster-qwen3-tts==0.3.2` runtime with `Qwen/Qwen3-TTS-12Hz-1.7B-Base`; its ICL cloning path requires a reference transcript that matches the saved sample. The former `0.6B-Base` experimental identifier is compatibility-only and must not silently load the old model.
+  - *Source*: PROJECT.md Active + Key Decisions; amended 2026-07-31 after Spikes 004a/004b/005/006 and product-owner listening acceptance selected 1.7B.
 - **REQ-23** `[v1]` — Voice Library supports list / rename / delete / test-play. Test-play synthesizes a stock phrase (and optional custom text) using the voice, routed to the configured output device.
 - **REQ-24** `[v1]` — Deleting a voice that is referenced by a character default or chat override must not leave dangling references. Either cascade-reassign to a default or block with a clear error listing referents.
 
@@ -108,7 +108,7 @@
 
 ### Settings
 
-- **REQ-80** `[v1]` — Settings consolidates: three-endpoint configuration + tests (REQ-05); STT model dropdown (when multiple loaded); TTS engine default (**F5 / XTTS / Qwen3-TTS** — per-voice still overrides; Qwen3-TTS is present but should be labeled as a non-default/experimental `0.6B-Base` path because Phase 0 did not clear it for default use); VAD sensitivity slider (threshold + end-of-utterance silence duration); default audio input/output device; save-AI-audio toggle (default ON); save-mic-audio toggle (default OFF); clear-all-data danger zone.
+- **REQ-80** `[v1]` — Settings consolidates: three-endpoint configuration + tests (REQ-05); STT model dropdown (when multiple loaded); TTS engine default (**F5 / XTTS / Qwen3-TTS / VoxCPM2** — per-voice still overrides; Qwen3-TTS identifies the pinned Faster Qwen3-TTS 1.7B Base path and exposes honest load/reference-prewarm status); VAD sensitivity slider (threshold + end-of-utterance silence duration); default audio input/output device; save-AI-audio toggle (default ON); save-mic-audio toggle (default OFF); clear-all-data danger zone.
   - *Source*: PROJECT.md Active + constraints.
 
 ### Design System

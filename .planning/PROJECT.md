@@ -37,7 +37,7 @@ fix; it turns RayMe into generated-audio playback and violates the core value.
 - [ ] Text chat and call from a character can be started/resumed from the same thread
 - [ ] LLM is OpenAI-compatible — works with the official OpenAI API or a local server (e.g., `llama-server`)
 - [ ] STT is fast and accurate for accented English (Spanish-accented English specifically)
-- [ ] TTS supports three engines in v1: F5-TTS, XTTS v2, and Qwen3-TTS 0.6B-Base, selectable per voice
+- [ ] TTS supports F5-TTS, XTTS v2, VoxCPM2, and Faster Qwen3-TTS 1.7B Base, selectable per voice
 - [ ] Voice Lab: upload a voice sample, STT auto-generates the reference transcript, user can edit and save the voice
 - [ ] Character creator/editor supports the SillyTavern character-card field set plus a picture
 - [ ] Character importer accepts SillyTavern v2 and v3 card formats (JSON and PNG-embedded)
@@ -120,6 +120,7 @@ fix; it turns RayMe into generated-audio playback and violates the core value.
 - **TTS chunking requirement (REQ-45):** all engines need a shared chunk planner before final long-form decisions. The planner must enforce model-specific limits such as XTTS `inference_stream`'s 400-token cap, preserve natural sentence boundaries where possible, and benchmark first chunk, total stitched playback, inter-chunk gaps, and the stitched WAV.
 - **FA2 (Qwen3-TTS 1.7B eligibility):** not installed; reason: `windows_build_compile_error`. Qwen3-TTS 1.7B is ineligible for v1, so the included Qwen path is `0.6B-Base` only.
 - **Hardware note:** measured directly on the target RTX 3060; no 4090-to-3060 extrapolation was needed. Per-engine 3060 fit: F5=`yes`, XTTS=`yes`, Qwen3-0.6B=`yes`.
+- **Qwen3-TTS Phase 9 superseding decision (2026-07-31):** the product owner accepted the Faster Qwen3-TTS v0.3.2 0.6B/1.7B comparisons and the 50-turn longitudinal reel, then selected `Qwen/Qwen3-TTS-12Hz-1.7B-Base`. Spikes 004b/005/006 supersede the earlier FA2 ineligibility conclusion for the new runtime: 1.7B ran on the target Windows RTX 3060 within the 11 GiB budget, stayed faster than realtime, preserved early streaming and interruption, and showed no longitudinal collapse. Phase 9 owns product integration and canonical OMEN deployment; this does not retroactively alter the Phase 0 evidence.
 - **Runtime mandate:** AI model paths for the real-time call simulator are GPU
   paths. CPU fallback for STT/TTS/VAD/LLM/embedding runtime is a regression, not
   a quick fix. Deployments must fail fast when CUDA runtime, CUDA PyTorch, or
