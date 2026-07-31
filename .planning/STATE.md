@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready_to_execute
-stopped_at: Completed 09-05-PLAN.md
-last_updated: "2026-07-31T18:09:01.594Z"
+stopped_at: Completed 09-07-PLAN.md
+last_updated: "2026-07-31T18:39:04.927Z"
 last_activity: 2026-07-31
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 112
-  completed_plans: 98
+  completed_plans: 99
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
-last_activity_desc: "Completed Phase 09 Plan 05: content-bound prompts, STT alignment, strict generation ceilings, and Qwen-scoped typed failure containment"
+last_activity_desc: "Completed Phase 09 Plan 07: exact identity migration, hash-bound reference authorization, and live-call readiness bridge"
 ---
 
 ## Phase Status
@@ -260,8 +260,8 @@ last_activity_desc: "Completed Phase 09 Plan 05: content-bound prompts, STT alig
 ## Session Continuity
 
 Last activity: 2026-07-31
-Last session: 2026-07-31T18:09:01.271Z
-Stopped at: Completed 09-05-PLAN.md
+Last session: 2026-07-31T18:39:04.588Z
+Stopped at: Completed 09-07-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -275,6 +275,7 @@ Resume file: None
 | Phase 09 P03 | 18min | 2 tasks | 7 files |
 | Phase 09 P04 | 1h 14m | 2 tasks | 7 files |
 | Phase 09 P05 | 20min | 2 tasks | 8 files |
+| Phase 09 P07 | 26min | 3 tasks | 10 files |
 
 ## Decisions
 
@@ -294,3 +295,7 @@ Resume file: None
 - [Phase 09]: Qwen clone alignment accepts when token coverage reaches 0.45 or normalized edit similarity reaches 0.50, caching only opaque identity and scalar results.
 - [Phase 09]: Only Qwen runtime/protocol failures mark the engine unavailable; validation, prompt, and ceiling failures remain correctable and scoped.
 - [Phase 09]: Qwen preview collects only validated native stream chunks; live-call whole-synthesis fallback remains prohibited.
+- [Phase 09]: Only exact persisted qwen3_0_6b values translate to qwen3_1_7b; migrated voices remain pending authorization confirmation.
+- [Phase 09]: Qwen authorization binds named stewardship and basis to LAN scope plus exact reference and transcript hashes without fabricating consent.
+- [Phase 09]: Live calls retain the durable saved voice id publicly while using a content-derived opaque voice key at the AI backend boundary.
+- [Phase 09]: Call preparation runs once and then polls separate shared model and prompt readiness with safe fixed failures.
