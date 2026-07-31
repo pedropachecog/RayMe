@@ -11,6 +11,8 @@ from app.config import Settings
 from app.storage.models import AppSetting
 
 SETTINGS_KEY = "endpoint_settings"
+LEGACY_QWEN_ENGINE_ID = "qwen3_0_6b"
+CANONICAL_QWEN_ENGINE_ID = "qwen3_1_7b"
 SETTING_FIELDS = (
     "web_url",
     "ai_backend_url",
@@ -107,11 +109,11 @@ class SettingsService:
         if row is None or not isinstance(row.value_json, dict):
             return {}
 
-        return {
+        return normalize_endpoint_settings({
             key: _clean_persisted_setting(key, value)
             for key, value in row.value_json.items()
             if key in SETTING_FIELDS
-        }
+        })
 
     async def _save(self, values: Mapping[str, object]) -> None:
         row = await self._session.get(AppSetting, SETTINGS_KEY)
@@ -168,7 +170,10 @@ def _clean_setting_value(key: str, value: Any) -> object:
         return float(value)
     if key == "vad_end_silence_ms":
         return int(value)
-    return str(value).strip()
+    cleaned = str(value).strip()
+    if key == "tts_default_engine" and cleaned == LEGACY_QWEN_ENGINE_ID:
+        return CANONICAL_QWEN_ENGINE_ID
+    return cleaned
 
 
 def _clean_persisted_setting(key: str, value: Any) -> object:
@@ -179,6 +184,15 @@ def _clean_persisted_setting(key: str, value: Any) -> object:
     if key == "vad_end_silence_ms":
         return int(value)
     return str(value).strip() if isinstance(value, str) else ""
+
+
+def normalize_endpoint_settings(values: Mapping[str, object]) -> dict[str, object]:
+    """Translate only the exact obsolete Qwen id at the settings read boundary."""
+
+    normalized = dict(values)
+    if normalized.get("tts_default_engine") == LEGACY_QWEN_ENGINE_ID:
+        normalized["tts_default_engine"] = CANONICAL_QWEN_ENGINE_ID
+    return normalized
 
 
 def _default_ai_backend_status() -> dict[str, object]:
@@ -196,4 +210,12 @@ def _default_ai_backend_status() -> dict[str, object]:
     }
 
 
-__all__ = ["EndpointSettings", "SETTING_FIELDS", "SETTINGS_KEY", "SettingsService"]
+__all__ = [
+    "CANONICAL_QWEN_ENGINE_ID",
+    "EndpointSettings",
+    "LEGACY_QWEN_ENGINE_ID",
+    "SETTING_FIELDS",
+    "SETTINGS_KEY",
+    "SettingsService",
+    "normalize_endpoint_settings",
+]

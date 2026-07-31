@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,6 +19,25 @@ from app.domain.voice_assets import (
 from app.storage.models import Character, Voice, VoiceAsset, utc_now
 
 ACTIVE_SAMPLE_KIND = "sample"
+QWEN3_ENGINE_ID = "qwen3_1_7b"
+LEGACY_QWEN3_ENGINE_ID = "qwen3_0_6b"
+QWEN3_AUTHORIZATION_METADATA_KEY = "qwen3_authorization"
+QWEN3_LAN_CALL_USE_SCOPE = "rayme_lan_call_testing"
+GENERATED_NON_PERSON_AUTHORIZATION_BASIS = "generated_non_person_fixture"
+SUPPORTED_VOICE_ENGINE_IDS = {
+    "f5",
+    "F5-TTS",
+    "xtts_v2",
+    "XTTS v2",
+    QWEN3_ENGINE_ID,
+    "luxtts",
+    "LuxTTS",
+    "chatterbox_turbo",
+    "Chatterbox Turbo",
+    "tada_1b",
+    "TADA 1B",
+    "voxcpm2",
+}
 VOXCPM2_ENGINE_ID = "voxcpm2"
 VOXCPM2_WARNING_REFERENCE_ONLY_WITHOUT_TRANSCRIPT = "voxcpm2_reference_only_without_transcript"
 VOXCPM2_DEFAULT_SETTINGS = {
@@ -138,12 +158,20 @@ class VoiceService:
 
     async def save_voice(self, payload: dict[str, Any]) -> dict[str, Any]:
         asset = await self.get_asset(str(payload["asset_id"]))
+        sample = await self.sample_blob(asset.id)
+        engine_id = normalize_voice_engine_id(payload["default_engine"])
         metadata = normalize_voice_metadata(payload.get("metadata"))
         metadata["sample_asset_id"] = asset.id
+        if engine_id == QWEN3_ENGINE_ID:
+            metadata[QWEN3_AUTHORIZATION_METADATA_KEY] = build_qwen3_authorization_record(
+                payload,
+                reference_bytes=sample.path.read_bytes(),
+                reference_transcript=payload.get("reference_transcript"),
+            )
         voice = Voice(
             id=new_voice_id(),
             name=str(payload["name"]),
-            default_engine=str(payload["default_engine"]),
+            default_engine=engine_id,
             reference_transcript=payload.get("reference_transcript"),
             metadata_json=metadata,
             deleted_at=None,
@@ -300,7 +328,7 @@ class VoiceService:
             "voice_id": voice.id,
             "asset_id": asset.id if asset else None,
             "name": voice.name,
-            "default_engine": voice.default_engine,
+            "default_engine": canonical_voice_engine_id_for_read(voice.default_engine),
             "reference_transcript": voice.reference_transcript,
             "metadata": dict(voice.metadata_json or {}),
             "status": "deleted" if voice.deleted_at else "available",
@@ -315,6 +343,11 @@ class VoiceService:
 
 __all__ = [
     "ACTIVE_SAMPLE_KIND",
+    "GENERATED_NON_PERSON_AUTHORIZATION_BASIS",
+    "LEGACY_QWEN3_ENGINE_ID",
+    "QWEN3_AUTHORIZATION_METADATA_KEY",
+    "QWEN3_ENGINE_ID",
+    "QWEN3_LAN_CALL_USE_SCOPE",
     "VoiceAssetNotFoundError",
     "VoiceNotFoundError",
     "VoiceReferencedError",
@@ -322,11 +355,67 @@ __all__ = [
     "VoiceSynthesisFailedError",
     "VoiceMetadataValidationError",
     "VoiceService",
+    "build_qwen3_authorization_record",
+    "canonical_voice_engine_id_for_read",
     "merge_voice_metadata",
     "new_voice_asset_id",
     "new_voice_id",
+    "normalize_voice_engine_id",
     "normalize_voice_metadata",
 ]
+
+
+def canonical_voice_engine_id_for_read(value: Any) -> str:
+    engine_id = str(value).strip()
+    if engine_id == LEGACY_QWEN3_ENGINE_ID:
+        return QWEN3_ENGINE_ID
+    return engine_id
+
+
+def normalize_voice_engine_id(value: Any) -> str:
+    engine_id = canonical_voice_engine_id_for_read(value)
+    if engine_id not in SUPPORTED_VOICE_ENGINE_IDS:
+        raise VoiceMetadataValidationError("Voice engine is not supported")
+    return engine_id
+
+
+def build_qwen3_authorization_record(
+    payload: dict[str, Any],
+    *,
+    reference_bytes: bytes,
+    reference_transcript: Any,
+) -> dict[str, str]:
+    transcript = reference_transcript if isinstance(reference_transcript, str) else ""
+    if not transcript.strip():
+        raise VoiceMetadataValidationError("Qwen3-TTS requires a matching reference transcript")
+
+    steward = _required_authorization_text(payload, "voice_data_steward")
+    basis = _required_authorization_text(payload, "authorization_basis")
+    use_scope = _required_authorization_text(payload, "use_scope")
+    if use_scope != QWEN3_LAN_CALL_USE_SCOPE:
+        raise VoiceMetadataValidationError("Qwen3-TTS voice use scope is not permitted")
+    if not reference_bytes:
+        raise VoiceMetadataValidationError("Qwen3-TTS requires a valid saved reference")
+
+    generated_fixture = basis == GENERATED_NON_PERSON_AUTHORIZATION_BASIS
+    return {
+        "voice_data_steward": steward,
+        "authorization_basis": basis,
+        "use_scope": use_scope,
+        "reference_sha256": hashlib.sha256(reference_bytes).hexdigest(),
+        "transcript_sha256": hashlib.sha256(transcript.encode("utf-8")).hexdigest(),
+        "authorization_status": "non_person_fixture" if generated_fixture else "recorded",
+        "reference_kind": (
+            GENERATED_NON_PERSON_AUTHORIZATION_BASIS if generated_fixture else "real_person"
+        ),
+    }
+
+
+def _required_authorization_text(payload: dict[str, Any], field: str) -> str:
+    value = payload.get(field)
+    if not isinstance(value, str) or not value.strip():
+        raise VoiceMetadataValidationError(f"Qwen3-TTS {field} is required")
+    return value.strip()
 
 
 def normalize_voice_metadata(raw_metadata: Any) -> dict[str, Any]:
