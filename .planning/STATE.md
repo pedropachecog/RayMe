@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready_to_execute
-stopped_at: Completed 09-08-PLAN.md
-last_updated: "2026-07-31T19:37:13.235Z"
+stopped_at: Completed 09-11-PLAN.md
+last_updated: "2026-07-31T20:00:25.910Z"
 last_activity: 2026-07-31
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 112
-  completed_plans: 101
+  completed_plans: 102
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
-last_activity_desc: "Completed Phase 09 Plan 08: canonical Qwen readiness, authorization, row-scoped operations, and call gating UI"
+last_activity_desc: "Completed Phase 09 Plan 11: paced playout credit, truthful terminal metrics, and request-scoped call cancellation"
 ---
 
 ## Phase Status
@@ -260,8 +260,8 @@ last_activity_desc: "Completed Phase 09 Plan 08: canonical Qwen readiness, autho
 ## Session Continuity
 
 Last activity: 2026-07-31
-Last session: 2026-07-31T19:37:12.912Z
-Stopped at: Completed 09-08-PLAN.md
+Last session: 2026-07-31T20:00:25.593Z
+Stopped at: Completed 09-11-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -278,6 +278,7 @@ Resume file: None
 | Phase 09 P07 | 26min | 3 tasks | 10 files |
 | Phase 09 P06 | 20min | 2 tasks | 12 files |
 | Phase 09 P08 | 26min | 3 tasks | 13 files |
+| Phase 09 P11 | 20min | 2 tasks | 5 files |
 
 ## Decisions
 
@@ -309,3 +310,6 @@ Resume file: None
 - [Phase 09]: A Qwen call remains Connecting/Preparing until the authoritative offer response confirms both a resident model and ready prompt.
 - [Phase 09]: Saved-library preparation, synthesis, errors, and retries are keyed by opaque saved voice id so unrelated rows remain usable.
 - [Phase 09]: Qwen preparation and generation codes are converted to fixed public copy before any server message can reach visible call UI.
+- [Phase 09]: Bound live-call playout by pending PCM samples across the queue and frame buffer, releasing credit only on paced 20 ms consumption.
+- [Phase 09]: Keep first-audio startup evidence separate from terminal generation, playout, EOS, debt, underflow, join, order, and discard metrics.
+- [Phase 09]: Every terminal call control cancels the exact turn and request before normal completion, and late audio or ai_done is discarded.
