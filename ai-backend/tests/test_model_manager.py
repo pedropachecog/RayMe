@@ -12,7 +12,7 @@ import pytest
 EXPECTED_TTS_ENGINE_IDS = (
     "f5",
     "xtts_v2",
-    "qwen3_0_6b",
+    "qwen3_1_7b",
     "luxtts",
     "chatterbox_turbo",
     "tada_1b",
@@ -259,7 +259,7 @@ def test_failed_engine_self_test_degrades_only_that_engine_with_typed_reason() -
     assert statuses["xtts_v2"]["unavailable_reason"]
     assert statuses["xtts_v2"].get("state") in EXPECTED_SWITCH_STATES
     assert statuses["f5"]["available"] is True
-    assert statuses["qwen3_0_6b"]["available"] is True
+    assert statuses["qwen3_1_7b"]["available"] is True
     _assert_no_raw_exception_text(statuses["xtts_v2"]["unavailable_reason"])
     _assert_no_raw_exception_text(health)
 
@@ -299,7 +299,7 @@ def test_voxcpm2_load_failure_degrades_only_voxcpm2() -> None:
     for engine_id in (
         "f5",
         "xtts_v2",
-        "qwen3_0_6b",
+        "qwen3_1_7b",
         "luxtts",
         "chatterbox_turbo",
         "tada_1b",
