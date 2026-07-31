@@ -491,8 +491,6 @@ async def create_call_turn(
                     }
                 )
 
-            # Task 2 moves this durable write behind the normal terminal gate.
-            message = await service.record_ai_speech(call_id, visible_text)
             final_text = segmenter.finish() if segmenter is not None else visible_text
             terminal_task = asyncio.create_task(speech_turn.finalize(final_text))
             while not terminal_task.done():
@@ -519,6 +517,14 @@ async def create_call_turn(
                         "message": "Speech playback failed",
                     }
                 )
+                return
+            message = await service.record_completed_ai_speech(
+                call_id,
+                turn_id=payload.turn_id,
+                text=visible_text,
+                terminal=terminal,
+            )
+            if message is None:
                 return
             logger.info(
                 "[call-turn] ai_done call=%s turn=%s visible_text_len=%d",
@@ -647,6 +653,9 @@ async def end_call(
     try:
         session_id = service.session_for_call(call_id)
         _reject_mismatched_session(session_id, payload.session_id if payload else None)
+        task = _ACTIVE_LLM_TURNS.get(call_id)
+        if task is not None:
+            task.cancel()
         endpoint_settings = await SettingsService(session, runtime_settings).read()
         try:
             await _end_call(backend, endpoint_settings.ai_backend_url, session_id, reason)

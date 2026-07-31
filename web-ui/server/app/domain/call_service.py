@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import base64
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -13,6 +13,7 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.ai_backend_client import SpeechTurnTerminal
 from app.domain.thread_service import (
     CharacterUnavailableError,
     ThreadNotFoundError,
@@ -96,6 +97,7 @@ class ActiveCall:
     started_at: datetime
     ended_at: datetime | None = None
     muted: bool = False
+    completed_ai_turn_ids: set[str] = field(default_factory=set, repr=False)
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -249,6 +251,32 @@ class CallService:
             message_kind="ai_speech",
             role="assistant",
         )
+
+    async def record_completed_ai_speech(
+        self,
+        call_id: str,
+        *,
+        turn_id: str,
+        text: str,
+        terminal: SpeechTurnTerminal,
+    ) -> dict[str, Any] | None:
+        """Persist one exact assistant row only after normal completed playout."""
+        call = self._active_call(call_id)
+        if (
+            terminal.status != "normal"
+            or not terminal.playout_completed
+            or call.ended_at is not None
+            or turn_id in call.completed_ai_turn_ids
+        ):
+            return None
+        message = await self._append_message(
+            call.thread_id,
+            text,
+            message_kind="ai_speech",
+            role="assistant",
+        )
+        call.completed_ai_turn_ids.add(turn_id)
+        return message
 
     async def voice_reference_for_call(self, call_id: str, voice_blob_dir: Path) -> dict[str, Any]:
         call = self._active_call(call_id)
