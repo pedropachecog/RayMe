@@ -690,11 +690,11 @@ if ($verifyQwen3) {
     throw "Production Qwen core evidence failed: $failureLine"
   }
 
-  $fakeMicSource = Join-Path $tracerDir "synthetic-fake-microphone.wav"
-  if (-not (Test-Path $fakeMicSource)) {
-    throw "Qwen fake microphone fixture was not produced by the canonical tracer"
+  $browserMicSource = Join-Path $tracerDir "synthetic-fake-microphone.wav"
+  if (-not (Test-Path $browserMicSource)) {
+    throw "Qwen browser microphone fixture was not produced by the canonical tracer"
   }
-  Copy-Item -Path $fakeMicSource -Destination (Join-Path $qwenEvidenceLocalDir "qwen3-fake-mic.wav") -Force
+  Copy-Item -Path $browserMicSource -Destination (Join-Path $qwenEvidenceLocalDir "qwen3-fake-mic.wav") -Force
 
   & "$repo\ai-backend\.venv\Scripts\python.exe" $verifierScript `
     --core-ready `

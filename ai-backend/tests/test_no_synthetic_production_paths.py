@@ -21,6 +21,10 @@ BANNED_SNIPPETS = (
     "'answer': None",
 )
 ALLOWLIST = {
+    Path("scripts/deploy-omen.sh"): {
+        "qwen3-fake-mic.wav",
+        "synthetic-fake-microphone.wav",
+    },
     Path("web-ui/client/src/lib/components/call/VoiceVisualizer.svelte"): {
         "waveform-fallback",
     },
