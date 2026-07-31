@@ -592,16 +592,27 @@ Plans:
 4. Barge-in/hangup stops Faster Qwen3 generation promptly, discards late chunks, returns the session to listening, and cannot emit a normal `ai_done` after cancellation.
 5. Local backend/server/client regressions pass; `scripts/deploy-omen.sh` installs/verifies the pinned runtime, deploys the committed implementation, and post-deploy `/webrtc/status` plus a real call-flow evidence run prove the engine is ready for the builder's physical call test.
 
-**Plans:** 6 plans
+**Plans:** 15 plans
+
+**Wave summary:** Waves 1–3 create the narrow dependency, worker, and local call contracts. Wave 4 is a blocking canonical OMEN production-path tracer; every broad migration/UI/call/evidence plan depends on that real hardware gate. Waves 5–9 harden validation/deletion/storage/UI/turn flow/playout and construct independently self-tested evidence tooling. Wave 10 performs final canonical deployment and core exact-commit hardware evidence. Wave 11 runs pinned acoustic/privacy checks, real Qwen browser E2E, decision-ready verification, and exact operational handoff.
 
 Plans:
 
-- [ ] 09-01-PLAN.md - Production tracer from pinned 1.7B load/prewarm through early streamed call playback and cancel (Wave 1)
-- [ ] 09-02-PLAN.md - Worker protocol, prompt alignment/cache, output ceilings, and engine-scoped failure containment (Wave 2)
-- [ ] 09-03-PLAN.md - Saved-voice identity migration, reference authorization, server validation, and readiness bridge (Wave 2)
-- [ ] 09-04-PLAN.md - Voice Lab and call UI canonical identity, visible readiness, errors, and saved Playwright contracts (Wave 3)
-- [ ] 09-05-PLAN.md - Incremental LLM segment pump, paced end-to-end backpressure, truthful metrics, and terminal-safe persistence (Wave 4)
-- [ ] 09-06-PLAN.md - Twenty-scenario evaluation, canonical OMEN deployment, 50-turn proof, and physical-call handoff (Wave 5)
+- [ ] 09-01-PLAN.md - Immutable dependency/package provenance and truthful 1.7B roster identity (Wave 1)
+- [ ] 09-02-PLAN.md - Versioned worker protocol and supervised native full-ICL stream/cancel adapter (Wave 2)
+- [ ] 09-03-PLAN.md - Local one-hot readiness plus fake slow-stream/cancel CallSession contract (Wave 3)
+- [ ] 09-04-PLAN.md - Blocking canonical OMEN real saved-voice/CallSession/WebRTC hardware tracer (Wave 4)
+- [ ] 09-05-PLAN.md - Alignment, ceilings, prompt cache, protocol, and engine-scoped backend hardening (Wave 5)
+- [ ] 09-06-PLAN.md - Saved-voice delete to AI-backend prompt cancel/invalidate/evict lifecycle (Wave 6)
+- [ ] 09-07-PLAN.md - Exact identity migration, reference authorization, server validation, and readiness bridge (Wave 5)
+- [ ] 09-08-PLAN.md - Canonical client identity and fast model/prompt readiness component contracts (Wave 6)
+- [ ] 09-09-PLAN.md - Mocked readiness Playwright acceptance and commit-asserting Qwen live E2E support (Wave 7)
+- [ ] 09-10-PLAN.md - Incremental slow-LLM segment pump and terminal-authorized persistence (Wave 7)
+- [ ] 09-11-PLAN.md - Paced end-to-end backpressure, truthful metrics, and complete cancellation controls (Wave 6)
+- [ ] 09-12-PLAN.md - Twenty-scenario manifest, pinned local speaker scorer, and adversarial verifier self-test (Wave 8)
+- [ ] 09-13-PLAN.md - Production-path 20-scenario/50-turn OMEN evidence runner construction (Wave 9)
+- [ ] 09-14-PLAN.md - Final canonical deploy and exact-commit runtime/call/STT core evidence (Wave 10)
+- [ ] 09-15-PLAN.md - Pinned acoustic/privacy gates, real Qwen live E2E, decision-ready evidence, and operational handoff (Wave 11)
 
 ---
 

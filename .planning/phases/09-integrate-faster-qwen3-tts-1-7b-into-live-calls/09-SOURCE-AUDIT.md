@@ -1,84 +1,68 @@
 # Phase 09 Multi-Source Coverage Audit
 
-All required source items are planned. Deferred CONTEXT items and explicitly opted-out SDK capabilities are exclusions, not gaps.
+All required source items are executable. Deferred CONTEXT items and COVERAGE opt-outs are exclusions, not gaps.
 
 ## Goal and requirements
 
 | SOURCE | ID | Feature / requirement | Plan | Status | Notes |
 |---|---|---|---|---|---|
-| GOAL | — | First-class pinned 1.7B saved voice on real OMEN calls with visible prewarm, alignment, early bounded streaming, cancellation, and no whole fallback | 09-01–09-06 | COVERED | Tracer through canonical deployment and call-ready handoff. |
-| REQ | REQ-22 | Truthful saved Qwen engine, exact transcript/reference, compatibility identity | 09-01–09-04, 09-06 | COVERED | Runtime, migration, server, UI, deployed evidence. |
-| REQ | REQ-45 | Natural incremental text plus native early streamed chunks, bounded playout, metrics, interruption | 09-01, 09-05, 09-06 | COVERED | Slow LLM/native/playout and deployed normal/cancel flows. |
-| REQ | REQ-46 | Latency target and warmed/native/realtime evidence without buffering cheats | 09-01, 09-05, 09-06 | COVERED | Native <=500 ms, normal playback <=1.25 s, RTF gates; <800 ms retained as target/evidence. |
+| GOAL | — | First-class pinned 1.7B saved voice on real OMEN calls with visible prewarm, alignment, early bounded streaming, cancellation, and no whole fallback | 09-01–09-15 | COVERED | Wave 4 is a mandatory real production tracer; Waves 10–11 are final deployment and handoff. |
+| REQ | REQ-22 | Truthful saved Qwen engine, exact transcript/reference, compatibility identity | 09-01–09-09, 09-12–09-15 | COVERED | Includes explicit delete→prompt eviction and permitted-fixture preflight. |
+| REQ | REQ-45 | Incremental natural text, native early chunks, bounded playout, interruption | 09-03–09-05, 09-10–09-15 | COVERED | Slow LLM/native/playout and deployed live E2E. |
+| REQ | REQ-46 | Latency targets/evidence without buffering cheats | 09-03–09-04, 09-08–09-15 | COVERED | <800 ms remains measured target; native/playout/RTF are release gates. |
 
 ## Context decisions
 
 | SOURCE | ID | Feature / requirement | Plan | Status | Notes |
 |---|---|---|---|---|---|
-| CONTEXT | D-01 | Pin official v0.3.2 and exact 1.7B Base | 09-01, 09-06 | COVERED | Immutable Git commit and model snapshot attestation. |
-| CONTEXT | D-02 | Truthful qwen3_1_7b and explicit legacy compatibility | 09-01, 09-03, 09-04 | COVERED | Exact migration/read normalization; no selectable alias. |
-| CONTEXT | D-03 | CUDA one-hot manager; no CPU/second resident model | 09-01, 09-06 | COVERED | Local one-hot tests and OMEN identity/VRAM evidence. |
-| CONTEXT | D-04 | One RayMe public API | 09-03–09-05 | COVERED | Existing voice/call/WebRTC boundaries only. |
-| CONTEXT | D-05 | Base full-ICL saved WAV plus exact transcript | 09-01–09-03 | COVERED | Worker/prompt/server path. |
-| CONTEXT | D-06 | Blank transcript blocks every boundary | 09-02–09-04 | COVERED | Backend, server, and browser gates. |
-| CONTEXT | D-07 | Tolerant practical STT alignment | 09-02, 09-03, 09-06 | COVERED | Dual threshold plus deployed invalid/tolerant cases. |
-| CONTEXT | D-08 | Text-relative generation ceilings | 09-02, 09-06 | COVERED | Token/audio/non-EOS gates and hardware mutation case. |
-| CONTEXT | D-09 | Separate visible model and prompt states | 09-01, 09-03, 09-04, 09-06 | COVERED | Backend/server/client/deployed status. |
-| CONTEXT | D-10 | Prewarm selected saved voice, bounded cache | 09-01–09-04 | COVERED | Capacity one, key invalidation, call prep. |
-| CONTEXT | D-11 | Preview/test-play shared readiness and errors | 09-03, 09-04, 09-06 | COVERED | Saved browser and deployed evidence. |
-| CONTEXT | D-12 | Qwen calls use streaming only | 09-01, 09-05, 09-06 | COVERED | Adapter spy, live call, verifier fallback blocker. |
-| CONTEXT | D-13 | Bounded early playback | 09-01, 09-05, 09-06 | COVERED | Slow producer before completion locally/deployed. |
-| CONTEXT | D-14 | Bounded producer queue/backpressure | 09-01, 09-05, 09-06 | COVERED | Capacity two plus paced playout credit. |
-| CONTEXT | D-15 | Immediate/final timing separation | 09-01, 09-05, 09-06 | COVERED | Schema/event tests and raw evidence. |
-| CONTEXT | D-16 | non_streaming_mode only current safe segment | 09-05, 09-06 | COVERED | Slow LLM first segment and no full response. |
-| CONTEXT | D-17 | All interrupt/control causes cancel/drain/recover | 09-01, 09-02, 09-05, 09-06 | COVERED | Before/after audio, hangup, switch, close. |
-| CONTEXT | D-18 | No normal done/persistence/late audio after cancel | 09-01, 09-05, 09-06 | COVERED | Cross-tier DB/event/audio evidence. |
-| CONTEXT | D-19 | Engine-scoped sanitized containment | 09-02–09-06 | COVERED | Typed errors, UI, recovery, leak scan. |
-| CONTEXT | D-20 | Full regression suite including VoxCPM2 invariants | 09-01, 09-02, 09-05, 09-06 | COVERED | Explicit commands run existing regressions. |
-| CONTEXT | D-21 | Integrated 50-turn non-degradation gate | 09-06 | COVERED | Production-path soak, STT, acoustics, memory, anchors. |
-| CONTEXT | D-22 | Canonical deploy only | 09-06 | COVERED | `scripts/deploy-omen.sh` is sole install/launcher/task/deploy/evidence path. |
+| CONTEXT | D-01 | Pin official v0.3.2 and exact 1.7B Base | 09-01, 09-02, 09-04, 09-14 | COVERED | Source/model/lock/deployed identity. |
+| CONTEXT | D-02 | Truthful qwen3_1_7b and exact compatibility | 09-01, 09-07–09-09 | COVERED | No selectable old alias. |
+| CONTEXT | D-03 | CUDA one-hot manager; no CPU/second TTS | 09-01, 09-03–09-05, 09-14 | COVERED | Local and twice-deployed hardware gates. |
+| CONTEXT | D-04 | One RayMe public API | 09-02–09-11 | COVERED | Worker stays internal; browser uses RayMe routes. |
+| CONTEXT | D-05 | Base full-ICL saved WAV plus exact transcript | 09-02, 09-04–09-07 | COVERED | Explicit upstream API opt-outs in COVERAGE. |
+| CONTEXT | D-06 | Blank transcript blocks every boundary | 09-05, 09-07–09-09, 09-14–09-15 | COVERED | Backend/server/client/live fixture. |
+| CONTEXT | D-07 | Tolerant practical STT alignment | 09-05, 09-07, 09-13–09-14 | COVERED | Known mismatch plus tolerant variants. |
+| CONTEXT | D-08 | Text-relative generation ceilings | 09-05, 09-12–09-14 | COVERED | Mutation and real evidence. |
+| CONTEXT | D-09 | Separate visible model/prompt states | 09-03–09-04, 09-07–09-09, 09-14–09-15 | COVERED | Fast component, mocked browser, real browser/hardware. |
+| CONTEXT | D-10 | Prewarm selected voice; bounded/evicted cache | 09-02–09-07, 09-14 | COVERED | Includes delete→invalidate and unrelated-voice survival. |
+| CONTEXT | D-11 | Preview/test-play shared readiness/errors | 09-05, 09-07–09-09, 09-14 | COVERED | Honest retryable UI and deployed evidence. |
+| CONTEXT | D-12 | Qwen calls use streaming only | 09-02–09-05, 09-10–09-14 | COVERED | No fallback at fake, real tracer, final live gates. |
+| CONTEXT | D-13 | Bounded early playback | 09-03–09-04, 09-11, 09-13–09-14 | COVERED | Real early hardware gate precedes broad work. |
+| CONTEXT | D-14 | Bounded producer/backpressure | 09-03–09-04, 09-11–09-14 | COVERED | Bridge and paced track bounds. |
+| CONTEXT | D-15 | Immediate/final timing separation | 09-03–09-04, 09-11–09-14 | COVERED | Local and raw deployed evidence. |
+| CONTEXT | D-16 | Current safe segment prefill only | 09-02, 09-10, 09-13–09-14 | COVERED | Slow LLM proves no full response wait. |
+| CONTEXT | D-17 | All interrupt/control causes cancel/drain/recover | 09-02–09-06, 09-10–09-14 | COVERED | Includes delete, switch, close, live cancel. |
+| CONTEXT | D-18 | No done/persistence/late audio after cancel | 09-03–09-04, 09-10–09-14 | COVERED | Cross-tier rows/events/audio. |
+| CONTEXT | D-19 | Engine-scoped sanitized containment | 09-02–09-11, 09-14–09-15 | COVERED | Other voices/services remain usable. |
+| CONTEXT | D-20 | Full regression suite including VoxCPM2 | 09-03, 09-05, 09-11–09-15 | COVERED | Existing invariant tests remain unchanged. |
+| CONTEXT | D-21 | Integrated 50-turn non-degradation gate | 09-12–09-15 | COVERED | Adds pinned speaker drift and human-pending separation. |
+| CONTEXT | D-22 | Canonical deploy only | 09-04, 09-14 | COVERED | Early blocking tracer and final release both use deploy-omen.sh. |
 
-## Research and AI-SPEC release gates
-
-| SOURCE | ID | Feature / requirement | Plan | Status | Notes |
-|---|---|---|---|---|---|
-| RESEARCH | R-01 | Supervised spawned Windows CUDA worker and validated IPC | 09-01, 09-02 | COVERED | Reader-thread cancel differs from Vox worker analog. |
-| RESEARCH | R-02 | Incremental LLM-to-TTS natural segmentation | 09-05 | COVERED | Slow-LLM regression first. |
-| RESEARCH | R-03 | End-to-end backpressure through paced track | 09-05 | COVERED | Both bridge and track bounds. |
-| RESEARCH | R-04 | Persist only normal terminal speech | 09-05 | COVERED | Cancel/error DB checks. |
-| RESEARCH | R-05 | Saved identity migration/read normalization | 09-03 | COVERED | Real Alembic command/test. |
-| RESEARCH | R-06 | Young-package legitimacy | COVERAGE, 09-01 | COVERED | Prior product-owner provenance approval recorded; immutable metadata/slop/lock checks remain executable. |
-| RESEARCH | R-07 | Visible client readiness and hard-coded roster sweep | 09-04 | COVERED | Saved Playwright plus dynamic metadata preservation. |
-| RESEARCH | R-08 | Canonical deployment and independent evidence | 09-06 | COVERED | No alternate deployment mechanism. |
-| AI-SPEC | C-01 | Immutable runtime/CUDA/one-hot residency | 09-01, 09-06 | COVERED | Critical. |
-| AI-SPEC | C-02 | Reference/transcript integrity and runaway prevention | 09-02, 09-03, 09-06 | COVERED | Critical. |
-| AI-SPEC | C-03 | True live streaming, bounded backpressure, realtime supply | 09-01, 09-05, 09-06 | COVERED | Critical. |
-| AI-SPEC | C-04 | Timing/event truthfulness | 09-01, 09-05, 09-06 | COVERED | Critical. |
-| AI-SPEC | C-05 | Interruption, hangup, and recovery | 09-01, 09-05, 09-06 | COVERED | Critical. |
-| AI-SPEC | C-06 | Spoken-message integrity and clean endings | 09-06 | COVERED | Critical STT/EOS/final-word/audio gate. |
-| AI-SPEC | C-07 | Longitudinal non-degradation | 09-06 | COVERED | Critical 50-turn gate. |
-| AI-SPEC | H-01 | Clone likeness, natural delivery, and joins | 09-05, 09-06 | COVERED | High; local join/speaker trend plus previously accepted candidate and final physical-call acceptance. |
-| AI-SPEC | H-02 | Visible readiness and contained failures | 09-01–09-06 | COVERED | High; every tier plus deployed browser evidence. |
-| AI-SPEC | C-08 | Voice-data safety and scope adherence | 09-03, 09-04, 09-06 | COVERED | Critical; provenance, path containment, local-only evidence, leak scan. |
-
-## Edge-probe assumptions and surviving prohibitions
+## Research, AI-SPEC, edge, and prohibitions
 
 | SOURCE | ID | Feature / requirement | Plan | Status | Notes |
 |---|---|---|---|---|---|
-| EDGE | E-01 | Empty/null/single input rejection and no fake empty speech | 09-01–09-05 | COVERED | Backend/server/client/turn tests. |
-| EDGE | E-02 | Byte SHA-256, normalized comparison only, exact ICL transcript | 09-02, 09-03 | COVERED | Explicit planner assumptions/actions. |
-| EDGE | E-03 | Legacy/deploy/warmup/prewarm idempotency | 09-01–09-03, 09-06 | COVERED | Exact repeatability contracts. |
-| EDGE | E-04 | One CUDA generation, scoped cancel/terminal, bounded queues | 09-01, 09-02, 09-05 | COVERED | Concurrency state machine. |
-| EDGE | E-05 | REQ-45 defined by locked live-call/AI-SPEC tests | 09-01, 09-05 | COVERED | Must-haves and regression commands. |
-| EDGE | E-06 | REQ-46 concrete gates and target semantics | 09-01, 09-05, 09-06 | COVERED | Measured fields; no buffering exception. |
-| PROHIBITION | P-01 | No unapproved/arbitrary clone reference | 09-02–09-04, 09-06 | COVERED | Flagged-unverified must-have plus executable boundary tests. |
-| PROHIBITION | P-02 | No hosted/log/evidence private voice leakage | 09-03, 09-04, 09-06 | COVERED | Flagged-unverified must-have plus leak scan. |
-| PROHIBITION | P-03 | No model/CPU/x-vector/whole-WAV substitution | 09-01, 09-02, 09-06 | COVERED | Flagged-unverified must-have plus identity/fallback gates. |
-| PROHIBITION | P-04 | No hidden loading/whole buffering as ready call | 09-01, 09-04–09-06 | COVERED | Flagged-unverified must-have plus UI/call tests. |
+| RESEARCH | R-01 | Supervised Windows CUDA worker/IPC | 09-02, 09-05 | COVERED | Reader-thread cancel, validated IPC. |
+| RESEARCH | R-02 | Incremental LLM segmentation | 09-10 | COVERED | Slow LLM early submission. |
+| RESEARCH | R-03 | End-to-end paced backpressure | 09-03, 09-11 | COVERED | Bridge plus track credit. |
+| RESEARCH | R-04 | Persist only normal terminal speech | 09-10 | COVERED | Database/event assertions. |
+| RESEARCH | R-05 | Saved identity migration/read normalization | 09-07 | COVERED | Alembic/idempotency. |
+| RESEARCH | R-06 | Young-package legitimacy | 09-RESEARCH, COVERAGE, 09-01 | COVERED | Prior human approval resolved; exact automated metadata/tag/commit/lock checks. |
+| RESEARCH | R-07 | Visible readiness/hard-coded roster sweep | 09-08–09-09 | COVERED | Fast component plus Playwright. |
+| RESEARCH | R-08 | Canonical deployment/independent evidence | 09-04, 09-12–09-15 | COVERED | Early hard gate, self-test, final real E2E. |
+| AI-SPEC | C-01–C-05 | Identity, reference integrity, streaming, timing, interruption | 09-01–09-15 | COVERED | Critical paths have local plus hardware evidence. |
+| AI-SPEC | C-06–C-07 | Message integrity/endings and longitudinal stability | 09-12–09-15 | COVERED | STT/EOS/50-turn/acoustics/speaker. |
+| AI-SPEC | H-01 | Clone likeness/naturalness/joins | 09-04, 09-11–09-15 | COVERED | Automated speaker/join readiness; integrated human listening remains explicitly pending. |
+| AI-SPEC | H-02/C-08 | Visible containment and voice-data safety | 09-04, 09-06–09-09, 09-12–09-15 | COVERED | Permission-safe fixture, delete eviction, leak self-test. |
+| UI-SPEC | — | Canonical engine identity, independent readiness, authorized-reference form, row-scoped progress, truthful call gate, responsive/a11y states | 09-08–09-09, 09-15 | COVERED | Approved six-dimension contract with resolved UI considerations and real deployed browser acceptance. |
+| EDGE | E-01–E-06 | Empty input, byte hash/exact transcript, idempotency, concurrency, REQ-45/46 concrete gates | 09-01–09-15 | COVERED | Named behaviors/assumptions in task contracts. |
+| PROHIBITION | P-01 | No arbitrary/unapproved reference | 09-04, 09-06–09-07, 09-09, 09-13–09-15 | COVERED | Phase 005 or mechanical fallback only. |
+| PROHIBITION | P-02 | No hosted/private voice leakage | 09-02, 09-04–09-15 | COVERED | Local-only audio/scorer plus leak mutation. |
+| PROHIBITION | P-03 | No model/CPU/x-vector/whole-WAV substitution | 09-01–09-05, 09-11–09-15 | COVERED | Identity/fallback checks and COVERAGE opt-outs. |
+| PROHIBITION | P-04 | No hidden loading/full buffering | 09-03–09-04, 09-08–09-15 | COVERED | Fast, mocked, real hardware/browser proof. |
 
 ## Explicit exclusions
 
-- 0.6B as a separate selectable engine; CustomVoice; VoiceDesign; promptless/x-vector-only cloning; multilingual controls; GGML/quantized/Triton/vLLM/server/demo APIs; general Voice Lab/call UI redesign.
-- The API capability subtraction record is in `COVERAGE.md`; every OPT-OUT has a reason.
+0.6B selectable engine; generic `generate()` default voice; Torch use of GGML-only `ref_spk`/`ref_rvq`/`ref_spk_emb`/`ref_codes`; whole `generate_voice_clone()`; CustomVoice and its streaming method; VoiceDesign and its streaming method; x-vector/promptless, multilingual, GGML/quantized/Triton/vLLM/server/demo paths; broad UI redesign.
 
-**Audit result:** PASS — no source item is missing from the executable plan set.
+**Audit result:** PASS — no source item is missing from the 14-plan executable set.

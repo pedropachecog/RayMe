@@ -1,8 +1,6 @@
 ---
 phase: 09
 slug: integrate-faster-qwen3-tts-1-7b-into-live-calls
-# status lifecycle: draft (seeded by plan-phase) → validated (set by validate-phase §6)
-# audit-milestone §5.5 distinguishes NOT-VALIDATED (draft) from PARTIAL (validated + nyquist_compliant: false) (#2117)
 status: draft
 nyquist_compliant: false
 wave_0_complete: false
@@ -11,77 +9,71 @@ created: 2026-07-31
 
 # Phase 09 — Validation Strategy
 
-> Per-phase validation contract for feedback sampling during execution.
-
----
-
 ## Test Infrastructure
 
 | Property | Value |
-|----------|-------|
-| **Framework** | pytest 9.0.3; Vitest 4.1.5; Playwright 1.59.1 |
-| **Config file** | `ai-backend/pyproject.toml`, `web-ui/server/pyproject.toml`, `web-ui/client/vitest.config.ts`, `web-ui/client/playwright.config.ts` |
-| **Quick run command** | `uv run --project ai-backend pytest ai-backend/tests/test_tts_qwen3.py ai-backend/tests/test_call_session.py ai-backend/tests/test_model_manager.py -q` |
-| **Full suite command** | `uv run --project ai-backend pytest ai-backend/tests -q && uv run --project web-ui/server pytest web-ui/server/tests -q && npm --prefix web-ui/client run test:unit -- --run` |
-| **Estimated runtime** | ~180 seconds locally; OMEN evidence is a separate hardware gate |
-
----
+|---|---|
+| Framework | pytest 9.0.3; Vitest 4.1.5; Playwright 1.59.1 |
+| Config | `ai-backend/pyproject.toml`, `web-ui/server/pyproject.toml`, client Vitest/Playwright configs |
+| Fast feedback | Focused fake-worker/backend/server/component commands in each task; target <30 s |
+| Wave acceptance | Full tier suite; saved Playwright only after fast component tests |
+| Hardware gates | Plan 09-04 blocking early canonical deploy; Plan 09-14 final canonical deploy/core bundle; Plan 09-15 real live E2E/handoff |
 
 ## Sampling Rate
 
-- **After every task commit:** Run the focused test command named by that task; keep fake-worker feedback under 30 seconds.
-- **After every plan wave:** Run `uv run --project ai-backend pytest ai-backend/tests -q && uv run --project web-ui/server pytest web-ui/server/tests -q && npm --prefix web-ui/client run test:unit -- --run` plus `git diff --check`.
-- **Before `$gsd-verify-work`:** Full suite must be green
-- **Max feedback latency:** 30 seconds for focused tests; hardware evidence is release-gated separately.
+- After every code-producing task: run its focused command and `git diff --check`.
+- At each wave boundary: run complete tests for touched tiers.
+- UI edits use focused Vitest per task; saved mocked Playwright is wave acceptance, not the fast edit loop.
+- No broad migration/UI/call/evidence work proceeds if Plan 09-04's real adapter/manager/saved-voice/CallSession/WebRTC tracer fails.
+- Final handoff requires verifier `--self-test`, canonical deploy, real live E2E, `--decision-ready`, and exact operational-check arguments.
 
----
+## Per-Plan Verification Map
 
-## Per-Task Verification Map
+| Plan | Wave | Requirement | Primary automated gate | Status |
+|---|---:|---|---|---|
+| 09-01 | 1 | REQ-22 | package-legitimacy/PyPI/tag/commit checks; `uv lock --check`; roster/health pytest | pending |
+| 09-02 | 2 | REQ-22/45 | `test_tts_qwen3.py` fake protocol/worker/adapter suite | pending |
+| 09-03 | 3 | REQ-22/45/46 | manager/WebRTC/CallSession slow stream/cancel plus VoxCPM2 regressions | pending |
+| 09-04 | 4 | REQ-22/45/46 | `RAYME_OMEN_VERIFY_QWEN3_TRACER=1 scripts/deploy-omen.sh` and commit-matched tracer verifier | pending |
+| 09-05 | 5 | REQ-22/45 | alignment/ceiling/protocol/cache/error pytest | pending |
+| 09-06 | 6 | REQ-22 | backend and server delete→invalidate/evict tests with unrelated-voice recovery | pending |
+| 09-07 | 5 | REQ-22/45 | migration/voice/call server pytest plus Alembic upgrade | pending |
+| 09-08 | 6 | REQ-22/45/46 | focused Voice Lab/settings Vitest readiness states | pending |
+| 09-09 | 7 | REQ-22/45/46 | fast Playwright `--list`, then saved mocked readiness UI wave acceptance | pending |
+| 09-10 | 7 | REQ-22/45/46 | slow-LLM segment/persistence server pytest | pending |
+| 09-11 | 6 | REQ-45/46 | slow producer/consumer, paced bound, metrics, all control causes, Vox regression pytest | pending |
+| 09-12 | 8 | REQ-22/45/46 | manifest/scorer tests; verifier `--contracts-only` and named `--self-test` | pending |
+| 09-13 | 9 | REQ-22/45/46 | production runner dry-run/scenario/scorer lifecycle tests | pending |
+| 09-14 | 10 | REQ-22/45/46 | full suites; canonical deploy; exact-commit runtime/call/STT core bundle | pending |
+| 09-15 | 11 | REQ-22/45/46 | pinned speaker/leak; real Qwen live E2E; decision-ready; exact operational handoff | pending |
 
-| Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
-|---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| 09-W0-01 | W0 | 0 | REQ-22 | T-09-01 through T-09-06 | Worker events are request-scoped, bounded, validated, and sanitized. | unit | `uv run --project ai-backend pytest ai-backend/tests/test_tts_qwen3.py ai-backend/tests/test_tts_registry.py -q` | ❌ W0 | ⬜ pending |
-| 09-W0-02 | W0 | 0 | REQ-45 | T-09-01, T-09-05 | Slow LLM/native streams play early; queue depth is bounded; no whole synthesis is called. | async contract | `uv run --project ai-backend pytest ai-backend/tests/test_call_session.py ai-backend/tests/test_webrtc_signaling.py -q` | ✅ extend | ⬜ pending |
-| 09-W0-03 | W0 | 0 | REQ-45 | T-09-01, T-09-05 | Cancel/hangup rejects late chunks and normal completion/persistence. | API contract | `uv run --project web-ui/server pytest web-ui/server/tests/test_calls.py -q` | ✅ extend | ⬜ pending |
-| 09-W0-04 | W0 | 0 | REQ-22 | T-09-04 | Voice/id migration, transcript alignment, readiness, and public errors cross backend/server/client. | integration | `uv run --project web-ui/server pytest web-ui/server/tests/test_voices.py -q && npm --prefix web-ui/client run test:unit -- --run` | ✅ extend | ⬜ pending |
-| 09-W0-05 | W0 | 0 | REQ-46 | T-09-05, T-09-06 | Exact CUDA identity, TTFA/RTF/VRAM, 50-turn stability, and real call-flow pass on OMEN. | hardware evidence | `RAYME_OMEN_VERIFY_QWEN3=1 scripts/deploy-omen.sh` | ❌ W0 | ⬜ pending |
+## Required Regression Inventory
 
-*Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
-
----
-
-## Wave 0 Requirements
-
-- [ ] `ai-backend/tests/test_tts_qwen3.py` — worker protocol, runtime identity, prompt cache, alignment/ceiling, cancellation, crash/hang, and error sanitization.
-- [ ] `web-ui/server/tests/test_call_tts_segments.py` — incremental natural segmentation and slow-LLM early submission.
-- [ ] Migration fixture/test for exact legacy `qwen3_0_6b` voice/settings values and idempotent zero-row behavior.
-- [ ] `09-evidence-manifest.json` — 20 locked scenarios and fixture hashes.
-- [ ] `09-verify-evidence.py` — contracts-only and decision-ready verification modes.
-- [ ] Integrated OMEN runner descended from Spikes 005/006, excluding private reference audio/transcript from git.
-- [ ] Saved client E2E test/result for Voice Lab loading, prewarm, ready, and sanitized failure states.
-
-*If none: "Existing infrastructure covers all phase requirements."*
-
----
+- Protocol: schema/version/request/index/time/audio/terminal mutations, crash/hang/restart, exact immutable identity.
+- Reference: blank/missing/known mismatch reject before generation; punctuation/case/accent tolerance; exact transcript preserved.
+- Streaming: slow LLM submission before completion; slow native first playback before completion; no Qwen or VoxCPM2 whole fallback.
+- Bounds: segment scheduler, bridge capacity two, paced-track pending-audio credit, prompt capacity one, output ceilings.
+- Cancellation: before/after audio, VAD/button/hangup/switch/close/delete; zero late audio/done/complete persistence; recovery.
+- Deletion: matching prompt tensors/cache are evicted; unrelated saved voice remains usable.
+- UI: canonical identity; dynamic metadata; Loading/Resident versus Prewarming/Ready/Failed; retry; no premature Listening.
+- Browser release: after deploy only, `RAYME_ENABLE_LIVE_E2E=1`, canonical URLs, qwen3_1_7b, permitted fixture, deployed-commit assertion.
+- Evidence self-test: false overall status, stale/commit mismatch, fallback, missing gate, unbounded queue, speaker drop, private leak.
+- Longitudinal: 50 valid/natural/realtime turns, STT/WER, acoustics, memory, anchors, WavLM baseline/early/middle/late cosine.
 
 ## Manual-Only Verifications
 
-| Behavior | Requirement | Why Manual | Test Instructions |
-|----------|-------------|------------|-------------------|
-| Clone likeness, naturalness, joins, and early/middle/late stability | REQ-22 | Automated STT/acoustic/speaker scores cannot make the final audible product judgment. | Listen blind to the pinned reference-set samples and longitudinal reel; require median likeness/naturalness at least 4/5, no item below 3/5, and no progressive muffling, whisper, noise, identity drift, or audible join. |
-| Physical phone-call feel | REQ-45, REQ-46 | Browser/device acoustics, interruption feel, and human turn-taking require the builder's phone after agent-run gates pass. | Select the saved 1.7B voice in deployed RayMe, place a real call, confirm early speech, interrupt before and after first audio, continue multiple turns, and report any drift or stale audio. |
-
-*If none: "All phase behaviors have automated verification."*
-
----
+| Behavior | Why manual | Status before handoff |
+|---|---|---|
+| Integrated clone likeness, naturalness, joins, early/middle/late listening | Automated WER/acoustic/speaker scores cannot make final audible identity judgment | pending; candidate spike listening accepted separately |
+| Physical phone-call feel and barge-in | Device acoustics and human turn-taking require the builder's phone | pending after autonomous release-ready pass |
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 30s for focused fake-worker tests
-- [ ] `nyquist_compliant: true` set in frontmatter
-
-**Approval:** pending
+- [ ] Every task automated gate passes.
+- [ ] Plan 09-04 early real production tracer passes before broad expansion.
+- [ ] Verifier named self-tests all fail closed as expected.
+- [ ] Final real live E2E and commit assertion pass after canonical deploy.
+- [ ] Decision-ready evidence is sanitized/current/commit-matched.
+- [ ] Operational check receives phase dir, deployed SHA, passing-test summary, UI/live/GPU artifacts.
+- [ ] Automated readiness is separated from pending integrated listening and physical call.
+- [ ] Set `nyquist_compliant: true` only after these gates.

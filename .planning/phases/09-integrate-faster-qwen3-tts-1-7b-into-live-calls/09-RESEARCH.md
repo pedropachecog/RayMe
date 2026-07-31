@@ -144,13 +144,13 @@ The direct source pin is the production form fixed by the AI design contract; `f
 
 | Package | Registry | Age | Downloads | Source Repo | Verdict | Disposition |
 |---------|----------|-----|-----------|-------------|---------|-------------|
-| `faster-qwen3-tts` | PyPI / official Git commit | 14 days at research date; published 2026-07-17 | Registry seam returned unknown | `github.com/andimarafioti/faster-qwen3-tts` | SUS: `too-new`, `unknown-downloads` | Flagged — planner must add `checkpoint:human-verify` before install, compare PyPI metadata/source with the user-provided official repository, and retain the immutable commit pin. [VERIFIED: GSD package-legitimacy seam and PyPI registry, 2026-07-31] |
+| `faster-qwen3-tts` | PyPI / official Git commit | 14 days at research date; published 2026-07-17 | Registry seam returned unknown | `github.com/andimarafioti/faster-qwen3-tts` | SUS: `too-new`, `unknown-downloads`; source approved | RESOLVED — the product owner supplied this exact repository, accepted audio produced by tag `v0.3.2` at commit `a70afc0f81f7f5f8801c3227968f1102f43f211c`, selected 1.7B, and explicitly authorized implementation/deployment. Execution must still run `node /home/agent/.codex/gsd-core/bin/gsd-tools.cjs package-legitimacy check --ecosystem pypi faster-qwen3-tts`, `python3 -m pip index versions faster-qwen3-tts`, and `git ls-remote --tags https://github.com/andimarafioti/faster-qwen3-tts refs/tags/v0.3.2`; then `uv lock --project ai-backend --check` plus `rg -n 'a70afc0f81f7f5f8801c3227968f1102f43f211c' ai-backend/uv.lock` must prove the immutable lock. No new product choice or human checkpoint remains. [VERIFIED: user direction, accepted Spikes 004b/005/006, GSD package-legitimacy seam, PyPI, and official source, 2026-07-31] |
 
 The PyPI registry exposes versions `0.1.0` through `0.3.2`; current is `0.3.2`. Python packages have no npm-style postinstall check. [VERIFIED: `python3 -m pip index versions faster-qwen3-tts`, 2026-07-31]
 
 **Packages removed due to [SLOP] verdict:** none.
 
-**Packages flagged as suspicious [SUS]:** `faster-qwen3-tts`. The suspicion is package age/download telemetry, not a source mismatch; the repository was explicitly supplied by the user and its pinned source was inspected, but the mandatory checkpoint remains.
+**Packages flagged as suspicious [SUS]:** `faster-qwen3-tts`. The suspicion is package age/download telemetry, not a source mismatch. The trust-establishing human decision is already recorded: the product owner supplied the source, accepted its pinned output, selected 1.7B, and authorized deployment. The exact metadata, tag, commit, and lock commands above remain blocking automated execution gates.
 
 ## Architecture Patterns
 
@@ -558,10 +558,9 @@ The first RED test must hold the LLM stream open after emitting a complete first
 
 ## Open Questions
 
-1. **Mandatory young-package checkpoint**
-   - What we know: The package exists as v0.3.2, its metadata points to the user-supplied official repository, and its immutable source passed RayMe's OMEN spikes; the legitimacy seam still returns SUS because it is 14 days old and download telemetry is unavailable. [VERIFIED: GSD legitimacy seam, PyPI, official source, and Phase 09 spikes]
-   - What's unclear: Whether registry telemetry will mature before execution; it does not change the approved source commit.
-   - Recommendation: Planner adds `checkpoint:human-verify` before dependency installation, checks owner/repo/tag/commit/PyPI metadata, then installs only the pinned Git commit.
+1. **Resolved: young-package trust decision**
+   - Resolution: The product owner's repository provenance, accepted `v0.3.2` spike output, explicit 1.7B selection, and deployment authorization satisfy the human trust decision for the exact source commit. The SUS telemetry remains recorded and cannot authorize any different source/version.
+   - Execution gate: Run the exact package-legitimacy, PyPI metadata, tag/commit, lock-check, and lock-commit assertions named in the Package Legitimacy Audit. Any mismatch blocks installation; no additional human checkpoint is required for this already approved source.
 
 2. **Other installations may contain compatibility rows**
    - What we know: The current OMEN database has zero old Qwen rows; schema and fixtures allow arbitrary engine strings. [VERIFIED: read-only OMEN query; web-ui/server/app/storage/models.py:184-192]

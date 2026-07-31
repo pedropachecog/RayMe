@@ -11,16 +11,20 @@
 | Full-ICL `create_voice_clone_prompt()` from reference WAV plus exact transcript | INTEGRATE | |
 | Reuse of one precomputed selected-voice prompt | INTEGRATE | |
 | `generate_voice_clone_streaming()` | INTEGRATE | |
+| Public `generate()` default-voice method | OPT-OUT | At pinned commit it raises `NotImplementedError` and directs callers to voice cloning; Phase 09 has no default-voice path. |
 | Native chunk timing metadata | INTEGRATE | |
 | `chunk_size=4` | INTEGRATE | |
 | `non_streaming_mode=True` for the current bounded text segment | INTEGRATE | |
 | `append_silence=True` | INTEGRATE | |
 | Generator close/exhaustion terminal semantics | INTEGRATE | |
 | Non-streaming `generate_voice_clone()` whole synthesis | OPT-OUT | Live RayMe calls must play early native chunks and may never fall back to a whole-turn WAV.
+| Torch arguments `ref_spk`, `ref_rvq`, `ref_spk_emb`, and `ref_codes` | OPT-OUT | GGML-only cached inputs rejected by Torch. RayMe uses full-ICL `voice_clone_prompt` from approved audio and exact transcript. |
 | X-vector-only cloning | OPT-OUT | The selected product path is full ICL with matching reference audio and transcript.
 | Promptless voice cloning | OPT-OUT | Phase 09 requires the approved saved reference WAV and exact transcript.
-| CustomVoice model/API | OPT-OUT | Explicitly outside the Phase 09 voice-cloning boundary.
-| VoiceDesign model/API | OPT-OUT | Explicitly outside the Phase 09 voice-cloning boundary.
+| `generate_custom_voice()` | OPT-OUT | Requires a CustomVoice model and is explicitly outside the Phase 09 Base-model ICL boundary. |
+| `generate_custom_voice_streaming()` | OPT-OUT | Streaming does not change the model/product boundary; CustomVoice remains explicitly deferred. |
+| `generate_voice_design()` | OPT-OUT | Requires a VoiceDesign model and is explicitly outside the Phase 09 Base-model ICL boundary. |
+| `generate_voice_design_streaming()` | OPT-OUT | Streaming does not change the model/product boundary; VoiceDesign remains explicitly deferred. |
 | Base-model `instruct` controls | OPT-OUT | Phase 09 is English full-ICL cloning, not instruction-driven voice design.
 | Qwen3-TTS 0.6B model | OPT-OUT | The product owner selected 1.7B after the accepted comparison and longitudinal reel.
 | Multilingual language modes | OPT-OUT | RayMe v1 remains English-only, including accented English.
