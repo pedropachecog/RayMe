@@ -225,6 +225,7 @@ export interface CallOfferResponse {
   session_id: string;
   answer: RTCSessionDescriptionInit | CallSessionDescription | null;
   event_channel: 'rayme-events' | string;
+  preparation?: VoicePreparationStatus | null;
 }
 
 export interface CallTurnRequest {
@@ -470,6 +471,9 @@ export interface VoiceSavePayload {
   name: string;
   default_engine: TtsEngineId;
   reference_transcript?: string | null;
+  voice_data_steward?: string | null;
+  authorization_basis?: string | null;
+  use_scope?: string | null;
   metadata?: VoiceMetadata;
 }
 
@@ -478,6 +482,9 @@ export interface VoicePreviewPayload {
   name?: string | null;
   default_engine?: TtsEngineId | null;
   reference_transcript?: string | null;
+  voice_data_steward?: string | null;
+  authorization_basis?: string | null;
+  use_scope?: string | null;
   preview_text?: string | null;
   use_default_engine?: boolean;
   engine?: TtsEngineId | null;

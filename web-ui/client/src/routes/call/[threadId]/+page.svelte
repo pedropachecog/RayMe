@@ -16,7 +16,8 @@
     submitCallTurn
   } from '$lib/api/calls';
   import { loadThread } from '$lib/api/chat';
-  import type { CallErrorCode, CallEvent, CallStateName, CallTranscriptTurn, ThreadDetail } from '$lib/api/types';
+  import { getVoice, getVoicePreparationStatus } from '$lib/api/voices';
+  import type { CallErrorCode, CallEvent, CallOfferResponse, CallStateName, CallTranscriptTurn, ThreadDetail, VoicePreparationStatus } from '$lib/api/types';
   import {
     ensureRemoteCallAudioAudible,
     keepCallMicrophoneTracksLive,
@@ -35,9 +36,10 @@
 
   type ActiveCallState = Extract<CallStateName, 'connecting' | 'listening' | 'understanding' | 'thinking' | 'rehearsing' | 'speaking' | 'interrupted' | 'ended' | 'failed'>;
   type VisualState = Extract<CallStateName, 'listening' | 'understanding' | 'thinking' | 'rehearsing' | 'speaking'>;
-  type BlockingAction = 'Retry Microphone' | 'Open Character' | 'Choose Voice' | 'Open Settings' | 'Return to Thread';
+  type BlockingAction = 'Retry Microphone' | 'Retry Preparation' | 'Open Voice Lab' | 'Open Character' | 'Choose Voice' | 'Open Settings' | 'Return to Thread';
 
   interface BlockingPanel {
+    heading?: string;
     body: string;
     action: BlockingAction;
     tone?: 'danger' | 'warning';
@@ -95,6 +97,14 @@
   let transcript = $state<CallTranscriptTurn[]>([]);
   let activeAiText = $state('');
   let blockingPanel = $state<BlockingPanel | null>(null);
+  let blockingPanelHeading = $state<HTMLElement | null>(null);
+  let selectedCallEngine = $state('');
+  let selectedCallVoiceName = $state('selected voice');
+  let callPreparation = $state<VoicePreparationStatus>({
+    model: { state: 'idle', engine_id: null },
+    prompt: { state: 'none' }
+  });
+  let callPreparationPollToken = 0;
   let ending = $state(false);
   let timers: number[] = [];
   const handledUserFinalTurnIds = new Set<string>();
@@ -166,12 +176,14 @@
   const statusLabel = $derived(labelForState(callState));
   const callControlStateLabel = $derived(callState === 'listening' ? 'Ready to speak' : statusLabel);
   const canUseToolbar = $derived(callState !== 'connecting' && callState !== 'ended' && callState !== 'failed');
+  const qwenPreparationActive = $derived(selectedCallEngine === 'qwen3_1_7b' && callState === 'connecting');
 
   onMount(() => {
     void initializeCall();
   });
 
   onDestroy(() => {
+    callPreparationPollToken += 1;
     clearEventTimers();
     cancelActiveTurnStream();
     stopBrowserMedia();
@@ -220,7 +232,30 @@
       const started = await startCall({ thread_id: threadId });
       callId = started.call_id;
       sessionId = started.session_id || started.call_id;
-      await connectBrowserMedia(started);
+      selectedCallEngine = started.engine_id ?? '';
+      if (started.voice_id) {
+        void getVoice(started.voice_id).then(
+          (voice) => {
+            selectedCallVoiceName = voice.name || 'selected voice';
+          },
+          () => undefined
+        );
+      }
+      const preparationToken =
+        started.engine_id === 'qwen3_1_7b' ? beginCallPreparationMonitoring() : 0;
+      const offerResponse = await connectBrowserMedia(started);
+      if (preparationToken) {
+        callPreparationPollToken += 1;
+        const preparation = offerResponse?.preparation;
+        if (!preparation || preparation.model.state !== 'resident' || preparation.prompt.state !== 'ready') {
+          throw new CallApiError(
+            'RayMe could not prepare this voice for the call.',
+            502,
+            preparation?.prompt.error_code || 'call_tts_prepare_failed'
+          );
+        }
+        callPreparation = preparation;
+      }
       applyCallState(started.state ?? 'listening');
       applyStartEvents((started as typeof started & { events?: StartEvent[] }).events ?? []);
 
@@ -239,9 +274,9 @@
       beforeRemoteDescription?: () => Promise<void>;
       preserveExistingUntilConnected?: boolean;
     } = {}
-  ) {
+  ): Promise<CallOfferResponse | null> {
     if (!localMediaStream) {
-      return;
+      return null;
     }
 
     if (typeof RTCPeerConnection === 'undefined') {
@@ -331,6 +366,7 @@
       if (preserveExisting && previousConnection && previousConnection !== connection) {
         previousConnection.close();
       }
+      return response;
     } catch (error) {
       if (preserveExisting) {
         if (peerConnection === connection) {
@@ -342,6 +378,30 @@
         connection.close();
       }
       throw error;
+    }
+  }
+
+  function beginCallPreparationMonitoring(): number {
+    const token = ++callPreparationPollToken;
+    callPreparation = {
+      model: { state: 'loading', engine_id: 'qwen3_1_7b' },
+      prompt: { state: 'prewarming' }
+    };
+    void monitorCallPreparation(token);
+    return token;
+  }
+
+  async function monitorCallPreparation(token: number) {
+    for (let attempt = 0; attempt < 480 && token === callPreparationPollToken; attempt += 1) {
+      try {
+        const preparation = await getVoicePreparationStatus();
+        if (token !== callPreparationPollToken) return;
+        callPreparation = preparation;
+        if (preparation.prompt.state === 'ready' || preparation.prompt.state === 'failed') return;
+      } catch {
+        // The offer response is authoritative; transient polling failure keeps the call visibly preparing.
+      }
+      await delay(250);
     }
   }
 
@@ -1820,6 +1880,10 @@
   }
 
   function messageForCallFailure(code: CallErrorCode, message?: string | null) {
+    if (code === 'qwen3_generation_ceiling') {
+      return 'RayMe stopped this voice because the generated audio exceeded its safe limit. Check the transcript and try again.';
+    }
+
     const normalized = message?.trim();
     if (normalized) {
       return normalized;
@@ -2238,6 +2302,66 @@
     callState = 'failed';
 
     if (error instanceof CallApiError) {
+      if (error.code === 'qwen3_transcript_required') {
+        showFocusedBlockingPanel({
+          heading: 'Voice preparation failed',
+          body: 'Add the matching reference transcript before using Qwen3-TTS 1.7B.',
+          action: 'Open Voice Lab',
+          tone: 'warning'
+        });
+        return;
+      }
+
+      if (error.code === 'qwen3_transcript_mismatch' || error.code === 'qwen3_alignment_failed') {
+        showFocusedBlockingPanel({
+          heading: 'Voice preparation failed',
+          body: 'This transcript does not appear to match the voice sample. Review the transcript or choose a different sample, then try again.',
+          action: 'Open Voice Lab',
+          tone: 'warning'
+        });
+        return;
+      }
+
+      if (error.code === 'qwen3_authorization_required') {
+        showFocusedBlockingPanel({
+          heading: 'Voice preparation failed',
+          body: 'Add the reference source, authorization basis, and use scope before using this voice.',
+          action: 'Open Voice Lab',
+          tone: 'warning'
+        });
+        return;
+      }
+
+      if (
+        error.code === 'qwen3_prompt_failed' ||
+        error.code === 'qwen3_prompt_not_ready' ||
+        error.code === 'call_tts_prepare_failed' ||
+        error.code === 'call_tts_prepare_mismatch'
+      ) {
+        showFocusedBlockingPanel({
+          heading: 'Voice preparation failed',
+          body: 'RayMe could not prepare this voice for the call. Retry preparation, choose another voice, or check Settings.',
+          action: 'Retry Preparation',
+          tone: 'warning'
+        });
+        return;
+      }
+
+      if (
+        error.code === 'qwen3_worker_protocol' ||
+        error.code === 'qwen3_worker_timeout' ||
+        error.code === 'qwen3_worker_stopped' ||
+        error.code === 'call_tts_prepare_unavailable'
+      ) {
+        showFocusedBlockingPanel({
+          heading: 'Qwen3-TTS 1.7B unavailable',
+          body: 'Qwen3-TTS 1.7B is unavailable right now. Choose another voice or check AI backend status in Settings.',
+          action: 'Open Settings',
+          tone: 'danger'
+        });
+        return;
+      }
+
       if (error.code === 'call_voice_required') {
         blockingPanel = {
           body: 'Assign a voice before calling this character.',
@@ -2305,9 +2429,19 @@
     };
   }
 
+  function showFocusedBlockingPanel(panel: BlockingPanel) {
+    blockingPanel = panel;
+    queueMicrotask(() => blockingPanelHeading?.focus());
+  }
+
   function handleBlockingAction(action: BlockingAction) {
-    if (action === 'Retry Microphone') {
+    if (action === 'Retry Microphone' || action === 'Retry Preparation') {
       void beginCall();
+      return;
+    }
+
+    if (action === 'Open Voice Lab') {
+      void goto('/voice-lab');
       return;
     }
 
@@ -2568,7 +2702,7 @@
       {:else}
         <UserRound size={24} strokeWidth={1.8} aria-hidden="true" />
       {/if}
-      <h2>{blockingPanel.action}</h2>
+      <h2 bind:this={blockingPanelHeading} tabindex="-1">{blockingPanel.heading ?? blockingPanel.action}</h2>
       <p>{blockingPanel.body}</p>
       <button type="button" onclick={() => handleBlockingAction(blockingPanel!.action)}>
         {blockingPanel.action}
@@ -2576,8 +2710,24 @@
     </div>
   {:else if callState === 'connecting'}
     <div class="blocking-panel" role="status">
-      <RefreshCw size={22} strokeWidth={1.8} aria-hidden="true" />
-      <h2>Connecting</h2>
+      <RefreshCw class="preparation-progress" size={22} strokeWidth={1.8} aria-hidden="true" />
+      {#if qwenPreparationActive}
+        <h2>Preparing voice</h2>
+        <div class="preparation-rows" aria-label="Call voice preparation">
+          <p>
+            {callPreparation.model.state === 'resident'
+              ? 'Qwen3-TTS 1.7B loaded'
+              : 'Loading Qwen3-TTS 1.7B…'}
+          </p>
+          <p>
+            {callPreparation.prompt.state === 'ready'
+              ? 'Saved voice ready'
+              : `Preparing ${selectedCallVoiceName}…`}
+          </p>
+        </div>
+      {:else}
+        <h2>Connecting</h2>
+      {/if}
     </div>
   {:else if callState === 'ended'}
     <div class="ended-panel" role="status">
@@ -2715,6 +2865,36 @@
     color: var(--color-text-muted);
     font-size: var(--font-body);
     line-height: var(--line-body);
+  }
+
+  .preparation-rows {
+    display: grid;
+    width: min(100%, 520px);
+    gap: var(--space-sm);
+  }
+
+  .preparation-rows p {
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    background: rgba(9, 19, 40, 0.56);
+    color: var(--color-text);
+    overflow-wrap: anywhere;
+  }
+
+  :global(.preparation-progress) {
+    animation: preparation-spin 1s linear infinite;
+  }
+
+  @keyframes preparation-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(.preparation-progress) {
+      animation: none;
+    }
   }
 
   .blocking-panel button,

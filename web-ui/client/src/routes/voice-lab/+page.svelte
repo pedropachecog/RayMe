@@ -1,11 +1,12 @@
 <script lang="ts">
-  import { Save } from 'lucide-svelte';
-  import { onMount } from 'svelte';
+  import { RefreshCw, Save } from 'lucide-svelte';
+  import { onDestroy, onMount } from 'svelte';
 
   import { toApiPath } from '$lib/api/client';
   import { getSettings } from '$lib/api/settings';
   import {
     deleteVoice,
+    getVoicePreparationStatus,
     listVoices,
     previewVoice,
     renameVoice,
@@ -17,6 +18,8 @@
   import type {
     AiBackendEngineStatus,
     TtsEngineMetadata,
+    TtsModelReadiness,
+    TtsPromptReadiness,
     VoiceAsset,
     VoiceMetadata,
     VoiceSummary,
@@ -105,6 +108,19 @@
   ];
 
   const validSampleExtension = /\.(wav|mp3|flac)$/i;
+  const QWEN3_ENGINE_ID = 'qwen3_1_7b';
+  const QWEN3_LAN_SCOPE = 'rayme_lan_call_testing';
+  const QWEN3_FAILURE_COPY: Record<string, string> = {
+    qwen3_transcript_required: 'Add the matching reference transcript before using Qwen3-TTS 1.7B.',
+    qwen3_transcript_mismatch: 'This transcript does not appear to match the voice sample. Review the transcript or choose a different sample, then try again.',
+    qwen3_alignment_failed: 'This transcript does not appear to match the voice sample. Review the transcript or choose a different sample, then try again.',
+    qwen3_prompt_failed: 'RayMe could not prepare this voice. Retry preparation. Your sample, transcript, name, and engine selection are still here.',
+    qwen3_prompt_not_ready: 'RayMe could not prepare this voice. Retry preparation. Your sample, transcript, name, and engine selection are still here.',
+    qwen3_generation_ceiling: 'RayMe stopped this voice because the generated audio exceeded its safe limit. Check the transcript and try again.',
+    qwen3_worker_protocol: 'Qwen3-TTS 1.7B is unavailable right now. Choose another voice or check AI backend status in Settings.',
+    qwen3_worker_timeout: 'Qwen3-TTS 1.7B is unavailable right now. Choose another voice or check AI backend status in Settings.',
+    qwen3_worker_stopped: 'Qwen3-TTS 1.7B is unavailable right now. Choose another voice or check AI backend status in Settings.'
+  };
   const DEFAULT_VOXCPM2_SETTINGS: Required<VoxCpm2EngineSettings> = {
     cloning_mode: 'reference_only',
     style_prompt: '',
@@ -122,13 +138,23 @@
   let previewText = 'The line is open. This is how the saved RayMe voice will sound.';
   let useDefaultEngine = true;
   let speechSpeed = 0.85;
+  let voiceDataSteward = '';
+  let authorizationBasis = '';
+  let useScope = '';
+  let authorizationError = '';
+  let voiceDataStewardInput: HTMLInputElement;
+  let authorizationBasisInput: HTMLInputElement;
+  let useScopeSelect: HTMLSelectElement;
   let engineSettings = {
     voxcpm2: { ...DEFAULT_VOXCPM2_SETTINGS }
   };
   let engines: TtsEngineMetadata[] = DEFAULT_TTS_ENGINES;
   let uploadState: 'idle' | 'uploading' | 'ready' | 'error' = 'idle';
   let transcriptState: 'idle' | 'pending' | 'ready' | 'error' = 'idle';
-  let previewState: 'idle' | 'synthesizing' | 'ready' | 'error' = 'idle';
+  let previewState: 'idle' | 'preparing' | 'synthesizing' | 'ready' | 'error' = 'idle';
+  let modelReadiness: TtsModelReadiness = { state: 'idle', engine_id: null };
+  let promptReadiness: TtsPromptReadiness = { state: 'none' };
+  let preparationPollToken = 0;
   let saveState: 'idle' | 'saving' | 'saved' | 'error' = 'idle';
   let uploadError = '';
   let transcriptError = '';
@@ -149,10 +175,13 @@
   let activeAudio: HTMLAudioElement | null = null;
 
   $: selectedEngineMetadata = engines.find((engine) => engine.id === selectedEngine);
+  $: isQwenSelected = selectedEngine === QWEN3_ENGINE_ID;
   $: transcriptRequired = selectedEngineMetadata?.requires_transcript === true;
   $: hasRequiredTranscript = !transcriptRequired || Boolean(transcript.trim());
-  $: canPreview = Boolean(asset && hasRequiredTranscript && selectedEngine && previewText.trim());
-  $: canSave = Boolean(asset && voiceName.trim() && hasRequiredTranscript && selectedEngine);
+  $: hasQwenAuthorization =
+    !isQwenSelected || Boolean(voiceDataSteward.trim() && authorizationBasis.trim() && useScope);
+  $: canPreview = Boolean(asset && hasRequiredTranscript && hasQwenAuthorization && selectedEngine && previewText.trim());
+  $: canSave = Boolean(asset && voiceName.trim() && hasRequiredTranscript && hasQwenAuthorization && selectedEngine);
   $: uploadedSampleUrl = asset ? toApiPath(`/voices/assets/${encodeURIComponent(asset.asset_id)}/sample`) : null;
   $: if (transcriptState === 'error' && transcript.trim()) {
     transcriptState = 'ready';
@@ -162,6 +191,10 @@
   onMount(() => {
     void loadEngineMetadata();
     void loadVoiceLibrary();
+  });
+
+  onDestroy(() => {
+    preparationPollToken += 1;
   });
 
   async function loadEngineMetadata() {
@@ -279,11 +312,13 @@
   }
 
   async function previewCurrentVoice() {
-    if (!asset || !canPreview) {
+    if (!focusFirstInvalidQwenField() || !asset || !canPreview) {
       return;
     }
 
-    previewState = 'synthesizing';
+    const qwenOperation = selectedEngine === QWEN3_ENGINE_ID;
+    const pollToken = qwenOperation ? beginPreparationMonitoring() : 0;
+    previewState = qwenOperation ? 'preparing' : 'synthesizing';
     previewError = '';
     previewAudioUrl = null;
 
@@ -293,12 +328,27 @@
         name: voiceName.trim(),
         default_engine: selectedEngine,
         reference_transcript: transcript.trim(),
+        ...(qwenOperation
+          ? {
+              voice_data_steward: voiceDataSteward.trim(),
+              authorization_basis: authorizationBasis.trim(),
+              use_scope: useScope
+            }
+          : {}),
         preview_text: previewText,
         use_default_engine: useDefaultEngine,
         engine: useDefaultEngine ? null : selectedEngine,
         speech_speed: speechSpeed,
         ...(selectedEngine === 'voxcpm2' ? { metadata: buildVoiceMetadata() } : {})
       });
+      previewState = 'synthesizing';
+      if (result.error || result.status === 'tts_failed') {
+        previewState = 'error';
+        previewError = qwenOperation
+          ? qwenFailureMessage(errorCodeFrom(result))
+          : 'Preview failed. You can retry or save this voice anyway.';
+        return;
+      }
       previewAudioUrl = synthesisAudioUrl(result);
       previewState = previewAudioUrl ? 'ready' : 'error';
       previewError = previewAudioUrl
@@ -306,12 +356,18 @@
         : 'Preview did not return playable audio. You can retry or save this voice anyway.';
     } catch {
       previewState = 'error';
-      previewError = 'Preview failed. You can retry or save this voice anyway.';
+      previewError = qwenOperation
+        ? qwenFailureMessage(promptReadiness.error_code)
+        : 'Preview failed. You can retry or save this voice anyway.';
+    } finally {
+      if (pollToken) {
+        preparationPollToken += 1;
+      }
     }
   }
 
   async function saveCurrentVoice() {
-    if (!asset || !canSave) {
+    if (!focusFirstInvalidQwenField() || !asset || !canSave) {
       return;
     }
 
@@ -324,6 +380,13 @@
         name: voiceName.trim(),
         default_engine: selectedEngine,
         reference_transcript: transcript.trim(),
+        ...(isQwenSelected
+          ? {
+              voice_data_steward: voiceDataSteward.trim(),
+              authorization_basis: authorizationBasis.trim(),
+              use_scope: useScope
+            }
+          : {}),
         metadata: {
           ...buildVoiceMetadata(),
           sample_filename: selectedFile?.name ?? null
@@ -334,7 +397,9 @@
       await loadVoiceLibrary();
     } catch {
       saveState = 'error';
-      saveError = 'RayMe could not save this voice. Check the required fields and try again.';
+      saveError = isQwenSelected
+        ? qwenFailureMessage(promptReadiness.error_code)
+        : 'RayMe could not save this voice. Check the required fields and try again.';
     }
   }
 
@@ -475,6 +540,81 @@
     return null;
   }
 
+  function focusFirstInvalidQwenField(): boolean {
+    if (!isQwenSelected) {
+      authorizationError = '';
+      return true;
+    }
+    if (!asset) {
+      document.querySelector<HTMLInputElement>('input[type="file"]')?.focus();
+      return false;
+    }
+    if (!transcript.trim()) {
+      transcriptError = 'Add the matching reference transcript before using Qwen3-TTS 1.7B.';
+      document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Reference transcript"]')?.focus();
+      return false;
+    }
+    if (!voiceDataSteward.trim()) {
+      authorizationError = 'Add the reference source, authorization basis, and use scope before using this voice.';
+      voiceDataStewardInput?.focus();
+      return false;
+    }
+    if (!authorizationBasis.trim()) {
+      authorizationError = 'Add the reference source, authorization basis, and use scope before using this voice.';
+      authorizationBasisInput?.focus();
+      return false;
+    }
+    if (!useScope) {
+      authorizationError = 'Add the reference source, authorization basis, and use scope before using this voice.';
+      useScopeSelect?.focus();
+      return false;
+    }
+    authorizationError = '';
+    return true;
+  }
+
+  function beginPreparationMonitoring(): number {
+    const token = ++preparationPollToken;
+    modelReadiness = { state: 'loading', engine_id: QWEN3_ENGINE_ID };
+    promptReadiness = { state: 'prewarming' };
+    void monitorPreparation(token);
+    return token;
+  }
+
+  async function monitorPreparation(token: number) {
+    for (let attempt = 0; attempt < 480 && token === preparationPollToken; attempt += 1) {
+      try {
+        const status = await getVoicePreparationStatus();
+        if (token !== preparationPollToken) return;
+        modelReadiness = status.model;
+        promptReadiness = status.prompt;
+        if (status.prompt.state === 'ready') {
+          previewState = 'synthesizing';
+          return;
+        }
+        if (status.model.state === 'failed' || status.model.state === 'unavailable' || status.prompt.state === 'failed') {
+          return;
+        }
+      } catch {
+        // The synthesis request remains authoritative; a transient status miss does not erase form state.
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 250));
+    }
+  }
+
+  function errorCodeFrom(result: VoiceSynthesisResult): string | null {
+    const error = result.error;
+    return error && typeof error === 'object' && typeof (error as Record<string, unknown>).code === 'string'
+      ? String((error as Record<string, unknown>).code)
+      : null;
+  }
+
+  function qwenFailureMessage(code: string | null | undefined): string {
+    return code && QWEN3_FAILURE_COPY[code]
+      ? QWEN3_FAILURE_COPY[code]
+      : 'RayMe could not prepare this voice. Retry preparation. Your sample, transcript, name, and engine selection are still here.';
+  }
+
   function voiceNameFromFilename(filename: string) {
     return filename.replace(/\.[^.]+$/, '').trim();
   }
@@ -545,6 +685,79 @@
 
       <TtsEnginePicker bind:selectedEngine {engines} />
 
+      {#if selectedEngine === 'qwen3_1_7b'}
+        <section class="authorization-panel" aria-labelledby="reference-authorization-title">
+          <div>
+            <h2 id="reference-authorization-title">Reference authorization</h2>
+            <p>Add where this recording came from, why you are authorized to use it, and its permitted RayMe scope.</p>
+          </div>
+          <label>
+            <span>Reference source</span>
+            <input
+              bind:this={voiceDataStewardInput}
+              bind:value={voiceDataSteward}
+              name="voice_data_steward"
+              type="text"
+              autocomplete="off"
+              aria-invalid={Boolean(authorizationError && !voiceDataSteward.trim())}
+            />
+          </label>
+          <label>
+            <span>Authorization basis</span>
+            <input
+              bind:this={authorizationBasisInput}
+              bind:value={authorizationBasis}
+              name="authorization_basis"
+              type="text"
+              autocomplete="off"
+              aria-invalid={Boolean(authorizationError && !authorizationBasis.trim())}
+            />
+          </label>
+          <label>
+            <span>Use scope</span>
+            <select
+              bind:this={useScopeSelect}
+              bind:value={useScope}
+              name="use_scope"
+              aria-invalid={Boolean(authorizationError && !useScope)}
+            >
+              <option value="">Choose permitted scope</option>
+              <option value={QWEN3_LAN_SCOPE}>RayMe LAN call testing</option>
+            </select>
+          </label>
+          {#if authorizationError}
+            <p class="error" role="alert">{authorizationError}</p>
+          {/if}
+
+          <div class="readiness" aria-label="Qwen voice readiness">
+            <div>
+              <span>Model</span>
+              {#if modelReadiness.state === 'loading'}
+                <p role="status"><RefreshCw class="progress-icon" size={16} strokeWidth={1.8} aria-hidden="true" /> Loading Qwen3-TTS 1.7B…</p>
+              {:else if modelReadiness.state === 'resident'}
+                <p class="ready" role="status">Qwen3-TTS 1.7B loaded</p>
+              {:else if modelReadiness.state === 'failed' || modelReadiness.state === 'unavailable'}
+                <p class="error" role="alert">Qwen3-TTS 1.7B unavailable</p>
+              {:else}
+                <p>Model not loaded</p>
+              {/if}
+            </div>
+            <div>
+              <span>Selected voice</span>
+              {#if promptReadiness.state === 'prewarming'}
+                <p role="status"><RefreshCw class="progress-icon" size={16} strokeWidth={1.8} aria-hidden="true" /> Preparing saved voice…</p>
+              {:else if promptReadiness.state === 'ready'}
+                <p class="ready" role="status">Saved voice ready</p>
+              {:else if promptReadiness.state === 'failed'}
+                <p class="error" role="alert">Voice preparation failed</p>
+              {:else}
+                <p>Voice not prepared</p>
+              {/if}
+            </div>
+          </div>
+        </section>
+      {/if}
+
       {#if selectedEngine === 'voxcpm2'}
         <VoxCpm2Controls bind:settings={engineSettings.voxcpm2} {transcript} />
       {/if}
@@ -569,7 +782,11 @@
         </label>
 
         <div class="save-state">
-          <p>Save Voice is available once sample, name, transcript, and engine are valid. Preview success is not required.</p>
+          <p>
+            {isQwenSelected
+              ? 'Save Voice needs a sample, name, matching transcript, authorization details, and engine. Preview success is not required.'
+              : 'Save Voice is available once sample, name, transcript, and engine are valid. Preview success is not required.'}
+          </p>
           {#if saveState === 'saved'}
             <p class="success" role="status">Voice saved.</p>
           {:else if saveError}
@@ -687,7 +904,9 @@
   }
 
   .side-rail,
-  .save-panel {
+  .save-panel,
+  .authorization-panel,
+  .readiness {
     display: grid;
     min-width: 0;
     gap: var(--space-md);
@@ -698,6 +917,87 @@
     border-radius: var(--radius-md);
     padding: var(--space-lg);
     background: rgba(20, 31, 56, 0.78);
+  }
+
+  .authorization-panel {
+    border-radius: var(--radius-md);
+    padding: var(--space-lg);
+    background: rgba(20, 31, 56, 0.78);
+  }
+
+  .authorization-panel h2 {
+    margin: 0;
+    color: var(--color-text);
+    font-size: var(--font-heading);
+    font-weight: 600;
+    line-height: var(--line-heading);
+  }
+
+  .authorization-panel p {
+    color: var(--color-text-muted);
+    font-size: var(--font-body);
+    line-height: var(--line-body);
+  }
+
+  select {
+    width: 100%;
+    min-height: 44px;
+    border: 0;
+    border-radius: var(--radius-md);
+    padding: 0 var(--space-md);
+    background: rgba(6, 14, 32, 0.78);
+    box-shadow: inset 0 0 0 1px rgba(64, 72, 93, 0.28);
+    color: var(--color-text);
+    font-size: var(--font-body);
+  }
+
+  .readiness {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .readiness > div {
+    min-width: 0;
+    border-radius: var(--radius-md);
+    padding: var(--space-sm);
+    background: rgba(9, 19, 40, 0.56);
+  }
+
+  .readiness span {
+    color: var(--color-text-muted);
+    font-size: var(--font-label);
+    font-weight: 600;
+  }
+
+  .readiness p {
+    display: flex;
+    align-items: center;
+    gap: var(--space-xs);
+    margin-top: var(--space-xs);
+    overflow-wrap: anywhere;
+    color: var(--color-text);
+    font-size: var(--font-label);
+    font-weight: 600;
+  }
+
+  .readiness p.ready {
+    color: var(--color-secondary);
+  }
+
+  :global(.progress-icon) {
+    flex: 0 0 auto;
+    animation: readiness-spin 1s linear infinite;
+  }
+
+  @keyframes readiness-spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(.progress-icon) {
+      animation: none;
+    }
   }
 
   label {
@@ -779,6 +1079,14 @@
 
     .save-panel {
       padding: var(--space-md);
+    }
+
+    .authorization-panel {
+      padding: var(--space-md);
+    }
+
+    .readiness {
+      grid-template-columns: 1fr;
     }
   }
 

@@ -8,7 +8,8 @@ import type {
   VoiceSavePayload,
   VoiceSummary,
   VoiceSynthesisResult,
-  VoiceTestPlayPayload
+  VoiceTestPlayPayload,
+  VoicePreparationStatus
 } from './types';
 
 const ABSOLUTE_HTTP_URL = /^https?:\/\//i;
@@ -37,6 +38,10 @@ export function previewVoice(payload: VoicePreviewPayload): Promise<VoiceSynthes
     method: 'POST',
     body: JSON.stringify(payload)
   });
+}
+
+export function getVoicePreparationStatus(): Promise<VoicePreparationStatus> {
+  return apiFetch<VoicePreparationStatus>('/voices/preparation-status', { method: 'GET' });
 }
 
 export function saveVoice(payload: VoiceSavePayload): Promise<VoiceDetail> {

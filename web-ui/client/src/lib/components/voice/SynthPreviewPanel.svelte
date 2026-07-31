@@ -5,7 +5,7 @@
   export let useDefaultEngine = true;
   export let speechSpeed = 0.85;
   export let disabled = true;
-  export let state: 'idle' | 'synthesizing' | 'ready' | 'error' = 'idle';
+  export let state: 'idle' | 'preparing' | 'synthesizing' | 'ready' | 'error' = 'idle';
   export let audioUrl: string | null = null;
   export let errorMessage = '';
   export let onPreview: () => void = () => {};
@@ -68,9 +68,9 @@
   </label>
 
   <div class="preview-actions">
-    <button class="primary" type="button" disabled={disabled || state === 'synthesizing'} on:click={onPreview}>
+    <button class="primary" type="button" disabled={disabled || state === 'preparing' || state === 'synthesizing'} on:click={onPreview}>
       <RefreshCw size={16} strokeWidth={1.8} aria-hidden="true" />
-      <span>{state === 'synthesizing' ? 'Synthesizing...' : 'Preview Voice'}</span>
+      <span>{state === 'preparing' ? 'Preparing voice…' : state === 'synthesizing' ? 'Synthesizing…' : 'Preview Voice'}</span>
     </button>
     <button type="button" disabled={!audioUrl} on:click={togglePlayback} aria-label={playing ? 'Pause preview audio' : 'Play preview audio'}>
       {#if playing}
