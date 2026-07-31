@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import io
 import json
 import wave
@@ -20,12 +21,13 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.api.characters import get_character_session, get_portrait_blob_dir
 from app.main import create_app
 from app.storage.models import Base
+from app.storage.models import Voice
 from app.storage.session import create_engine
 
 SUPPORTED_TTS_ENGINES = (
     "F5-TTS",
     "XTTS v2",
-    "Qwen3-TTS 0.6B-Base",
+    "qwen3_1_7b",
     "LuxTTS",
     "Chatterbox Turbo",
     "TADA 1B",
@@ -97,6 +99,7 @@ class ScriptedVoiceProcessor:
 class VoiceFixture:
     client: TestClient
     processor: ScriptedVoiceProcessor
+    sessionmaker: async_sessionmaker
 
 
 @dataclass(frozen=True, slots=True)
@@ -176,7 +179,7 @@ def voice_fixture(tmp_path: Path) -> Iterator[VoiceFixture]:
     _install_test_dependencies(app, sessionmaker, tmp_path / "blobs", processor)
 
     with TestClient(app) as client:
-        yield VoiceFixture(client=client, processor=processor)
+        yield VoiceFixture(client=client, processor=processor, sessionmaker=sessionmaker)
 
     asyncio.run(engine.dispose())
 
@@ -275,14 +278,17 @@ def test_voice_save_without_preview_covers_full_engine_roster(
         uploaded = _upload_voice_asset(client, _wav_audio(f"{engine_name}.wav"))
         assert uploaded.status_code == 201
         asset_id = uploaded.json()["asset_id"]
+        payload = _voice_payload(
+            asset_id=asset_id,
+            name=f"{engine_name} reference voice",
+            default_engine=engine_name,
+            reference_transcript=f"Editable transcript for {engine_name}.",
+        )
+        if engine_name == "qwen3_1_7b":
+            payload.update(_qwen_authorization())
         response = client.post(
             "/api/voices",
-            json=_voice_payload(
-                asset_id=asset_id,
-                name=f"{engine_name} reference voice",
-                default_engine=engine_name,
-                reference_transcript=f"Editable transcript for {engine_name}.",
-            ),
+            json=payload,
         )
 
         assert response.status_code == 201
@@ -294,6 +300,134 @@ def test_voice_save_without_preview_covers_full_engine_roster(
         assert body["reference_transcript"] == f"Editable transcript for {engine_name}."
         assert "preview_id" not in body
         assert "preview_url" not in body
+
+
+def test_qwen_voice_save_binds_explicit_provenance_to_exact_reference(
+    voice_fixture: VoiceFixture,
+) -> None:
+    audio = _wav_audio("authorized-qwen-reference.wav")
+    transcript = "  Exact steward-approved reference transcript.  "
+    uploaded = _upload_voice_asset(voice_fixture.client, audio)
+    assert uploaded.status_code == 201
+
+    response = voice_fixture.client.post(
+        "/api/voices",
+        json={
+            **_voice_payload(
+                asset_id=uploaded.json()["asset_id"],
+                name="Authorized Qwen voice",
+                default_engine="qwen3_1_7b",
+                reference_transcript=transcript,
+            ),
+            **_qwen_authorization(),
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["default_engine"] == "qwen3_1_7b"
+    assert response.json()["reference_transcript"] == transcript
+    assert response.json()["metadata"]["qwen3_authorization"] == {
+        "voice_data_steward": "steward_rayme_owner",
+        "authorization_basis": "speaker_supplied_for_testing",
+        "use_scope": "rayme_lan_call_testing",
+        "reference_sha256": hashlib.sha256(audio.content).hexdigest(),
+        "transcript_sha256": hashlib.sha256(transcript.encode("utf-8")).hexdigest(),
+        "authorization_status": "recorded",
+        "reference_kind": "real_person",
+    }
+
+
+@pytest.mark.parametrize(
+    ("missing_field", "value"),
+    (
+        ("voice_data_steward", ""),
+        ("authorization_basis", ""),
+        ("use_scope", "some_other_scope"),
+    ),
+)
+def test_qwen_voice_save_rejects_missing_or_wrong_authorization(
+    voice_fixture: VoiceFixture,
+    missing_field: str,
+    value: str,
+) -> None:
+    uploaded = _upload_voice_asset(voice_fixture.client, _wav_audio("qwen-auth-reject.wav"))
+    authorization = _qwen_authorization()
+    authorization[missing_field] = value
+
+    response = voice_fixture.client.post(
+        "/api/voices",
+        json={
+            **_voice_payload(
+                asset_id=uploaded.json()["asset_id"],
+                name="Rejected Qwen voice",
+                default_engine="qwen3_1_7b",
+                reference_transcript="A matching nonblank transcript.",
+            ),
+            **authorization,
+        },
+    )
+
+    assert response.status_code == 422
+    serialized = json.dumps(response.json())
+    assert "Traceback" not in serialized
+    assert "qwen-auth-reject.wav" not in serialized
+
+
+def test_generated_non_person_qwen_fixture_is_never_recorded_as_a_persons_likeness(
+    voice_fixture: VoiceFixture,
+) -> None:
+    uploaded = _upload_voice_asset(voice_fixture.client, _wav_audio("synthetic-qwen.wav"))
+    response = voice_fixture.client.post(
+        "/api/voices",
+        json={
+            **_voice_payload(
+                asset_id=uploaded.json()["asset_id"],
+                name="Synthetic Qwen fixture",
+                default_engine="qwen3_1_7b",
+                reference_transcript="Synthetic mechanical reference speech.",
+            ),
+            **_qwen_authorization(
+                voice_data_steward="rayme_test_harness",
+                authorization_basis="generated_non_person_fixture",
+            ),
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    authorization = response.json()["metadata"]["qwen3_authorization"]
+    assert authorization["authorization_status"] == "non_person_fixture"
+    assert authorization["reference_kind"] == "generated_non_person_fixture"
+    assert "consent" not in json.dumps(authorization).lower()
+
+
+def test_qwen_engine_normalization_is_narrow_and_legacy_reads_are_canonical(
+    voice_fixture: VoiceFixture,
+) -> None:
+    from app.domain.voice_service import VoiceMetadataValidationError, normalize_voice_engine_id
+
+    assert normalize_voice_engine_id("qwen3_0_6b") == "qwen3_1_7b"
+    assert normalize_voice_engine_id("qwen3_1_7b") == "qwen3_1_7b"
+    with pytest.raises(VoiceMetadataValidationError):
+        normalize_voice_engine_id("qwen3_future_unknown")
+
+    async def insert_legacy_voice() -> None:
+        async with voice_fixture.sessionmaker() as session:
+            session.add(
+                Voice(
+                    id="voice_legacy_qwen_read",
+                    name="Legacy Qwen read",
+                    default_engine="qwen3_0_6b",
+                    reference_transcript="Legacy exact transcript.",
+                    metadata_json={},
+                )
+            )
+            await session.commit()
+
+    asyncio.run(insert_legacy_voice())
+    response = voice_fixture.client.get("/api/voices/voice_legacy_qwen_read")
+
+    assert response.status_code == 200
+    assert response.json()["default_engine"] == "qwen3_1_7b"
 
 
 def test_voice_save_succeeds_after_preview_returns_tts_failed(
@@ -953,6 +1087,19 @@ def _voice_payload(
     assert "preview_url" not in payload
     assert "successful_synthesis_result" not in payload
     return payload
+
+
+def _qwen_authorization(
+    *,
+    voice_data_steward: str = "steward_rayme_owner",
+    authorization_basis: str = "speaker_supplied_for_testing",
+    use_scope: str = "rayme_lan_call_testing",
+) -> dict[str, str]:
+    return {
+        "voice_data_steward": voice_data_steward,
+        "authorization_basis": authorization_basis,
+        "use_scope": use_scope,
+    }
 
 
 def _character_payload(**overrides: Any) -> dict[str, Any]:

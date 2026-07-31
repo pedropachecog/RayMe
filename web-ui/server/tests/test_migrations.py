@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+import json
 from pathlib import Path
 
 import pytest
@@ -39,6 +40,13 @@ def run_migration(tmp_path: Path) -> Path:
     command.upgrade(config, "head")
 
     return db_path
+
+
+def migration_config(db_path: Path) -> Config:
+    config = Config(str(SERVER_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(SERVER_ROOT / "alembic"))
+    config.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_path.as_posix()}")
+    return config
 
 
 def connect(db_path: Path) -> sqlite3.Connection:
@@ -263,3 +271,97 @@ def test_branch_columns_persist_selected_alternate_and_stale_state(tmp_path: Pat
             "stale_after_edit": 1,
             "branch_root_id": "ai-1",
         }
+
+
+def test_qwen3_identity_upgrade_is_exact_truthful_and_idempotent(tmp_path: Path) -> None:
+    db_path = tmp_path / "rayme-qwen-identity.sqlite3"
+    config = migration_config(db_path)
+    command.upgrade(config, "0002_voice_storage")
+
+    with connect(db_path) as connection:
+        connection.executemany(
+            """
+            INSERT INTO voices (id, name, default_engine, reference_transcript, metadata_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                (
+                    "voice-legacy-qwen",
+                    "Legacy Qwen",
+                    "qwen3_0_6b",
+                    "Exact legacy transcript.",
+                    json.dumps({"keep": {"nested": True}}),
+                ),
+                (
+                    "voice-current-qwen",
+                    "Current Qwen",
+                    "qwen3_1_7b",
+                    "Current transcript.",
+                    json.dumps({"authorization_status": "external"}),
+                ),
+                (
+                    "voice-unknown-qwen",
+                    "Unknown Qwen",
+                    "qwen3_future_unknown",
+                    "Unknown transcript.",
+                    json.dumps({"keep": "untouched"}),
+                ),
+            ),
+        )
+        connection.execute(
+            "INSERT INTO app_settings (key, value_json) VALUES (?, ?)",
+            (
+                "endpoint_settings",
+                json.dumps(
+                    {
+                        "tts_default_engine": "qwen3_0_6b",
+                        "unrelated": {"qwen3_0_6b": "must-not-change"},
+                    }
+                ),
+            ),
+        )
+        connection.execute(
+            "INSERT INTO app_settings (key, value_json) VALUES (?, ?)",
+            ("unrelated_setting", json.dumps({"tts_default_engine": "qwen3_0_6b"})),
+        )
+        connection.commit()
+
+    command.upgrade(config, "head")
+    command.upgrade(config, "head")
+
+    with connect(db_path) as connection:
+        voices = {
+            row["id"]: row
+            for row in connection.execute(
+                "SELECT id, default_engine, metadata_json FROM voices ORDER BY id"
+            )
+        }
+        legacy_metadata = json.loads(voices["voice-legacy-qwen"]["metadata_json"])
+        current_metadata = json.loads(voices["voice-current-qwen"]["metadata_json"])
+        unknown_metadata = json.loads(voices["voice-unknown-qwen"]["metadata_json"])
+
+        assert voices["voice-legacy-qwen"]["default_engine"] == "qwen3_1_7b"
+        assert legacy_metadata["keep"] == {"nested": True}
+        assert legacy_metadata["qwen3_authorization"] == {
+            "authorization_status": "needs_confirmation"
+        }
+        assert voices["voice-current-qwen"]["default_engine"] == "qwen3_1_7b"
+        assert current_metadata == {"authorization_status": "external"}
+        assert voices["voice-unknown-qwen"]["default_engine"] == "qwen3_future_unknown"
+        assert unknown_metadata == {"keep": "untouched"}
+
+        endpoint_settings = json.loads(
+            connection.execute(
+                "SELECT value_json FROM app_settings WHERE key = 'endpoint_settings'"
+            ).fetchone()["value_json"]
+        )
+        unrelated_settings = json.loads(
+            connection.execute(
+                "SELECT value_json FROM app_settings WHERE key = 'unrelated_setting'"
+            ).fetchone()["value_json"]
+        )
+        assert endpoint_settings == {
+            "tts_default_engine": "qwen3_1_7b",
+            "unrelated": {"qwen3_0_6b": "must-not-change"},
+        }
+        assert unrelated_settings == {"tts_default_engine": "qwen3_0_6b"}
