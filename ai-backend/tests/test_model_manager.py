@@ -5,7 +5,9 @@ import importlib
 import inspect
 import json
 import threading
+import wave
 from dataclasses import asdict, is_dataclass
+from io import BytesIO
 from typing import Any
 
 import pytest
@@ -121,6 +123,43 @@ class SlowPreparingQwenAdapter(ScriptedTtsAdapter):
         self.prewarm_started.set()
         assert self.release_prewarm.wait(1.0)
         return object()
+
+
+class RecordingQwenAdapter(ScriptedTtsAdapter):
+    def __init__(self, events: list[str], *, prewarm_error: Exception | None = None) -> None:
+        super().__init__("qwen3_1_7b", events)
+        self.prewarm_error = prewarm_error
+        self.prewarm_calls: list[dict[str, Any]] = []
+
+    def prewarm(self, **kwargs: Any) -> object:
+        self.prewarm_calls.append(dict(kwargs))
+        if self.prewarm_error is not None:
+            raise self.prewarm_error
+        return object()
+
+
+class ScriptedAlignmentSttAdapter:
+    def __init__(self, transcript: str) -> None:
+        self.transcript = transcript
+        self.calls: list[dict[str, Any]] = []
+
+    def transcribe(self, **kwargs: Any) -> dict[str, Any]:
+        self.calls.append(dict(kwargs))
+        return {
+            "status": "accepted",
+            "transcript": self.transcript,
+            "speech_detected": True,
+        }
+
+
+def _reference_wav_bytes() -> bytes:
+    buffer = BytesIO()
+    with wave.open(buffer, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+        wav.writeframes((2048).to_bytes(2, "little", signed=True) * 4800)
+    return buffer.getvalue()
 
 
 def _require_attr(module: object, attr: str) -> Any:
@@ -371,6 +410,138 @@ def test_qwen_prompt_failure_is_voice_scoped_and_sanitized() -> None:
             "error_code": "voice_prompt_preparation_failed",
         }
         _assert_no_raw_exception_text(health)
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize(
+    ("approved", "observed"),
+    [
+        ("Okay. Yeah, I RESENT you!", "okay yeah i resent you"),
+        ("José says café timing is ready.", "jose says cafe timing is ready"),
+    ],
+)
+def test_qwen_alignment_tolerates_punctuation_case_and_accent_variants(
+    approved: str,
+    observed: str,
+) -> None:
+    manager_module = importlib.import_module("app.models.model_manager")
+
+    result = manager_module.evaluate_qwen_transcript_alignment(approved, observed)
+
+    assert result.accepted is True
+    assert result.token_coverage >= 0.45 or result.edit_similarity >= 0.50
+
+
+def test_qwen_alignment_rejects_known_gross_mismatch_only_when_both_scores_are_low() -> None:
+    manager_module = importlib.import_module("app.models.model_manager")
+
+    result = manager_module.evaluate_qwen_transcript_alignment(
+        "Vulcan Science Academy validates a completely unrelated sentence.",
+        "Okay yeah I resent you I love you but you blew it",
+    )
+
+    assert result.accepted is False
+    assert result.token_coverage < 0.45
+    assert result.edit_similarity < 0.50
+
+
+def test_qwen_alignment_is_cached_by_content_and_blocks_before_load_or_prompt() -> None:
+    async def scenario() -> None:
+        qwen = importlib.import_module("app.models.tts_qwen3")
+        manager, _, events = _build_manager()
+        manager.startup()
+        adapter = RecordingQwenAdapter(events)
+        manager.tts_adapters["qwen3_1_7b"] = adapter
+        stt = ScriptedAlignmentSttAdapter(
+            "Okay yeah I resent you I love you but you blew it"
+        )
+        manager.stt_adapter = stt
+        reference = _reference_wav_bytes()
+        approved = "Vulcan Science Academy validates a completely unrelated sentence."
+
+        for _ in range(2):
+            with pytest.raises(qwen.Qwen3ValidationError) as raised:
+                await manager.prepare_tts_engine(
+                    "qwen3_1_7b",
+                    voice_key="voice-mismatch",
+                    reference_audio=reference,
+                    reference_transcript=approved,
+                )
+            assert raised.value.code == "qwen3_transcript_mismatch"
+
+        health = manager.health()
+        assert len(stt.calls) == 1
+        assert adapter.prewarm_calls == []
+        assert "qwen3_1_7b:load" not in events
+        assert health["resident_tts_engine"] == "f5"
+        assert health["selected_voice_prompt"]["state"] == "failed"
+        assert health["selected_voice_prompt"]["error_code"] == (
+            "qwen3_transcript_mismatch"
+        )
+        _assert_no_raw_exception_text(health)
+
+    asyncio.run(scenario())
+
+
+def test_qwen_alignment_never_replaces_exact_approved_transcript_entering_prompt() -> None:
+    async def scenario() -> None:
+        manager, _, events = _build_manager()
+        manager.startup()
+        adapter = RecordingQwenAdapter(events)
+        manager.tts_adapters["qwen3_1_7b"] = adapter
+        stt = ScriptedAlignmentSttAdapter("jose says cafe timing is ready")
+        manager.stt_adapter = stt
+        exact = "  José says café timing is ready.  "
+
+        result = await manager.prepare_tts_engine(
+            "qwen3_1_7b",
+            voice_key="voice-aligned",
+            reference_audio=_reference_wav_bytes(),
+            reference_transcript=exact,
+        )
+
+        assert result["prompt_state"] == "ready"
+        assert adapter.prewarm_calls[0]["reference_transcript"] == exact
+        assert len(stt.calls) == 1
+
+    asyncio.run(scenario())
+
+
+def test_qwen_runtime_failure_marks_only_qwen_unavailable_and_preserves_stt_and_other_tts() -> None:
+    async def scenario() -> None:
+        qwen = importlib.import_module("app.models.tts_qwen3")
+        manager, _, events = _build_manager()
+        manager.startup()
+        adapter = RecordingQwenAdapter(
+            events,
+            prewarm_error=qwen.Qwen3WorkerProtocolError(
+                "Traceback C:\\private\\model.bin",
+            ),
+        )
+        manager.tts_adapters["qwen3_1_7b"] = adapter
+        stt = ScriptedAlignmentSttAdapter("the exact approved transcript")
+        manager.stt_adapter = stt
+        manager.stt_ready = True
+
+        with pytest.raises(qwen.Qwen3WorkerProtocolError):
+            await manager.prepare_tts_engine(
+                "qwen3_1_7b",
+                voice_key="voice-runtime-failed",
+                reference_audio=_reference_wav_bytes(),
+                reference_transcript="The exact approved transcript.",
+            )
+
+        failed = manager.health()
+        failed_statuses = _engine_statuses(failed)
+        assert failed_statuses["qwen3_1_7b"]["available"] is False
+        assert failed_statuses["f5"]["available"] is True
+        assert failed_statuses["xtts_v2"]["available"] is True
+        assert failed["stt_ready"] is True
+        assert manager.stt_adapter is stt
+        manager.switch_tts_engine("xtts_v2")
+        assert manager.health()["resident_tts_engine"] == "xtts_v2"
+        _assert_no_raw_exception_text(failed)
 
     asyncio.run(scenario())
 

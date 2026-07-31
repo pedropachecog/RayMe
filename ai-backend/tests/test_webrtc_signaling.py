@@ -134,13 +134,22 @@ class ScriptedModelManager:
 
 
 class ScriptedPreparingModelManager(ScriptedModelManager):
-    def __init__(self, adapter: Any, *, ready: bool = False) -> None:
+    def __init__(
+        self,
+        adapter: Any,
+        *,
+        ready: bool = False,
+        prepare_error: Exception | None = None,
+    ) -> None:
         super().__init__(adapters={"qwen3_1_7b": adapter})
         self.ready = ready
+        self.prepare_error = prepare_error
         self.prepare_calls: list[dict[str, Any]] = []
 
     async def prepare_tts_engine(self, engine_id: str, **kwargs: Any) -> dict[str, Any]:
         self.prepare_calls.append({"engine_id": engine_id, **kwargs})
+        if self.prepare_error is not None:
+            raise self.prepare_error
         self.ready = True
         return {
             "engine_id": engine_id,
@@ -326,6 +335,114 @@ def test_webrtc_prepare_qwen_uses_only_contained_reference_and_exact_transcript(
     )
     assert rejected.status_code == 422
     assert "private" not in rejected.text
+
+
+def test_webrtc_prepare_qwen_maps_alignment_failure_to_actionable_sanitized_code(
+    stub_webrtc: None,
+) -> None:
+    from app.models.tts_qwen3 import Qwen3ValidationError
+
+    adapter = ScriptedQwenStreamingTtsAdapter()
+    manager = ScriptedPreparingModelManager(
+        adapter,
+        prepare_error=Qwen3ValidationError(
+            "Traceback /home/private/.cache full secret transcript",
+            code="qwen3_transcript_mismatch",
+        ),
+    )
+    client = _client(model_manager=manager)
+    session_id = "call-session-qwen-mismatch"
+    client.post(
+        "/webrtc/offer",
+        json={
+            **_offer_payload(session_id=session_id),
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+        },
+    )
+
+    response = client.post(
+        f"/webrtc/sessions/{session_id}/prepare",
+        json={
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+            "reference_audio_b64": base64.b64encode(SCRIPTED_WAV_BYTES).decode("ascii"),
+            "reference_transcript": "The exact approved transcript.",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "code": "qwen3_transcript_mismatch",
+        "message": "Reference audio and transcript do not match",
+        "engine_id": "qwen3_1_7b",
+    }
+    assert "Traceback" not in response.text
+    assert "/home/" not in response.text
+    assert "secret transcript" not in response.text
+
+
+@pytest.mark.parametrize(
+    ("error_factory", "expected_status", "expected_code", "should_mark"),
+    [
+        (
+            lambda: __import__(
+                "app.models.tts_qwen3", fromlist=["Qwen3ValidationError"]
+            ).Qwen3ValidationError(
+                "Traceback C:\\private\\voice.wav",
+                code="qwen3_transcript_required",
+            ),
+            422,
+            "qwen3_transcript_required",
+            False,
+        ),
+        (
+            lambda: __import__(
+                "app.models.tts_qwen3", fromlist=["Qwen3WorkerProtocolError"]
+            ).Qwen3WorkerProtocolError("Traceback /models/private/cache"),
+            502,
+            "qwen3_worker_protocol",
+            True,
+        ),
+    ],
+)
+def test_tts_boundary_maps_qwen_failures_without_poisoning_correctable_voice_errors(
+    error_factory: Any,
+    expected_status: int,
+    expected_code: str,
+    should_mark: bool,
+) -> None:
+    class FailingBoundaryManager:
+        def __init__(self) -> None:
+            self.tts_adapters = {"qwen3_1_7b": object()}
+            self._statuses = {"qwen3_1_7b": object()}
+            self.marked: list[tuple[str, str]] = []
+
+        def switch_tts_engine(self, _engine_id: str) -> None:
+            raise error_factory()
+
+        def _mark_unavailable(self, engine_id: str, reason: str) -> None:
+            self.marked.append((engine_id, reason))
+
+    manager = FailingBoundaryManager()
+    client = _client(model_manager=manager)
+
+    response = client.post(
+        "/tts/synthesize",
+        json={
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+            "text": "A bounded preview sentence.",
+            "reference_audio_b64": base64.b64encode(SCRIPTED_WAV_BYTES).decode("ascii"),
+            "reference_transcript": "The exact approved transcript.",
+        },
+    )
+
+    assert response.status_code == expected_status
+    assert response.json()["detail"]["code"] == expected_code
+    assert bool(manager.marked) is should_mark
+    assert "Traceback" not in response.text
+    assert "private" not in response.text
 
 
 def test_webrtc_qwen_speak_requires_matching_prepared_voice(stub_webrtc: None) -> None:
