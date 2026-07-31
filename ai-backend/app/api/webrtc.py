@@ -166,6 +166,7 @@ def get_webrtc_status(request: Request) -> dict[str, object]:
         "tts_model": {
             "resident_engine": model_health.get("resident_tts_engine"),
             "loading_engine": model_health.get("loading_engine"),
+            "torch_reserved_mib": model_health.get("tts_torch_reserved_mib"),
         },
         "selected_voice_prompt": model_health.get(
             "selected_voice_prompt",

@@ -192,6 +192,7 @@ def test_qwen_protocol_command_schema_rejects_wrong_or_oversized_data(
                 "device": "cuda",
                 "sample_rate": 24000,
                 "warmup_prefill": 100,
+                "torch_reserved_mib": 5604.0,
             },
             "QwenLoadedEvent",
         ),
@@ -235,6 +236,7 @@ def test_qwen_protocol_command_schema_rejects_wrong_or_oversized_data(
                 "duration_ms": 320.0,
                 "generated_at_ms": 369.0,
                 "total_steps_so_far": 4,
+                "torch_reserved_mib": 5604.0,
             },
             "QwenChunkEvent",
         ),
@@ -274,6 +276,7 @@ def test_qwen_protocol_event_schema_is_versioned_and_bounded(
             "duration_ms": 320.0,
             "generated_at_ms": 369.0,
             "total_steps_so_far": 4,
+            "torch_reserved_mib": 5604.0,
         },
         {
             "schema_version": 1,
@@ -285,6 +288,7 @@ def test_qwen_protocol_event_schema_is_versioned_and_bounded(
             "duration_ms": 320.0,
             "generated_at_ms": 369.0,
             "total_steps_so_far": 4,
+            "torch_reserved_mib": 5604.0,
         },
         {
             "schema_version": 1,
@@ -296,6 +300,7 @@ def test_qwen_protocol_event_schema_is_versioned_and_bounded(
             "duration_ms": 320.0,
             "generated_at_ms": 369.0,
             "total_steps_so_far": 4,
+            "torch_reserved_mib": 5604.0,
         },
         {
             "schema_version": 1,
@@ -309,6 +314,29 @@ def test_qwen_protocol_event_schema_is_versioned_and_bounded(
 )
 def test_qwen_protocol_event_schema_rejects_malformed_data(payload: dict[str, object]) -> None:
     protocol = _protocol_module()
+
+    with pytest.raises(ValidationError):
+        protocol.parse_event(payload)
+
+
+@pytest.mark.parametrize("reserved_mib", [None, 0, -1, 16_385, "5604"])
+def test_qwen_protocol_rejects_missing_or_invalid_worker_allocator_memory(
+    reserved_mib: object,
+) -> None:
+    protocol = _protocol_module()
+    payload: dict[str, object] = {
+        "schema_version": 1,
+        "event": "loaded",
+        "request_id": "load-memory",
+        "engine_id": "qwen3_1_7b",
+        "runtime_version": "0.3.2",
+        "model_revision": "fd4b254389122332181a7c3db7f27e918eec64e3",
+        "device": "cuda",
+        "sample_rate": 24000,
+        "warmup_prefill": 100,
+    }
+    if reserved_mib is not None:
+        payload["torch_reserved_mib"] = reserved_mib
 
     with pytest.raises(ValidationError):
         protocol.parse_event(payload)
@@ -328,6 +356,7 @@ def test_qwen_event_sequence_rejects_wrong_request_non_monotonic_and_late_events
             "duration_ms": 320.0,
             "generated_at_ms": 400.0,
             "total_steps_so_far": 4,
+            "torch_reserved_mib": 5604.0,
         }
     )
     state.accept(first)
@@ -343,6 +372,7 @@ def test_qwen_event_sequence_rejects_wrong_request_non_monotonic_and_late_events
             "duration_ms": 320.0,
             "generated_at_ms": 700.0,
             "total_steps_so_far": 8,
+            "torch_reserved_mib": 5604.0,
         },
         {
             "schema_version": 1,
@@ -354,6 +384,7 @@ def test_qwen_event_sequence_rejects_wrong_request_non_monotonic_and_late_events
             "duration_ms": 320.0,
             "generated_at_ms": 300.0,
             "total_steps_so_far": 4,
+            "torch_reserved_mib": 5604.0,
         },
     ):
         with pytest.raises(protocol.QwenProtocolError):
@@ -453,6 +484,7 @@ class ScriptedQwenWorkerProcess:
                         "device": "cuda",
                         "sample_rate": 24000,
                         "warmup_prefill": 100,
+                        "torch_reserved_mib": 5604.0,
                     }
                 )
             elif payload["op"] == "prewarm":
@@ -478,6 +510,7 @@ class ScriptedQwenWorkerProcess:
                             "duration_ms": 320.0,
                             "generated_at_ms": 370.0,
                             "total_steps_so_far": 4,
+                            "torch_reserved_mib": 5604.0,
                         }
                     )
                 elif not self.process.hang_generate:
@@ -502,6 +535,7 @@ class ScriptedQwenWorkerProcess:
                                 ),
                                 "generated_at_ms": 370.0 + 320.0 * index,
                                 "total_steps_so_far": 4 * (index + 1),
+                                "torch_reserved_mib": 5604.0 + index,
                             }
                         )
                     self.process.emit(
@@ -624,14 +658,17 @@ def test_qwen_adapter_owns_spawned_load_prewarm_stream_invalidate_unload_lifecyc
     adapter = qwen.Qwen3TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
 
     adapter.load()
+    assert adapter.torch_reserved_mib == 5604.0
     ready = adapter.prewarm(
         voice_key="voice_0123456789abcdef",
         reference_audio=b"RIFF-reference",
         reference_transcript="The exact spoken reference.",
     )
     chunks = list(adapter.stream(_request(), request_id="turn-1"))
+    assert adapter.torch_reserved_mib == 5605.0
     adapter.invalidate("voice_0123456789abcdef")
     adapter.unload()
+    assert adapter.torch_reserved_mib is None
 
     assert adapter.engine_id == "qwen3_1_7b"
     assert adapter.required_modules == ("faster_qwen3_tts",)
@@ -656,6 +693,30 @@ def test_qwen_adapter_owns_spawned_load_prewarm_stream_invalidate_unload_lifecyc
     assert "reference_transcript" not in generate
     # Unload is process ownership cleanup, not just a logical model flag.
     assert process.terminated is True
+
+
+def test_qwen_worker_reads_reserved_memory_from_its_own_torch_allocator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import sys
+
+    from app.models import tts_qwen3_worker as worker
+
+    class FakeCuda:
+        @staticmethod
+        def is_available() -> bool:
+            return True
+
+        @staticmethod
+        def memory_reserved() -> int:
+            return 5_604 * 1024 * 1024
+
+    class FakeTorch:
+        cuda = FakeCuda()
+
+    monkeypatch.setitem(sys.modules, "torch", FakeTorch)
+
+    assert worker._torch_reserved_mib() == 5604.0
 
 
 def test_qwen_adapter_propagates_explicit_evidence_seed_without_seeding_ordinary_calls(
@@ -1464,6 +1525,7 @@ def test_qwen_worker_pulls_only_native_full_icl_stream_with_locked_settings(
         "_wav_bytes",
         lambda _audio, _sample_rate: b"RIFF-native-chunk",
     )
+    monkeypatch.setattr(worker, "_torch_reserved_mib", lambda: 5604.0)
 
     events = list(worker.iter_generation_events(runtime, prompt, command, threading.Event()))
 
@@ -1509,6 +1571,7 @@ def test_qwen_worker_cancel_closes_native_generator_and_emits_one_terminal(
         "_wav_bytes",
         lambda _audio, _sample_rate: b"RIFF-native-chunk",
     )
+    monkeypatch.setattr(worker, "_torch_reserved_mib", lambda: 5604.0)
     iterator = worker.iter_generation_events(runtime, prompt, command, cancelled)
 
     assert next(iterator).event == "chunk"
@@ -1626,6 +1689,7 @@ def test_qwen_worker_runtime_failure_after_audio_emits_matching_single_error_ter
         "_wav_bytes",
         lambda _audio, _sample_rate: b"RIFF-native-chunk",
     )
+    monkeypatch.setattr(worker, "_torch_reserved_mib", lambda: 5604.0)
 
     events = list(
         worker.iter_generation_events(runtime, prompt, command, threading.Event())
@@ -1672,6 +1736,7 @@ def test_qwen_worker_non_ending_stream_stops_at_token_ceiling_without_yielding_c
         "_wav_bytes",
         lambda _audio, _sample_rate: _valid_wav_bytes(),
     )
+    monkeypatch.setattr(worker, "_torch_reserved_mib", lambda: 5604.0)
 
     events = list(
         worker.iter_generation_events(runtime, prompt, command, threading.Event())

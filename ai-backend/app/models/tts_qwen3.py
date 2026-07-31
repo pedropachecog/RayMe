@@ -128,12 +128,14 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
         self._operation_lock = threading.RLock()
         self._write_lock = threading.Lock()
         self._prompt_lock = threading.Lock()
+        self._metrics_lock = threading.Lock()
         self._active_lock = threading.Lock()
         self._active_request_id: str | None = None
         self._cancel_acknowledgements: dict[str, threading.Event] = {}
         self._cancelled_terminals: set[str] = set()
         self._selected_voice_key: str | None = None
         self._selected_prompt_key: str | None = None
+        self._torch_reserved_mib: float | None = None
 
     @property
     def selected_voice_key(self) -> str | None:
@@ -144,6 +146,15 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
     def active_request_id(self) -> str | None:
         with self._active_lock:
             return self._active_request_id
+
+    @property
+    def torch_reserved_mib(self) -> float | None:
+        with self._metrics_lock:
+            return self._torch_reserved_mib
+
+    def _record_torch_reserved_mib(self, value: float) -> None:
+        with self._metrics_lock:
+            self._torch_reserved_mib = value
 
     def startup_self_test(self) -> None:
         self._ensure_runtime_available()
@@ -167,6 +178,7 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                 )
             if not isinstance(event, QwenLoadedEvent):
                 self._fail_protocol("invalid Qwen3 load acknowledgement")
+            self._record_torch_reserved_mib(event.torch_reserved_mib)
             self.loaded = True
 
     def prewarm(
@@ -280,6 +292,7 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                             cause=exc,
                         )
                     if isinstance(event, QwenChunkEvent):
+                        self._record_torch_reserved_mib(event.torch_reserved_mib)
                         try:
                             wav_bytes = _validate_worker_wav(event)
                         except Exception as exc:
@@ -558,6 +571,8 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
         self._worker = None
         self._worker_lines = None
         self.loaded = False
+        with self._metrics_lock:
+            self._torch_reserved_mib = None
         self._clear_selected_prompt()
         with self._active_lock:
             acknowledgements = list(self._cancel_acknowledgements.values())

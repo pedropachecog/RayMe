@@ -128,6 +128,7 @@ class SlowPreparingQwenAdapter(ScriptedTtsAdapter):
 class RecordingQwenAdapter(ScriptedTtsAdapter):
     def __init__(self, events: list[str], *, prewarm_error: Exception | None = None) -> None:
         super().__init__("qwen3_1_7b", events)
+        self.torch_reserved_mib = 5604.0
         self.prewarm_error = prewarm_error
         self.prewarm_calls: list[dict[str, Any]] = []
 
@@ -307,6 +308,19 @@ def test_model_manager_health_reports_one_hot_residency_and_vram_headroom() -> N
     assert isinstance(health["vram_headroom_mb"], int | float)
     assert set(statuses) == set(EXPECTED_TTS_ENGINE_IDS)
     assert _resident_engine_ids(statuses) == ["f5"]
+
+
+def test_model_manager_health_exposes_only_resident_qwen_allocator_memory() -> None:
+    manager, _, events = _build_manager()
+    manager.startup()
+    qwen = RecordingQwenAdapter(events)
+    manager.tts_adapters["qwen3_1_7b"] = qwen
+
+    assert manager.health()["tts_torch_reserved_mib"] is None
+
+    manager.switch_tts_engine("qwen3_1_7b")
+
+    assert manager.health()["tts_torch_reserved_mib"] == 5604.0
 
 
 def test_switch_tts_engine_unloads_previous_resident_before_loading_target() -> None:

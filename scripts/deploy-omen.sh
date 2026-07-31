@@ -651,24 +651,21 @@ if ($verifyQwen3) {
   $qwenEvidenceLocalDir = Join-Path $qwenEvidenceDir ".local"
   New-Item -ItemType Directory -Path $qwenEvidenceLocalDir -Force | Out-Null
 
-  $qwenProcessMemory = @(
-    & nvidia-smi.exe --query-compute-apps=used_memory --format=csv,noheader,nounits 2>$null |
-      ForEach-Object {
-        $parsed = 0.0
-        if ([double]::TryParse(([string]$_).Trim(), [ref]$parsed) -and $parsed -gt 0) {
-          $parsed
-        }
-      }
-  )
-  if (-not $qwenProcessMemory) {
-    throw "Qwen GPU process memory could not be measured"
+  $qwenWebRtcStatusRaw = curl.exe -k -sS https://192.168.1.199:9443/webrtc/status
+  if ($LASTEXITCODE -ne 0) { throw "Qwen worker memory status request failed" }
+  $qwenWebRtcStatus = $qwenWebRtcStatusRaw | ConvertFrom-Json
+  $qwenTorchReservedMib = 0.0
+  $qwenTorchReservedText = [string]$qwenWebRtcStatus.tts_model.torch_reserved_mib
+  if (
+    -not [double]::TryParse($qwenTorchReservedText, [ref]$qwenTorchReservedMib) -or
+    $qwenTorchReservedMib -le 0
+  ) {
+    throw "Qwen worker Torch reserved memory could not be measured"
   }
-  $qwenProcessMemoryMib = [double](($qwenProcessMemory | Measure-Object -Maximum).Maximum)
-  if ($qwenProcessMemoryMib -gt 5888) {
-    throw "Qwen GPU process memory exceeds the 5888 MiB release limit"
+  if ($qwenTorchReservedMib -gt 5888) {
+    throw "Qwen worker Torch reserved memory exceeds the 5888 MiB release limit"
   }
 
-  $env:RAYME_QWEN3_TORCH_RESERVED_MIB = [string]$qwenProcessMemoryMib
   $env:RAYME_QWEN3_AI_LOG = "C:\Users\pmpg\rayme\logs\ai-backend.run.log"
   $env:RAYME_QWEN3_WEB_LOG = "C:\Users\pmpg\rayme\logs\web-ui.run.log"
   $runnerScript = Join-Path $repo ".planning\phases\09-integrate-faster-qwen3-tts-1-7b-into-live-calls\09-run-omen-evidence.py"

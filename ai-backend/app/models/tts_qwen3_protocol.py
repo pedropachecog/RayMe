@@ -169,6 +169,7 @@ class QwenLoadedEvent(_EventBase):
     device: Literal["cuda"]
     sample_rate: Literal[24000] = SAMPLE_RATE
     warmup_prefill: Literal[100]
+    torch_reserved_mib: float = Field(strict=True, gt=0, le=16_384)
 
 
 class QwenPromptReadyEvent(_EventBase):
@@ -212,6 +213,7 @@ class QwenChunkEvent(_EventBase):
     duration_ms: float = Field(gt=0, le=2000)
     generated_at_ms: float = Field(ge=0, le=3_600_000)
     total_steps_so_far: int = Field(ge=1, le=384)
+    torch_reserved_mib: float = Field(strict=True, gt=0, le=16_384)
 
     @field_validator("wav_b64")
     @classmethod

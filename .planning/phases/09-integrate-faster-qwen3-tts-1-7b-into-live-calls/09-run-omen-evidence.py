@@ -152,6 +152,19 @@ def _require_sha(value: str, *, length: int, label: str) -> str:
     return value
 
 
+def _qwen_torch_reserved_mib(status_payload: dict[str, Any]) -> float:
+    model = status_payload.get("tts_model")
+    if not isinstance(model, dict):
+        raise EvidenceRunnerError("Qwen worker memory status is unavailable")
+    raw_value = model.get("torch_reserved_mib")
+    if not isinstance(raw_value, (int, float)) or isinstance(raw_value, bool):
+        raise EvidenceRunnerError("Qwen worker Torch reserved-memory evidence is required")
+    value = float(raw_value)
+    if not math.isfinite(value) or value <= 0:
+        raise EvidenceRunnerError("Qwen worker reserved-memory evidence is invalid")
+    return value
+
+
 def resolve_evidence_reference(
     *,
     reference_path: Path | None,
@@ -558,6 +571,9 @@ class RayMeProductionPath:
         )
         if self.status_payload.get("deployed_commit") != self.expected_commit:
             raise EvidenceRunnerError("WebRTC status commit does not match the expected deployment")
+        self.runtime_identity["torch_reserved_mib"] = _qwen_torch_reserved_mib(
+            self.status_payload
+        )
 
     async def close(self) -> None:
         if self.api is not None and self.session_id:
@@ -790,8 +806,24 @@ class RayMeProductionPath:
             quality = _audio_metrics(path)
             stt = await self._stt(f"soak-{turn}", target, path)
             audio_hash = _sha256(path)
-            identity = self.runtime_identity
-            system_gpu_mib = float(self.health_payload.get("vram_used_mb") or 0.0)
+            current_status = self.tracer._require_ok(
+                await asyncio.to_thread(
+                    self.api.get_json,
+                    self.api.ai_base_url,
+                    "/webrtc/status",
+                ),
+                "Qwen worker memory status",
+            )
+            current_health = self.tracer._require_ok(
+                await asyncio.to_thread(
+                    self.api.get_json,
+                    self.api.ai_base_url,
+                    "/health",
+                ),
+                "AI GPU memory status",
+            )
+            torch_reserved_mib = _qwen_torch_reserved_mib(current_status)
+            system_gpu_mib = float(current_health.get("vram_used_mb") or 0.0)
             self.soak_turns.append(
                 {
                     "turn": turn,
@@ -809,7 +841,7 @@ class RayMeProductionPath:
                     "rtfx": values["rtfx"],
                     "underflow_count": values["underflow_count"],
                     "ttfa_ms": values["native_first_chunk_ms"],
-                    "torch_reserved_mib": float(identity.get("torch_reserved_mib") or 0.0),
+                    "torch_reserved_mib": torch_reserved_mib,
                     "system_gpu_mib": system_gpu_mib,
                     **quality,
                     "stt_accepted": stt["accepted"],
@@ -1099,13 +1131,7 @@ class OmenCoreAcquisition:
         row_by_id = {str(row["scenario_id"]): row for row in rows}
         definitions = {str(row["scenario_id"]): row for row in manifest["scenarios"]}
         runtime_identity = production.runtime_identity
-        torch_reserved_text = str(os.environ.get("RAYME_QWEN3_TORCH_RESERVED_MIB", "")).strip()
-        if not torch_reserved_text:
-            raise EvidenceRunnerError("Qwen worker Torch reserved-memory evidence is required")
-        try:
-            torch_reserved_mib = float(torch_reserved_text)
-        except ValueError as exc:
-            raise EvidenceRunnerError("Qwen worker reserved-memory evidence is invalid") from exc
+        torch_reserved_mib = _qwen_torch_reserved_mib(production.status_payload)
         system_gpu_mib = float(production.health_payload.get("vram_used_mb") or 0.0)
         package_version = str(runtime_identity.get("runtime_version") or "")
         runtime = {

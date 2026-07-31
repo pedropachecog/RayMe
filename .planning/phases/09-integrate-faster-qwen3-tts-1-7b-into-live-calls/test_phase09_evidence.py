@@ -901,6 +901,24 @@ def test_runner_finish_source_pins_local_cuda_scorer_and_never_self_certifies() 
     assert "overall_status" not in source
 
 
+def test_runner_accepts_only_positive_numeric_worker_allocator_memory() -> None:
+    runner = _runner_module("phase09_runner_worker_memory")
+
+    assert runner._qwen_torch_reserved_mib(
+        {"tts_model": {"torch_reserved_mib": 5604.0}}
+    ) == 5604.0
+    for payload in (
+        {},
+        {"tts_model": {}},
+        {"tts_model": {"torch_reserved_mib": None}},
+        {"tts_model": {"torch_reserved_mib": "5604"}},
+        {"tts_model": {"torch_reserved_mib": 0}},
+        {"tts_model": {"torch_reserved_mib": math.nan}},
+    ):
+        with pytest.raises(runner.EvidenceRunnerError):
+            runner._qwen_torch_reserved_mib(payload)
+
+
 def test_canonical_deploy_owns_final_qwen_core_evidence_and_copyback() -> None:
     deploy_path = PHASE_DIR.parents[2] / "scripts" / "deploy-omen.sh"
     source = deploy_path.read_text(encoding="utf-8")
@@ -915,6 +933,11 @@ def test_canonical_deploy_owns_final_qwen_core_evidence_and_copyback() -> None:
     assert "--core-only" in source
     assert "09-verify-evidence.py" in source
     assert "--core-ready" in source
+    assert "tts_model.torch_reserved_mib" in source
+    assert "Qwen worker Torch reserved memory could not be measured" in source
+    assert "Qwen worker Torch reserved memory exceeds the 5888 MiB release limit" in source
+    assert "--query-compute-apps=used_memory" not in source
+    assert "RAYME_QWEN3_TORCH_RESERVED_MIB" not in source
 
     for filename in (
         "qwen3-runtime.json",

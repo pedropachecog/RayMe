@@ -120,6 +120,18 @@ def _parse_command_line(raw_line: str) -> QwenWorkerCommand | None:
         return None
 
 
+def _torch_reserved_mib() -> float:
+    """Return allocator-owned CUDA memory from inside the Qwen worker."""
+    import torch
+
+    if not torch.cuda.is_available():
+        raise RuntimeError("Qwen3 CUDA allocator is unavailable")
+    reserved_bytes = int(torch.cuda.memory_reserved())
+    if reserved_bytes <= 0:
+        raise RuntimeError("Qwen3 CUDA allocator reported no reserved memory")
+    return round(reserved_bytes / (1024 * 1024), 3)
+
+
 def _signal_cancel(command: QwenCancelCommand) -> None:
     with _ACTIVE_LOCK:
         cancel_event = (
@@ -150,6 +162,7 @@ def _dispatch(command: QwenWorkerCommand) -> bool:
                     device="cuda",
                     sample_rate=SAMPLE_RATE,
                     warmup_prefill=WARMUP_PREFILL,
+                    torch_reserved_mib=_torch_reserved_mib(),
                 )
             )
         except Exception:
@@ -449,6 +462,7 @@ def iter_generation_events(
                 duration_ms=round(duration_seconds * 1000, 3),
                 generated_at_ms=round((time.perf_counter() - started_at) * 1000, 3),
                 total_steps_so_far=total_steps,
+                torch_reserved_mib=_torch_reserved_mib(),
             )
             if cancelled.is_set():
                 yield _cancelled_terminal(command.request_id, chunk_count)

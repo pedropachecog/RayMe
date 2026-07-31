@@ -422,6 +422,12 @@ class ModelManager:
 
     def health(self) -> dict[str, object]:
         vram = self._safe_vram_probe()
+        torch_reserved_mib: float | None = None
+        if self.resident_tts_engine == "qwen3_1_7b":
+            adapter = self.tts_adapters.get("qwen3_1_7b")
+            raw_reserved = getattr(adapter, "torch_reserved_mib", None)
+            if isinstance(raw_reserved, (int, float)) and raw_reserved > 0:
+                torch_reserved_mib = float(raw_reserved)
         engine_statuses = list(self._statuses.values())
         degraded = any(not status.available for status in engine_statuses)
         status = "degraded" if degraded else "ok"
@@ -441,6 +447,7 @@ class ModelManager:
             "available_engines": [status.model_dump() for status in engine_statuses],
             "loading_engine": self.loading_engine,
             "selected_voice_prompt": dict(self._selected_voice_prompt),
+            "tts_torch_reserved_mib": torch_reserved_mib,
             "vram_used_mb": vram["used_mb"],
             "vram_headroom_mb": vram["headroom_mb"],
         }

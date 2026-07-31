@@ -203,6 +203,7 @@ class ScriptedPreparingModelManager(ScriptedModelManager):
         return {
             "resident_tts_engine": "qwen3_1_7b" if self.ready else None,
             "loading_engine": None,
+            "tts_torch_reserved_mib": 5604.0 if self.ready else None,
             "available_engines": [],
             "selected_voice_prompt": {
                 "engine_id": "qwen3_1_7b",
@@ -313,6 +314,7 @@ def test_webrtc_status_exposes_deployed_commit_and_separate_qwen_readiness(
     assert payload["tts_model"] == {
         "resident_engine": "qwen3_1_7b",
         "loading_engine": None,
+        "torch_reserved_mib": 5604.0,
     }
     assert payload["selected_voice_prompt"] == {
         "engine_id": "qwen3_1_7b",
