@@ -90,6 +90,7 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
         self._order_violation_count = 0
         self._idle_wait_completed_count = 0
         self._idle_wait_timeout_count = 0
+        self._playout_measurement_active = False
         self._pts = 0
         self._recv_count = 0
         self._idle_frame_count = 0
@@ -120,6 +121,7 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
         self._order_violation_count = 0
         self._idle_wait_completed_count = 0
         self._idle_wait_timeout_count = 0
+        self._playout_measurement_active = False
 
     def playout_metrics(self) -> dict[str, float | int | bool]:
         pending_ms = self._samples_to_ms(self._pending_samples)
@@ -223,6 +225,7 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
             completed = self.readyState != "ended" and self._pending_samples == 0
             if completed:
                 self._idle_wait_completed_count += 1
+                self._playout_measurement_active = False
             return completed
 
     async def stop_current(self) -> None:
@@ -242,6 +245,7 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
             self._pending_samples = 0
             self._buffer = np.asarray([], dtype=np.int16)
             self._last_consumed_sequence = None
+            self._playout_measurement_active = False
             self._pending_condition.notify_all()
 
     def stop(self) -> None:
@@ -304,7 +308,7 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
                     float(np.sqrt(np.mean(np.square(samples.astype(np.float32))))),
                     peak,
                 )
-        if consumed_samples < self.frame_samples:
+        if consumed_samples < self.frame_samples and self._playout_measurement_active:
             self._underflow_frames += 1
         if not consumed_samples:
             # Emit silence while no AI audio is queued so recv() continues to
@@ -351,6 +355,7 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
                 self._queue.put_nowait((sequence, chunk))
                 offset += admitted
                 self._pending_samples += admitted
+                self._playout_measurement_active = True
                 self._pending_samples_high_water = max(
                     self._pending_samples_high_water,
                     self._pending_samples,
@@ -378,6 +383,7 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
         self._pending_samples = 0
         self._buffer = np.asarray([], dtype=np.int16)
         self._last_consumed_sequence = None
+        self._playout_measurement_active = False
 
     async def _notify_pending_waiters(self) -> None:
         async with self._pending_condition:

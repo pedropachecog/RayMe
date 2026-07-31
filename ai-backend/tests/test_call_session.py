@@ -1652,6 +1652,7 @@ def test_qwen_fast_producer_is_bounded_by_paced_track_consumption(
     assert final["track_pending_audio_high_water_ms"] <= 240.0
     assert final["track_admission_block_count"] > 0
     assert final["track_admission_block_time_ms"] > 0
+    assert final["track_underflow_frames"] == 0
     assert final["track_order_violation_count"] == 0
     assert final["track_discarded_samples"] == 0
     assert final["track_playout_debt_ms"] == 0.0
