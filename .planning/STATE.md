@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready_to_execute
-stopped_at: Completed 09-09-PLAN.md
-last_updated: "2026-07-31T20:33:40.891Z"
+stopped_at: Completed 09-10-PLAN.md
+last_updated: "2026-07-31T20:56:02.315Z"
 last_activity: 2026-07-31
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 112
-  completed_plans: 103
+  completed_plans: 104
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
-last_activity_desc: "Completed Phase 09 Plan 09: mocked Qwen readiness and commit-matched deployed browser acceptance"
+last_activity_desc: "Completed Phase 09 Plan 10: incremental Qwen LLM-to-TTS segmentation and terminal-authorized speech persistence"
 ---
 
 ## Phase Status
@@ -260,8 +260,8 @@ last_activity_desc: "Completed Phase 09 Plan 09: mocked Qwen readiness and commi
 ## Session Continuity
 
 Last activity: 2026-07-31
-Last session: 2026-07-31T20:33:40.538Z
-Stopped at: Completed 09-09-PLAN.md
+Last session: 2026-07-31T20:56:01.958Z
+Stopped at: Completed 09-10-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -280,6 +280,7 @@ Resume file: None
 | Phase 09 P08 | 26min | 3 tasks | 13 files |
 | Phase 09 P11 | 23min | 2 tasks | 5 files |
 | Phase 09 P09 | 23min | 2 tasks | 8 files |
+| Phase 09 P10 | 18min | 2 tasks | 6 files |
 
 ## Decisions
 
@@ -317,3 +318,7 @@ Resume file: None
 - [Phase 09]: Saved Qwen browser readiness evidence is labeled mocked_contract and cannot satisfy deployed release proof.
 - [Phase 09]: The live Qwen suite requires canonical OMEN URLs, the exact deployed commit, and a hash-bound local transcript/provenance fixture without fabricated permission.
 - [Phase 09]: Busy Qwen actions preserve initiating focus through guarded aria-disabled state while invalid actions remain natively disabled.
+- [Phase 09]: Incremental Qwen text uses the existing WebRTC speak endpoint through a capacity-two turn scheduler; no browser route or second service was added.
+- [Phase 09]: Natural sentence and safe newline boundaries emit as soon as useful, tiny fragments remain attached, and a late phrase boundary or the 60th word enforces the hard segment ceiling.
+- [Phase 09]: Only a typed normal terminal with completed playout authorizes one durable ai_speech row containing the exact visible accumulated text.
+- [Phase 09]: Hangup cancels the server-owned LLM/speech turn before ending the backend session so late completion cannot write history.
