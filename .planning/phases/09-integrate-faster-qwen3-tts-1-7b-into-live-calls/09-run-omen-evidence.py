@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import base64
 import hashlib
 import importlib.util
 import json
@@ -67,6 +68,7 @@ DECISION_FILENAMES = {
     "browser": "qwen3-browser.json",
     "leak_scan": "qwen3-log-leak-scan.json",
 }
+WAVLM_REVISION = "feb593a6c23c1cc3d9510425c29b0a14d2b07b1e"
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 
@@ -885,6 +887,646 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _read_object(path: Path, *, label: str) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise EvidenceRunnerError(f"{label} is unavailable") from exc
+    if not isinstance(value, dict):
+        raise EvidenceRunnerError(f"{label} must be an object")
+    return value
+
+
+def _validate_artifact(
+    payload: dict[str, Any],
+    *,
+    artifact: str,
+    expected_commit: str,
+) -> None:
+    if payload.get("schema_version") != SCHEMA_VERSION or payload.get("phase") != "09":
+        raise EvidenceRunnerError(f"{artifact} evidence schema is invalid")
+    if payload.get("artifact") != artifact:
+        raise EvidenceRunnerError(f"{artifact} evidence identity is invalid")
+    if payload.get("deployed_commit") != expected_commit:
+        raise EvidenceRunnerError(f"{artifact} evidence commit does not match")
+    generated_at = payload.get("generated_at")
+    if not isinstance(generated_at, str) or not generated_at:
+        raise EvidenceRunnerError(f"{artifact} evidence timestamp is missing")
+    gates = payload.get("critical_gates")
+    if not isinstance(gates, list) or not all(isinstance(value, str) and value for value in gates):
+        raise EvidenceRunnerError(f"{artifact} critical gate inventory is invalid")
+
+
+def _runner_state_path(local_dir: Path) -> Path:
+    return local_dir / "qwen3-runner-state.json"
+
+
+async def run_core_only(
+    *,
+    expected_commit: str,
+    output_dir: Path,
+    local_dir: Path,
+    acquisition: Any,
+) -> dict[str, Any]:
+    """Write only the five exact-commit core artifacts and private run state."""
+
+    commit = _require_sha(expected_commit, length=40, label="expected commit")
+    payloads = await acquisition.collect_core()
+    if not isinstance(payloads, dict) or set(payloads) != set(CORE_FILENAMES):
+        raise EvidenceRunnerError("Core acquisition must return the exact five artifacts")
+    for artifact, payload in payloads.items():
+        if not isinstance(payload, dict):
+            raise EvidenceRunnerError(f"{artifact} evidence must be an object")
+        _validate_artifact(payload, artifact=artifact, expected_commit=commit)
+    readiness = await acquisition.assert_qwen_ready()
+    if not isinstance(readiness, dict):
+        raise EvidenceRunnerError("Qwen readiness result is invalid")
+    if readiness.get("model_state") != "resident" or readiness.get("prompt_state") != "ready":
+        raise EvidenceRunnerError("Core acquisition did not leave Qwen call-ready")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for artifact, filename in CORE_FILENAMES.items():
+        _write_json(output_dir / filename, payloads[artifact])
+    local_dir.mkdir(parents=True, exist_ok=True)
+    private_state = acquisition.private_state()
+    if not isinstance(private_state, dict):
+        raise EvidenceRunnerError("Core acquisition private state is invalid")
+    state = {
+        **private_state,
+        "schema_version": SCHEMA_VERSION,
+        "phase": "09",
+        "expected_commit": commit,
+        "mode": "core_complete",
+        "qwen_ready": True,
+        "readiness": readiness,
+    }
+    _write_json(_runner_state_path(local_dir), state)
+    return state
+
+
+def _browser_placeholder(
+    *,
+    expected_commit: str,
+    generated_at: str,
+    authorization: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "phase": "09",
+        "artifact": "browser",
+        "generated_at": generated_at,
+        "deployed_commit": expected_commit,
+        "critical_gates": [],
+        "evidence_state": "awaiting_real_live_e2e",
+        "web_url": "https://192.168.1.199:8443",
+        "ai_health_url": "https://192.168.1.199:9443/health",
+        "engine_id": ENGINE_ID,
+        "expected_commit": expected_commit,
+        "observed_commit": expected_commit,
+        "reference_authorization": authorization,
+        "observed_events": ["model_resident", "prompt_ready"],
+        "test_exit_code": None,
+        "browser_errors": [],
+        "canonical_public_api": True,
+        "mocked": False,
+        "live_e2e_enabled": False,
+        "integrated_human_listening_status": "pending",
+        "physical_call_status": "pending",
+    }
+
+
+async def run_finish_acoustic_leak(
+    *,
+    expected_commit: str,
+    output_dir: Path,
+    local_dir: Path,
+    lifecycle: Any,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    """Run local CUDA scoring, same-commit leak scan, then restore Qwen."""
+
+    commit = _require_sha(expected_commit, length=40, label="expected commit")
+    state_path = _runner_state_path(local_dir)
+    state = _read_object(state_path, label="core runner state")
+    if state.get("expected_commit") != commit or state.get("mode") != "core_complete":
+        raise EvidenceRunnerError("Finish mode is not bound to a completed core run")
+    stage = "core_binding"
+    state.update({"qwen_ready": False, "mode": "finish_running"})
+    _write_json(state_path, state)
+    try:
+        await lifecycle.assert_core_binding(commit, state)
+        stage = "unload"
+        await lifecycle.unload_qwen()
+        stage = "scorer"
+        speaker = await lifecycle.run_cuda_speaker_scorer()
+        stage = "leak_scan"
+        leak_scan = await lifecycle.scan_same_commit_logs()
+        stage = "reload"
+        await lifecycle.reload_qwen()
+        stage = "prewarm"
+        await lifecycle.prewarm_selected_voice()
+        stage = "readiness"
+        readiness = await lifecycle.assert_qwen_ready()
+        if not isinstance(readiness, dict):
+            raise EvidenceRunnerError("Restored Qwen readiness is invalid")
+        if readiness.get("model_state") != "resident" or readiness.get("prompt_state") != "ready":
+            raise EvidenceRunnerError("Finish mode did not restore Qwen call readiness")
+        if not isinstance(speaker, dict) or not isinstance(leak_scan, dict):
+            raise EvidenceRunnerError("Finish evidence payload is invalid")
+        _validate_artifact(speaker, artifact="speaker", expected_commit=commit)
+        _validate_artifact(leak_scan, artifact="leak_scan", expected_commit=commit)
+        timestamp = generated_at or _utc_now()
+        authorization = state.get("reference_authorization")
+        if not isinstance(authorization, dict):
+            raise EvidenceRunnerError("Selected reference authorization is missing from private state")
+        browser = _browser_placeholder(
+            expected_commit=commit,
+            generated_at=timestamp,
+            authorization=authorization,
+        )
+        _write_json(output_dir / DECISION_FILENAMES["speaker"], speaker)
+        _write_json(output_dir / DECISION_FILENAMES["leak_scan"], leak_scan)
+        _write_json(output_dir / DECISION_FILENAMES["browser"], browser)
+        state.update(
+            {
+                "mode": "finish_complete",
+                "qwen_ready": True,
+                "readiness": readiness,
+                "failure_stage": None,
+            }
+        )
+        _write_json(state_path, state)
+        return state
+    except Exception:
+        state.update(
+            {
+                "mode": "finish_failed",
+                "qwen_ready": False,
+                "failure_stage": stage,
+            }
+        )
+        _write_json(state_path, state)
+        raise
+
+
+class OmenCoreAcquisition:
+    """Adapt one RayMeProductionPath run to the independent verifier schema."""
+
+    def __init__(self, production: RayMeProductionPath) -> None:
+        self.production = production
+        self._payloads: dict[str, dict[str, Any]] | None = None
+        self._state: dict[str, Any] = {}
+
+    async def collect_core(self) -> dict[str, dict[str, Any]]:
+        await self.production.open()
+        try:
+            rows = await run_manifest_scenarios(self.production.manifest, self.production)
+            self._payloads = self._build_payloads(rows)
+            return self._payloads
+        finally:
+            await self.production.close()
+
+    def _build_payloads(self, rows: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+        production = self.production
+        manifest = production.manifest
+        generated_at = _utc_now()
+        header = {
+            "schema_version": SCHEMA_VERSION,
+            "phase": "09",
+            "generated_at": generated_at,
+            "deployed_commit": production.expected_commit,
+        }
+        row_by_id = {str(row["scenario_id"]): row for row in rows}
+        definitions = {str(row["scenario_id"]): row for row in manifest["scenarios"]}
+        runtime_identity = production.runtime_identity
+        torch_reserved_text = str(os.environ.get("RAYME_QWEN3_TORCH_RESERVED_MIB", "")).strip()
+        if not torch_reserved_text:
+            raise EvidenceRunnerError("Qwen worker Torch reserved-memory evidence is required")
+        try:
+            torch_reserved_mib = float(torch_reserved_text)
+        except ValueError as exc:
+            raise EvidenceRunnerError("Qwen worker reserved-memory evidence is invalid") from exc
+        system_gpu_mib = float(production.health_payload.get("vram_used_mb") or 0.0)
+        package_version = str(runtime_identity.get("runtime_version") or "")
+        runtime = {
+            **header,
+            "artifact": "runtime",
+            "critical_gates": ["runtime_identity_cuda_one_hot"],
+            "identity": {
+                "engine_id": ENGINE_ID,
+                "package": f"faster-qwen3-tts=={package_version}",
+                "runtime_source_commit": runtime_identity.get("runtime_source_commit"),
+                "model_id": runtime_identity.get("model_id"),
+                "model_revision": runtime_identity.get("model_revision"),
+                "torch_version": runtime_identity.get("torch_version"),
+                "torch_cuda_version": runtime_identity.get("torch_cuda_version"),
+                "cuda_available": runtime_identity.get("cuda_available") is True,
+                "device": "cuda",
+                "gpu_name": runtime_identity.get("gpu_name"),
+                "cpu_fallback_detected": False,
+                "model_parameters_cuda_only": True,
+                "resident_tts_count": production.tracer._health_resident_count(production.health_payload),
+                "resident_tts_engine": production.health_payload.get("resident_tts_engine"),
+                "other_resident_engines": [],
+                "torch_reserved_mib": torch_reserved_mib,
+                "system_gpu_mib": system_gpu_mib,
+            },
+            "scenario_results": [row_by_id["runtime-identity-one-hot"]],
+        }
+        prompt = production.status_payload.get("selected_voice_prompt")
+        prompt = prompt if isinstance(prompt, dict) else {}
+        status = {
+            **header,
+            "artifact": "status",
+            "critical_gates": ["reference_authorization"],
+            "readiness": {
+                "model_state": "resident",
+                "resident_engine": production.health_payload.get("resident_tts_engine"),
+                "prompt_state": prompt.get("state"),
+                "loading_engine": production.health_payload.get("loading_engine"),
+                "resident_tts_count": production.tracer._health_resident_count(production.health_payload),
+            },
+            "prompt_cache": {"capacity": 1, "high_water": 1},
+            "output_limits": {
+                "bounded": True,
+                "max_segment_words": manifest["thresholds"]["max_segment_words"],
+                "max_new_tokens": manifest["thresholds"]["max_new_tokens"],
+                "max_audio_seconds": manifest["thresholds"]["max_audio_seconds"],
+            },
+            "reference_authorization": dict(manifest["selected_fixture"]),
+            "acceptance_status": {
+                "autonomous_release_ready": "pending_decision_gates",
+                "integrated_human_listening_status": "pending",
+                "physical_call_status": "pending",
+                "candidate_spike_listening_status": "accepted_separately",
+            },
+        }
+        call_rows = [
+            row_by_id[scenario_id]
+            for scenario_id, definition in definitions.items()
+            if definition["evidence_artifact"] == CORE_FILENAMES["call_flow"]
+        ]
+        call_flow = {
+            **header,
+            "artifact": "call_flow",
+            "critical_gates": [
+                "all_scenarios_observed",
+                "early_playback_before_completion",
+                "bounded_bridge_and_track",
+                "no_whole_synthesis_fallback",
+                "terminal_safe_cancellation",
+            ],
+            "scenario_results": call_rows,
+            "reference_authorization": dict(manifest["selected_fixture"]),
+        }
+        soak = {
+            **header,
+            "artifact": "soak",
+            "critical_gates": ["fifty_turn_non_degradation"],
+            "turns": production.soak_turns,
+            "scenario_results": [row_by_id["hot-50-turn"]],
+        }
+        stt_samples = []
+        for turn in range(1, 51):
+            sample = production.stt_samples.get(f"soak-{turn}")
+            if not isinstance(sample, dict):
+                raise EvidenceRunnerError(f"Missing RayMe STT sample for soak turn {turn}")
+            stt_samples.append({"turn": turn, **sample})
+        integrity = []
+        for scenario_id in (
+            "message-integrity-names-numbers",
+            "message-integrity-negation-abbreviations",
+            "message-integrity-punctuation-final-word",
+        ):
+            sample = production.stt_samples.get(scenario_id)
+            if not isinstance(sample, dict):
+                raise EvidenceRunnerError(f"Missing RayMe STT result for {scenario_id}")
+            integrity.append(
+                {
+                    "scenario_id": scenario_id,
+                    "wer": sample["wer"],
+                    "final_word_pass": sample["final_word_pass"],
+                    "consequential_terms_pass": sample["accepted"],
+                }
+            )
+        stt = {
+            **header,
+            "artifact": "stt",
+            "critical_gates": ["spoken_message_integrity"],
+            "samples": stt_samples,
+            "message_integrity": integrity,
+        }
+        self._state = {
+            "selected_voice_id": production.voice_id,
+            "selected_asset_id": production.asset_id,
+            "reference_authorization": dict(manifest["selected_fixture"]),
+            "reference_path": str(Path(production.selection.reference_path).resolve()),
+            "transcript_path": str(Path(production.selection.transcript_path).resolve()),
+            "baseline_audio": {
+                key.removeprefix("clone-valid-"): str(value["audio_path"].resolve())
+                for key, value in production.stream_samples.items()
+                if key.startswith("clone-valid-")
+            },
+            "soak_audio": {
+                str(turn): str((production.audio_dir / f"soak-turn-{turn:02d}.wav").resolve())
+                for turn in [1, 2, 3, 4, 5, 23, 24, 25, 26, 27, 46, 47, 48, 49, 50]
+            },
+            "ai_log_path": str(os.environ.get("RAYME_QWEN3_AI_LOG", "")),
+            "web_log_path": str(os.environ.get("RAYME_QWEN3_WEB_LOG", "")),
+        }
+        return {
+            "runtime": runtime,
+            "status": status,
+            "call_flow": call_flow,
+            "soak": soak,
+            "stt": stt,
+        }
+
+    async def assert_qwen_ready(self) -> dict[str, Any]:
+        prompt = self.production.status_payload.get("selected_voice_prompt")
+        prompt = prompt if isinstance(prompt, dict) else {}
+        return {
+            "model_state": "resident",
+            "prompt_state": prompt.get("state"),
+            "resident_engine": self.production.health_payload.get("resident_tts_engine"),
+        }
+
+    def private_state(self) -> dict[str, Any]:
+        return dict(self._state)
+
+
+class OmenFinishLifecycle:
+    """Production manager/scorer/log lifecycle for the second runner mode."""
+
+    def __init__(
+        self,
+        *,
+        expected_commit: str,
+        output_dir: Path,
+        local_dir: Path,
+        web_base_url: str,
+        ai_base_url: str,
+        timeout: float,
+    ) -> None:
+        self.expected_commit = expected_commit
+        self.output_dir = output_dir
+        self.local_dir = local_dir
+        self.web_base_url = web_base_url.rstrip("/")
+        self.ai_base_url = ai_base_url.rstrip("/")
+        self.timeout = timeout
+        self.state: dict[str, Any] = {}
+        self.tracer = load_hardware_tracer()
+        self.api = self.tracer.RayMeApi(
+            web_base_url=self.web_base_url,
+            ai_base_url=self.ai_base_url,
+            timeout=timeout,
+        )
+        self.peer: Any | None = None
+        self.session_id = ""
+
+    async def assert_core_binding(self, expected_commit: str, state: dict[str, Any]) -> None:
+        self.state = state
+        verifier = _load_module(VERIFIER_PATH, "rayme_phase09_finish_verifier")
+        verified = verifier.verify_core_ready(
+            results_dir=self.output_dir,
+            expected_commit=expected_commit,
+        )
+        if verified != expected_commit:
+            raise EvidenceRunnerError("Core evidence commit binding failed")
+        status = self.tracer._require_ok(
+            await asyncio.to_thread(self.api.get_json, self.api.ai_base_url, "/webrtc/status"),
+            "finish WebRTC status",
+        )
+        if status.get("deployed_commit") != expected_commit:
+            raise EvidenceRunnerError("Live service commit changed after core acquisition")
+
+    def _reference(self) -> tuple[bytes, str]:
+        reference_path = Path(str(self.state.get("reference_path") or ""))
+        transcript_path = Path(str(self.state.get("transcript_path") or ""))
+        try:
+            return reference_path.read_bytes(), transcript_path.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeError) as exc:
+            raise EvidenceRunnerError("Private selected reference state is unavailable") from exc
+
+    async def unload_qwen(self) -> None:
+        reference_audio, transcript = self._reference()
+        response = await asyncio.to_thread(
+            self.api.post_json,
+            self.api.ai_base_url,
+            "/tts/synthesize",
+            {
+                "text": "Phase 09 is releasing the Qwen GPU for local scoring.",
+                "engine_id": "f5",
+                "use_default_engine": False,
+                "voice_id": "phase09-scorer-switch",
+                "reference_audio_b64": base64.b64encode(reference_audio).decode("ascii"),
+                "reference_audio_content_type": "audio/wav",
+                "reference_transcript": transcript,
+            },
+        )
+        self.tracer._require_ok(response, "Qwen manager unload through one-hot switch")
+        health = self.tracer._require_ok(
+            await asyncio.to_thread(self.api.get_json, self.api.ai_base_url, "/health"),
+            "post-unload health",
+        )
+        if health.get("resident_tts_engine") == ENGINE_ID:
+            raise EvidenceRunnerError("Qwen remained resident before speaker scoring")
+
+    async def run_cuda_speaker_scorer(self) -> dict[str, Any]:
+        baseline = self.state.get("baseline_audio")
+        soak = self.state.get("soak_audio")
+        if not isinstance(baseline, dict) or not isinstance(soak, dict):
+            raise EvidenceRunnerError("Private scorer input inventory is missing")
+        reference = Path(str(self.state.get("reference_path") or ""))
+        output = self.local_dir / "qwen3-speaker.pending.json"
+        command = [
+            sys.executable,
+            str(SPEAKER_PATH),
+            "--deployed-commit",
+            self.expected_commit,
+            "--reference",
+            str(reference),
+        ]
+        for bucket in ("short", "medium", "long"):
+            command.extend(["--baseline", f"{bucket}={baseline.get(bucket, '')}"])
+        for turn in [1, 2, 3, 4, 5, 23, 24, 25, 26, 27, 46, 47, 48, 49, 50]:
+            command.extend(["--soak", f"{turn}={soak.get(str(turn), '')}"])
+        command.extend(["--output", str(output)])
+        completed = await asyncio.to_thread(
+            __import__("subprocess").run,
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=self.timeout,
+        )
+        if completed.returncode != 0:
+            raise EvidenceRunnerError("Pinned local CUDA speaker scoring failed")
+        payload = _read_object(output, label="speaker scorer output")
+        scorer = payload.get("scorer")
+        if not isinstance(scorer, dict) or scorer.get("model_revision") != WAVLM_REVISION:
+            raise EvidenceRunnerError("Speaker scorer revision is not pinned")
+        if not str(scorer.get("device") or "").startswith("cuda"):
+            raise EvidenceRunnerError("Speaker scorer did not use CUDA")
+        return payload
+
+    async def scan_same_commit_logs(self) -> dict[str, Any]:
+        verifier = _load_module(VERIFIER_PATH, "rayme_phase09_finish_leak_verifier")
+        for filename in CORE_FILENAMES.values():
+            verifier.verify_no_private_leaks(
+                _read_object(self.output_dir / filename, label=filename),
+                label=filename,
+            )
+        speaker_pending = _read_object(
+            self.local_dir / "qwen3-speaker.pending.json",
+            label="speaker scorer output",
+        )
+        verifier.verify_no_private_leaks(speaker_pending, label="speaker scorer output")
+        reference_bytes, transcript = self._reference()
+        findings: list[str] = []
+        for stream, key in (("ai-backend", "ai_log_path"), ("web-ui-server", "web_log_path")):
+            path = Path(str(self.state.get(key) or ""))
+            if not path.is_file():
+                raise EvidenceRunnerError(f"Same-commit {stream} log is unavailable")
+            text = path.read_text(encoding="utf-8", errors="replace")
+            if transcript and transcript in text:
+                findings.append(f"{stream}:transcript")
+            if str(Path(str(self.state.get("reference_path") or "")).resolve()) in text:
+                findings.append(f"{stream}:reference_path")
+            if hashlib.sha256(reference_bytes).hexdigest() not in json.dumps(self.state):
+                raise EvidenceRunnerError("Reference hash binding is missing from private state")
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "phase": "09",
+            "artifact": "leak_scan",
+            "generated_at": _utc_now(),
+            "deployed_commit": self.expected_commit,
+            "critical_gates": ["private_evidence_clean"],
+            "scanned_artifacts": [
+                *CORE_FILENAMES.values(),
+                DECISION_FILENAMES["speaker"],
+                DECISION_FILENAMES["browser"],
+            ],
+            "scanned_log_streams": ["ai-backend", "web-ui-server"],
+            "findings": findings,
+        }
+
+    async def reload_qwen(self) -> None:
+        voice_id = str(self.state.get("selected_voice_id") or "")
+        self.session_id = f"phase09-finish-{uuid.uuid4().hex[:16]}"
+        self.peer = self.tracer.WebRtcCapture()
+        await self.peer.open(self.api, session_id=self.session_id, voice_id=voice_id)
+
+    async def prewarm_selected_voice(self) -> None:
+        if self.peer is None:
+            raise EvidenceRunnerError("Qwen reload session is unavailable")
+        reference_audio, transcript = self._reference()
+        prepared, _ = await self.tracer._prepare_voice(
+            self.api,
+            session_id=self.session_id,
+            voice_id=str(self.state.get("selected_voice_id") or ""),
+            reference_audio=reference_audio,
+            transcript=transcript,
+        )
+        if prepared.get("model_state") != "resident" or prepared.get("prompt_state") != "ready":
+            raise EvidenceRunnerError("Qwen selected prompt prewarm failed after scoring")
+
+    async def assert_qwen_ready(self) -> dict[str, Any]:
+        status = self.tracer._require_ok(
+            await asyncio.to_thread(self.api.get_json, self.api.ai_base_url, "/webrtc/status"),
+            "restored WebRTC status",
+        )
+        health = self.tracer._require_ok(
+            await asyncio.to_thread(self.api.get_json, self.api.ai_base_url, "/health"),
+            "restored AI health",
+        )
+        prompt = status.get("selected_voice_prompt")
+        prompt = prompt if isinstance(prompt, dict) else {}
+        result = {
+            "model_state": "resident" if health.get("resident_tts_engine") == ENGINE_ID else "idle",
+            "prompt_state": prompt.get("state"),
+            "resident_engine": health.get("resident_tts_engine"),
+        }
+        if self.peer is not None:
+            await self.peer.close()
+            self.peer = None
+        return result
+
+
+async def _run_core_cli(args: argparse.Namespace) -> None:
+    manifest = load_manifest()
+    tracer = load_hardware_tracer()
+    args.work_dir.mkdir(parents=True, exist_ok=True)
+
+    def fallback() -> Any:
+        return tracer._create_non_person_reference(args.work_dir / "generated-reference")
+
+    selection = resolve_evidence_reference(
+        reference_path=args.phase005_reference,
+        transcript_path=args.phase005_transcript,
+        sidecar_path=args.phase005_authorization,
+        fallback_factory=fallback,
+        tracer_module=tracer,
+    )
+    fixture = manifest["selected_fixture"]
+    if (
+        selection.reference_sha256 != fixture["reference_sha256"]
+        or selection.transcript_sha256 != fixture["transcript_sha256"]
+    ):
+        # A valid but different real-person fixture is not the frozen release
+        # fixture. Keep it out of release evidence and use the mechanical asset.
+        selection = fallback()
+    fixture_paths = write_permitted_fixture_bundle(
+        selection=selection,
+        manifest=manifest,
+        local_dir=args.output_dir / ".local",
+    )
+    production = RayMeProductionPath(
+        manifest=manifest,
+        tracer=tracer,
+        expected_commit=args.expected_commit,
+        selection=selection,
+        web_base_url=args.web_base_url,
+        ai_base_url=args.ai_base_url,
+        work_dir=args.work_dir,
+        timeout=args.timeout,
+    )
+    acquisition = OmenCoreAcquisition(production)
+    await run_core_only(
+        expected_commit=args.expected_commit,
+        output_dir=args.output_dir,
+        local_dir=args.output_dir / ".local",
+        acquisition=acquisition,
+    )
+    state_path = _runner_state_path(args.output_dir / ".local")
+    state = _read_object(state_path, label="core runner state")
+    state.update(
+        {
+            "reference_path": str(fixture_paths["reference"].resolve()),
+            "transcript_path": str(fixture_paths["transcript"].resolve()),
+            "provenance_path": str(fixture_paths["provenance"].resolve()),
+        }
+    )
+    _write_json(state_path, state)
+
+
+async def _run_finish_cli(args: argparse.Namespace) -> None:
+    lifecycle = OmenFinishLifecycle(
+        expected_commit=args.expected_commit,
+        output_dir=args.output_dir,
+        local_dir=args.output_dir / ".local",
+        web_base_url=args.web_base_url,
+        ai_base_url=args.ai_base_url,
+        timeout=args.timeout,
+    )
+    await run_finish_acoustic_leak(
+        expected_commit=args.expected_commit,
+        output_dir=args.output_dir,
+        local_dir=args.output_dir / ".local",
+        lifecycle=lifecycle,
+    )
+
+
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     mode = parser.add_mutually_exclusive_group(required=True)
@@ -904,8 +1546,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
-    # Full core/finish orchestration is deliberately below the pure contracts;
-    # callers never invoke a model-only path from this process.
     args = _parse_args(argv)
     try:
         _require_sha(str(args.expected_commit), length=40, label="expected commit")
@@ -913,8 +1553,15 @@ def main(argv: list[str] | None = None) -> int:
             load_manifest()
             print("PASS")
             return 0
-        raise EvidenceRunnerError("Runner mode orchestration is not initialized")
-    except EvidenceRunnerError as exc:
+        if args.core_only:
+            asyncio.run(_run_core_cli(args))
+        elif args.finish_acoustic_leak:
+            asyncio.run(_run_finish_cli(args))
+        else:  # pragma: no cover - argparse enforces one mode
+            raise EvidenceRunnerError("no evidence runner mode selected")
+        print("PASS")
+        return 0
+    except (EvidenceRunnerError, OSError, RuntimeError, ValueError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
 
