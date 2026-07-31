@@ -381,6 +381,83 @@ def test_prepare_qwen_keeps_status_responsive_and_separates_model_from_prompt() 
     asyncio.run(scenario())
 
 
+def test_qwen_prompt_invalidation_resets_matching_cache_and_preserves_unrelated_voice() -> None:
+    async def scenario() -> None:
+        qwen_module = importlib.import_module("app.models.tts_qwen3")
+
+        class LifecycleQwenAdapter(RecordingQwenAdapter):
+            def __init__(self, events: list[str]) -> None:
+                super().__init__(events)
+                self.selected_voice_key: str | None = None
+                self.invalidate_calls: list[str] = []
+
+            def prewarm(self, **kwargs: Any) -> object:
+                self.selected_voice_key = str(kwargs["voice_key"])
+                return super().prewarm(**kwargs)
+
+            def invalidate(self, voice_key: str) -> Any:
+                self.invalidate_calls.append(voice_key)
+                matched = self.selected_voice_key == voice_key
+                if matched:
+                    self.selected_voice_key = None
+                return qwen_module.QwenPromptInvalidationResult(
+                    voice_key=voice_key,
+                    matched=matched,
+                    active_cancelled=False,
+                )
+
+        manager, _, events = _build_manager()
+        manager.startup()
+        adapter = LifecycleQwenAdapter(events)
+        manager.tts_adapters["qwen3_1_7b"] = adapter
+        manager.stt_adapter = ScriptedAlignmentSttAdapter("the exact reference transcript")
+        first_owner = "a" * 64
+        second_owner = "b" * 64
+
+        prepared = await manager.prepare_tts_engine(
+            "qwen3_1_7b",
+            voice_key=first_owner,
+            reference_audio=_reference_wav_bytes(),
+            reference_transcript="The exact reference transcript.",
+        )
+        assert prepared["prompt_state"] == "ready"
+        assert manager._selected_prompt_cache_key is not None
+        assert manager._qwen_alignment_cache is not None
+
+        unrelated = await manager.invalidate_tts_prompt("qwen3_1_7b", second_owner)
+        assert unrelated["status"] == "not_present"
+        assert manager.is_tts_prompt_ready("qwen3_1_7b", first_owner) is True
+        assert manager._selected_prompt_cache_key is not None
+        assert manager._qwen_alignment_cache is not None
+
+        matching = await manager.invalidate_tts_prompt("qwen3_1_7b", first_owner)
+        assert matching["status"] == "invalidated"
+        assert matching["matched"] is True
+        assert manager.health()["selected_voice_prompt"] == {
+            "engine_id": None,
+            "voice_key": None,
+            "state": "none",
+            "error_code": None,
+        }
+        assert manager._selected_prompt_cache_key is None
+        assert manager._qwen_alignment_cache is None
+
+        repeated = await manager.invalidate_tts_prompt("qwen3_1_7b", first_owner)
+        assert repeated["status"] == "not_present"
+
+        manager.stt_adapter.transcript = "a second exact reference transcript"
+        later = await manager.prepare_tts_engine(
+            "qwen3_1_7b",
+            voice_key=second_owner,
+            reference_audio=_reference_wav_bytes(amplitude=1024),
+            reference_transcript="A second exact reference transcript.",
+        )
+        assert later["prompt_state"] == "ready"
+        assert manager.is_tts_prompt_ready("qwen3_1_7b", second_owner) is True
+
+    asyncio.run(scenario())
+
+
 def test_qwen_prompt_failure_is_voice_scoped_and_sanitized() -> None:
     class FailingPromptAdapter(ScriptedTtsAdapter):
         def prewarm(self, **_kwargs: Any) -> None:

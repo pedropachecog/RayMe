@@ -340,11 +340,13 @@ def test_qwen_invalidate_acknowledgement_contains_only_opaque_identity() -> None
             "event": "invalidated",
             "request_id": "invalidate-1",
             "voice_key": "voice_0123456789abcdef",
+            "matched": True,
         }
     )
 
     dumped = event.model_dump()
     assert dumped["voice_key"] == "voice_0123456789abcdef"
+    assert dumped["matched"] is True
     assert "reference_audio" not in dumped
     assert "reference_transcript" not in dumped
     assert "model_path" not in dumped
@@ -365,6 +367,7 @@ class ScriptedQwenWorkerProcess:
         self.hang_generate = hang_generate
         self.acknowledge_cancel = acknowledge_cancel
         self.generate_mutation = generate_mutation
+        self.prepared_prompt_key: str | None = None
         self.terminated = False
         self.killed = False
 
@@ -407,6 +410,7 @@ class ScriptedQwenWorkerProcess:
                     }
                 )
             elif payload["op"] == "prewarm":
+                self.process.prepared_prompt_key = payload["voice_key"]
                 self.process.emit(
                     {
                         "schema_version": 1,
@@ -483,12 +487,16 @@ class ScriptedQwenWorkerProcess:
                     }
                 )
             elif payload["op"] == "invalidate":
+                matched = self.process.prepared_prompt_key == payload["voice_key"]
+                if matched:
+                    self.process.prepared_prompt_key = None
                 self.process.emit(
                     {
                         "schema_version": 1,
                         "event": "invalidated",
                         "request_id": request_id,
                         "voice_key": payload["voice_key"],
+                        "matched": matched,
                     }
                 )
             elif payload["op"] == "unload":
@@ -602,6 +610,201 @@ def test_qwen_adapter_owns_spawned_load_prewarm_stream_invalidate_unload_lifecyc
     assert "reference_transcript" not in generate
     # Unload is process ownership cleanup, not just a logical model flag.
     assert process.terminated is True
+
+
+def test_qwen_worker_invalidate_drops_matching_prompt_tensors_and_is_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.models import tts_qwen3_worker as worker
+    from app.models.tts_qwen3_protocol import QwenInvalidateCommand
+
+    tensor_sentinel = object()
+    prompt = worker.PreparedVoicePrompt(
+        voice_key="prompt_" + "a" * 64,
+        reference_transcript="Private prompt text stays worker-local.",
+        prompt_items=[tensor_sentinel],
+    )
+    emitted: list[Any] = []
+    monkeypatch.setattr(worker, "_PREPARED_PROMPT", prompt)
+    monkeypatch.setattr(worker, "_emit_event", emitted.append)
+
+    command = QwenInvalidateCommand(
+        op="invalidate",
+        request_id="invalidate-matching",
+        voice_key=prompt.voice_key,
+    )
+    assert worker._dispatch(command) is True
+    assert worker._PREPARED_PROMPT is None
+    assert emitted[-1].matched is True
+
+    assert worker._dispatch(command.model_copy(update={"request_id": "invalidate-again"})) is True
+    assert worker._PREPARED_PROMPT is None
+    assert emitted[-1].matched is False
+    assert "prompt_items" not in emitted[-1].model_dump()
+
+
+def test_qwen_worker_invalidate_unrelated_key_preserves_selected_prompt(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.models import tts_qwen3_worker as worker
+    from app.models.tts_qwen3_protocol import QwenInvalidateCommand
+
+    prompt = worker.PreparedVoicePrompt(
+        voice_key="prompt_" + "b" * 64,
+        reference_transcript="Selected prompt remains usable.",
+        prompt_items=[object()],
+    )
+    emitted: list[Any] = []
+    monkeypatch.setattr(worker, "_PREPARED_PROMPT", prompt)
+    monkeypatch.setattr(worker, "_emit_event", emitted.append)
+
+    worker._dispatch(
+        QwenInvalidateCommand(
+            op="invalidate",
+            request_id="invalidate-unrelated",
+            voice_key="prompt_" + "c" * 64,
+        )
+    )
+
+    assert worker._PREPARED_PROMPT is prompt
+    assert worker._PREPARED_PROMPT.prompt_items
+    assert emitted[-1].matched is False
+
+
+def test_qwen_adapter_invalidate_matches_owner_only_and_allows_later_voice(
+    qwen_runtime_available: None,
+) -> None:
+    qwen = _qwen_module()
+    process = ScriptedQwenWorkerProcess()
+    adapter = qwen.Qwen3TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
+    first_owner = "a" * 64
+    unrelated_owner = "b" * 64
+
+    adapter.load()
+    adapter.prewarm(
+        voice_key=first_owner,
+        reference_audio=_valid_wav_bytes(),
+        reference_transcript="The first exact reference.",
+    )
+
+    unrelated = adapter.invalidate(unrelated_owner)
+    assert unrelated.matched is False
+    assert unrelated.active_cancelled is False
+    assert adapter.selected_voice_key == first_owner
+    assert [chunk.chunk_index for chunk in adapter.stream(
+        _request(), request_id="turn-first", voice_key=first_owner
+    )] == [0, 1]
+
+    matching = adapter.invalidate(first_owner)
+    assert matching.matched is True
+    assert matching.active_cancelled is False
+    assert adapter.selected_voice_key is None
+    assert process.prepared_prompt_key is None
+
+    repeated = adapter.invalidate(first_owner)
+    assert repeated.matched is False
+    assert repeated.active_cancelled is False
+
+    adapter.prewarm(
+        voice_key=unrelated_owner,
+        reference_audio=_valid_wav_bytes(amplitude=1024),
+        reference_transcript="The second exact reference.",
+    )
+    assert [chunk.chunk_index for chunk in adapter.stream(
+        _request(), request_id="turn-second", voice_key=unrelated_owner
+    )] == [0, 1]
+
+
+def test_qwen_adapter_invalidate_cancels_active_owner_before_prompt_eviction(
+    qwen_runtime_available: None,
+) -> None:
+    qwen = _qwen_module()
+    process = ScriptedQwenWorkerProcess(hang_generate=True)
+    adapter = qwen.Qwen3TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
+    owner_key = "d" * 64
+    adapter.load()
+    adapter.prewarm(
+        voice_key=owner_key,
+        reference_audio=_valid_wav_bytes(),
+        reference_transcript="The exact active reference.",
+    )
+    produced: list[object] = []
+    producer = threading.Thread(
+        target=lambda: produced.extend(
+            adapter.stream(_request(), request_id="turn-delete", voice_key=owner_key)
+        ),
+        daemon=True,
+    )
+    producer.start()
+    deadline = time.monotonic() + 1.0
+    while not any(payload["op"] == "generate" for payload in process.ops):
+        assert time.monotonic() < deadline
+        time.sleep(0.001)
+
+    result = adapter.invalidate(owner_key)
+    producer.join(timeout=1.0)
+
+    assert producer.is_alive() is False
+    assert produced == []
+    assert result.matched is True
+    assert result.active_cancelled is True
+    assert [payload["op"] for payload in process.ops][-2:] == ["cancel", "invalidate"]
+    assert process.prepared_prompt_key is None
+
+
+def test_qwen_prompt_invalidate_api_accepts_only_opaque_owner_key() -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import create_app
+
+    class RecordingManager:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, str]] = []
+
+        def startup(self) -> None:
+            return None
+
+        def shutdown(self) -> None:
+            return None
+
+        async def invalidate_tts_prompt(self, engine_id: str, voice_key: str) -> dict[str, Any]:
+            self.calls.append((engine_id, voice_key))
+            return {
+                "engine_id": engine_id,
+                "voice_key": voice_key,
+                "status": "invalidated",
+                "matched": True,
+                "active_cancelled": False,
+            }
+
+    app = create_app()
+    manager = RecordingManager()
+    app.state.model_manager = manager
+    owner_key = "e" * 64
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/tts/qwen3/prompts/invalidate",
+            json={"engine_id": "qwen3_1_7b", "voice_key": owner_key},
+        )
+        invalid = client.post(
+            "/tts/qwen3/prompts/invalidate",
+            json={"engine_id": "qwen3_1_7b", "voice_key": "private-path"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "engine_id": "qwen3_1_7b",
+        "voice_key": owner_key,
+        "status": "invalidated",
+        "matched": True,
+        "active_cancelled": False,
+    }
+    assert manager.calls == [("qwen3_1_7b", owner_key)]
+    assert invalid.status_code == 422
+    serialized = json.dumps(invalid.json())
+    assert "private-path" not in serialized
+    assert "Traceback" not in serialized
 
 
 def test_qwen_adapter_spawn_imports_no_cuda_runtime_in_parent(
