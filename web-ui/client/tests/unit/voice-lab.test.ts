@@ -463,6 +463,48 @@ describe('Voice Lab Phase 2 source contract', () => {
     expect(voiceLabSources).toMatch(/testingVoiceId|testPlayState|row.*loading/i);
   });
 
+  it('keeps saved Qwen preparation, synthesis, errors, and retry scoped by voice id', () => {
+    const libraryListSource = readFileSync(
+      sourcePath('src/lib/components/voice/VoiceLibraryList.svelte'),
+      'utf8'
+    );
+    const libraryRowSource = readFileSync(
+      sourcePath('src/lib/components/voice/VoiceLibraryRow.svelte'),
+      'utf8'
+    );
+
+    for (const keyedState of [
+      'preparationByVoiceId',
+      'operationByVoiceId',
+      'operationErrorByVoiceId',
+      '[voice.voice_id]'
+    ]) {
+      expect(`${routeSource}\n${libraryListSource}`).toContain(keyedState);
+    }
+    for (const copy of [
+      'Voice not prepared',
+      'Preparing saved voice…',
+      'Saved voice ready',
+      'Voice preparation failed',
+      'Test Voice',
+      'Preparing voice…',
+      'Testing voice…',
+      'Retry Preparation'
+    ]) {
+      expect(libraryRowSource).toContain(copy);
+    }
+    expect(libraryRowSource).toContain('modelReadiness');
+    expect(libraryRowSource).toContain('promptReadiness');
+    expect(libraryRowSource).toContain('role="status"');
+    expect(libraryRowSource).toContain('role="alert"');
+    expect(libraryRowSource).toContain('min-height: 44px');
+    expect(libraryRowSource).toContain('prefers-reduced-motion: reduce');
+    expect(libraryRowSource).toMatch(/disabled={operation === 'preparing' \|\| operation === 'testing'}/);
+    expect(libraryRowSource).not.toMatch(/disabled=.*(?:onRename|onDelete)/);
+    expect(libraryListSource).toMatch(/preparationByVoiceId\[voice\.voice_id\]/);
+    expect(libraryListSource).toMatch(/operationByVoiceId\[voice\.voice_id\]/);
+  });
+
   it('wires referenced delete confirmation through explicit force semantics', () => {
     for (const copy of [
       'Delete voice: Delete this voice?',
