@@ -634,7 +634,11 @@ def test_runner_anchor_hashes_are_bound_to_each_actual_wav_and_mismatch_fails() 
     runner = _runner_module("phase09_runner_actual_anchor_hashes")
     shared = "a" * 64
     rows = [
-        {"turn": turn, "audio_sha256": shared}
+        {
+            "turn": turn,
+            "audio_sha256": f"{turn:064x}",
+            "source_audio_sha256": shared,
+        }
         for turn in (1, 10, 20, 30, 40, 50)
     ]
 
@@ -644,7 +648,7 @@ def test_runner_anchor_hashes_are_bound_to_each_actual_wav_and_mismatch_fails() 
     )
     assert [row["anchor_sha256"] for row in rows] == [shared] * 6
 
-    rows[-1]["audio_sha256"] = "b" * 64
+    rows[-1]["source_audio_sha256"] = "b" * 64
     with pytest.raises(runner.EvidenceRunnerError, match="bit-identical"):
         runner.bind_and_validate_actual_anchor_hashes(
             rows,

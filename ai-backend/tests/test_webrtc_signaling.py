@@ -1075,6 +1075,7 @@ def test_webrtc_prepared_qwen_speak_uses_native_stream_and_truthful_carriers(
     final = payload["event"]["tts_playback_final"]
     assert final["bridge_queue_capacity"] == 2
     assert final["bridge_queue_high_water"] <= 2
+    assert "source_audio_sha256" not in final
     assert adapter.calls[0].qwen3_release_evidence_mode is None
     assert adapter.calls[0].qwen3_release_evidence_seed is None
 
@@ -1113,6 +1114,11 @@ def test_webrtc_qwen_release_evidence_seed_requires_explicit_evidence_session_an
         },
     )
     assert accepted.status_code == 200
+    source_audio_sha256 = accepted.json()["event"]["tts_playback_final"][
+        "source_audio_sha256"
+    ]
+    assert len(source_audio_sha256) == 64
+    int(source_audio_sha256, 16)
     assert adapter.calls[-1].qwen3_release_evidence_mode == "phase09_release_evidence"
     assert adapter.calls[-1].qwen3_release_evidence_seed == 91_001
 

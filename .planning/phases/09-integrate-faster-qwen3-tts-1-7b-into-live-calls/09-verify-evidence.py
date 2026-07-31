@@ -647,6 +647,11 @@ def _verify_soak(payload: dict[str, Any], manifest: dict[str, Any]) -> list[dict
             raise EvidenceError(f"soak turn {turn} audio validity failed")
         for field in ("ttfa_ms", "rms_db", "spectral_centroid_hz", "spectral_flatness", "torch_reserved_mib", "system_gpu_mib"):
             _number(row.get(field), label=f"soak turn {turn} {field}")
+        _sha(
+            row.get("source_audio_sha256"),
+            label=f"soak turn {turn} source_audio_sha256",
+            length=64,
+        )
         if row["torch_reserved_mib"] > manifest["thresholds"]["torch_reserved_mib"] or row["system_gpu_mib"] > manifest["thresholds"]["system_gpu_mib"]:
             raise EvidenceError(f"soak turn {turn} memory budget failed")
 
@@ -1057,6 +1062,11 @@ def write_synthetic_bundle(results_dir: Path, *, deployed_commit: str, generated
                 "torch_reserved_mib": 5604.0,
                 "system_gpu_mib": 8348.0,
                 "audio_sha256": f"{turn:064x}",
+                "source_audio_sha256": (
+                    anchor_hash
+                    if turn in manifest["seed_policy"]["anchor_turns"]
+                    else f"{turn + 100:064x}"
+                ),
                 "anchor_sha256": anchor_hash if turn in manifest["seed_policy"]["anchor_turns"] else None,
             }
         )

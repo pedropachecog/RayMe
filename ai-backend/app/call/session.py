@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import concurrent.futures
+import hashlib
 import inspect
 import json
 import logging
@@ -1153,6 +1154,9 @@ class CallSession:
         playout_complete_ms: float | None = None
         playout_wait_completed: bool | None = None
         stream_completed_normally = False
+        source_audio_hasher = (
+            hashlib.sha256() if qwen3_release_evidence_mode is not None else None
+        )
 
         reset_track_metrics = getattr(
             self.outbound_audio_track,
@@ -1205,7 +1209,7 @@ class CallSession:
             realtime_generation_ratio = 0.0
             if generation_ms > 0:
                 realtime_generation_ratio = round(generated_audio_ms / generation_ms, 3)
-            return {
+            metrics = {
                 "streaming_used": True,
                 "fallback_used": False,
                 "whole_wav_fallback_used": False,
@@ -1231,6 +1235,9 @@ class CallSession:
                 "bridge_discarded_item_count": bridge_discarded_item_count,
                 **track_metrics(),
             }
+            if source_audio_hasher is not None and chunk_count > 0:
+                metrics["source_audio_sha256"] = source_audio_hasher.hexdigest()
+            return metrics
 
         def pending_audio_seconds() -> float:
             return sum(float(chunk["playback_seconds"]) for chunk in pending_chunks)
@@ -1451,6 +1458,9 @@ class CallSession:
                     generated_at_ms = float(getattr(item, "generated_at_ms", elapsed_ms()) or 0.0)
                 if not wav_bytes:
                     continue
+                if source_audio_hasher is not None:
+                    source_audio_hasher.update(len(wav_bytes).to_bytes(8, "big"))
+                    source_audio_hasher.update(wav_bytes)
                 if first_chunk_received_at is None:
                     first_chunk_received_at = time.perf_counter()
                 if generated_at_values:

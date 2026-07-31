@@ -55,6 +55,7 @@ FINAL_ONLY_FIELDS = {
     "rtfx",
     "underflow_count",
     "join_violation_count",
+    "source_audio_sha256",
 }
 CORE_FILENAMES = {
     "runtime": "qwen3-runtime.json",
@@ -347,10 +348,10 @@ def bind_and_validate_actual_anchor_hashes(
         row = by_turn.get(turn)
         if row is None:
             raise EvidenceRunnerError(f"Missing deterministic anchor turn {turn}")
-        audio_hash = str(row.get("audio_sha256") or "")
-        _require_sha(audio_hash, length=64, label=f"anchor turn {turn} audio")
-        row["anchor_sha256"] = audio_hash
-        actual_hashes.append(audio_hash)
+        source_hash = str(row.get("source_audio_sha256") or "")
+        _require_sha(source_hash, length=64, label=f"anchor turn {turn} source audio")
+        row["anchor_sha256"] = source_hash
+        actual_hashes.append(source_hash)
     if len(set(actual_hashes)) != 1:
         raise EvidenceRunnerError(
             "Reset-seed anchor WAVs are not bit-identical; release evidence failed"
@@ -660,6 +661,11 @@ class RayMeProductionPath:
             "immediate_fields": sorted(immediate),
             "final_fields": sorted(FINAL_ONLY_FIELDS),
             "audio_sha256": _sha256(path),
+            "source_audio_sha256": _require_sha(
+                str(final.get("source_audio_sha256") or ""),
+                length=64,
+                label=f"{scenario_id} source audio",
+            ),
         }
         self.stream_samples[scenario_id] = {"raw": raw, "measurements": values, "audio_path": path}
         return values, path
@@ -838,6 +844,7 @@ class RayMeProductionPath:
                     "seed": generation_seed,
                     "target_text_hash": hashlib.sha256(target.encode("utf-8")).hexdigest(),
                     "audio_sha256": audio_hash,
+                    "source_audio_sha256": values["source_audio_sha256"],
                     "anchor_sha256": None,
                     "valid_audio": values["valid_audio"],
                     "natural_eos": values["natural_eos"],
