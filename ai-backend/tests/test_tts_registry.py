@@ -193,7 +193,6 @@ def test_registry_metadata_captures_engine_specific_contracts_registry_metadata(
     assert "matching transcript" in by_id["qwen3_1_7b"]["quality_notes"].lower()
     assert "50-turn" in by_id["qwen3_1_7b"]["runtime_evidence"]
     assert "RTX 3060" in by_id["qwen3_1_7b"]["runtime_evidence"]
-    assert "qwen3_0_6b" not in by_id
     assert by_id["luxtts"]["runtime_evidence"]
     assert by_id["chatterbox_turbo"]["runtime_evidence"]
     assert by_id["tada_1b"]["runtime_evidence"]

@@ -26,7 +26,11 @@ class EngineStatus(BaseModel):
 ENGINE_METADATA: tuple[EngineMetadata, ...] = (
     EngineMetadata(id="f5", label="F5-TTS", default=True),
     EngineMetadata(id="xtts_v2", label="XTTS v2"),
-    EngineMetadata(id="qwen3_0_6b", label="Qwen3-TTS 0.6B-Base", caveats=["opt-in"]),
+    EngineMetadata(
+        id="qwen3_1_7b",
+        label="Qwen3-TTS 1.7B-Base",
+        caveats=["requires transcript", "native streaming", "RTX 3060 verified"],
+    ),
     EngineMetadata(id="luxtts", label="LuxTTS", caveats=["quality caveat"]),
     EngineMetadata(id="chatterbox_turbo", label="Chatterbox Turbo", caveats=["experimental"]),
     EngineMetadata(id="tada_1b", label="TADA 1B", caveats=["experimental"]),
