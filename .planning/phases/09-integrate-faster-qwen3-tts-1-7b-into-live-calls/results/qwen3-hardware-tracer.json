@@ -1,0 +1,221 @@
+{
+  "cancellation": {
+    "audio_started_count": 1,
+    "forced_termination_detected": false,
+    "normal_ai_done_count": 0,
+    "post_cancel_nonzero_frames": 0,
+    "recovery": {
+      "first_remote_audio_ms": 1273.2,
+      "passed": true,
+      "pcm_sha256": "7668ac70ff82a61c94095fba1784b3c41701633f2c6fefb7340028b91828c19c",
+      "wav_sha256": "166bf858a473136cd18837ca3c30b19eb70ae3eb352265099b57b55a31cb8ba3"
+    },
+    "speak_http_status": 502,
+    "turn_id": "trace-cancel-f777c6434dd641c3",
+    "worker_ack_upper_bound_ms": 144.4
+  },
+  "commit_sha": "e9923925e55d7d2f71929372d9186df46aacaa6d",
+  "deployment_branch": "main",
+  "generated_at": "2026-07-31T17:38:28.497605Z",
+  "normal_streams": [
+    {
+      "bucket_id": "short",
+      "duration_ms": 5571.0,
+      "event_indexes": [
+        16,
+        19
+      ],
+      "event_order": [
+        "ai_audio_started",
+        "ai_done"
+      ],
+      "final": {
+        "bridge_queue_capacity": 2,
+        "bridge_queue_high_water": 1,
+        "chunk_count": 9,
+        "fallback_used": false,
+        "generated_audio_ms": 2720.0,
+        "producer_block_time_ms": 11.7,
+        "realtime_generation_ratio": 0.313,
+        "streaming_used": true,
+        "total_generation_ms": 8694.2,
+        "total_playback_ms": 2970.0,
+        "whole_wav_fallback_used": false
+      },
+      "first_before_completion": true,
+      "first_remote_audio_ms": 7544.5,
+      "immediate": {
+        "ai_audio_started_ms": 7201.3,
+        "fallback_used": false,
+        "first_chunk_enqueued_ms": 7201.3,
+        "first_chunk_generated_ms": 6637.784,
+        "startup_buffered_audio_ms": 960.0,
+        "startup_buffered_chunks": 3,
+        "streaming_used": true,
+        "whole_wav_fallback_used": false
+      },
+      "pcm_sha256": "1f7a4a2176c616b545d3522fc6e859fe9569ace432875af90c387d99fc1766b4",
+      "peak": 32767,
+      "producer_running_at_audio_started": true,
+      "producer_running_at_remote_playout": true,
+      "remote_before_response": true,
+      "response_completed_ms": 11006.5,
+      "rms": 31475.255,
+      "sample_count": 267408,
+      "turn_id": "trace-short-576c9eb8c9644705",
+      "wav_sha256": "8273035c8a1c0f20194a37c631f8a46a3e2723142d33ba2b7ca07001082ad8ca"
+    },
+    {
+      "bucket_id": "medium",
+      "duration_ms": 17056.9,
+      "event_indexes": [
+        21,
+        27
+      ],
+      "event_order": [
+        "ai_audio_started",
+        "ai_done"
+      ],
+      "final": {
+        "bridge_queue_capacity": 2,
+        "bridge_queue_high_water": 1,
+        "chunk_count": 27,
+        "fallback_used": false,
+        "generated_audio_ms": 8400.0,
+        "producer_block_time_ms": 42.2,
+        "realtime_generation_ratio": 1.381,
+        "streaming_used": true,
+        "total_generation_ms": 6084.3,
+        "total_playback_ms": 8650.0,
+        "whole_wav_fallback_used": false
+      },
+      "first_before_completion": true,
+      "first_remote_audio_ms": 1457.4,
+      "immediate": {
+        "ai_audio_started_ms": 1094.4,
+        "fallback_used": false,
+        "first_chunk_enqueued_ms": 1094.4,
+        "first_chunk_generated_ms": 540.939,
+        "startup_buffered_audio_ms": 960.0,
+        "startup_buffered_chunks": 3,
+        "streaming_used": true,
+        "whole_wav_fallback_used": false
+      },
+      "pcm_sha256": "db99dd96faa66adda297d182e74b5449f4a1ef1b7d80ec9ed31dcf4860fc2665",
+      "peak": 32767,
+      "producer_running_at_audio_started": true,
+      "producer_running_at_remote_playout": true,
+      "remote_before_response": true,
+      "response_completed_ms": 10749.4,
+      "rms": 32457.471,
+      "sample_count": 818730,
+      "turn_id": "trace-medium-8a803c09ded24528",
+      "wav_sha256": "6a3ca775231161b16e8fea178fa13781e44fb20d529ffe07da5beb908b1e5b82"
+    },
+    {
+      "bucket_id": "long",
+      "duration_ms": 38612.0,
+      "event_indexes": [
+        28,
+        39
+      ],
+      "event_order": [
+        "ai_audio_started",
+        "ai_done"
+      ],
+      "final": {
+        "bridge_queue_capacity": 2,
+        "bridge_queue_high_water": 1,
+        "chunk_count": 60,
+        "fallback_used": false,
+        "generated_audio_ms": 19200.0,
+        "producer_block_time_ms": 102.7,
+        "realtime_generation_ratio": 1.541,
+        "streaming_used": true,
+        "total_generation_ms": 12456.2,
+        "total_playback_ms": 19450.0,
+        "whole_wav_fallback_used": false
+      },
+      "first_before_completion": true,
+      "first_remote_audio_ms": 1466.8,
+      "immediate": {
+        "ai_audio_started_ms": 1123.4,
+        "fallback_used": false,
+        "first_chunk_enqueued_ms": 1123.4,
+        "first_chunk_generated_ms": 583.677,
+        "startup_buffered_audio_ms": 960.0,
+        "startup_buffered_chunks": 3,
+        "streaming_used": true,
+        "whole_wav_fallback_used": false
+      },
+      "pcm_sha256": "0aa13ff72352e18f6251e9e8441253c1726b31bac0b430d8f091a976e4220856",
+      "peak": 32767,
+      "producer_running_at_audio_started": true,
+      "producer_running_at_remote_playout": true,
+      "remote_before_response": true,
+      "response_completed_ms": 21524.6,
+      "rms": 32154.971,
+      "sample_count": 1853378,
+      "turn_id": "trace-long-035574d1ece14f66",
+      "wav_sha256": "c542885c21da0791ef781695433e5839ac4faf2a9c54f588ad026c6274869312"
+    }
+  ],
+  "phase": "09",
+  "plan": "04",
+  "readiness": {
+    "observations": [
+      {
+        "loading_engine": null,
+        "prompt_state": "none",
+        "resident_engine": "f5"
+      },
+      {
+        "loading_engine": "qwen3_1_7b",
+        "prompt_state": "none",
+        "resident_engine": null
+      },
+      {
+        "loading_engine": null,
+        "prompt_state": "prewarming",
+        "resident_engine": "qwen3_1_7b"
+      },
+      {
+        "loading_engine": null,
+        "prompt_state": "ready",
+        "resident_engine": "qwen3_1_7b"
+      }
+    ],
+    "prepared_model_state": "resident",
+    "prepared_prompt_state": "ready",
+    "resident_tts_count": 1,
+    "resident_tts_engine": "qwen3_1_7b",
+    "status_deployed_commit": "e9923925e55d7d2f71929372d9186df46aacaa6d"
+  },
+  "reference_authorization": {
+    "authorization_basis": "generated_non_person_fixture",
+    "fake_microphone_sha256": "f6833eac5b26d964258a82ff2d06435df5d666a3944bf6836699a1a11c072696",
+    "opaque_asset_id": "voice_asset_c4a180c91578400eb7836cf41475bf54",
+    "opaque_voice_id": "voice_f66dfa6fcb43482c8279552140c513fd",
+    "reference_sha256": "b58c9c9926cd7a535db401fe82ac18af8aa3a1e8532ef513197d463dc9fb9a8b",
+    "source": "generated_non_person_fixture",
+    "temporary_reference_deleted_after_upload": true,
+    "temporary_transcript_deleted_after_upload": true,
+    "transcript_sha256": "fc4f6a7f4b2f8e6fe7de46941b5b5cb8f35f4d21a11529542c403e347853aa96",
+    "use_scope": "rayme_lan_call_testing",
+    "voice_data_steward": "generated_non_person_fixture"
+  },
+  "runtime_identity": {
+    "cuda_available": true,
+    "declared_model_revision": "fd4b254389122332181a7c3db7f27e918eec64e3",
+    "deployed_commit": "e9923925e55d7d2f71929372d9186df46aacaa6d",
+    "gpu_name": "NVIDIA GeForce RTX 3060",
+    "model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+    "model_revision": "fd4b254389122332181a7c3db7f27e918eec64e3",
+    "runtime_source_commit": "a70afc0f81f7f5f8801c3227968f1102f43f211c",
+    "runtime_version": "0.3.2",
+    "sample_rate": 24000,
+    "torch_cuda_version": "12.6",
+    "torch_version": "2.10.0+cu126"
+  },
+  "schema_version": 1
+}
