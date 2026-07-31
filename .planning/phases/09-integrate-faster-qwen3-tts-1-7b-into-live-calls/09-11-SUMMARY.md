@@ -15,9 +15,9 @@ provides:
 affects: [09-12, 09-13, 09-14, qwen3-evaluation, live-call-streaming]
 
 actuals:
-  tokens: 13518
+  tokens: 13619
   tasks: 2
-  commits: 4
+  commits: 5
 
 tech-stack:
   added: []
@@ -75,7 +75,7 @@ coverage:
         status: pass
     human_judgment: false
 
-duration: 20min
+duration: 23min
 completed: 2026-07-31
 status: complete
 ---
@@ -86,9 +86,9 @@ status: complete
 
 ## Performance
 
-- **Duration:** 20 min
+- **Duration:** 23 min
 - **Started:** 2026-07-31T19:39:46Z
-- **Completed:** 2026-07-31T19:59:02Z
+- **Completed:** 2026-07-31T20:02:12Z
 - **Tasks:** 2
 - **Files modified:** 5
 
@@ -108,6 +108,7 @@ Each TDD task has separate RED and GREEN commits:
 2. **Task 1 GREEN: Bound streaming playout by paced audio credit** - `d067b31` (feat)
 3. **Task 2 RED: Define terminal-safe Qwen control contracts** - `736d87b` (test)
 4. **Task 2 GREEN: Make Qwen call controls terminal-safe** - `8003e2e` (feat)
+5. **Post-GREEN correctness: Scope underflow to active playout** - `dfc3809` (fix)
 
 ## Files Created/Modified
 
@@ -121,6 +122,7 @@ Each TDD task has separate RED and GREEN commits:
 
 - Used a 1.5-second default pending-audio budget, expressed as samples at the track's actual sample rate. Tests lower the budget explicitly to prove that the bound—not timing luck—forces admission blocking.
 - Kept the existing 20 ms RTP pacing unchanged. Backpressure is credited by actual sample consumption rather than queue dequeue, so moving a chunk into `_buffer` cannot fake available capacity.
+- Counted underflow only while admitted audio is actively draining, so ordinary silent RTP keepalive before first audio and after playout completion cannot masquerade as a smoothness defect.
 - Kept `ai_audio_started` limited to first-known/startup facts. Every total, completion timestamp, EOS claim, and smoothness/debt field remains terminal-only.
 - Reused the adapter's request-scoped cancellation acknowledgement and bounded it at the call boundary. A control records sanitized acknowledgement state but never exposes worker, model, path, or transcript details.
 - Reoffers only cancel when the saved voice or engine actually changes; ordinary same-selection reconnect keeps the existing media recovery behavior.
@@ -145,7 +147,7 @@ None - this plan adds no dependency, service, secret, or deployment setting.
 ## Self-Check: PASSED
 
 - All five modified implementation/test files and this summary exist.
-- Commits `8048801`, `d067b31`, `736d87b`, and `8003e2e` exist in git history in RED/GREEN order.
+- Commits `8048801`, `d067b31`, `736d87b`, `8003e2e`, and `dfc3809` exist in git history in RED/GREEN order followed by the terminal-metric correctness fix.
 - Task 1 focused verification passed 14 tests; Task 2 focused verification passed 21 tests; the complete backend suite passed 229 tests with three existing dependency warnings.
 - `git diff --check` passed, VoxCPM2 no-whole-synthesis regressions remain green, and no stubs, skipped tests, unrun verification, unexpected deletions, or new unmodeled trust surface remains.
 

@@ -278,7 +278,7 @@ Resume file: None
 | Phase 09 P07 | 26min | 3 tasks | 10 files |
 | Phase 09 P06 | 20min | 2 tasks | 12 files |
 | Phase 09 P08 | 26min | 3 tasks | 13 files |
-| Phase 09 P11 | 20min | 2 tasks | 5 files |
+| Phase 09 P11 | 23min | 2 tasks | 5 files |
 
 ## Decisions
 
