@@ -16,6 +16,7 @@ PHASE_DIR = Path(__file__).resolve().parent
 MANIFEST_PATH = PHASE_DIR / "09-evidence-manifest.json"
 SPEAKER_PATH = PHASE_DIR / "09-speaker-score.py"
 VERIFIER_PATH = PHASE_DIR / "09-verify-evidence.py"
+RUNNER_PATH = PHASE_DIR / "09-run-omen-evidence.py"
 
 EXPECTED_SCENARIOS = {
     "clone-valid-short",
@@ -359,3 +360,221 @@ def test_print_deployed_commit_emits_only_validated_sha(tmp_path: Path) -> None:
     )
     assert completed.returncode == 0, completed.stderr
     assert completed.stdout == f"{commit}\n"
+
+
+# Plan 09-13 Task 1: production-path acquisition contracts.
+
+
+class _FakeReferenceSelection:
+    def __init__(
+        self,
+        *,
+        reference_path: Path,
+        transcript_path: Path,
+        source: str,
+        reference_sha256: str,
+        transcript_sha256: str,
+    ) -> None:
+        self.reference_path = reference_path
+        self.transcript_path = transcript_path
+        self.steward_id = "generated_non_person_fixture"
+        self.authorization_basis = "generated_non_person_fixture"
+        self.use_scope = "rayme_lan_call_testing"
+        self.reference_sha256 = reference_sha256
+        self.transcript_sha256 = transcript_sha256
+        self.source = source
+
+
+def _runner_module(name: str = "phase09_omen_runner") -> ModuleType:
+    return _load_module(RUNNER_PATH, name)
+
+
+def _hash_bytes(value: bytes) -> str:
+    import hashlib
+
+    return hashlib.sha256(value).hexdigest()
+
+
+def _fallback_selection(tmp_path: Path) -> _FakeReferenceSelection:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    reference = tmp_path / "generated-reference.bin"
+    transcript = tmp_path / "generated-transcript.bin"
+    reference_bytes = b"RIFF-generated-non-person-fixture"
+    transcript_bytes = b"Generated non person fixture.\n"
+    reference.write_bytes(reference_bytes)
+    transcript.write_bytes(transcript_bytes)
+    return _FakeReferenceSelection(
+        reference_path=reference,
+        transcript_path=transcript,
+        source="generated_non_person_fixture",
+        reference_sha256=_hash_bytes(reference_bytes),
+        transcript_sha256=_hash_bytes(transcript_bytes),
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "missing",
+        "malformed",
+        "wrong-reference-hash",
+        "wrong-transcript-hash",
+        "wrong-scope",
+    ],
+)
+def test_runner_invalid_phase005_sidecars_select_fallback_before_product_use(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    runner = _runner_module(f"phase09_runner_sidecar_{mutation}")
+    reference = tmp_path / "phase005-reference.bin"
+    transcript = tmp_path / "phase005-transcript.bin"
+    sidecar = tmp_path / "phase005.authorization.json"
+    reference_bytes = b"RIFF-phase005-private-reference"
+    transcript_bytes = b"Exact Phase 005 transcript.\n"
+    reference.write_bytes(reference_bytes)
+    transcript.write_bytes(transcript_bytes)
+    metadata = {
+        "voice_data_steward": "opaque-steward",
+        "authorization_basis": "speaker-provided local test",
+        "use_scope": "rayme_lan_call_testing",
+        "reference_sha256": _hash_bytes(reference_bytes),
+        "transcript_sha256": _hash_bytes(transcript_bytes),
+    }
+    sidecar.write_text(json.dumps(metadata), encoding="utf-8")
+    if mutation == "missing":
+        sidecar.unlink()
+    elif mutation == "malformed":
+        sidecar.write_text("{", encoding="utf-8")
+    elif mutation == "wrong-reference-hash":
+        sidecar.write_text(json.dumps({**metadata, "reference_sha256": "0" * 64}), encoding="utf-8")
+    elif mutation == "wrong-transcript-hash":
+        sidecar.write_text(json.dumps({**metadata, "transcript_sha256": "f" * 64}), encoding="utf-8")
+    else:
+        sidecar.write_text(json.dumps({**metadata, "use_scope": "outside-rayme"}), encoding="utf-8")
+
+    fallback = _fallback_selection(tmp_path / "fallback")
+    used_paths: list[Path] = []
+    selected = runner.resolve_evidence_reference(
+        reference_path=reference,
+        transcript_path=transcript,
+        sidecar_path=sidecar,
+        fallback_factory=lambda: fallback,
+    )
+    runner.consume_selected_reference(selected, lambda path: used_paths.append(path))
+
+    assert selected.source == "generated_non_person_fixture"
+    assert used_paths == [fallback.reference_path, fallback.transcript_path]
+    assert reference not in used_paths and transcript not in used_paths
+
+
+def test_runner_loads_tracer_canonical_authorization_contract() -> None:
+    runner = _runner_module("phase09_runner_canonical_authorization")
+    tracer = runner.load_hardware_tracer()
+    assert runner.CANONICAL_REFERENCE_RESOLVER == "_resolve_authorized_reference"
+    assert runner.canonical_reference_resolver(tracer) is tracer._resolve_authorized_reference
+    source = RUNNER_PATH.read_text(encoding="utf-8")
+    assert "09-run-hardware-tracer.py" in source
+    assert "_resolve_authorized_reference" in source
+
+
+def test_runner_writes_generated_non_person_fixture_sidecar_without_private_content(
+    tmp_path: Path,
+) -> None:
+    runner = _runner_module("phase09_runner_fixture_bundle")
+    selection = _fallback_selection(tmp_path / "source")
+    manifest = _manifest()
+    manifest["selected_fixture"] = {
+        **manifest["selected_fixture"],
+        "reference_sha256": selection.reference_sha256,
+        "transcript_sha256": selection.transcript_sha256,
+    }
+    paths = runner.write_permitted_fixture_bundle(
+        selection=selection,
+        manifest=manifest,
+        local_dir=tmp_path / "results" / ".local",
+    )
+    provenance = json.loads(paths["provenance"].read_text(encoding="utf-8"))
+    assert provenance == {
+        **manifest["selected_fixture"],
+        "authorization_basis": "generated_non_person_fixture",
+        "use_scope": "rayme_lan_call_testing",
+    }
+    assert paths["reference"].read_bytes() == selection.reference_path.read_bytes()
+    assert paths["transcript"].read_bytes() == selection.transcript_path.read_bytes()
+    assert "transcript" not in provenance
+    assert "path" not in json.dumps(provenance).lower()
+
+
+class _DryProductionPath:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    async def collect_runtime(self, scenario: dict[str, object]) -> dict[str, object]:
+        self.calls.append(("runtime", str(scenario["scenario_id"])))
+        return {"attested": True}
+
+    async def collect_stream(self, scenario: dict[str, object]) -> dict[str, object]:
+        self.calls.append(("stream", str(scenario["scenario_id"])))
+        return {"streaming_used": True}
+
+    async def collect_alignment(self, scenario: dict[str, object]) -> dict[str, object]:
+        self.calls.append(("alignment", str(scenario["scenario_id"])))
+        return {"alignment_observed": True}
+
+    async def collect_ceiling(self, scenario: dict[str, object]) -> dict[str, object]:
+        self.calls.append(("ceiling", str(scenario["scenario_id"])))
+        return {"ceiling_triggered": True}
+
+    async def collect_control(self, scenario: dict[str, object]) -> dict[str, object]:
+        self.calls.append(("control", str(scenario["scenario_id"])))
+        return {"cancelled": True}
+
+    async def collect_worker_failure(self, scenario: dict[str, object]) -> dict[str, object]:
+        self.calls.append(("worker_failure", str(scenario["scenario_id"])))
+        return {"backend_healthy": True}
+
+    async def collect_soak(self, scenario: dict[str, object]) -> dict[str, object]:
+        self.calls.append(("soak", str(scenario["scenario_id"])))
+        return {"turn_count": 50}
+
+    async def collect_canonical_call(self, scenario: dict[str, object]) -> dict[str, object]:
+        self.calls.append(("canonical_call", str(scenario["scenario_id"])))
+        return {"canonical_public_api": True}
+
+
+def test_runner_dispatches_all_manifest_scenarios_through_named_production_paths() -> None:
+    import asyncio
+
+    runner = _runner_module("phase09_runner_dispatch")
+    manifest = _manifest()
+    production = _DryProductionPath()
+    rows = asyncio.run(runner.run_manifest_scenarios(manifest, production))
+    assert [row["scenario_id"] for row in rows] == [
+        scenario["scenario_id"] for scenario in manifest["scenarios"]
+    ]
+    assert len(production.calls) == 20
+    assert {kind for kind, _ in production.calls} == {
+        "runtime",
+        "stream",
+        "alignment",
+        "ceiling",
+        "control",
+        "worker_failure",
+        "soak",
+        "canonical_call",
+    }
+    assert all(row["observed_events"] for row in rows)
+    assert all("measurements" in row for row in rows)
+
+
+def test_runner_source_owns_production_routes_and_forbids_direct_generation_imports() -> None:
+    source = RUNNER_PATH.read_text(encoding="utf-8")
+    assert "/api/voices" in source
+    assert "/webrtc/sessions/" in source
+    assert "/api/calls" in source
+    assert "/stt/transcribe" in source
+    assert "from faster_qwen3_tts" not in source
+    assert "import faster_qwen3_tts" not in source
+    assert "generate_voice_clone(" not in source
+    assert "generate_voice_clone_streaming(" not in source
