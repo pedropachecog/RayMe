@@ -26,6 +26,17 @@ def _audio_b64(payload: bytes = b"RIFF-valid-wav-chunk") -> str:
     return base64.b64encode(payload).decode("ascii")
 
 
+def _valid_wav_bytes(*, amplitude: int = 2048, frames: int = 7680) -> bytes:
+    payload = BytesIO()
+    with wave.open(payload, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+        sample = int(amplitude).to_bytes(2, "little", signed=True)
+        wav.writeframes(sample * frames)
+    return payload.getvalue()
+
+
 @pytest.mark.parametrize(
     ("payload", "model_name"),
     [
@@ -345,7 +356,7 @@ class ScriptedQwenWorkerProcess:
         *,
         hang_generate: bool = False,
         acknowledge_cancel: bool = True,
-        malformed_generate: bool = False,
+        generate_mutation: str | None = None,
     ) -> None:
         self.returncode: int | None = None
         self.ops: list[dict[str, Any]] = []
@@ -353,7 +364,7 @@ class ScriptedQwenWorkerProcess:
         self.stdin = self.ScriptedStdin(self)
         self.hang_generate = hang_generate
         self.acknowledge_cancel = acknowledge_cancel
-        self.malformed_generate = malformed_generate
+        self.generate_mutation = generate_mutation
         self.terminated = False
         self.killed = False
 
@@ -405,14 +416,14 @@ class ScriptedQwenWorkerProcess:
                     }
                 )
             elif payload["op"] == "generate":
-                if self.process.malformed_generate:
+                if self.process.generate_mutation == "wrong_request":
                     self.process.emit(
                         {
                             "schema_version": 1,
                             "event": "chunk",
                             "request_id": "wrong-turn",
                             "chunk_index": 0,
-                            "wav_b64": _audio_b64(),
+                            "wav_b64": _audio_b64(_valid_wav_bytes()),
                             "sample_rate": 24000,
                             "duration_ms": 320.0,
                             "generated_at_ms": 370.0,
@@ -421,13 +432,18 @@ class ScriptedQwenWorkerProcess:
                     )
                 elif not self.process.hang_generate:
                     for index in range(2):
+                        wav_bytes = _valid_wav_bytes()
+                        if self.process.generate_mutation == "non_wav":
+                            wav_bytes = b"not-a-wav"
+                        elif self.process.generate_mutation == "silent":
+                            wav_bytes = _valid_wav_bytes(amplitude=0)
                         self.process.emit(
                             {
                                 "schema_version": 1,
                                 "event": "chunk",
                                 "request_id": request_id,
                                 "chunk_index": index,
-                                "wav_b64": _audio_b64(f"RIFF-chunk-{index}".encode()),
+                                "wav_b64": _audio_b64(wav_bytes),
                                 "sample_rate": 24000,
                                 "duration_ms": 320.0,
                                 "generated_at_ms": 370.0 + 320.0 * index,
@@ -619,7 +635,7 @@ def test_qwen_adapter_rejects_wrong_request_worker_event_and_contains_process(
     qwen_runtime_available: None,
 ) -> None:
     qwen = _qwen_module()
-    process = ScriptedQwenWorkerProcess(malformed_generate=True)
+    process = ScriptedQwenWorkerProcess(generate_mutation="wrong_request")
     adapter = qwen.Qwen3TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
     adapter.load()
     adapter.prewarm(
@@ -632,6 +648,108 @@ def test_qwen_adapter_rejects_wrong_request_worker_event_and_contains_process(
         list(adapter.stream(_request(), request_id="turn-1"))
 
     assert process.terminated is True
+
+
+@pytest.mark.parametrize("mutation", ["non_wav", "silent"])
+def test_qwen_adapter_rejects_malformed_or_silent_worker_audio_and_contains_process(
+    mutation: str,
+    qwen_runtime_available: None,
+) -> None:
+    qwen = _qwen_module()
+    process = ScriptedQwenWorkerProcess(generate_mutation=mutation)
+    adapter = qwen.Qwen3TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
+    adapter.load()
+    adapter.prewarm(
+        voice_key="voice_0123456789abcdef",
+        reference_audio=b"RIFF-reference",
+        reference_transcript="The exact spoken reference.",
+    )
+
+    with pytest.raises(qwen.Qwen3WorkerProtocolError) as raised:
+        list(adapter.stream(_request(), request_id=f"turn-{mutation}"))
+
+    assert raised.value.code == "qwen3_worker_protocol"
+    assert process.terminated is True
+
+
+def test_qwen_prompt_cache_key_is_content_bound_but_uses_comparison_normalization() -> None:
+    qwen = _qwen_module()
+    reference = _valid_wav_bytes()
+
+    canonical = qwen.qwen_prompt_cache_key(reference, "Hello, MARIA!")
+
+    assert canonical == qwen.qwen_prompt_cache_key(reference, "hello maria")
+    assert canonical == qwen.qwen_prompt_cache_key(reference, "Héllo María.")
+    assert canonical != qwen.qwen_prompt_cache_key(reference + b"changed", "hello maria")
+    assert canonical.startswith("prompt_")
+    assert len(canonical) == len("prompt_") + 64
+
+
+def test_qwen_adapter_binds_worker_prompt_to_content_identity_but_preserves_exact_icl_text(
+    qwen_runtime_available: None,
+) -> None:
+    qwen = _qwen_module()
+    process = ScriptedQwenWorkerProcess()
+    adapter = qwen.Qwen3TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
+    reference = _valid_wav_bytes()
+    exact_transcript = "  The exact approved transcript.  "
+
+    adapter.load()
+    adapter.prewarm(
+        voice_key="voice_0123456789abcdef",
+        reference_audio=reference,
+        reference_transcript=exact_transcript,
+    )
+    list(adapter.stream(_request(), request_id="turn-content-bound"))
+
+    prompt_key = qwen.qwen_prompt_cache_key(reference, exact_transcript)
+    prewarm = next(payload for payload in process.ops if payload["op"] == "prewarm")
+    generate = next(payload for payload in process.ops if payload["op"] == "generate")
+    assert adapter.selected_voice_key == "voice_0123456789abcdef"
+    assert prewarm["voice_key"] == prompt_key
+    assert prewarm["reference_transcript"] == exact_transcript
+    assert generate["voice_key"] == prompt_key
+
+
+def test_qwen_prompt_failure_is_correctable_and_does_not_retain_prompt_identity(
+    qwen_runtime_available: None,
+) -> None:
+    qwen = _qwen_module()
+
+    class PromptFailingProcess(ScriptedQwenWorkerProcess):
+        class ScriptedStdin(ScriptedQwenWorkerProcess.ScriptedStdin):
+            def write(self, line: str) -> int:
+                qwen_module = _qwen_module()
+                payload = json.loads(line[len(qwen_module.WORKER_EVENT_PREFIX) :])
+                if payload["op"] != "prewarm":
+                    return super().write(line)
+                self.process.ops.append(payload)
+                self.process.emit(
+                    {
+                        "schema_version": 1,
+                        "event": "prompt_failed",
+                        "request_id": payload["request_id"],
+                        "voice_key": payload["voice_key"],
+                        "error_code": "qwen3_prompt_failed",
+                    }
+                )
+                return len(line)
+
+    process = PromptFailingProcess()
+    adapter = qwen.Qwen3TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
+    adapter.load()
+
+    with pytest.raises(qwen.Qwen3PromptError) as raised:
+        adapter.prewarm(
+            voice_key="voice_0123456789abcdef",
+            reference_audio=_valid_wav_bytes(),
+            reference_transcript="The exact spoken reference.",
+        )
+
+    assert raised.value.code == "qwen3_prompt_failed"
+    assert raised.value.marks_engine_unavailable is False
+    assert adapter.loaded is True
+    assert adapter.selected_voice_key is None
 
 
 def test_qwen_adapter_cancel_is_request_scoped_and_stream_drains_cancelled_terminal(
@@ -855,6 +973,41 @@ def test_qwen_worker_prewarm_builds_one_full_icl_prompt_from_exact_reference() -
     assert len(audio) == 2400 + 12000
 
 
+def test_qwen_worker_passes_approved_transcript_to_icl_without_rewriting() -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    reference = BytesIO()
+    with wave.open(reference, "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(24000)
+        wav.writeframes((b"\x00\x01" * 2400))
+    exact_transcript = "  The exact approved transcript.  "
+    prompt_calls: list[dict[str, Any]] = []
+
+    class PromptModel:
+        def create_voice_clone_prompt(self, **kwargs: Any) -> list[str]:
+            prompt_calls.append(kwargs)
+            return ["gpu-prompt-stays-worker-local"]
+
+    runtime = type("Runtime", (), {"model": PromptModel()})()
+    command = _protocol_module().parse_command(
+        {
+            "schema_version": 1,
+            "op": "prewarm",
+            "request_id": "prewarm-exact",
+            "voice_key": "prompt_" + "a" * 64,
+            "reference_audio_b64": base64.b64encode(reference.getvalue()).decode("ascii"),
+            "reference_transcript": exact_transcript,
+        }
+    )
+
+    prompt = worker.prepare_voice_prompt(runtime, command)
+
+    assert prompt.reference_transcript == exact_transcript
+    assert prompt_calls[0]["ref_text"] == exact_transcript
+
+
 def test_qwen_worker_pulls_only_native_full_icl_stream_with_locked_settings(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1053,3 +1206,48 @@ def test_qwen_worker_runtime_failure_after_audio_emits_matching_single_error_ter
     assert events[-1].chunk_count == 1
     assert events[-1].error_code == "qwen3_generation_failed"
     assert "private" not in events[-1].model_dump_json()
+
+
+def test_qwen_worker_non_ending_stream_stops_at_token_ceiling_without_yielding_ceiling_chunk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    class NonEndingRuntime(ScriptedNativeRuntime):
+        def generate_voice_clone_streaming(self, **kwargs: Any):
+            self.streaming_calls.append(kwargs)
+            steps = 0
+            while True:
+                steps += 4
+                yield ([0.1] * 7680, 24000, {"total_steps": steps})
+
+    runtime = NonEndingRuntime()
+    prompt = worker.PreparedVoicePrompt(
+        voice_key="prompt_" + "a" * 64,
+        reference_transcript="The exact spoken reference.",
+        prompt_items=[object()],
+    )
+    command = _protocol_module().parse_command(
+        {
+            "schema_version": 1,
+            "op": "generate",
+            "request_id": "turn-token-ceiling",
+            "voice_key": prompt.voice_key,
+            "text": "A short bounded phrase.",
+            "max_new_tokens": 8,
+            "hard_audio_seconds": 6.0,
+        }
+    )
+    monkeypatch.setattr(
+        worker,
+        "_wav_bytes",
+        lambda _audio, _sample_rate: _valid_wav_bytes(),
+    )
+
+    events = list(
+        worker.iter_generation_events(runtime, prompt, command, threading.Event())
+    )
+
+    assert [event.event for event in events] == ["chunk", "error"]
+    assert events[-1].chunk_count == 1
+    assert events[-1].error_code == "qwen3_generation_ceiling"
