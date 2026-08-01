@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import logging
 from dataclasses import dataclass, field
@@ -11,6 +12,7 @@ from typing import Any, Literal
 from uuid import uuid4
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.ai_backend_client import SpeechTurnTerminal
@@ -98,6 +100,11 @@ class ActiveCall:
     ended_at: datetime | None = None
     muted: bool = False
     completed_ai_turn_ids: set[str] = field(default_factory=set, repr=False)
+    pending_ai_turn_ids: set[str] = field(default_factory=set, repr=False)
+    lifecycle_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    persistence_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
+    active_turn_tasks: set[Any] = field(default_factory=set, repr=False)
+    end_message_recorded: bool = field(default=False, repr=False)
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -234,6 +241,31 @@ class CallService:
     def active_call(self, call_id: str) -> dict[str, Any]:
         return self._active_call(call_id).to_public_dict()
 
+    async def register_active_turn(self, call_id: str, task: Any) -> bool:
+        call = self._active_call(call_id)
+        async with call.lifecycle_lock:
+            if call.ended_at is not None:
+                return False
+            call.active_turn_tasks.add(task)
+            return True
+
+    async def unregister_active_turn(self, call_id: str, task: Any) -> None:
+        call = self._active_call(call_id)
+        async with call.lifecycle_lock:
+            call.active_turn_tasks.discard(task)
+
+    async def cancel_active_turns(self, call_id: str) -> None:
+        call = self._active_call(call_id)
+        async with call.lifecycle_lock:
+            tasks = tuple(call.active_turn_tasks)
+            for task in tasks:
+                task.cancel()
+        awaitable_tasks = [task for task in tasks if isinstance(task, asyncio.Future)]
+        if awaitable_tasks:
+            await asyncio.gather(*awaitable_tasks, return_exceptions=True)
+        async with call.lifecycle_lock:
+            call.active_turn_tasks.difference_update(tasks)
+
     async def record_user_speech(self, call_id: str, text: str) -> dict[str, Any]:
         call = self._active_call(call_id)
         return await self._append_message(
@@ -262,21 +294,83 @@ class CallService:
     ) -> dict[str, Any] | None:
         """Persist one exact assistant row only after normal completed playout."""
         call = self._active_call(call_id)
-        if (
-            terminal.status != "normal"
-            or not terminal.playout_completed
-            or call.ended_at is not None
-            or turn_id in call.completed_ai_turn_ids
-        ):
+        if terminal.status != "normal" or not terminal.playout_completed:
             return None
-        message = await self._append_message(
-            call.thread_id,
-            text,
-            message_kind="ai_speech",
-            role="assistant",
-        )
-        call.completed_ai_turn_ids.add(turn_id)
-        return message
+        async with call.lifecycle_lock:
+            if (
+                call.ended_at is not None
+                or turn_id in call.completed_ai_turn_ids
+                or turn_id in call.pending_ai_turn_ids
+            ):
+                return None
+            call.pending_ai_turn_ids.add(turn_id)
+
+        try:
+            # Keep per-call message sequencing deterministic, but do not hold
+            # the lifecycle lock while preparing the transaction. Hangup can
+            # therefore publish its terminal state before this commit gate.
+            async with call.persistence_lock:
+                async with call.lifecycle_lock:
+                    if call.ended_at is not None:
+                        call.pending_ai_turn_ids.discard(turn_id)
+                        return None
+
+                message = await self._stage_message(
+                    call.thread_id,
+                    text,
+                    message_kind="ai_speech",
+                    role="assistant",
+                    call_id=call.call_id,
+                    call_turn_id=turn_id,
+                )
+
+                async with call.lifecycle_lock:
+                    if call.ended_at is not None:
+                        await self.session.rollback()
+                        call.pending_ai_turn_ids.discard(turn_id)
+                        return None
+                    try:
+                        await self.session.commit()
+                    except IntegrityError:
+                        await self.session.rollback()
+                        existing = await self.session.scalar(
+                            select(Message.id).where(
+                                Message.call_id == call.call_id,
+                                Message.call_turn_id == turn_id,
+                            )
+                        )
+                        call.pending_ai_turn_ids.discard(turn_id)
+                        if existing is not None:
+                            call.completed_ai_turn_ids.add(turn_id)
+                            return None
+                        raise
+                    call.pending_ai_turn_ids.discard(turn_id)
+                    call.completed_ai_turn_ids.add(turn_id)
+                    return message
+        except asyncio.CancelledError:
+            await self.session.rollback()
+            async with call.lifecycle_lock:
+                call.pending_ai_turn_ids.discard(turn_id)
+            raise
+        except IntegrityError:
+            await self.session.rollback()
+            existing = await self.session.scalar(
+                select(Message.id).where(
+                    Message.call_id == call.call_id,
+                    Message.call_turn_id == turn_id,
+                )
+            )
+            async with call.lifecycle_lock:
+                call.pending_ai_turn_ids.discard(turn_id)
+                if existing is not None:
+                    call.completed_ai_turn_ids.add(turn_id)
+                    return None
+            raise
+        except Exception:
+            await self.session.rollback()
+            async with call.lifecycle_lock:
+                call.pending_ai_turn_ids.discard(turn_id)
+            raise
 
     async def voice_reference_for_call(self, call_id: str, voice_blob_dir: Path) -> dict[str, Any]:
         call = self._active_call(call_id)
@@ -312,16 +406,35 @@ class CallService:
             raise CallVoiceUnavailableError()
         return preparation
 
+    async def begin_end(self, call_id: str) -> dict[str, Any]:
+        """Publish terminal lifecycle state before backend or database waits."""
+        call = self._active_call(call_id)
+        async with call.lifecycle_lock:
+            if call.ended_at is None:
+                call.ended_at = utc_now()
+            tasks = tuple(call.active_turn_tasks)
+            for task in tasks:
+                task.cancel()
+        awaitable_tasks = [task for task in tasks if isinstance(task, asyncio.Future)]
+        if awaitable_tasks:
+            await asyncio.gather(*awaitable_tasks, return_exceptions=True)
+        async with call.lifecycle_lock:
+            call.active_turn_tasks.difference_update(tasks)
+        return call.to_public_dict()
+
     async def end_call(self, call_id: str, reason: str = "hangup") -> dict[str, Any]:
         call = self._active_call(call_id)
-        if call.ended_at is None:
-            call.ended_at = utc_now()
-            await self._append_message(
-                call.thread_id,
-                "Call ended",
-                message_kind="call_end",
-                role="event",
-            )
+        await self.begin_end(call_id)
+        async with call.persistence_lock:
+            async with call.lifecycle_lock:
+                if not call.end_message_recorded:
+                    await self._append_message(
+                        call.thread_id,
+                        "Call ended",
+                        message_kind="call_end",
+                        role="event",
+                    )
+                    call.end_message_recorded = True
         result = call.to_public_dict()
         result["reason"] = reason
         return result
@@ -444,12 +557,37 @@ class CallService:
         *,
         message_kind: str,
         role: str,
+        call_id: str | None = None,
+        call_turn_id: str | None = None,
+    ) -> dict[str, Any]:
+        message = await self._stage_message(
+            thread_id,
+            content_text,
+            message_kind=message_kind,
+            role=role,
+            call_id=call_id,
+            call_turn_id=call_turn_id,
+        )
+        await self.session.commit()
+        return message
+
+    async def _stage_message(
+        self,
+        thread_id: str,
+        content_text: str,
+        *,
+        message_kind: str,
+        role: str,
+        call_id: str | None = None,
+        call_turn_id: str | None = None,
     ) -> dict[str, Any]:
         thread = await self._get_thread(thread_id)
         now = utc_now()
         message = Message(
             id=new_message_id(),
             thread_id=thread_id,
+            call_id=call_id,
+            call_turn_id=call_turn_id,
             message_kind=message_kind,
             role=role,
             sequence=await self._next_sequence(thread_id),
@@ -460,7 +598,7 @@ class CallService:
         self.session.add(message)
         thread.last_message_at = now
         thread.updated_at = now
-        await self.session.commit()
+        await self.session.flush()
         return {
             "id": message.id,
             "thread_id": message.thread_id,

@@ -29,6 +29,7 @@ VOICE_ASSET_COLUMNS = {
 }
 VOICE_ASSET_INDEX = "ix_voice_assets_voice_id"
 CHARACTER_DEFAULT_VOICE_INDEX = "ix_characters_default_voice_id"
+MESSAGE_CALL_TURN_UNIQUE_INDEX = "uq_messages_call_turn"
 
 
 def run_migration(tmp_path: Path) -> Path:
@@ -186,6 +187,36 @@ def test_messages_accept_only_unified_message_kinds(tmp_path: Path) -> None:
                     (id, thread_id, message_kind, role, sequence, content_text)
                 VALUES ('bad-kind', 'thread-1', 'typing_indicator', 'event', 99, 'bad')
                 """,
+            )
+
+
+def test_completed_call_turn_identity_is_durably_unique(tmp_path: Path) -> None:
+    db_path = run_migration(tmp_path)
+
+    with connect(db_path) as connection:
+        insert_thread(connection)
+        assert MESSAGE_CALL_TURN_UNIQUE_INDEX in index_names(connection, "messages")
+        connection.execute(
+            """
+            INSERT INTO messages
+                (id, thread_id, call_id, call_turn_id, message_kind, role, sequence,
+                 content_text)
+            VALUES
+                ('ai-call-1', 'thread-1', 'call-1', 'turn-1', 'ai_speech',
+                 'assistant', 0, 'Only once')
+            """
+        )
+
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO messages
+                    (id, thread_id, call_id, call_turn_id, message_kind, role,
+                     sequence, content_text)
+                VALUES
+                    ('ai-call-duplicate', 'thread-1', 'call-1', 'turn-1',
+                     'ai_speech', 'assistant', 1, 'Must fail')
+                """
             )
 
 

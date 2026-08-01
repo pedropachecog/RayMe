@@ -62,6 +62,8 @@ MESSAGE_ALTERNATE_SOURCE_ACTIONS = (
 MESSAGE_SCHEMA_REQUIRED_COLUMNS = (
     "id",
     "thread_id",
+    "call_id",
+    "call_turn_id",
     "parent_message_id",
     "message_kind",
     "role",
@@ -257,6 +259,7 @@ class Message(TimestampMixin, Base):
             name="ck_messages_role",
         ),
         UniqueConstraint("thread_id", "sequence", name="uq_messages_thread_sequence"),
+        UniqueConstraint("call_id", "call_turn_id", name="uq_messages_call_turn"),
         Index("ix_messages_thread_id", "thread_id"),
     )
 
@@ -266,6 +269,8 @@ class Message(TimestampMixin, Base):
         ForeignKey(f"{THREADS_TABLE}.id", ondelete="CASCADE"),
         nullable=False,
     )
+    call_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    call_turn_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     parent_message_id: Mapped[str | None] = mapped_column(
         String(64),
         ForeignKey(f"{MESSAGES_TABLE}.id", ondelete="SET NULL"),

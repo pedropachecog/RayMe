@@ -29,6 +29,7 @@ from app.domain.ai_backend_client import (
     AiBackendProcessingError,
     SpeechTurn,
     SpeechTurnClosedError,
+    SpeechTurnTerminal,
 )
 from app.main import create_app
 from app.domain.call_service import CallService
@@ -1103,6 +1104,134 @@ def test_qwen_normal_multi_segment_turn_persists_once_after_one_normal_terminal(
     ]
 
 
+def test_concurrent_duplicate_completed_turn_is_reserved_and_persisted_once(
+    call_fixture: CallFixture,
+) -> None:
+    thread_id = asyncio.run(
+        _insert_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post(
+        "/api/calls/start",
+        json={"thread_id": thread_id},
+    ).json()
+
+    async def scenario() -> None:
+        async with call_fixture.sessionmaker() as session:
+            service = CallService(session)
+            original_stage = service._stage_message
+            stage_entered = asyncio.Event()
+            release_stage = asyncio.Event()
+
+            async def delayed_stage(
+                thread_id: str,
+                content_text: str,
+                **kwargs: Any,
+            ) -> dict[str, Any]:
+                stage_entered.set()
+                await release_stage.wait()
+                return await original_stage(thread_id, content_text, **kwargs)
+
+            service._stage_message = delayed_stage  # type: ignore[method-assign]
+            terminal = SpeechTurnTerminal(status="normal", playout_completed=True)
+            first = asyncio.create_task(
+                service.record_completed_ai_speech(
+                    started["call_id"],
+                    turn_id="turn-duplicate",
+                    text="Persist exactly once.",
+                    terminal=terminal,
+                )
+            )
+            await stage_entered.wait()
+            duplicate = await service.record_completed_ai_speech(
+                started["call_id"],
+                turn_id="turn-duplicate",
+                text="Duplicate must not persist.",
+                terminal=terminal,
+            )
+            release_stage.set()
+            persisted = await first
+
+            assert persisted is not None
+            assert duplicate is None
+
+        async with call_fixture.sessionmaker() as verification_session:
+            rows = (
+                await verification_session.execute(
+                    select(Message).where(
+                        Message.call_id == started["call_id"],
+                        Message.call_turn_id == "turn-duplicate",
+                    )
+                )
+            ).scalars().all()
+            assert [row.content_text for row in rows] == ["Persist exactly once."]
+
+    asyncio.run(scenario())
+
+
+def test_hangup_marked_during_assistant_append_rolls_back_uncommitted_turn(
+    call_fixture: CallFixture,
+) -> None:
+    thread_id = asyncio.run(
+        _insert_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post(
+        "/api/calls/start",
+        json={"thread_id": thread_id},
+    ).json()
+
+    async def scenario() -> None:
+        async with call_fixture.sessionmaker() as session:
+            service = CallService(session)
+            original_stage = service._stage_message
+            stage_entered = asyncio.Event()
+            release_stage = asyncio.Event()
+
+            async def delayed_stage(
+                thread_id: str,
+                content_text: str,
+                **kwargs: Any,
+            ) -> dict[str, Any]:
+                stage_entered.set()
+                await release_stage.wait()
+                return await original_stage(thread_id, content_text, **kwargs)
+
+            service._stage_message = delayed_stage  # type: ignore[method-assign]
+            persistence = asyncio.create_task(
+                service.record_completed_ai_speech(
+                    started["call_id"],
+                    turn_id="turn-hangup-race",
+                    text="Never durable after hangup.",
+                    terminal=SpeechTurnTerminal(
+                        status="normal",
+                        playout_completed=True,
+                    ),
+                )
+            )
+            await stage_entered.wait()
+            ended = await service.begin_end(started["call_id"])
+            late_turn = ScriptedCancelableTask()
+            release_stage.set()
+
+            assert ended["ended_at"] is not None
+            assert await service.register_active_turn(
+                started["call_id"],
+                late_turn,
+            ) is False
+            assert late_turn.cancel_calls == 0
+            assert await persistence is None
+
+        async with call_fixture.sessionmaker() as verification_session:
+            persisted = await verification_session.scalar(
+                select(Message.id).where(
+                    Message.call_id == started["call_id"],
+                    Message.call_turn_id == "turn-hangup-race",
+                )
+            )
+            assert persisted is None
+
+    asyncio.run(scenario())
+
+
 @pytest.mark.parametrize(
     ("terminal_event", "expected_status"),
     [
@@ -1838,9 +1967,17 @@ def test_interrupt_cancels_server_generation_and_ai_backend_session(
 ) -> None:
     thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
     started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
-    calls_module = importlib.import_module("app.api.calls")
     scripted_task = ScriptedCancelableTask()
-    calls_module._ACTIVE_LLM_TURNS[started["call_id"]] = scripted_task
+
+    async def register_task() -> None:
+        async with call_fixture.sessionmaker() as session:
+            registered = await CallService(session).register_active_turn(
+                started["call_id"],
+                scripted_task,
+            )
+            assert registered is True
+
+    asyncio.run(register_task())
 
     response = call_fixture.client.post(
         f"/api/calls/{started['call_id']}/interrupt",
@@ -1852,6 +1989,46 @@ def test_interrupt_cancels_server_generation_and_ai_backend_session(
     assert call_fixture.backend.interrupt_calls == [
         {"base_url": "https://127.0.0.1:9443", "session_id": started["session_id"]}
     ]
+
+
+def test_call_control_cancels_and_awaits_every_active_turn_task(
+    call_fixture: CallFixture,
+) -> None:
+    thread_id = asyncio.run(
+        _insert_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post(
+        "/api/calls/start",
+        json={"thread_id": thread_id},
+    ).json()
+
+    async def scenario() -> None:
+        stopped: list[str] = []
+
+        async def active_turn(name: str) -> None:
+            try:
+                await asyncio.Event().wait()
+            finally:
+                await asyncio.sleep(0)
+                stopped.append(name)
+
+        tasks = {
+            asyncio.create_task(active_turn("first")),
+            asyncio.create_task(active_turn("second")),
+        }
+        async with call_fixture.sessionmaker() as session:
+            service = CallService(session)
+            for task in tasks:
+                assert await service.register_active_turn(started["call_id"], task)
+            await asyncio.sleep(0)
+
+            await service.cancel_active_turns(started["call_id"])
+
+            assert all(task.done() for task in tasks)
+            assert sorted(stopped) == ["first", "second"]
+            assert service._active_call(started["call_id"]).active_turn_tasks == set()
+
+    asyncio.run(scenario())
 
 
 def _install_test_dependencies(

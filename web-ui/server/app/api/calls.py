@@ -48,7 +48,6 @@ CALL_SESSION_NOT_FOUND_CODE = "call_session_not_found"
 CALL_GENERATION_FAILED = "call_generation_failed"
 RAYME_EVENTS_CHANNEL = "rayme-events"
 CALL_BACKEND_NOT_READY_MESSAGE = "RayMe voice backend is not ready. Check Settings, then try again."
-_ACTIVE_LLM_TURNS: dict[str, asyncio.Task[Any]] = {}
 
 
 class CallStartRequest(BaseModel):
@@ -319,9 +318,7 @@ async def interrupt_call(
     try:
         session_id = service.session_for_call(call_id)
         _reject_mismatched_session(session_id, payload.session_id if payload else None)
-        task = _ACTIVE_LLM_TURNS.get(call_id)
-        if task is not None:
-            task.cancel()
+        await service.cancel_active_turns(call_id)
         endpoint_settings = await SettingsService(session, runtime_settings).read()
         await _interrupt_call(backend, endpoint_settings.ai_backend_url, session_id)
         service.interrupt(call_id)
@@ -386,8 +383,19 @@ async def create_call_turn(
 
     async def events() -> AsyncIterator[str]:
         current_task = asyncio.current_task()
-        if current_task is not None:
-            _ACTIVE_LLM_TURNS[call_id] = current_task
+        if current_task is not None and not await service.register_active_turn(
+            call_id,
+            current_task,
+        ):
+            yield _sse(
+                {
+                    "type": "error",
+                    "turn_id": payload.turn_id,
+                    "code": CALL_SESSION_NOT_FOUND_CODE,
+                    "message": "Call session was not found",
+                }
+            )
+            return
         accumulated: list[str] = []
         speech_turn: SpeechTurn | None = None
         segmenter = CallTtsSegmenter() if call["engine_id"] == "qwen3_1_7b" else None
@@ -568,8 +576,8 @@ async def create_call_turn(
         finally:
             if speech_turn is not None and speech_turn.terminal is None:
                 await speech_turn.cancel()
-            if current_task is not None and _ACTIVE_LLM_TURNS.get(call_id) is current_task:
-                _ACTIVE_LLM_TURNS.pop(call_id, None)
+            if current_task is not None:
+                await service.unregister_active_turn(call_id, current_task)
 
     return StreamingResponse(events(), media_type="text/event-stream")
 
@@ -653,9 +661,7 @@ async def end_call(
     try:
         session_id = service.session_for_call(call_id)
         _reject_mismatched_session(session_id, payload.session_id if payload else None)
-        task = _ACTIVE_LLM_TURNS.get(call_id)
-        if task is not None:
-            task.cancel()
+        await service.begin_end(call_id)
         endpoint_settings = await SettingsService(session, runtime_settings).read()
         try:
             await _end_call(backend, endpoint_settings.ai_backend_url, session_id, reason)
