@@ -51,6 +51,9 @@ VOXCPM2_CFG_VALUE_MIN = 1.0
 VOXCPM2_CFG_VALUE_MAX = 3.0
 VOXCPM2_INFERENCE_TIMESTEPS_MIN = 4
 VOXCPM2_INFERENCE_TIMESTEPS_MAX = 30
+RETIRED_QWEN_AUTHORIZATION_METADATA_KEYS = frozenset(
+    {"qwen3_authorization", "authorization"}
+)
 
 
 class VoiceAssetNotFoundError(LookupError):
@@ -398,7 +401,9 @@ class VoiceService:
             "name": voice.name,
             "default_engine": canonical_voice_engine_id_for_read(voice.default_engine),
             "reference_transcript": voice.reference_transcript,
-            "metadata": dict(voice.metadata_json or {}),
+            "metadata": strip_retired_qwen_authorization_metadata(
+                dict(voice.metadata_json or {})
+            ),
             "status": "deleted" if voice.deleted_at else "available",
             "deleted_at": voice.deleted_at.isoformat() if voice.deleted_at else None,
             "created_at": voice.created_at.isoformat() if voice.created_at else None,
@@ -429,6 +434,7 @@ __all__ = [
     "normalize_voice_engine_id",
     "normalize_voice_metadata",
     "qwen3_voice_key",
+    "strip_retired_qwen_authorization_metadata",
     "validate_saved_qwen3_reference",
 ]
 
@@ -557,7 +563,7 @@ def normalize_voice_metadata(raw_metadata: Any) -> dict[str, Any]:
     if not isinstance(raw_metadata, dict):
         raise VoiceMetadataValidationError("Voice metadata must be an object")
 
-    metadata = dict(raw_metadata)
+    metadata = strip_retired_qwen_authorization_metadata(dict(raw_metadata))
     if "engine_settings" not in metadata:
         return metadata
 
@@ -578,6 +584,7 @@ def normalize_voice_metadata(raw_metadata: Any) -> dict[str, Any]:
 
 
 def merge_voice_metadata(existing_metadata: dict[str, Any], patch_metadata: Any) -> dict[str, Any]:
+    existing_metadata = strip_retired_qwen_authorization_metadata(existing_metadata)
     normalized_patch = normalize_voice_metadata(patch_metadata)
     if "engine_settings" not in normalized_patch:
         return {**existing_metadata, **normalized_patch}
@@ -593,6 +600,15 @@ def merge_voice_metadata(existing_metadata: dict[str, Any], patch_metadata: Any)
     merged = {**existing_metadata, **normalized_patch}
     merged["engine_settings"] = {**existing_engine_settings, **patch_engine_settings}
     return merged
+
+
+def strip_retired_qwen_authorization_metadata(
+    metadata: dict[str, Any],
+) -> dict[str, Any]:
+    sanitized = dict(metadata)
+    for key in RETIRED_QWEN_AUTHORIZATION_METADATA_KEYS:
+        sanitized.pop(key, None)
+    return sanitized
 
 
 def normalize_voxcpm2_engine_settings(raw_settings: Any) -> dict[str, Any]:

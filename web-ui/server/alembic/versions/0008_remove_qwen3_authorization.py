@@ -18,7 +18,7 @@ down_revision: str | None = "0007_call_turn_ownership"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-AUTHORIZATION_METADATA_KEY = "qwen3_authorization"
+AUTHORIZATION_METADATA_KEYS = frozenset({"qwen3_authorization", "authorization"})
 
 
 def upgrade() -> None:
@@ -33,9 +33,10 @@ def upgrade() -> None:
     ).mappings()
     for row in rows:
         metadata = _metadata_object(row["metadata_json"])
-        if AUTHORIZATION_METADATA_KEY not in metadata:
+        if not AUTHORIZATION_METADATA_KEYS.intersection(metadata):
             continue
-        metadata.pop(AUTHORIZATION_METADATA_KEY, None)
+        for key in AUTHORIZATION_METADATA_KEYS:
+            metadata.pop(key, None)
         connection.execute(
             sa.update(voices)
             .where(voices.c.id == row["id"])

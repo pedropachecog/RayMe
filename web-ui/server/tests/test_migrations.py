@@ -577,6 +577,14 @@ def test_upload_implies_authorization_migration_removes_legacy_qwen_metadata(
                             "authorization_status": "needs_confirmation",
                             "voice_data_steward": "remove-me",
                         },
+                        "authorization": {
+                            "authorization_status": "recorded",
+                            "voice_data_steward": "remove-legacy-steward",
+                            "authorization_basis": "remove-legacy-basis",
+                            "use_scope": "remove-legacy-scope",
+                            "reference_sha256": "c" * 64,
+                            "transcript_sha256": "d" * 64,
+                        },
                     }
                 ),
             ),
@@ -592,4 +600,9 @@ def test_upload_implies_authorization_migration_removes_legacy_qwen_metadata(
             ("voice-legacy-authorization",),
         ).fetchone()
 
-    assert json.loads(row["metadata_json"]) == {"keep": {"unrelated": True}}
+    metadata = json.loads(row["metadata_json"])
+    assert metadata == {"keep": {"unrelated": True}}
+    serialized = json.dumps(metadata)
+    assert "remove-legacy-steward" not in serialized
+    assert "remove-legacy-basis" not in serialized
+    assert "remove-legacy-scope" not in serialized

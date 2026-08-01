@@ -392,6 +392,92 @@ def test_qwen_voice_save_rejects_removed_authorization_fields(
     assert "qwen-legacy-field.wav" not in serialized
 
 
+def test_qwen_voice_metadata_strips_retired_authorization_on_save_patch_and_read(
+    voice_fixture: VoiceFixture,
+) -> None:
+    uploaded = _upload_voice_asset(
+        voice_fixture.client,
+        _wav_audio("qwen-retired-metadata.wav"),
+    )
+    retired_metadata = {
+        "qwen3_authorization": {
+            "voice_data_steward": "private-current-steward",
+            "authorization_basis": "private-current-basis",
+        },
+        "authorization": {
+            "voice_data_steward": "private-legacy-steward",
+            "authorization_basis": "private-legacy-basis",
+            "use_scope": "private-legacy-scope",
+        },
+    }
+    saved = voice_fixture.client.post(
+        "/api/voices",
+        json={
+            **_voice_payload(
+                asset_id=uploaded.json()["asset_id"],
+                name="Retired metadata is stripped",
+                default_engine="qwen3_1_7b",
+                reference_transcript="The uploaded reference itself grants authorization.",
+            ),
+            "metadata": {"keep": {"unrelated": True}, **retired_metadata},
+        },
+    )
+
+    assert saved.status_code == 201, saved.text
+    voice_id = saved.json()["voice_id"]
+    assert saved.json()["metadata"] == {
+        "keep": {"unrelated": True},
+        "sample_asset_id": uploaded.json()["asset_id"],
+    }
+
+    async def restore_stale_metadata() -> None:
+        async with voice_fixture.sessionmaker() as session:
+            voice = await session.get(Voice, voice_id)
+            assert voice is not None
+            voice.metadata_json = {
+                **dict(voice.metadata_json or {}),
+                **retired_metadata,
+            }
+            await session.commit()
+
+    asyncio.run(restore_stale_metadata())
+
+    read_stale = voice_fixture.client.get(f"/api/voices/{voice_id}")
+    listed_stale = voice_fixture.client.get("/api/voices")
+    patched = voice_fixture.client.patch(
+        f"/api/voices/{voice_id}",
+        json={
+            "metadata": {
+                "safe_patch": True,
+                **retired_metadata,
+            },
+        },
+    )
+
+    assert read_stale.status_code == 200
+    assert listed_stale.status_code == 200
+    assert patched.status_code == 200
+    for body in (read_stale.json(), listed_stale.json(), patched.json()):
+        serialized = json.dumps(body)
+        assert "qwen3_authorization" not in serialized
+        assert '"authorization"' not in serialized
+        assert "private-current-steward" not in serialized
+        assert "private-legacy-steward" not in serialized
+    assert patched.json()["metadata"] == {
+        "keep": {"unrelated": True},
+        "sample_asset_id": uploaded.json()["asset_id"],
+        "safe_patch": True,
+    }
+
+    async def read_stored_metadata() -> dict[str, Any]:
+        async with voice_fixture.sessionmaker() as session:
+            voice = await session.get(Voice, voice_id)
+            assert voice is not None
+            return dict(voice.metadata_json or {})
+
+    assert asyncio.run(read_stored_metadata()) == patched.json()["metadata"]
+
+
 def test_qwen_voice_save_still_requires_nonblank_transcript(
     voice_fixture: VoiceFixture,
 ) -> None:

@@ -9,7 +9,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -25,6 +25,7 @@ from app.domain.voice_service import (
     VoicePromptInvalidationError,
     VoiceSynthesisFailedError,
     normalize_voxcpm2_engine_settings,
+    strip_retired_qwen_authorization_metadata,
 )
 from app.storage.session import SERVER_ROOT, get_session
 
@@ -41,6 +42,13 @@ class VoiceSave(BaseModel):
     reference_transcript: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def strip_retired_authorization_metadata(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        return strip_retired_qwen_authorization_metadata(value)
+
 
 class VoicePatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -49,6 +57,13 @@ class VoicePatch(BaseModel):
     default_engine: str | None = Field(default=None, min_length=1, max_length=80)
     reference_transcript: str | None = None
     metadata: dict[str, Any] | None = None
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def strip_retired_authorization_metadata(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        return strip_retired_qwen_authorization_metadata(value)
 
 
 class VoicePreview(BaseModel):
