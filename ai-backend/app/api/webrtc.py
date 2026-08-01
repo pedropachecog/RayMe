@@ -6,7 +6,6 @@ import binascii
 import inspect
 import logging
 import os
-import secrets
 import time
 from typing import Any, Literal
 
@@ -15,6 +14,7 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from app.api.stt import _settings_from_app, _stt_adapter_from_app, _vad_adapter_from_app
 from app.api.tts import _qwen_error_detail, _qwen_http_status
+from app.api.auth import require_service_auth as _require_service_auth
 from app.call.session import (
     AcceptedSpeechConfiguration,
     CallSession,
@@ -44,34 +44,6 @@ WEBRTC_AUDIO_TRACK_FAILED = "webrtc_audio_track_failed"
 WEBRTC_AUDIO_TRACK_FAILED_MESSAGE = "Backend could not create call audio output track"
 WEBRTC_RUNTIME_UNAVAILABLE = "webrtc_runtime_unavailable"
 WEBRTC_RUNTIME_UNAVAILABLE_MESSAGE = "Backend WebRTC runtime is unavailable"
-
-
-def _require_service_auth(request: Request) -> None:
-    settings = getattr(request.app.state, "ai_backend_settings", None)
-    expected = str(getattr(settings, "service_auth_token", "") or "")
-    if len(expected) < 32:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail={
-                "code": "service_auth_not_configured",
-                "message": "Service authentication is unavailable",
-            },
-        )
-    authorization = request.headers.get("authorization", "")
-    scheme, separator, supplied = authorization.partition(" ")
-    if (
-        separator != " "
-        or scheme.lower() != "bearer"
-        or not supplied
-        or not secrets.compare_digest(supplied, expected)
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "code": "service_auth_invalid",
-                "message": "Service authentication failed",
-            },
-        )
 
 
 class SessionDescription(BaseModel):

@@ -15,6 +15,10 @@ import soundfile as sf
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.config import AiBackendSettings
+
+SERVICE_AUTH_TOKEN = "rayme-test-service-token-0123456789abcdef"
+SERVICE_AUTH_HEADERS = {"Authorization": f"Bearer {SERVICE_AUTH_TOKEN}"}
 
 EXPECTED_ENGINE_LABELS = {
     "f5": "F5-TTS",
@@ -312,9 +316,9 @@ def _synthesis_payload(**overrides: Any) -> dict[str, Any]:
 def test_tts_synthesize_switches_engine_and_returns_transient_json() -> None:
     adapter = ScriptedSynthesisAdapter()
     manager = ScriptedSwitchingManager(adapter)
-    app = create_app()
+    app = create_app(AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN))
     app.state.model_manager = manager
-    client = TestClient(app)
+    client = TestClient(app, headers=SERVICE_AUTH_HEADERS)
 
     response = client.post("/tts/synthesize", json=_synthesis_payload())
 
@@ -332,9 +336,9 @@ def test_tts_synthesize_switches_engine_and_returns_transient_json() -> None:
 def test_tts_synthesize_accepts_web_ui_reference_audio_alias() -> None:
     adapter = ScriptedSynthesisAdapter()
     manager = ScriptedSwitchingManager(adapter)
-    app = create_app()
+    app = create_app(AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN))
     app.state.model_manager = manager
-    client = TestClient(app)
+    client = TestClient(app, headers=SERVICE_AUTH_HEADERS)
     payload = _synthesis_payload()
     payload["reference_audio_base64"] = payload.pop("reference_audio_b64")
     payload["speech_speed"] = 0.75
@@ -353,9 +357,9 @@ def test_tts_synthesize_rejects_reference_audio_over_web_ui_limit(
     monkeypatch.setattr(tts_module, "MAX_REFERENCE_AUDIO_BYTES", len(b"reference wav") - 1)
     adapter = ScriptedSynthesisAdapter()
     manager = ScriptedSwitchingManager(adapter)
-    app = create_app()
+    app = create_app(AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN))
     app.state.model_manager = manager
-    client = TestClient(app)
+    client = TestClient(app, headers=SERVICE_AUTH_HEADERS)
 
     response = client.post("/tts/synthesize", json=_synthesis_payload())
 
@@ -371,9 +375,9 @@ def test_tts_synthesize_rejects_reference_audio_over_web_ui_limit(
 def test_tts_synthesize_accepts_bounded_voxcpm2_options() -> None:
     adapter = ScriptedSynthesisAdapter()
     manager = ScriptedSwitchingManager(adapter)
-    app = create_app()
+    app = create_app(AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN))
     app.state.model_manager = manager
-    client = TestClient(app)
+    client = TestClient(app, headers=SERVICE_AUTH_HEADERS)
 
     response = client.post(
         "/tts/synthesize",
@@ -417,9 +421,9 @@ def test_tts_synthesize_returns_voxcpm2_warning_codes() -> None:
         warning_codes=["voxcpm2_reference_only_without_transcript"],
     )
     manager = ScriptedSwitchingManager(adapter)
-    app = create_app()
+    app = create_app(AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN))
     app.state.model_manager = manager
-    client = TestClient(app)
+    client = TestClient(app, headers=SERVICE_AUTH_HEADERS)
 
     response = client.post(
         "/tts/synthesize",
@@ -433,9 +437,9 @@ def test_tts_synthesize_returns_voxcpm2_warning_codes() -> None:
 def test_tts_synthesize_use_default_engine_switches_to_caller_default() -> None:
     adapter = ScriptedSynthesisAdapter()
     manager = ScriptedSwitchingManager(adapter)
-    app = create_app()
+    app = create_app(AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN))
     app.state.model_manager = manager
-    client = TestClient(app)
+    client = TestClient(app, headers=SERVICE_AUTH_HEADERS)
 
     response = client.post(
         "/tts/synthesize",
@@ -450,9 +454,9 @@ def test_tts_synthesize_use_default_engine_switches_to_caller_default() -> None:
 def test_tts_synthesize_failure_returns_fixed_public_error() -> None:
     adapter = ScriptedSynthesisAdapter(should_fail=True)
     manager = ScriptedSwitchingManager(adapter)
-    app = create_app()
+    app = create_app(AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN))
     app.state.model_manager = manager
-    client = TestClient(app)
+    client = TestClient(app, headers=SERVICE_AUTH_HEADERS)
 
     response = client.post("/tts/synthesize", json=_synthesis_payload())
 
@@ -474,9 +478,9 @@ def test_tts_synthesize_failure_returns_fixed_public_error() -> None:
 def test_tts_synthesize_unknown_engine_keeps_public_error_sanitized() -> None:
     adapter = ScriptedSynthesisAdapter()
     manager = ScriptedSwitchingManager(adapter)
-    app = create_app()
+    app = create_app(AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN))
     app.state.model_manager = manager
-    client = TestClient(app)
+    client = TestClient(app, headers=SERVICE_AUTH_HEADERS)
 
     response = client.post("/tts/synthesize", json=_synthesis_payload(engine_id="missing_engine"))
 
@@ -595,7 +599,7 @@ def test_f5_runtime_audio_loader_avoids_torchcodec_dependency(tmp_path: Path) ->
 
 
 def test_create_app_includes_tts_router_without_voice_library_persistence_routes() -> None:
-    app = create_app()
+    app = create_app(AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN))
     routes = {
         f"{','.join(sorted(route.methods or []))} {route.path}"
         for route in app.routes

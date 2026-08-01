@@ -3,11 +3,12 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from app.api import tts, webrtc
+from app.api.auth import require_service_auth
 from app.api.health import router as health_router
 from app.api.stt import router as stt_router
 from app.call.session import CallSessionManager
@@ -36,8 +37,9 @@ def create_app(settings: AiBackendSettings | None = None) -> FastAPI:
     app.state.model_manager = ModelManager(runtime_settings)
     app.state.call_session_manager = CallSessionManager(settings=runtime_settings)
     app.include_router(health_router)
-    app.include_router(stt_router)
-    app.include_router(tts.router)
+    protected = [Depends(require_service_auth)]
+    app.include_router(stt_router, dependencies=protected)
+    app.include_router(tts.router, dependencies=protected)
     app.include_router(webrtc.router)
     return app
 

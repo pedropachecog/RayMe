@@ -14,6 +14,10 @@ import soundfile as sf
 from fastapi.testclient import TestClient
 
 from app.main import create_app
+from app.config import AiBackendSettings
+
+SERVICE_AUTH_TOKEN = "rayme-test-service-token-0123456789abcdef"
+SERVICE_AUTH_HEADERS = {"Authorization": f"Bearer {SERVICE_AUTH_TOKEN}"}
 
 EXPECTED_WHISPER_OPTIONS = {
     "language": "en",
@@ -328,10 +332,10 @@ def _wav_upload() -> tuple[str, bytes, str]:
 
 
 def _client_with_stt(scripted_stt: RouteScriptedSttAdapter, vad_adapter: Any | None = None) -> TestClient:
-    app = create_app()
+    app = create_app(AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN))
     app.state.stt_adapter = scripted_stt
     app.state.vad_adapter = vad_adapter or SpeechVad()
-    return TestClient(app)
+    return TestClient(app, headers=SERVICE_AUTH_HEADERS)
 
 
 def test_transient_stt_route_accepts_upload_and_returns_contract_fields() -> None:

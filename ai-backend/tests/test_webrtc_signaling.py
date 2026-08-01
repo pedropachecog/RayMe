@@ -15,6 +15,7 @@ import httpx
 from fastapi.testclient import TestClient
 
 import app.api.webrtc as webrtc_module
+from app.api.auth import require_service_auth
 from app.main import create_app
 from app.config import AiBackendSettings
 from app.models.tts_registry import TtsAudioChunk
@@ -399,6 +400,63 @@ def test_webrtc_service_identity_fails_closed_and_rejects_wrong_token() -> None:
     assert rejected.status_code == 401
     assert rejected.json()["detail"]["code"] == "service_auth_invalid"
     assert configured.get("/webrtc/status").status_code == 200
+
+
+def test_every_non_public_ai_route_has_shared_service_auth_dependency() -> None:
+    app = create_app(AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN))
+    public_routes = {("/health", "GET"), ("/webrtc/status", "GET")}
+
+    for route in app.routes:
+        path = getattr(route, "path", "")
+        for method in getattr(route, "methods", set()):
+            if not path.startswith(("/stt", "/tts", "/webrtc")):
+                continue
+            if (path, method) in public_routes:
+                continue
+            dependency_calls = {
+                dependency.call for dependency in route.dependant.dependencies
+            }
+            assert require_service_auth in dependency_calls, (method, path)
+
+
+@pytest.mark.parametrize(
+    ("path", "request_kwargs"),
+    [
+        ("/stt/transcribe", {}),
+        (
+            "/tts/synthesize",
+            {
+                "json": {
+                    "voice_id": "voice-1",
+                    "engine_id": "f5",
+                    "text": "Protected synthesis.",
+                    "reference_audio_b64": "cmVmZXJlbmNl",
+                }
+            },
+        ),
+        (
+            "/tts/qwen3/prompts/invalidate",
+            {
+                "json": {
+                    "engine_id": "qwen3_1_7b",
+                    "voice_key": "e" * 64,
+                }
+            },
+        ),
+    ],
+)
+def test_stateful_stt_and_tts_routes_reject_missing_service_identity(
+    path: str,
+    request_kwargs: dict[str, Any],
+) -> None:
+    client = TestClient(
+        create_app(AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN))
+    )
+
+    response = client.post(path, **request_kwargs)
+
+    assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "service_auth_invalid"
 
 
 def test_authorized_service_identity_completes_offer_and_end(

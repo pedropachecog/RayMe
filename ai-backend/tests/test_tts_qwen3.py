@@ -1111,6 +1111,7 @@ def test_qwen_prompt_invalidate_api_accepts_only_opaque_owner_key() -> None:
     from fastapi.testclient import TestClient
 
     from app.main import create_app
+    from app.config import AiBackendSettings
 
     class RecordingManager:
         def __init__(self) -> None:
@@ -1132,12 +1133,16 @@ def test_qwen_prompt_invalidate_api_accepts_only_opaque_owner_key() -> None:
                 "active_cancelled": False,
             }
 
-    app = create_app()
+    service_token = "rayme-test-service-token-0123456789abcdef"
+    app = create_app(AiBackendSettings(service_auth_token=service_token))
     manager = RecordingManager()
     app.state.model_manager = manager
     owner_key = "e" * 64
 
-    with TestClient(app) as client:
+    with TestClient(
+        app,
+        headers={"Authorization": f"Bearer {service_token}"},
+    ) as client:
         response = client.post(
             "/tts/qwen3/prompts/invalidate",
             json={"engine_id": "qwen3_1_7b", "voice_key": owner_key},
