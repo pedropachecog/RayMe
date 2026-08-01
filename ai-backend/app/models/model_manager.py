@@ -33,6 +33,9 @@ RETRIABLE_TTS_UNAVAILABLE_REASONS = {
 }
 QWEN_ALIGNMENT_MIN_TOKEN_COVERAGE = 0.45
 QWEN_ALIGNMENT_MIN_EDIT_SIMILARITY = 0.50
+QWEN_ALIGNMENT_MIN_ORDERED_TOKEN_SIMILARITY = 0.50
+QWEN_ALIGNMENT_MIN_MEANINGFUL_TOKENS = 4
+QWEN_ALIGNMENT_MIN_TOKEN_LENGTH_RATIO = 0.75
 
 
 @dataclass(frozen=True)
@@ -57,16 +60,46 @@ def evaluate_qwen_transcript_alignment(
             edit_similarity=0.0,
         )
     overlap = Counter(approved_tokens) & Counter(observed_tokens)
-    token_coverage = sum(overlap.values()) / len(approved_tokens)
+    overlap_count = sum(overlap.values())
+    approved_coverage = overlap_count / len(approved_tokens)
+    observed_coverage = overlap_count / len(observed_tokens)
+    token_coverage = min(approved_coverage, observed_coverage)
+    token_length_ratio = min(len(approved_tokens), len(observed_tokens)) / max(
+        len(approved_tokens),
+        len(observed_tokens),
+    )
+    ordered_token_similarity = SequenceMatcher(
+        None,
+        approved_tokens,
+        observed_tokens,
+        autojunk=False,
+    ).ratio()
     edit_similarity = SequenceMatcher(
         None,
         approved_text,
         observed_text,
         autojunk=False,
     ).ratio()
-    accepted = not (
-        token_coverage < QWEN_ALIGNMENT_MIN_TOKEN_COVERAGE
-        and edit_similarity < QWEN_ALIGNMENT_MIN_EDIT_SIMILARITY
+    prefix_only = approved_tokens != observed_tokens and (
+        approved_tokens == observed_tokens[: len(approved_tokens)]
+        or observed_tokens == approved_tokens[: len(observed_tokens)]
+    )
+    meaningful_transcripts = (
+        len(approved_tokens) >= QWEN_ALIGNMENT_MIN_MEANINGFUL_TOKENS
+        and len(observed_tokens) >= QWEN_ALIGNMENT_MIN_MEANINGFUL_TOKENS
+    )
+    accepted = (
+        meaningful_transcripts
+        and not prefix_only
+        and token_length_ratio >= QWEN_ALIGNMENT_MIN_TOKEN_LENGTH_RATIO
+        and (
+            edit_similarity >= QWEN_ALIGNMENT_MIN_EDIT_SIMILARITY
+            or (
+                token_coverage >= QWEN_ALIGNMENT_MIN_TOKEN_COVERAGE
+                and ordered_token_similarity
+                >= QWEN_ALIGNMENT_MIN_ORDERED_TOKEN_SIMILARITY
+            )
+        )
     )
     return QwenTranscriptAlignment(
         accepted=accepted,

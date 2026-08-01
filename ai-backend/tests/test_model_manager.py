@@ -694,7 +694,7 @@ def test_qwen_alignment_tolerates_punctuation_case_and_accent_variants(
     assert result.token_coverage >= 0.45 or result.edit_similarity >= 0.50
 
 
-def test_qwen_alignment_rejects_known_gross_mismatch_only_when_both_scores_are_low() -> None:
+def test_qwen_alignment_rejects_known_gross_mismatch() -> None:
     manager_module = importlib.import_module("app.models.model_manager")
 
     result = manager_module.evaluate_qwen_transcript_alignment(
@@ -705,6 +705,50 @@ def test_qwen_alignment_rejects_known_gross_mismatch_only_when_both_scores_are_l
     assert result.accepted is False
     assert result.token_coverage < 0.45
     assert result.edit_similarity < 0.50
+
+
+@pytest.mark.parametrize(
+    ("approved", "observed"),
+    [
+        (
+            "Okay.",
+            "Okay, the rest of this recording says entirely different words for several minutes.",
+        ),
+        (
+            "The approved sentence contains enough meaningful reference words.",
+            "The approved sentence contains enough meaningful reference words followed by "
+            "totally unrelated speech that keeps going for a long time.",
+        ),
+        (
+            "The approved sentence contains enough meaningful reference words for alignment.",
+            "The approved sentence contains enough meaningful reference words",
+        ),
+        (
+            "alpha beta gamma delta epsilon zeta",
+            "zeta epsilon delta gamma beta alpha",
+        ),
+    ],
+)
+def test_qwen_alignment_rejects_short_prefix_tail_and_reordered_transcripts(
+    approved: str,
+    observed: str,
+) -> None:
+    manager_module = importlib.import_module("app.models.model_manager")
+
+    result = manager_module.evaluate_qwen_transcript_alignment(approved, observed)
+
+    assert result.accepted is False
+
+
+def test_qwen_alignment_token_coverage_penalizes_observed_extra_speech() -> None:
+    manager_module = importlib.import_module("app.models.model_manager")
+
+    result = manager_module.evaluate_qwen_transcript_alignment(
+        "one two three four five six",
+        "one two three four five six unrelated extra speech continues",
+    )
+
+    assert result.token_coverage == 0.6
 
 
 def test_qwen_alignment_resamples_uploaded_reference_like_voice_lab_transcription() -> None:
