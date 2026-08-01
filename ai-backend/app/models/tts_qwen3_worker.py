@@ -459,6 +459,9 @@ def iter_generation_events(
     cumulative_seconds = 0.0
     last_steps = 0
     stream: Any | None = None
+    if cancelled.is_set():
+        yield _cancelled_terminal(command.request_id, chunk_count)
+        return
     try:
         stream = runtime.generate_voice_clone_streaming(
             text=command.text,

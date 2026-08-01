@@ -1908,7 +1908,7 @@ def test_qwen_worker_preserves_cancel_that_arrives_before_generate_dispatch(
     worker._dispatch(command)
 
     assert [event.event for event in emitted] == ["cancelled"]
-    assert runtime.streaming_calls[0]["text"] == command.text
+    assert runtime.streaming_calls == []
 
 
 def test_qwen_worker_loads_cuda_before_starting_cancellation_reader(
