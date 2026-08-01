@@ -606,3 +606,22 @@ def test_upload_implies_authorization_migration_removes_legacy_qwen_metadata(
     assert "remove-legacy-steward" not in serialized
     assert "remove-legacy-basis" not in serialized
     assert "remove-legacy-scope" not in serialized
+
+
+def test_upload_implies_authorization_migration_rejects_downgrade(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "rayme-qwen-irreversible-authorization.sqlite3"
+    config = migration_config(db_path)
+    command.upgrade(config, "head")
+
+    with pytest.raises(
+        RuntimeError,
+        match="0008 is irreversible: removed Qwen authorization claims cannot be reconstructed",
+    ):
+        command.downgrade(config, "0007_call_turn_ownership")
+
+    with connect(db_path) as connection:
+        revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+
+    assert revision["version_num"] == "0008_remove_qwen3_authorization"

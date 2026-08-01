@@ -45,8 +45,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Removed reference-authorization claims cannot be reconstructed truthfully.
-    pass
+    raise RuntimeError(
+        "0008 is irreversible: removed Qwen authorization claims cannot be reconstructed"
+    )
 
 
 def _metadata_object(value: Any) -> dict[str, Any]:
