@@ -144,6 +144,67 @@ def test_qwen_generate_protocol_accepts_only_paired_bounded_release_evidence_see
             protocol.parse_command(invalid)
 
 
+def test_qwen_generate_protocol_v2_is_explicit_and_keeps_v1_worker_compatibility() -> None:
+    protocol = _protocol_module()
+    legacy = {
+        "schema_version": 1,
+        "op": "generate",
+        "request_id": "legacy-turn-1",
+        "voice_key": "voice_0123456789abcdef",
+        "text": "A legacy producer remains accepted.",
+        "max_new_tokens": 48,
+        "hard_audio_seconds": 6.0,
+    }
+    current = {
+        **legacy,
+        "schema_version": 2,
+        "speaker_seed": 71_001,
+        "generation_seed": 71_002,
+    }
+
+    legacy_command = protocol.parse_command(legacy)
+    current_command = protocol.parse_command(current)
+
+    assert legacy_command.schema_version == 1
+    assert legacy_command.speaker_seed is None
+    assert legacy_command.generation_seed is None
+    assert current_command.schema_version == 2
+    assert current_command.speaker_seed == 71_001
+    assert current_command.generation_seed == 71_002
+
+    with pytest.raises(ValidationError):
+        protocol.parse_command({**current, "schema_version": 1})
+    with pytest.raises(ValidationError):
+        protocol.parse_command({**current, "schema_version": 3})
+
+
+def test_qwen_worker_derives_deterministic_seed_for_legacy_v1_producer() -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    protocol = _protocol_module()
+
+    def legacy_command(request_id: str) -> Any:
+        return protocol.parse_command(
+            {
+                "schema_version": 1,
+                "op": "generate",
+                "request_id": request_id,
+                "voice_key": "voice_0123456789abcdef",
+                "text": "A legacy producer remains deterministic.",
+                "max_new_tokens": 48,
+                "hard_audio_seconds": 6.0,
+            }
+        )
+
+    first = worker._generation_seed_for_command(legacy_command("legacy-turn-1"))
+    repeated = worker._generation_seed_for_command(legacy_command("legacy-turn-1"))
+    next_request = worker._generation_seed_for_command(legacy_command("legacy-turn-2"))
+
+    assert first == repeated
+    assert first != next_request
+    assert 0 <= first <= 4_294_967_295
+
+
 @pytest.mark.parametrize(
     "payload",
     [
@@ -748,7 +809,7 @@ def test_qwen_worker_reads_reserved_memory_from_its_own_torch_allocator(
     assert worker._torch_reserved_mib() == 5604.0
 
 
-def test_qwen_adapter_propagates_explicit_evidence_seed_without_seeding_ordinary_calls(
+def test_qwen_adapter_emits_explicit_v2_seed_contract(
     qwen_runtime_available: None,
 ) -> None:
     from app.models.tts_registry import TtsSynthesisInput
@@ -776,13 +837,18 @@ def test_qwen_adapter_propagates_explicit_evidence_seed_without_seeding_ordinary
     list(adapter.stream(evidence, request_id="evidence-turn"))
 
     generated = [payload for payload in process.ops if payload["op"] == "generate"]
+    assert generated[0]["schema_version"] == 2
+    assert generated[0]["speaker_seed"] == generated[0]["generation_seed"]
     assert generated[0]["release_evidence_mode"] is None
     assert generated[0]["release_evidence_seed"] is None
+    assert generated[1]["schema_version"] == 2
+    assert generated[1]["speaker_seed"] == generated[0]["speaker_seed"]
+    assert generated[1]["generation_seed"] == 91_001
     assert generated[1]["release_evidence_mode"] == "phase09_release_evidence"
     assert generated[1]["release_evidence_seed"] == 91_001
 
 
-def test_qwen_worker_release_evidence_rng_is_repeatable_and_restores_all_rng_states(
+def test_qwen_worker_generation_rng_is_repeatable_and_restores_all_rng_states(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import random
@@ -836,7 +902,7 @@ def test_qwen_worker_release_evidence_rng_is_repeatable_and_restores_all_rng_sta
 
     samples: list[tuple[float, float, bytes, list[bytes]]] = []
     for _ in range(2):
-        with worker._release_evidence_rng_scope(91_001):
+        with worker._generation_rng_scope(91_001):
             samples.append(
                 (
                     random.random(),

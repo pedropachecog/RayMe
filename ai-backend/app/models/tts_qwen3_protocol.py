@@ -93,6 +93,7 @@ class QwenPrewarmCommand(_CommandBase):
 
 
 class QwenGenerateCommand(_CommandBase):
+    schema_version: Literal[1, 2] = 2
     op: Literal["generate"]
     voice_key: str = Field(
         min_length=1,
@@ -102,6 +103,16 @@ class QwenGenerateCommand(_CommandBase):
     text: str = Field(min_length=1, max_length=MAX_TARGET_TEXT_LENGTH)
     max_new_tokens: int = Field(ge=4, le=384, multiple_of=4)
     hard_audio_seconds: float = Field(ge=0.1, le=32.0)
+    speaker_seed: int | None = Field(
+        default=None,
+        ge=0,
+        le=MAX_RELEASE_EVIDENCE_SEED,
+    )
+    generation_seed: int | None = Field(
+        default=None,
+        ge=0,
+        le=MAX_RELEASE_EVIDENCE_SEED,
+    )
     release_evidence_mode: Literal["phase09_release_evidence"] | None = None
     release_evidence_seed: int | None = Field(
         default=None,
@@ -120,6 +131,17 @@ class QwenGenerateCommand(_CommandBase):
     def require_paired_release_evidence_fields(self) -> "QwenGenerateCommand":
         if (self.release_evidence_mode is None) != (self.release_evidence_seed is None):
             raise ValueError("release evidence mode and seed must be provided together")
+        seeded_fields = (self.speaker_seed, self.generation_seed)
+        if self.schema_version == 2 and any(value is None for value in seeded_fields):
+            raise ValueError("generate protocol v2 requires speaker and generation seeds")
+        if self.schema_version == 1 and any(value is not None for value in seeded_fields):
+            raise ValueError("generate seed fields require protocol version 2")
+        if (
+            self.release_evidence_seed is not None
+            and self.schema_version == 2
+            and self.generation_seed != self.release_evidence_seed
+        ):
+            raise ValueError("release evidence seed must control generation")
         return self
 
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import hashlib
 import importlib.metadata
 import json
 import os
@@ -215,12 +216,7 @@ def _dispatch(command: QwenWorkerCommand) -> bool:
                 _PENDING_CANCELS.remove(command.request_id)
                 cancelled.set()
         try:
-            rng_scope = (
-                _release_evidence_rng_scope(command.release_evidence_seed)
-                if command.release_evidence_seed is not None
-                else contextlib.nullcontext()
-            )
-            with rng_scope:
+            with _generation_rng_scope(_generation_seed_for_command(command)):
                 for event in iter_generation_events(
                     _RUNTIME,
                     _PREPARED_PROMPT,
@@ -269,9 +265,23 @@ def _dispatch(command: QwenWorkerCommand) -> bool:
     return True
 
 
+def _generation_seed_for_command(command: QwenGenerateCommand) -> int:
+    if command.generation_seed is not None:
+        return command.generation_seed
+    if command.release_evidence_seed is not None:
+        return command.release_evidence_seed
+    digest = hashlib.sha256(
+        (
+            "rayme-qwen3-legacy-generation-v1:"
+            f"{command.voice_key}:{command.request_id}"
+        ).encode("utf-8")
+    ).digest()
+    return int.from_bytes(digest[:4], byteorder="big", signed=False)
+
+
 @contextlib.contextmanager
-def _release_evidence_rng_scope(seed: int) -> Iterator[None]:
-    """Reset all generation RNGs for one evidence request, then restore them."""
+def _generation_rng_scope(seed: int) -> Iterator[None]:
+    """Reset all generation RNGs for one request, then restore them."""
 
     import numpy as np
     import torch

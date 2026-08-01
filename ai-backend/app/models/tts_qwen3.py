@@ -53,6 +53,17 @@ WORKER_STREAM_EVENT_TIMEOUT_SECONDS = 60.0
 WORKER_CONTROL_TIMEOUT_SECONDS = 5.0
 WORKER_CANCEL_TIMEOUT_SECONDS = 2.0
 QWEN_MODEL_REVISION = "fd4b254389122332181a7c3db7f27e918eec64e3"
+
+
+def _voice_generation_seed(prompt_key: str) -> int:
+    """Return the stable identity seed for one prepared speaker prompt."""
+
+    digest = hashlib.sha256(
+        f"rayme-qwen3-speaker-v1:{prompt_key}".encode("utf-8")
+    ).digest()
+    return int.from_bytes(digest[:4], byteorder="big", signed=False)
+
+
 QWEN_CLONE_MODE = "full_icl"
 QWEN_APPEND_SILENCE = True
 QWEN_MIN_AUDIO_PEAK = 1e-5
@@ -265,6 +276,12 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                 )
             generation_request_id = request_id or _new_request_id("generate")
             max_new_tokens, hard_audio_seconds = _generation_limits(request.text)
+            speaker_seed = _voice_generation_seed(selected_prompt_key)
+            generation_seed = (
+                request.qwen3_release_evidence_seed
+                if request.qwen3_release_evidence_seed is not None
+                else speaker_seed
+            )
             command = QwenGenerateCommand(
                 op="generate",
                 request_id=generation_request_id,
@@ -272,6 +289,8 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                 text=request.text,
                 max_new_tokens=max_new_tokens,
                 hard_audio_seconds=hard_audio_seconds,
+                speaker_seed=speaker_seed,
+                generation_seed=generation_seed,
                 release_evidence_mode=request.qwen3_release_evidence_mode,
                 release_evidence_seed=request.qwen3_release_evidence_seed,
             )
