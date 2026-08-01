@@ -236,6 +236,19 @@ class _CapturedTurnCancellation:
 
 
 @dataclass
+class _SpeechAdmission:
+    """One speech owner installed atomically with its segment claim."""
+
+    token: int
+    lifecycle_epoch: int
+    turn_id: str
+    request_id: str
+    adapter: Any
+    active_task: asyncio.Task[Any] | None
+    done: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+@dataclass
 class _TtsSegmentLedgerEntry:
     segment_id: str
     ordinal: int
@@ -322,6 +335,8 @@ class CallSession:
         self._active_tts_turn_id: str | None = None
         self._active_tts_cancel_requested = False
         self._active_tts_metrics_snapshot: Callable[[], dict[str, Any]] | None = None
+        self._speech_admission_generation = 0
+        self._speech_admission: _SpeechAdmission | None = None
         self._last_tts_cancel_context: dict[str, Any] | None = None
         self._pending_speech_terminal_turn_id: str | None = None
         self._pending_speech_terminal_voice_id: str | None = None
@@ -402,18 +417,23 @@ class CallSession:
         reservation: AcceptedSpeechConfiguration,
     ) -> None:
         async with self._lifecycle_lock:
-            lifecycle = self._peer_lifecycle
-            if (
-                self.ended_at is not None
-                or lifecycle.phase == "terminal"
-                or lifecycle.phase == "switching"
-                or reservation.epoch != lifecycle.epoch
-                or reservation.voice_id != self.voice_id
-                or reservation.engine_id != self.engine_id
-            ):
-                raise SpeechSessionSelectionError(
-                    "accepted call configuration changed before speech"
-                )
+            self._validate_accepted_speech_configuration_locked(reservation)
+
+    def _validate_accepted_speech_configuration_locked(
+        self,
+        reservation: AcceptedSpeechConfiguration,
+    ) -> None:
+        lifecycle = self._peer_lifecycle
+        if (
+            self.ended_at is not None
+            or lifecycle.phase != "stable"
+            or reservation.epoch != lifecycle.epoch
+            or reservation.voice_id != self.voice_id
+            or reservation.engine_id != self.engine_id
+        ):
+            raise SpeechSessionSelectionError(
+                "accepted call configuration changed before speech"
+            )
 
     async def handle_inbound_audio_frame(self, frame: Any) -> dict[str, Any] | bool | None:
         self.incoming_audio_frames += 1
@@ -651,7 +671,8 @@ class CallSession:
                     or accepted_configuration.engine_id != self.engine_id
                 )
             cancel_selection = selection_changed and (
-                self.active_turn_task is not None
+                self._speech_admission is not None
+                or self.active_turn_task is not None
                 or self._active_tts_turn_id is not None
                 or self._pending_speech_terminal_turn_id is not None
             )
@@ -734,15 +755,26 @@ class CallSession:
         self.stt_adapter = configuration.stt_adapter
 
     def _capture_turn_cancellation_locked(self) -> _CapturedTurnCancellation:
+        admission = self._speech_admission
         resolved_turn_id = (
             self._active_tts_turn_id
             or self._pending_speech_terminal_turn_id
+            or (admission.turn_id if admission is not None else None)
         )
         return _CapturedTurnCancellation(
-            active_task=self.active_turn_task,
+            active_task=(
+                self.active_turn_task
+                or (admission.active_task if admission is not None else None)
+            ),
             turn_id=resolved_turn_id,
-            request_id=self._active_tts_request_id,
-            adapter=self._active_tts_adapter,
+            request_id=(
+                self._active_tts_request_id
+                or (admission.request_id if admission is not None else None)
+            ),
+            adapter=(
+                self._active_tts_adapter
+                or (admission.adapter if admission is not None else None)
+            ),
             metrics_snapshot=(
                 self._active_tts_metrics_snapshot
                 if self._active_tts_request_id is not None
@@ -1646,7 +1678,8 @@ class CallSession:
     ) -> None:
         changed = voice_id != self.voice_id or engine_id != self.engine_id
         if changed and (
-            self.active_turn_task is not None
+            self._speech_admission is not None
+            or self.active_turn_task is not None
             or self._active_tts_turn_id is not None
             or self._pending_speech_terminal_turn_id is not None
         ):
@@ -1756,24 +1789,32 @@ class CallSession:
         qwen3_release_evidence_mode: str | None = None,
         qwen3_release_evidence_seed: int | None = None,
     ) -> dict[str, Any]:
-        if accepted_configuration is not None:
-            await self._validate_accepted_speech_configuration(
-                accepted_configuration
-            )
-        segment, cached_response = await self._claim_tts_segment(
+        adapter = tts_adapter or self.tts_adapter
+        current_task = asyncio.current_task()
+        segment, cached_response, admission = await self._admit_tts_segment(
             turn_id=turn_id,
             text=text,
             final_chunk=final_chunk,
             segment_id=segment_id,
             requested_ordinal=segment_ordinal,
+            accepted_configuration=accepted_configuration,
+            adapter=adapter,
+            active_task=current_task,
         )
         if cached_response is not None:
             return cached_response
+        if admission is None:
+            raise RuntimeError("speech segment was admitted without an owner")
+        try:
+            await self._promote_speech_admission(
+                admission,
+                accepted_configuration=accepted_configuration,
+            )
+        except BaseException:
+            await self._release_tts_segment_attempt(turn_id, segment)
+            await self._release_speech_admission(admission)
+            raise
         reserved_segment_ordinal = segment.ordinal
-        self.state = "rehearsing"
-        current_task = asyncio.current_task()
-        if current_task is not None:
-            self.active_turn_task = current_task
 
         audio_started_event: dict[str, Any] | None = None
         final_playback: dict[str, Any] | None = None
@@ -1786,8 +1827,6 @@ class CallSession:
             "voxcpm2_normalize": voxcpm2_normalize,
             "voxcpm2_denoise": voxcpm2_denoise,
         }
-        adapter = tts_adapter or self.tts_adapter
-
         try:
             if _adapter_supports_streaming(adapter, engine_id):
                 result = await self._speak_streaming_speech(
@@ -1920,8 +1959,7 @@ class CallSession:
                 return {**event, "ai_audio_started_event": audio_started_event}
             return event
         finally:
-            if self.active_turn_task is current_task:
-                self.active_turn_task = None
+            await self._release_speech_admission(admission)
 
         if turn_id in self._cancelled_ai_turns:
             self.state = "listening"
@@ -1975,94 +2013,221 @@ class CallSession:
         while True:
             waiter: asyncio.Event | None = None
             async with self._lifecycle_lock:
-                ledger = self._tts_turn_ledgers.setdefault(
-                    turn_id,
-                    _TtsTurnLedger(),
+                segment, cached_response, waiter = self._claim_tts_segment_locked(
+                    turn_id=turn_id,
+                    content_digest=content_digest,
+                    final_chunk=final_chunk,
+                    segment_id=segment_id,
+                    requested_ordinal=requested_ordinal,
                 )
-                identity = segment_id
-                if identity is None:
-                    ordinal_for_identity = (
-                        requested_ordinal
-                        if requested_ordinal is not None
-                        else ledger.next_ordinal
-                    )
-                    identity = (
-                        f"ordinal:{ordinal_for_identity}"
-                        if requested_ordinal is not None
-                        else f"legacy:{ordinal_for_identity}:{content_digest}:{int(final_chunk)}"
-                    )
-                existing = ledger.segments.get(identity)
-                if existing is not None:
-                    if (
-                        (requested_ordinal is not None and requested_ordinal != existing.ordinal)
-                        or existing.content_digest != content_digest
-                        or existing.final_chunk != final_chunk
-                    ):
-                        raise SpeechSegmentConflictError(
-                            "segment identity was reused with different content"
-                        )
-                    if existing.state == "committed":
-                        if existing.response is None:
-                            raise RuntimeError("committed segment has no cached response")
-                        return existing, dict(existing.response)
-                    if ledger.state in {"cancelled", "completed"}:
-                        raise SpeechTurnTerminalError(
-                            f"speech turn is {ledger.state}"
-                        )
-                    if existing.state == "in_flight":
-                        waiter = existing.attempt_done
-                    elif existing.state == "reserved":
-                        existing.state = "in_flight"
-                        existing.attempt_done = asyncio.Event()
-                        existing.attempt_generation += 1
-                        existing.worker_request_id = self._worker_request_id_for_segment(
-                            turn_id=turn_id,
-                            segment_id=identity,
-                            ordinal=existing.ordinal,
-                            content_digest=content_digest,
-                            attempt_generation=existing.attempt_generation,
-                        )
-                        return existing, None
-                    else:
-                        raise SpeechTurnTerminalError("speech segment is cancelled")
-                else:
-                    if ledger.state in {"cancelled", "completed"}:
-                        raise SpeechTurnTerminalError(
-                            f"speech turn is {ledger.state}"
-                        )
-                    ordinal = (
-                        requested_ordinal
-                        if requested_ordinal is not None
-                        else ledger.next_ordinal
-                    )
-                    if ordinal != ledger.next_ordinal:
-                        raise SpeechSegmentConflictError(
-                            "segment ordinal is not the next expected ordinal"
-                        )
-                    ordinal_owner = ledger.ordinal_owners.get(ordinal)
-                    if ordinal_owner is not None and ordinal_owner != identity:
-                        raise SpeechSegmentConflictError(
-                            "segment ordinal is already owned by another identity"
-                        )
-                    entry = _TtsSegmentLedgerEntry(
-                        segment_id=identity,
-                        ordinal=ordinal,
-                        content_digest=content_digest,
-                        final_chunk=final_chunk,
-                        worker_request_id=self._worker_request_id_for_segment(
-                            turn_id=turn_id,
-                            segment_id=identity,
-                            ordinal=ordinal,
-                            content_digest=content_digest,
-                            attempt_generation=1,
-                        ),
-                        state="in_flight",
-                    )
-                    ledger.segments[identity] = entry
-                    ledger.ordinal_owners[ordinal] = identity
-                    return entry, None
+                if waiter is None:
+                    return segment, cached_response
             if waiter is not None:
                 await waiter.wait()
+
+    def _claim_tts_segment_locked(
+        self,
+        *,
+        turn_id: str,
+        content_digest: str,
+        final_chunk: bool,
+        segment_id: str | None,
+        requested_ordinal: int | None,
+    ) -> tuple[
+        _TtsSegmentLedgerEntry,
+        dict[str, Any] | None,
+        asyncio.Event | None,
+    ]:
+        ledger = self._tts_turn_ledgers.setdefault(turn_id, _TtsTurnLedger())
+        identity = segment_id
+        if identity is None:
+            ordinal_for_identity = (
+                requested_ordinal
+                if requested_ordinal is not None
+                else ledger.next_ordinal
+            )
+            identity = (
+                f"ordinal:{ordinal_for_identity}"
+                if requested_ordinal is not None
+                else f"legacy:{ordinal_for_identity}:{content_digest}:{int(final_chunk)}"
+            )
+        existing = ledger.segments.get(identity)
+        if existing is not None:
+            if (
+                (requested_ordinal is not None and requested_ordinal != existing.ordinal)
+                or existing.content_digest != content_digest
+                or existing.final_chunk != final_chunk
+            ):
+                raise SpeechSegmentConflictError(
+                    "segment identity was reused with different content"
+                )
+            if existing.state == "committed":
+                if existing.response is None:
+                    raise RuntimeError("committed segment has no cached response")
+                return existing, dict(existing.response), None
+            if ledger.state in {"cancelled", "completed"}:
+                raise SpeechTurnTerminalError(f"speech turn is {ledger.state}")
+            if existing.state == "in_flight":
+                return existing, None, existing.attempt_done
+            if existing.state == "reserved":
+                existing.state = "in_flight"
+                existing.attempt_done = asyncio.Event()
+                existing.attempt_generation += 1
+                existing.worker_request_id = self._worker_request_id_for_segment(
+                    turn_id=turn_id,
+                    segment_id=identity,
+                    ordinal=existing.ordinal,
+                    content_digest=content_digest,
+                    attempt_generation=existing.attempt_generation,
+                )
+                return existing, None, None
+            raise SpeechTurnTerminalError("speech segment is cancelled")
+
+        if ledger.state in {"cancelled", "completed"}:
+            raise SpeechTurnTerminalError(f"speech turn is {ledger.state}")
+        ordinal = (
+            requested_ordinal
+            if requested_ordinal is not None
+            else ledger.next_ordinal
+        )
+        if ordinal != ledger.next_ordinal:
+            raise SpeechSegmentConflictError(
+                "segment ordinal is not the next expected ordinal"
+            )
+        ordinal_owner = ledger.ordinal_owners.get(ordinal)
+        if ordinal_owner is not None and ordinal_owner != identity:
+            raise SpeechSegmentConflictError(
+                "segment ordinal is already owned by another identity"
+            )
+        entry = _TtsSegmentLedgerEntry(
+            segment_id=identity,
+            ordinal=ordinal,
+            content_digest=content_digest,
+            final_chunk=final_chunk,
+            worker_request_id=self._worker_request_id_for_segment(
+                turn_id=turn_id,
+                segment_id=identity,
+                ordinal=ordinal,
+                content_digest=content_digest,
+                attempt_generation=1,
+            ),
+            state="in_flight",
+        )
+        ledger.segments[identity] = entry
+        ledger.ordinal_owners[ordinal] = identity
+        return entry, None, None
+
+    async def _admit_tts_segment(
+        self,
+        *,
+        turn_id: str,
+        text: str,
+        final_chunk: bool,
+        segment_id: str | None,
+        requested_ordinal: int | None,
+        accepted_configuration: AcceptedSpeechConfiguration | None,
+        adapter: Any,
+        active_task: asyncio.Task[Any] | None,
+    ) -> tuple[
+        _TtsSegmentLedgerEntry,
+        dict[str, Any] | None,
+        _SpeechAdmission | None,
+    ]:
+        content_digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        while True:
+            waiter: asyncio.Event | None = None
+            async with self._lifecycle_lock:
+                if accepted_configuration is not None:
+                    self._validate_accepted_speech_configuration_locked(
+                        accepted_configuration
+                    )
+                elif (
+                    self.ended_at is not None
+                    or self._peer_lifecycle.phase != "stable"
+                    or self.state in {"ended", "failed"}
+                ):
+                    raise SpeechSessionSelectionError(
+                        "accepted call configuration changed before speech"
+                    )
+
+                current_admission = self._speech_admission
+                if current_admission is not None:
+                    waiter = current_admission.done
+                else:
+                    segment, cached_response, waiter = self._claim_tts_segment_locked(
+                        turn_id=turn_id,
+                        content_digest=content_digest,
+                        final_chunk=final_chunk,
+                        segment_id=segment_id,
+                        requested_ordinal=requested_ordinal,
+                    )
+                    if waiter is None:
+                        if cached_response is not None:
+                            return segment, cached_response, None
+                        self._speech_admission_generation += 1
+                        admission = _SpeechAdmission(
+                            token=self._speech_admission_generation,
+                            lifecycle_epoch=self._peer_lifecycle.epoch,
+                            turn_id=turn_id,
+                            request_id=segment.worker_request_id,
+                            adapter=adapter,
+                            active_task=active_task,
+                        )
+                        self._speech_admission = admission
+                        self.active_turn_task = active_task
+                        self._active_tts_adapter = adapter
+                        self._active_tts_request_id = segment.worker_request_id
+                        self._active_tts_turn_id = turn_id
+                        self._active_tts_cancel_requested = False
+                        self._last_tts_cancel_context = None
+                        self.state = "rehearsing"
+                        return segment, None, admission
+            if waiter is not None:
+                await waiter.wait()
+
+    async def _promote_speech_admission(
+        self,
+        admission: _SpeechAdmission,
+        *,
+        accepted_configuration: AcceptedSpeechConfiguration | None,
+    ) -> None:
+        async with self._lifecycle_lock:
+            if accepted_configuration is not None:
+                self._validate_accepted_speech_configuration_locked(
+                    accepted_configuration
+                )
+            if (
+                self._speech_admission is not admission
+                or admission.lifecycle_epoch != self._peer_lifecycle.epoch
+                or self._peer_lifecycle.phase != "stable"
+                or admission.turn_id in self._cancelled_ai_turns
+                or admission.turn_id in self._cancelling_ai_turns
+            ):
+                raise SpeechSessionSelectionError(
+                    "accepted call configuration changed before speech generation"
+                )
+
+    async def _release_speech_admission(
+        self,
+        admission: _SpeechAdmission,
+    ) -> None:
+        async with self._lifecycle_lock:
+            if self._speech_admission is not admission:
+                return
+            self._speech_admission = None
+            if self.active_turn_task is admission.active_task:
+                self.active_turn_task = None
+            if (
+                self._active_tts_turn_id == admission.turn_id
+                and self._active_tts_request_id == admission.request_id
+                and self._active_tts_adapter is admission.adapter
+            ):
+                self._active_tts_adapter = None
+                self._active_tts_request_id = None
+                self._active_tts_turn_id = None
+                self._active_tts_cancel_requested = False
+                self._active_tts_metrics_snapshot = None
+            admission.done.set()
 
     @staticmethod
     def _tts_segment_result_succeeded(result: dict[str, Any]) -> bool:
@@ -2675,7 +2840,7 @@ class CallSession:
             return event
 
         finally:
-            if self._active_tts_turn_id == turn_id:
+            if self._speech_admission is None and self._active_tts_turn_id == turn_id:
                 self._active_tts_adapter = None
                 self._active_tts_request_id = None
                 self._active_tts_turn_id = None
@@ -2776,27 +2941,7 @@ class CallSession:
     ) -> dict[str, Any]:
         cancel_started_at = time.perf_counter()
         if captured is None:
-            captured = _CapturedTurnCancellation(
-                active_task=self.active_turn_task,
-                turn_id=(
-                    turn_id
-                    or self._active_tts_turn_id
-                    or self._pending_speech_terminal_turn_id
-                ),
-                request_id=self._active_tts_request_id,
-                adapter=self._active_tts_adapter,
-                metrics_snapshot=(
-                    self._active_tts_metrics_snapshot
-                    if self._active_tts_request_id is not None
-                    else None
-                ),
-                pending_terminal_turn_id=self._pending_speech_terminal_turn_id,
-                pending_playback_final=(
-                    dict(self._pending_speech_playback_final)
-                    if self._pending_speech_playback_final is not None
-                    else None
-                ),
-            )
+            captured = self._capture_turn_cancellation_locked()
         active = captured.active_task
         resolved_turn_id = (
             turn_id
@@ -2969,7 +3114,8 @@ class CallSession:
             candidate_peer=candidate_peer,
             prompt_lease_releaser=releaser,
             cancel_pending=(
-                self.active_turn_task is not None
+                self._speech_admission is not None
+                or self.active_turn_task is not None
                 or self._active_tts_turn_id is not None
                 or self._pending_speech_terminal_turn_id is not None
             ),

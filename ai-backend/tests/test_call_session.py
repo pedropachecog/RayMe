@@ -2253,6 +2253,74 @@ def test_engine_switch_silences_old_and_new_tracks_before_cancel_ack() -> None:
     assert len(old_track.chunks) == 2
 
 
+def test_reserved_speech_cannot_claim_after_engine_switch() -> None:
+    async def scenario() -> None:
+        adapter = SlowQwenStreamingTtsAdapter()
+        track = ScriptedOutboundAudioTrack()
+        session, _ = _new_session(
+            tts_adapter=adapter,
+            outbound_audio_track=track,
+        )
+        session.voice_id = "voice-before"
+        session.engine_id = "qwen3_1_7b"
+        reservation = await session.reserve_accepted_speech_configuration(
+            voice_id="voice-before",
+            engine_id="qwen3_1_7b",
+        )
+
+        admission_entered = asyncio.Event()
+        resume_admission = asyncio.Event()
+        original_admit = session._admit_tts_segment
+
+        async def gated_admission(**kwargs: Any) -> Any:
+            admission_entered.set()
+            await resume_admission.wait()
+            return await original_admit(**kwargs)
+
+        session._admit_tts_segment = gated_admission  # type: ignore[method-assign]
+        speech = asyncio.create_task(
+            session.speak_text(
+                "turn-pre-switch-reservation",
+                "This stale voice must never start.",
+                "voice-before",
+                "qwen3_1_7b",
+                final_chunk=True,
+                accepted_configuration=reservation,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="The exact reference transcript.",
+            )
+        )
+        await admission_entered.wait()
+
+        candidate = ScriptedPeerConnection()
+        generation = await session.mark_peer_connection_pending(
+            candidate,
+            configuration=PeerOfferConfiguration(
+                thread_id="thread-after",
+                voice_id="voice-after",
+                engine_id="f5",
+                prompt_messages=(),
+                vad_adapter=None,
+                stt_adapter=None,
+            ),
+            timeout_seconds=60.0,
+        )
+        accepted, _ = await session.accept_pending_peer_connection(
+            candidate,
+            generation=generation,
+        )
+        assert accepted is True
+
+        resume_admission.set()
+        with pytest.raises(SpeechSessionSelectionError):
+            await speech
+        assert adapter.requests == []
+        assert track.chunks == []
+        assert session._speech_admission is None
+
+    _run(scenario())
+
+
 def test_switching_away_from_qwen_releases_prompt_for_another_session() -> None:
     lease_owner: str | None = "qwen-owner-one"
     releases: list[str] = []
