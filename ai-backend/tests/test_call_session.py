@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
+import sys
 import threading
 from io import BytesIO
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -66,11 +69,12 @@ class ScriptedDataChannel:
 
 
 class ScriptedOutboundAudioTrack:
-    def __init__(self) -> None:
+    def __init__(self, *, playout_wait_completed: bool = True) -> None:
         self.chunks: list[bytes] = []
         self.preroll_seconds: list[float] = []
         self.stop_calls = 0
         self.wait_calls: list[float | None] = []
+        self.playout_wait_completed = playout_wait_completed
 
     async def enqueue(self, chunk: bytes, *, preroll_seconds: float = 0.0) -> float:
         self.chunks.append(chunk)
@@ -88,7 +92,7 @@ class ScriptedOutboundAudioTrack:
 
     async def wait_until_idle(self, *, timeout: float | None = None) -> bool:
         self.wait_calls.append(timeout)
-        return True
+        return self.playout_wait_completed
 
 
 class ObservableStreamingOutboundAudioTrack(ScriptedOutboundAudioTrack):
@@ -1268,7 +1272,80 @@ def test_speak_text_queues_audio_and_emits_done_for_final_chunk() -> None:
     assert events[0]["audio"]["rms"] > 0
     assert events[0]["audio"]["peak"] > 0
     assert event["type"] == "ai_done"
+    assert event["tts_playback_final"]["playout_wait_completed"] is True
     assert session.state == "listening"
+
+
+def test_real_nonstreaming_terminal_crosses_web_playout_validation_boundary() -> None:
+    contract_path = (
+        Path(__file__).resolve().parents[2]
+        / "web-ui/server/app/domain/speech_terminal.py"
+    )
+    spec = importlib.util.spec_from_file_location(
+        "rayme_web_speech_terminal_contract",
+        contract_path,
+    )
+    assert spec is not None and spec.loader is not None
+    contract = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = contract
+    spec.loader.exec_module(contract)
+
+    async def produce(playout_wait_completed: bool) -> dict[str, Any]:
+        session, _ = _new_session(
+            tts_adapter=ScriptedTtsAdapter(),
+            outbound_audio_track=ScriptedOutboundAudioTrack(
+                playout_wait_completed=playout_wait_completed
+            ),
+        )
+        return await session.speak_text(
+            f"turn-{playout_wait_completed}",
+            "Real non-streaming speech.",
+            "voice-f5",
+            "f5",
+            final_chunk=True,
+        )
+
+    class EmptyAudioAdapter:
+        async def synthesize_call_text(self, **_kwargs: Any) -> dict[str, Any]:
+            return {"wav_bytes": b"", "sample_rate": 24000, "duration_ms": 0}
+
+    async def produce_empty_audio() -> dict[str, Any]:
+        session, _ = _new_session(
+            tts_adapter=EmptyAudioAdapter(),
+            outbound_audio_track=ScriptedOutboundAudioTrack(),
+        )
+        return await session.speak_text(
+            "turn-empty",
+            "Empty audio must fail closed.",
+            "voice-f5",
+            "f5",
+            final_chunk=True,
+        )
+
+    completed_event = _run(produce(True))
+    incomplete_event = _run(produce(False))
+    empty_event = _run(produce_empty_audio())
+    completed = contract._speech_terminal_from_response(
+        {"event": completed_event},
+        require_final=True,
+    )
+    incomplete = contract._speech_terminal_from_response(
+        {"event": incomplete_event},
+        require_final=True,
+    )
+    empty = contract._speech_terminal_from_response(
+        {"event": empty_event},
+        require_final=True,
+    )
+
+    assert completed_event["tts_playback_final"]["playout_wait_completed"] is True
+    assert completed.status == "normal"
+    assert completed.playout_completed is True
+    assert incomplete_event["tts_playback_final"]["playout_wait_completed"] is False
+    assert incomplete.status == "error"
+    assert incomplete.playout_completed is False
+    assert empty_event["tts_playback_final"]["playout_wait_completed"] is False
+    assert empty.status == "error"
 
 
 def test_speak_text_queues_audio_before_audio_started_event() -> None:

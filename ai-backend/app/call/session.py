@@ -1101,7 +1101,9 @@ class CallSession:
                     },
                 )
                 await self.emit_event(audio_started_event)
-                await self._wait_for_outbound_audio_playback(playback_seconds)
+                playout_wait_completed = await self._wait_for_outbound_audio_playback(
+                    playback_seconds
+                )
                 final_playback = {
                     "streaming_used": False,
                     "fallback_used": False,
@@ -1110,6 +1112,7 @@ class CallSession:
                     "total_generation_ms": total_generation_ms,
                     "total_playback_ms": round(playback_seconds * 1000, 1),
                     "inter_chunk_gaps_ms": [],
+                    "playout_wait_completed": playout_wait_completed,
                 }
             else:
                 await self._queue_outbound_audio(wav_bytes)
@@ -1121,6 +1124,7 @@ class CallSession:
                     "total_generation_ms": total_generation_ms,
                     "total_playback_ms": 0.0,
                     "inter_chunk_gaps_ms": [],
+                    "playout_wait_completed": False,
                 }
         except asyncio.CancelledError:
             self._cancelled_ai_turns.add(turn_id)

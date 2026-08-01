@@ -10,6 +10,11 @@ from typing import Any, Literal
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from app.domain.speech_terminal import (
+    SpeechTurnTerminal,
+    _speech_terminal_from_response,
+)
+
 UNREACHABLE_MESSAGE = "AI backend unreachable"
 INVALID_RESPONSE_MESSAGE = "AI backend returned an invalid response"
 TRANSCRIPTION_FAILED_MESSAGE = "Transcription failed"
@@ -133,17 +138,6 @@ class SpeechTurnClosedError(AiBackendProcessingError):
 
     def __init__(self) -> None:
         super().__init__(code="call_tts_failed", message="Speech playback failed")
-
-
-@dataclass(frozen=True, slots=True)
-class SpeechTurnTerminal:
-    """One sanitized terminal result for a multi-segment speech turn."""
-
-    status: Literal["normal", "cancelled", "error"]
-    playout_completed: bool
-    response: dict[str, Any] | None = None
-    error_code: str | None = None
-    error_message: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -298,63 +292,6 @@ class SpeechTurn:
                 self._queue.get_nowait()
             except asyncio.QueueEmpty:
                 return
-
-
-def _speech_terminal_from_response(
-    response: Mapping[str, Any] | None,
-    *,
-    require_final: bool,
-) -> SpeechTurnTerminal:
-    if response is None:
-        return _speech_error_terminal("call_tts_failed")
-    raw_event = response.get("event")
-    if not isinstance(raw_event, Mapping):
-        return _speech_error_terminal("call_tts_failed", response=response)
-    event = raw_event
-    event_type = event.get("type")
-    event_status = event.get("status")
-    if event_status == "cancelled" or event_type == "cancelled":
-        return SpeechTurnTerminal(
-            status="cancelled",
-            playout_completed=False,
-            response=dict(response),
-        )
-    if event_type in {"failed", "error"} or event_status == "error":
-        return _speech_error_terminal("call_tts_failed", response=response)
-
-    normal_shape = event_type == "ai_done" or (
-        not require_final and event_status in {"queued", "normal"}
-    )
-    if not normal_shape:
-        return _speech_error_terminal("call_tts_failed", response=response)
-
-    # A final call response is persistence authority. Accept only an explicit
-    # backend playout proof; absence, null, integers, strings, and other
-    # truthy-looking values must all fail closed.
-    raw_playout = event.get("tts_playback_final")
-    if not isinstance(raw_playout, Mapping):
-        return _speech_error_terminal("call_tts_failed", response=response)
-    if raw_playout.get("playout_wait_completed") is not True:
-        return _speech_error_terminal("call_tts_failed", response=response)
-    return SpeechTurnTerminal(
-        status="normal",
-        playout_completed=True,
-        response=dict(response),
-    )
-
-
-def _speech_error_terminal(
-    code: str,
-    *,
-    response: Mapping[str, Any] | None = None,
-) -> SpeechTurnTerminal:
-    return SpeechTurnTerminal(
-        status="error",
-        playout_completed=False,
-        response=dict(response) if response is not None else None,
-        error_code="call_tts_failed",
-        error_message="Speech playback failed",
-    )
 
 
 class AiBackendClient:
