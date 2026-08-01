@@ -1,0 +1,135 @@
+{
+  "absolute_cosine_is_human_likeness_judgment": false,
+  "artifact": "speaker",
+  "audio_and_embeddings_retained": "local_only_uncommitted",
+  "autonomous_release_ready": "pending_other_gates",
+  "baseline_commit": "3501a1a1e2b4371a46d6d65322975134b0d35a5f",
+  "baseline_scores": [
+    {
+      "audio_sha256": "2f3304a5b0667cf5cbd07ae1a8e6df048b08599843339120bd94e921d86dba07",
+      "bucket_id": "short",
+      "cosine": 0.9164327917661004
+    },
+    {
+      "audio_sha256": "0de291f2dcbb943e305a3501a21320d9211bb2bd1793add6806950befb83450b",
+      "bucket_id": "medium",
+      "cosine": 0.9769008210740886
+    },
+    {
+      "audio_sha256": "b0da13526a925ec2ba5edc818967b2406a0eb22021a0702bff00db1acc2723f4",
+      "bucket_id": "long",
+      "cosine": 0.9721072191160505
+    }
+  ],
+  "critical_gates": [
+    "speaker_stability"
+  ],
+  "deployed_commit": "3501a1a1e2b4371a46d6d65322975134b0d35a5f",
+  "early_median": 0.968299968623129,
+  "early_scores": [
+    {
+      "audio_sha256": "6613f1ed4a2a2869739c28a30a07f0a3489ebf3f251d654e0a8959ee9dc7b818",
+      "bucket_id": 1,
+      "cosine": 0.9448910115474559
+    },
+    {
+      "audio_sha256": "55ea1c15ddd51a5d277ea8c7e541821cdaad9928c4658b736bf6860a17f9b6de",
+      "bucket_id": 2,
+      "cosine": 0.9762461597980859
+    },
+    {
+      "audio_sha256": "b38e728bf5d2ef4b29bc11a75a7d1efdd86d299d73041f7f718a39c5f4e43d95",
+      "bucket_id": 3,
+      "cosine": 0.9745215456669014
+    },
+    {
+      "audio_sha256": "1c4af7a0e8a95875a92da7de2ac3a3f0c562819adfe8cb31a9a46b080d51a67b",
+      "bucket_id": 4,
+      "cosine": 0.9169548957688665
+    },
+    {
+      "audio_sha256": "8829087e405e9af94e12b389261b20fc4a3ef828542195f36d050457aecb7b53",
+      "bucket_id": 5,
+      "cosine": 0.968299968623129
+    }
+  ],
+  "generated_at": "2026-08-01T06:11:21.030041Z",
+  "integrated_baseline_median": 0.9721072191160505,
+  "integrated_human_listening_status": "pending",
+  "late_median": 0.9473899870154929,
+  "late_minus_early": -0.02090998160763602,
+  "late_minus_integrated_baseline": -0.02471723210055754,
+  "late_scores": [
+    {
+      "audio_sha256": "af67e7d11aa120386aeff803aa93b54ea462c83b1760e464d5e26eef3ce227ac",
+      "bucket_id": 46,
+      "cosine": 0.9473899870154929
+    },
+    {
+      "audio_sha256": "97bede68886c3ee40011c17e108f211bd449c959089520d5ef9166d534b46bd1",
+      "bucket_id": 47,
+      "cosine": 0.9788521437298593
+    },
+    {
+      "audio_sha256": "dd64dc8bda442e9512055aebbfce83d05509efcec7cd0136415d7a81eca3f657",
+      "bucket_id": 48,
+      "cosine": 0.963734755797452
+    },
+    {
+      "audio_sha256": "c4d27357b545ab6f8d82156bd9df7158fe55aee5bb8df131b0d576bcc8542bc2",
+      "bucket_id": 49,
+      "cosine": 0.9427585325265652
+    },
+    {
+      "audio_sha256": "6046af0866dcfe14bd365a9c64fd667077e573a1df91309989e9e6b6da819049",
+      "bucket_id": 50,
+      "cosine": 0.9442886815566806
+    }
+  ],
+  "maximum_late_drop": 0.05,
+  "middle_median": 0.9726437624488938,
+  "middle_scores": [
+    {
+      "audio_sha256": "abee9f361d2c2d1474ab223ffa17bf64e9d6372b93ab19307cea7bab85e3560b",
+      "bucket_id": 23,
+      "cosine": 0.9781476860545035
+    },
+    {
+      "audio_sha256": "d07e956119a519412bf6363515fb5c83e0435db5e4718736c5634f4f267fdcb5",
+      "bucket_id": 24,
+      "cosine": 0.9685624320583284
+    },
+    {
+      "audio_sha256": "e28370a8c63a4085132b704f76a0a37c8aeda90366866033cd161c578d359987",
+      "bucket_id": 25,
+      "cosine": 0.9113320961531599
+    },
+    {
+      "audio_sha256": "80bc11563c02f38fc933b799ff3f350289f7cf47ff251283a973582f1593ec21",
+      "bucket_id": 26,
+      "cosine": 0.9726437624488938
+    },
+    {
+      "audio_sha256": "e8d3608252c2c652a1b27ddf99186ad65760a33d02ef7c5980a3bdc3b312eb8f",
+      "bucket_id": 27,
+      "cosine": 0.9727515828625166
+    }
+  ],
+  "phase": "09",
+  "physical_call_status": "pending",
+  "reference_sha256": "b58c9c9926cd7a535db401fe82ac18af8aa3a1e8532ef513197d463dc9fb9a8b",
+  "schema_version": 1,
+  "scorer": {
+    "device": "cuda",
+    "gpu_name": "NVIDIA GeForce RTX 3060",
+    "local_files_only": true,
+    "model_class": "WavLMForXVector",
+    "model_id": "microsoft/wavlm-base-plus-sv",
+    "model_revision": "feb593a6c23c1cc3d9510425c29b0a14d2b07b1e",
+    "sample_rate_hz": 16000,
+    "torch_cuda_version": "12.6",
+    "torch_version": "2.10.0+cu126",
+    "transformers_version": "4.57.3"
+  },
+  "speaker_stability_gate": true
+}

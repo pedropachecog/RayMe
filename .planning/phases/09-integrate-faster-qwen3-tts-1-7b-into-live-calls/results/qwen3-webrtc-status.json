@@ -9,8 +9,8 @@
   "critical_gates": [
     "reference_authorization"
   ],
-  "deployed_commit": "5e8a49c5179e4d38c55994625cd9ab18718e2962",
-  "generated_at": "2026-08-01T02:16:45.963690Z",
+  "deployed_commit": "3501a1a1e2b4371a46d6d65322975134b0d35a5f",
+  "generated_at": "2026-08-01T06:10:11.498159Z",
   "output_limits": {
     "bounded": true,
     "max_audio_seconds": 32.0,

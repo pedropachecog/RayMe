@@ -1,0 +1,24 @@
+{
+  "artifact": "leak_scan",
+  "critical_gates": [
+    "private_evidence_clean"
+  ],
+  "deployed_commit": "3501a1a1e2b4371a46d6d65322975134b0d35a5f",
+  "findings": [],
+  "generated_at": "2026-08-01T06:11:21.966252Z",
+  "phase": "09",
+  "scanned_artifacts": [
+    "qwen3-runtime.json",
+    "qwen3-webrtc-status.json",
+    "qwen3-call-flow.json",
+    "qwen3-soak.json",
+    "qwen3-stt.json",
+    "qwen3-speaker.json",
+    "qwen3-browser.json"
+  ],
+  "scanned_log_streams": [
+    "ai-backend",
+    "web-ui-server"
+  ],
+  "schema_version": 1
+}

@@ -1,0 +1,43 @@
+{
+  "ai_health_url": "https://192.168.1.199:9443/health",
+  "artifact": "browser",
+  "browser_errors": [],
+  "canonical_public_api": true,
+  "critical_gates": [],
+  "deployed_commit": "3501a1a1e2b4371a46d6d65322975134b0d35a5f",
+  "engine_id": "qwen3_1_7b",
+  "evidence_state": "passed_real_live_e2e",
+  "expected_commit": "3501a1a1e2b4371a46d6d65322975134b0d35a5f",
+  "generated_at": "2026-08-01T06:24:23Z",
+  "integrated_human_listening_status": "pending",
+  "live_e2e_enabled": true,
+  "mocked": false,
+  "observed_commit": "3501a1a1e2b4371a46d6d65322975134b0d35a5f",
+  "observed_events": [
+    "model_resident",
+    "prompt_ready",
+    "ai_audio_started",
+    "ai_done"
+  ],
+  "phase": "09",
+  "physical_call_status": "pending",
+  "reference_authorization": {
+    "authorization_basis": "generated_non_person_fixture",
+    "fixture_kind": "generated_non_person_fixture",
+    "opaque_asset_id": "voice_asset_c4a180c91578400eb7836cf41475bf54",
+    "reference_sha256": "b58c9c9926cd7a535db401fe82ac18af8aa3a1e8532ef513197d463dc9fb9a8b",
+    "transcript_sha256": "fc4f6a7f4b2f8e6fe7de46941b5b5cb8f35f4d21a11529542c403e347853aa96",
+    "use_scope": "rayme_lan_call_testing",
+    "voice_data_steward": "non_person_sapi_david_v1"
+  },
+  "schema_version": 1,
+  "test_exit_code": 0,
+  "test_result": {
+    "desktop_chromium": "passed_two_user_to_ai_cycles",
+    "mobile_chromium": "passed_two_user_to_ai_cycles",
+    "desktop_ai_done_events": 2,
+    "mobile_ai_done_events": 2,
+    "total_tests_passed": 6
+  },
+  "web_url": "https://192.168.1.199:8443"
+}
