@@ -12,6 +12,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_valida
 
 from app.domain.speech_terminal import (
     SpeechTurnTerminal,
+    _speech_error_terminal,
     _speech_terminal_from_response,
 )
 
