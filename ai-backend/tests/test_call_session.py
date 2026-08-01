@@ -2397,6 +2397,84 @@ def test_overlapping_engine_switch_rejects_and_closes_second_peer() -> None:
     _run(scenario())
 
 
+@pytest.mark.parametrize(
+    "failed_step",
+    ["stop", "old_peer_close", "cancel", "prompt_lease"],
+)
+def test_engine_switch_cleanup_failure_never_leaves_switching(
+    failed_step: str,
+) -> None:
+    class FailingStopTrack(ScriptedOutboundAudioTrack):
+        async def stop_current(self) -> None:
+            self.stop_calls += 1
+            raise RuntimeError("injected stop failure")
+
+    class FailingClosePeer(ScriptedPeerConnection):
+        async def close(self) -> None:
+            self.close_calls += 1
+            raise RuntimeError("injected close failure")
+
+    async def scenario() -> None:
+        old_track: ScriptedOutboundAudioTrack = (
+            FailingStopTrack()
+            if failed_step == "stop"
+            else ScriptedOutboundAudioTrack()
+        )
+        session, original_peer = _new_session(outbound_audio_track=old_track)
+        if failed_step == "old_peer_close":
+            session.peer_connection = FailingClosePeer()
+        else:
+            session.peer_connection = original_peer
+        session.voice_id = "voice-before"
+        session.engine_id = "qwen3_1_7b"
+
+        if failed_step == "cancel":
+            session.active_turn_task = ScriptedAiTurn()
+
+            async def fail_cancel(*_: Any, **__: Any) -> dict[str, Any]:
+                raise RuntimeError("injected cancellation failure")
+
+            session.cancel_ai_turn = fail_cancel  # type: ignore[method-assign]
+
+        if failed_step == "prompt_lease":
+            async def fail_release(_: str) -> bool:
+                raise RuntimeError("injected lease failure")
+
+            assert await session.install_or_release_tts_prompt_lease(fail_release)
+
+        candidate = ScriptedPeerConnection()
+        generation = await session.mark_peer_connection_pending(
+            candidate,
+            outbound_audio_track=ScriptedOutboundAudioTrack(),
+            configuration=PeerOfferConfiguration(
+                thread_id="thread-after",
+                voice_id="voice-after",
+                engine_id="f5",
+                prompt_messages=(),
+                vad_adapter=None,
+                stt_adapter=None,
+            ),
+            timeout_seconds=60.0,
+        )
+        accepted, _ = await session.accept_pending_peer_connection(
+            candidate,
+            generation=generation,
+        )
+
+        assert accepted is False
+        assert session._peer_lifecycle.phase == "terminal"
+        assert session._peer_lifecycle.phase != "switching"
+        assert session._peer_lifecycle.switch_owner is None
+        assert session.state == "failed"
+        if failed_step == "prompt_lease":
+            cleanup = session._terminal_cleanup
+            assert cleanup is not None
+            assert cleanup.prompt_lease_releaser is not None
+            assert cleanup.prompt_lease_pending is True
+
+    _run(scenario())
+
+
 def test_switching_away_from_qwen_releases_prompt_for_another_session() -> None:
     lease_owner: str | None = "qwen-owner-one"
     releases: list[str] = []
