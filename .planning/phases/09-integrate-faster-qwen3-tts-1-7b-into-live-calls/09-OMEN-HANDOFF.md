@@ -13,11 +13,11 @@ RayMe is autonomously release-ready at deployed commit `2721a4ef3ddfadf9cbc47acb
 | Resident engine | `qwen3_1_7b` |
 | Selected prompt | `ready` |
 | Active sessions | `0` before and after the real browser suite |
-| Saved voice ID | `voice_2ff7f9b73a4040648d2d8317b07cf02d` |
-| Saved voice name | `Live Call Voice 1785565019627` |
-| Prompt owner key | `8481585640f8e716076611f1f49b8ae034cb58cabd95460b7c55165e48da1df2` — matches the live ready prompt |
+| Prepared evidence voice ID | `voice_4770e0117d35481fa1fb595eef7939ff` |
+| Prepared evidence voice name | `RayMe Phase 09 Synthetic Qwen Tracer` |
+| Prompt owner key | `voice_4770e0117d35481fa1fb595eef7939ff` — matches the live ready prompt after final finish-evidence cleanup |
 
-The selected saved voice is the mechanical generated non-person evidence fallback (`authorization_basis=generated_non_person_fixture`, steward `non_person_sapi_david_v1`, scope `rayme_lan_call_testing`). It proves transport, streaming, recovery, stability, and privacy; it is not eligible for human likeness judgment. Before judging likeness or naturalness, save or select the intended real-person reference with the speaker/data steward's actual authorization, the matching transcript, the LAN-test scope, and agreed retention/deletion terms.
+The prepared voice is a mechanical generated non-person evidence fallback (`authorization_basis=generated_non_person_fixture`, scope `rayme_lan_call_testing`). Evidence runs may create additional transient fixture IDs, so identify the fallback by its authorization basis rather than by one ID. It proves transport, streaming, recovery, stability, and privacy; it is not eligible for human likeness judgment. Before judging likeness or naturalness, save or select the intended real-person reference with the speaker/data steward's actual authorization, the matching transcript, the LAN-test scope, and agreed retention/deletion terms.
 
 ## Release Evidence
 
