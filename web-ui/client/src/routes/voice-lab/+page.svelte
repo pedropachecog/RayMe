@@ -110,7 +110,6 @@
 
   const validSampleExtension = /\.(wav|mp3|flac)$/i;
   const QWEN3_ENGINE_ID = 'qwen3_1_7b';
-  const QWEN3_LAN_SCOPE = 'rayme_lan_call_testing';
   const QWEN3_FAILURE_COPY: Record<string, string> = {
     qwen3_transcript_required: 'Add the matching reference transcript before using Qwen3-TTS 1.7B.',
     qwen3_transcript_mismatch: 'This transcript does not appear to match the voice sample. Review the transcript or choose a different sample, then try again.',
@@ -139,13 +138,6 @@
   let previewText = 'The line is open. This is how the saved RayMe voice will sound.';
   let useDefaultEngine = true;
   let speechSpeed = 0.85;
-  let voiceDataSteward = '';
-  let authorizationBasis = '';
-  let useScope = '';
-  let authorizationError = '';
-  let voiceDataStewardInput: HTMLInputElement;
-  let authorizationBasisInput: HTMLInputElement;
-  let useScopeSelect: HTMLSelectElement;
   let engineSettings = {
     voxcpm2: { ...DEFAULT_VOXCPM2_SETTINGS }
   };
@@ -185,10 +177,8 @@
   $: isQwenSelected = selectedEngine === QWEN3_ENGINE_ID;
   $: transcriptRequired = selectedEngineMetadata?.requires_transcript === true;
   $: hasRequiredTranscript = !transcriptRequired || Boolean(transcript.trim());
-  $: hasQwenAuthorization =
-    !isQwenSelected || Boolean(voiceDataSteward.trim() && authorizationBasis.trim() && useScope);
-  $: canPreview = Boolean(asset && hasRequiredTranscript && hasQwenAuthorization && selectedEngine && previewText.trim());
-  $: canSave = Boolean(asset && voiceName.trim() && hasRequiredTranscript && hasQwenAuthorization && selectedEngine);
+  $: canPreview = Boolean(asset && hasRequiredTranscript && selectedEngine && previewText.trim());
+  $: canSave = Boolean(asset && voiceName.trim() && hasRequiredTranscript && selectedEngine);
   $: uploadedSampleUrl = asset ? toApiPath(`/voices/assets/${encodeURIComponent(asset.asset_id)}/sample`) : null;
   $: if (transcriptState === 'error' && transcript.trim()) {
     transcriptState = 'ready';
@@ -336,13 +326,6 @@
         name: voiceName.trim(),
         default_engine: selectedEngine,
         reference_transcript: transcript.trim(),
-        ...(qwenOperation
-          ? {
-              voice_data_steward: voiceDataSteward.trim(),
-              authorization_basis: authorizationBasis.trim(),
-              use_scope: useScope
-            }
-          : {}),
         preview_text: previewText,
         use_default_engine: useDefaultEngine,
         engine: useDefaultEngine ? null : selectedEngine,
@@ -388,13 +371,6 @@
         name: voiceName.trim(),
         default_engine: selectedEngine,
         reference_transcript: transcript.trim(),
-        ...(isQwenSelected
-          ? {
-              voice_data_steward: voiceDataSteward.trim(),
-              authorization_basis: authorizationBasis.trim(),
-              use_scope: useScope
-            }
-          : {}),
         metadata: {
           ...buildVoiceMetadata(),
           sample_filename: selectedFile?.name ?? null
@@ -637,7 +613,6 @@
 
   function focusFirstInvalidQwenField(): boolean {
     if (!isQwenSelected) {
-      authorizationError = '';
       return true;
     }
     if (!asset) {
@@ -649,22 +624,6 @@
       document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Reference transcript"]')?.focus();
       return false;
     }
-    if (!voiceDataSteward.trim()) {
-      authorizationError = 'Add the reference source, authorization basis, and use scope before using this voice.';
-      voiceDataStewardInput?.focus();
-      return false;
-    }
-    if (!authorizationBasis.trim()) {
-      authorizationError = 'Add the reference source, authorization basis, and use scope before using this voice.';
-      authorizationBasisInput?.focus();
-      return false;
-    }
-    if (!useScope) {
-      authorizationError = 'Add the reference source, authorization basis, and use scope before using this voice.';
-      useScopeSelect?.focus();
-      return false;
-    }
-    authorizationError = '';
     return true;
   }
 
@@ -781,53 +740,7 @@
       <TtsEnginePicker bind:selectedEngine {engines} />
 
       {#if selectedEngine === 'qwen3_1_7b'}
-        <section class="authorization-panel" aria-labelledby="reference-authorization-title">
-          <div>
-            <h2 id="reference-authorization-title">Reference authorization</h2>
-            <p>Add where this recording came from, why you are authorized to use it, and its permitted RayMe scope.</p>
-          </div>
-          <label>
-            <span>Reference source</span>
-            <input
-              bind:this={voiceDataStewardInput}
-              bind:value={voiceDataSteward}
-              name="voice_data_steward"
-              type="text"
-              required
-              autocomplete="off"
-              aria-invalid={Boolean(authorizationError && !voiceDataSteward.trim())}
-            />
-          </label>
-          <label>
-            <span>Authorization basis</span>
-            <input
-              bind:this={authorizationBasisInput}
-              bind:value={authorizationBasis}
-              name="authorization_basis"
-              type="text"
-              required
-              autocomplete="off"
-              aria-invalid={Boolean(authorizationError && !authorizationBasis.trim())}
-            />
-          </label>
-          <label>
-            <span>Use scope</span>
-            <select
-              bind:this={useScopeSelect}
-              bind:value={useScope}
-              name="use_scope"
-              required
-              aria-invalid={Boolean(authorizationError && !useScope)}
-            >
-              <option value="">Choose permitted scope</option>
-              <option value={QWEN3_LAN_SCOPE}>RayMe LAN call testing</option>
-            </select>
-          </label>
-          {#if authorizationError}
-            <p class="error" role="alert">{authorizationError}</p>
-          {/if}
-
-          <div class="readiness" aria-label="Qwen voice readiness">
+        <div class="readiness" aria-label="Qwen voice readiness">
             <div>
               <span>Model</span>
               {#if modelReadiness.state === 'loading'}
@@ -852,8 +765,7 @@
                 <p>Voice not prepared</p>
               {/if}
             </div>
-          </div>
-        </section>
+        </div>
       {/if}
 
       {#if selectedEngine === 'voxcpm2'}
@@ -881,9 +793,7 @@
 
         <div class="save-state">
           <p>
-            {isQwenSelected
-              ? 'Save Voice needs a sample, name, matching transcript, authorization details, and engine. Preview success is not required.'
-              : 'Save Voice is available once sample, name, transcript, and engine are valid. Preview success is not required.'}
+            Save Voice is available once sample, name, transcript, and engine are valid. Preview success is not required.
           </p>
           {#if saveState === 'saved'}
             <p class="success" role="status">Voice saved.</p>
@@ -1006,7 +916,6 @@
 
   .side-rail,
   .save-panel,
-  .authorization-panel,
   .readiness {
     display: grid;
     min-width: 0;
@@ -1018,38 +927,6 @@
     border-radius: var(--radius-md);
     padding: var(--space-lg);
     background: rgba(20, 31, 56, 0.78);
-  }
-
-  .authorization-panel {
-    border-radius: var(--radius-md);
-    padding: var(--space-lg);
-    background: rgba(20, 31, 56, 0.78);
-  }
-
-  .authorization-panel h2 {
-    margin: 0;
-    color: var(--color-text);
-    font-size: var(--font-heading);
-    font-weight: 600;
-    line-height: var(--line-heading);
-  }
-
-  .authorization-panel p {
-    color: var(--color-text-muted);
-    font-size: var(--font-body);
-    line-height: var(--line-body);
-  }
-
-  select {
-    width: 100%;
-    min-height: 44px;
-    border: 0;
-    border-radius: var(--radius-md);
-    padding: 0 var(--space-md);
-    background: rgba(6, 14, 32, 0.78);
-    box-shadow: inset 0 0 0 1px rgba(64, 72, 93, 0.28);
-    color: var(--color-text);
-    font-size: var(--font-body);
   }
 
   .readiness {
@@ -1179,10 +1056,6 @@
     }
 
     .save-panel {
-      padding: var(--space-md);
-    }
-
-    .authorization-panel {
       padding: var(--space-md);
     }
 

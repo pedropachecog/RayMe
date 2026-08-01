@@ -39,14 +39,6 @@ class VoiceSave(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     default_engine: str = Field(min_length=1, max_length=80)
     reference_transcript: str | None = None
-    voice_data_steward: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=200,
-        title="Reference source",
-    )
-    authorization_basis: str | None = Field(default=None, min_length=1, max_length=200)
-    use_scope: str | None = Field(default=None, min_length=1, max_length=80)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -66,14 +58,6 @@ class VoicePreview(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     default_engine: str | None = Field(default=None, max_length=80)
     reference_transcript: str | None = None
-    voice_data_steward: str | None = Field(
-        default=None,
-        min_length=1,
-        max_length=200,
-        title="Reference source",
-    )
-    authorization_basis: str | None = Field(default=None, min_length=1, max_length=200)
-    use_scope: str | None = Field(default=None, min_length=1, max_length=80)
     preview_text: str | None = None
     use_default_engine: bool = True
     engine: str | None = Field(default=None, max_length=80)

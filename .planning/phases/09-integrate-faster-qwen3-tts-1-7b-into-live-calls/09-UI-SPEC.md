@@ -20,7 +20,7 @@ Phase 09 preserves RayMe's existing Voice Lab, Voice Library, Settings, voice-as
 
 - truthful `Qwen3-TTS 1.7B-Base` identity from RayMe server metadata;
 - separate model-load and selected-voice preparation states;
-- Qwen reference-transcript and authorization validation in the existing creation flow;
+- Qwen reference-transcript validation in the existing creation flow, with upload implying authorization;
 - row-scoped preview/test-play progress and retry;
 - a call-preparation gate that stays visibly `Connecting` until the selected Qwen voice is ready.
 
@@ -118,22 +118,19 @@ Model and selected-voice preparation are two independent rows. Do not collapse t
 - Repeated prepare for the same voice reuses the same visible state; do not stack duplicate spinners, toasts, or panels.
 - Timestamps may appear as muted label text only when supplied by the server; format them with the existing locale formatter. Never show internal paths, model revisions, provider controls, cache identifiers, or raw worker errors.
 
-### Qwen reference authorization block
+### Qwen uploaded-reference contract
 
-When `qwen3_1_7b` is selected, render one compact raised panel immediately after the engine picker and before Preview Voice. Hide it for other engines without clearing entered values.
+When `qwen3_1_7b` is selected, the completed Voice Lab upload is the authorization event. Do not render or submit `Reference source`, `Authorization basis`, `Use scope`, or any replacement authorization form.
 
-- Heading: `Reference authorization`
-- Body: `Add where this recording came from, why you are authorized to use it, and its permitted RayMe scope.`
-- Render the three required typed values from the Phase 09 voice API with labels `Reference source`, `Authorization basis`, and `Use scope`. `Reference source` maps to `voice_data_steward` and must name the speaker/data steward or an opaque steward id; the server binds these three values to its computed reference/transcript SHA-256 values. Use the existing 44px input/select pattern and server-defined option values; do not invent permission, preselect a consent claim, or infer authorization from upload or prior listening.
-- All three values begin unconfirmed for a new real-person Qwen voice. Synthetic/evidence values are test-only and must not appear as convenient real-person defaults.
-- Preserve these values, the sample, transcript, name, preview text, and engine choice across preview, prewarm, alignment, worker, or network failure and across Qwen/non-Qwen engine switches.
-- For Qwen, Save Voice and Preview Voice are disabled until sample, editable nonblank transcript, required authorization values, engine, and relevant target text are locally valid. Server/backend validation remains authoritative.
-- Keep Preview optional: a synthesis/runtime preview failure does not by itself block Save Voice when all required fields remain valid. A transcript mismatch or missing authorization is a validation failure and must be corrected before Save.
+- Keep model and saved-voice readiness visible immediately after the engine picker.
+- Preserve the sample, transcript, name, preview text, and engine choice across preview, prewarm, alignment, worker, or network failure and across Qwen/non-Qwen engine switches.
+- For Qwen, Save Voice and Preview Voice are disabled until sample, editable nonblank transcript, engine, and relevant target text are locally valid. Server/backend validation remains authoritative.
+- Keep Preview optional: a synthesis/runtime preview failure does not by itself block Save Voice when the upload, transcript, name, and engine remain valid. A transcript mismatch remains a validation failure and must be corrected before Save.
 
 ### Voice Lab and Voice Library
 
-- Keep the existing five-step strip (`Upload`, `Transcript`, `Engine`, `Preview`, `Save`); authorization is conditional content within Engine, not a sixth step.
-- Change the Qwen save helper to: `Save Voice needs a sample, name, matching transcript, authorization details, and engine. Preview success is not required.` Preserve the existing helper for non-Qwen engines.
+- Keep the existing five-step strip (`Upload`, `Transcript`, `Engine`, `Preview`, `Save`); do not add an authorization step or conditional authorization panel.
+- Use the shared save helper: `Save Voice is available once sample, name, transcript, and engine are valid. Preview success is not required.`
 - Preview uses the existing `Preview Voice` button. During load/prewarm it reads `Preparing voice…`; during native synthesis it reads `Synthesizing…`.
 - Test-play uses the existing `Test Voice` button. During load/prewarm it reads `Preparing voice…`; during synthesis it reads `Testing voice…`.
 - Row progress stays inside the affected card. It must not replace the whole library with a loading state or disable unrelated rows.
@@ -172,7 +169,6 @@ When `qwen3_1_7b` is selected, render one compact raised panel immediately after
 | Empty state body | `Upload a 6–15 second WAV, MP3, or FLAC sample to create the first voice.` |
 | Missing transcript | `Add the matching reference transcript before using Qwen3-TTS 1.7B.` |
 | Transcript mismatch | `This transcript does not appear to match the voice sample. Review the transcript or choose a different sample, then try again.` |
-| Missing authorization | `Add the reference source, authorization basis, and use scope before using this voice.` |
 | Prewarm failure | `RayMe could not prepare this voice. Retry preparation. Your sample, transcript, name, and engine selection are still here.` |
 | Generation ceiling | `RayMe stopped this voice because the generated audio exceeded its safe limit. Check the transcript and try again.` |
 | Runtime/worker failure | `Qwen3-TTS 1.7B is unavailable right now. Choose another voice or check AI backend status in Settings.` |
@@ -181,7 +177,7 @@ When `qwen3_1_7b` is selected, render one compact raised panel immediately after
 
 Error/action mapping:
 
-- missing transcript, mismatch, or authorization → existing blocking panel with action `Open Voice Lab`;
+- missing transcript or mismatch → existing blocking panel with action `Open Voice Lab`;
 - retryable voice-preparation failure → action `Retry Preparation`;
 - runtime/worker/backend unavailable → action `Open Settings`;
 - selected voice missing/deleted → preserve existing `Choose Voice` action.
@@ -192,13 +188,13 @@ All failure text is fixed RayMe copy. Never append backend exception text, refer
 
 ## Responsive and Accessibility Contract
 
-- Preserve Voice Lab's desktop split at 1060px and its single-column mobile flow; readiness and authorization panels remain within the creation column.
+- Preserve Voice Lab's desktop split at 1060px and its single-column mobile flow; readiness remains within the creation column.
 - Preserve the engine grid's auto-fit behavior. At 320px minimum width, cards, chips, and long engine/error copy wrap without horizontal page scroll.
 - Preserve the call route's single-column layout below 800px, safe-area bottom reserve, sticky toolbar behavior after readiness, and minimum 44px controls.
 - Do not communicate `loading`, `ready`, or `failed` by color alone. Every state has visible text; loading additionally has an icon, and failure uses an alert.
 - Announce model and voice readiness changes through one polite live region per affected surface. Do not announce polling responses when the visible state has not changed.
-- Keep focus on the initiating button during inline progress. On validation failure, move focus to the first invalid Qwen field; on call-preparation failure, focus the blocking-panel heading or action.
-- Use the global 2px focus-visible outline. Do not remove focus rings from engine radios, authorization controls, retry, or call controls.
+- Keep focus on the initiating button during inline progress. On validation failure, move focus to the transcript or upload control; on call-preparation failure, focus the blocking-panel heading or action.
+- Use the global 2px focus-visible outline. Do not remove focus rings from engine radios, upload/transcript controls, retry, or call controls.
 - Honor the existing reduced-motion rule. Any rotating progress icon becomes static under `prefers-reduced-motion: reduce`; text still communicates progress.
 
 ---
@@ -215,10 +211,10 @@ Applicable state considerations resolved: 8 covered, 0 backstop, 0 unresolved.
 | loading | Engine metadata, readiness rows, preview/test controls, call gate | ✅ covered | Separate model and voice progress appears inline; only the initiating action is disabled; call remains `Connecting`. |
 | error | Voice form, engine card, row action, call gate | ✅ covered | Fixed sanitized copy plus retry/navigation action; form state is preserved and unrelated engines remain usable. |
 | populated | Engine picker and Voice Library | ✅ covered | Canonical metadata renders in existing responsive cards/rows with readiness local to the selected/affected item. |
-| partial | Qwen reference form | ✅ covered | Blank transcript or any missing authorization value marks/focuses the first invalid field and blocks only Qwen operations. |
+| partial | Qwen reference form | ✅ covered | A blank transcript marks/focuses the transcript field and blocks only Qwen operations. |
 | overflow | Engine grid, chips, readiness/error text | ✅ covered | Auto-fit grid and wrapping expand vertically; no clipping, ellipsis of actionable errors, or horizontal page scroll. |
 | zero-one-many | Voice Library and engine roster | ✅ covered | Existing empty, single-row, and spaced multi-row layouts remain intact; dynamic canonical engines are not filtered out. |
-| long-text | Engine labels, voice names, authorization values, errors | ✅ covered | Labels/errors wrap; existing voice-name ellipsis retains full accessible name/title; private raw text is never rendered. |
+| long-text | Engine labels, voice names, transcripts, errors | ✅ covered | Labels/errors wrap; existing voice-name ellipsis retains full accessible name/title; private raw text is never rendered. |
 
 ---
 

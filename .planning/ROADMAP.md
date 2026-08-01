@@ -625,6 +625,8 @@ Plans:
 - [x] 09-08-PLAN.md - Canonical Settings identity, three-field authorization, row-scoped prepare/test readiness, and call-gate component contracts (Wave 6)
 - [x] 09-11-PLAN.md - Paced end-to-end backpressure, truthful metrics, and complete cancellation controls (Wave 6)
 
+Policy supersession (2026-08-01): the completed 09-07/09-08 authorization work remains historical execution record, but current product behavior treats a completed Voice Lab upload as authorization and exposes no separate reference-source/basis/scope fields.
+
 **Wave 7** *(blocked on Wave 6 completion)*
 
 - [x] 09-09-PLAN.md - Mocked Voice Lab/Library/Settings/call readiness Playwright acceptance and commit-asserting Qwen live E2E support (Wave 7)

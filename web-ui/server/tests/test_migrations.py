@@ -469,17 +469,9 @@ def test_qwen3_identity_upgrade_is_exact_truthful_and_idempotent(tmp_path: Path)
         unknown_metadata = json.loads(voices["voice-unknown-qwen"]["metadata_json"])
 
         assert voices["voice-legacy-qwen"]["default_engine"] == "qwen3_1_7b"
-        assert legacy_metadata["keep"] == {"nested": True}
-        assert legacy_metadata["qwen3_authorization"] == {
-            "authorization_status": "needs_confirmation"
-        }
+        assert legacy_metadata == {"keep": {"nested": True}}
         assert voices["voice-legacy-recorded"]["default_engine"] == "qwen3_1_7b"
-        assert recorded_legacy_metadata == {
-            "keep": "preserved",
-            "qwen3_authorization": {
-                "authorization_status": "needs_confirmation"
-            },
-        }
+        assert recorded_legacy_metadata == {"keep": "preserved"}
         assert voices["voice-current-qwen"]["default_engine"] == "qwen3_1_7b"
         assert current_metadata == {"authorization_status": "external"}
         assert voices["voice-unknown-qwen"]["default_engine"] == "qwen3_future_unknown"
@@ -557,3 +549,47 @@ def test_forward_repair_resets_authorization_already_recorded_by_original_0003(
     serialized = json.dumps(metadata)
     assert "stale-private-steward" not in serialized
     assert "legacy-model-grant" not in serialized
+
+
+def test_upload_implies_authorization_migration_removes_legacy_qwen_metadata(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "rayme-qwen-upload-authorization.sqlite3"
+    config = migration_config(db_path)
+    command.upgrade(config, "0007_call_turn_ownership")
+
+    with connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO voices
+                (id, name, default_engine, reference_transcript, metadata_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "voice-legacy-authorization",
+                "Uploaded Qwen voice",
+                "qwen3_1_7b",
+                "Exact uploaded transcript.",
+                json.dumps(
+                    {
+                        "keep": {"unrelated": True},
+                        "qwen3_authorization": {
+                            "authorization_status": "needs_confirmation",
+                            "voice_data_steward": "remove-me",
+                        },
+                    }
+                ),
+            ),
+        )
+        connection.commit()
+
+    command.upgrade(config, "head")
+    command.upgrade(config, "head")
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            "SELECT metadata_json FROM voices WHERE id = ?",
+            ("voice-legacy-authorization",),
+        ).fetchone()
+
+    assert json.loads(row["metadata_json"]) == {"keep": {"unrelated": True}}

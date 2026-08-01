@@ -1897,9 +1897,6 @@
     if (code === 'qwen3_transcript_mismatch' || code === 'qwen3_alignment_failed') {
       return 'This transcript does not appear to match the voice sample. Review the transcript or choose a different sample, then try again.';
     }
-    if (code === 'qwen3_authorization_required') {
-      return 'Add the reference source, authorization basis, and use scope before using this voice.';
-    }
     if (code === 'qwen3_generation_ceiling') {
       return 'RayMe stopped this voice because the generated audio exceeded its safe limit. Check the transcript and try again.';
     }
@@ -2367,16 +2364,6 @@
         showFocusedBlockingPanel({
           heading: 'Voice preparation failed',
           body: 'This transcript does not appear to match the voice sample. Review the transcript or choose a different sample, then try again.',
-          action: 'Open Voice Lab',
-          tone: 'warning'
-        });
-        return;
-      }
-
-      if (error.code === 'qwen3_authorization_required') {
-        showFocusedBlockingPanel({
-          heading: 'Voice preparation failed',
-          body: 'Add the reference source, authorization basis, and use scope before using this voice.',
           action: 'Open Voice Lab',
           tone: 'warning'
         });

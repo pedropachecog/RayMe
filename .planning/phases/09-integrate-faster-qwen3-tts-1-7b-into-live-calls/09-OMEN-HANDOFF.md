@@ -17,7 +17,7 @@ RayMe is autonomously release-ready at deployed commit `2721a4ef3ddfadf9cbc47acb
 | Prepared evidence voice name | `RayMe Phase 09 Synthetic Qwen Tracer` |
 | Prompt owner key | `voice_4770e0117d35481fa1fb595eef7939ff` — matches the live ready prompt after final finish-evidence cleanup |
 
-The prepared voice is a mechanical generated non-person evidence fallback (`authorization_basis=generated_non_person_fixture`, scope `rayme_lan_call_testing`). Evidence runs may create additional transient fixture IDs, so identify the fallback by its authorization basis rather than by one ID. It proves transport, streaming, recovery, stability, and privacy; it is not eligible for human likeness judgment. Before judging likeness or naturalness, save or select the intended real-person reference with the speaker/data steward's actual authorization, the matching transcript, the LAN-test scope, and agreed retention/deletion terms.
+The prepared voice is a mechanical generated non-person evidence fallback. Evidence runs may create additional transient fixture IDs, so identify it by the evidence voice name rather than one ID. It proves transport, streaming, recovery, stability, and privacy; it is not eligible for human likeness judgment. Before judging likeness or naturalness, upload and save the intended real-person reference with its matching transcript and agreed retention/deletion terms. The completed Voice Lab upload is the authorization event; there is no separate reference-authorization form.
 
 ## Release Evidence
 
@@ -64,7 +64,7 @@ Observed result: `operational-check: handoff gate passed` for commit `2721a4ef3d
 ## Physical Multi-Turn and Barge-In Acceptance
 
 1. From the physical test device, open `https://192.168.1.199:8443`. In Settings, confirm the AI backend is `https://192.168.1.199:9443` and Qwen3-TTS 1.7B is available.
-2. In Voice Lab, save or select the intended real-person Qwen reference. Confirm its steward/speaker authorization, `rayme_lan_call_testing` scope, matching transcript, and retention/deletion terms. Assign that saved voice to the call character. Do not judge likeness with the generated fallback listed above.
+2. In Voice Lab, upload and save the intended real-person Qwen reference with its matching transcript and retention/deletion terms. Assign that saved voice to the call character. No separate reference-authorization fields are required. Do not judge likeness with the generated fallback listed above.
 3. Start the call and confirm the UI reaches `Listening` before speaking.
 4. Speak a normal first turn. Confirm audible playback begins while the assistant/TTS stream is still completing; silence until whole-response synthesis is a failure.
 5. During a later spoken response, talk over RayMe. Confirm audio stops promptly, the cancelled assistant response is not persisted as completed speech, and the UI returns to `Listening` so the interruption becomes the next turn.

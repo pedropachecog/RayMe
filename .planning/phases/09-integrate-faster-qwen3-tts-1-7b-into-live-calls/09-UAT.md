@@ -9,7 +9,7 @@ updated: 2026-08-01T12:57:46Z
 ## Current Test
 
 number: 1
-name: Integrated listening with the intended authorized real-person Qwen voice
+name: Integrated listening with the intended uploaded real-person Qwen voice
 expected: |
   Early, middle, and late call turns are intelligible and natural, retain the
   intended voice consistently, contain no objectionable chunk joins or
@@ -19,31 +19,30 @@ awaiting: user response
 ## Test Rules
 
 - Keep both tests pending until the builder performs them and records direct observations.
-- Do not use any voice with `authorization_basis=generated_non_person_fixture` for likeness or naturalness acceptance. Evidence runs may rotate its opaque voice ID; that non-person fixture proves automated transport only.
-- Use the intended real-person reference only after its speaker/data steward has explicitly authorized the matching audio and transcript for `rayme_lan_call_testing`, with agreed retention/deletion terms.
+- Do not use the generated non-person evidence fixture for likeness or naturalness acceptance. Evidence runs may rotate its opaque voice ID; that fixture proves automated transport only.
+- Uploading the intended real-person reference through Voice Lab is the authorization event. Use its matching transcript and follow the agreed retention/deletion terms.
 - Do not paste raw reference audio, its transcript, recordings, credentials, or private local paths into this file. Record only opaque IDs, device details, timestamps, and observations.
 - Mark `result: pass` only when every pass condition holds. Otherwise use `result: issue` and fill the failure evidence fields verbatim.
 
 ## Tests
 
-### 1. Integrated listening with the intended authorized real-person Qwen voice
+### 1. Integrated listening with the intended uploaded real-person Qwen voice
 
 **Procedure:**
 
-1. In Voice Lab, save or reconfirm the intended real-person Qwen3-TTS 1.7B voice with its matching transcript and explicit authorization.
-2. Confirm the selected voice does not have `authorization_basis=generated_non_person_fixture`, then assign it to the call character.
+1. In Voice Lab, upload and save the intended real-person Qwen3-TTS 1.7B voice with its matching transcript; no separate reference-authorization fields are required.
+2. Confirm this is the intended uploaded voice rather than the generated transport fixture, then assign it to the call character.
 3. Start a real OMEN call and listen deliberately to an early response, a middle response, and a later longer response.
 4. For each sample, judge intelligibility, naturalness, consistency with the authorized reference, chunk joins, and whether playback starts while the response is still being generated.
 
 **Pass conditions:** All three listening points are intelligible and natural; identity remains acceptably consistent; no objectionable joins or late degradation occur; playback is observably early rather than whole-response-delayed.
 
-**Fail conditions:** The generated fixture was used; authorization/transcript is not confirmed; speech is materially unintelligible or unnatural; identity drifts; joins are objectionable; late quality degrades; or playback waits for full generation.
+**Fail conditions:** The generated fixture was used; the transcript is not confirmed; speech is materially unintelligible or unnatural; identity drifts; joins are objectionable; late quality degrades; or playback waits for full generation.
 
 result: [pending]
 saved_voice_id: ""
 saved_voice_name: ""
-authorization_confirmed_by: ""
-authorization_basis: ""
+reference_uploaded_by: ""
 test_device_and_browser: ""
 tested_at: ""
 early_turn_observation: ""
@@ -57,7 +56,7 @@ failure_evidence: ""
 
 **Procedure:**
 
-1. On the physical test device, open `https://192.168.1.199:8443`; confirm the AI backend is `https://192.168.1.199:9443`, Qwen3-TTS 1.7B is available, and the intended authorized real-person saved voice is selected.
+1. On the physical test device, open `https://192.168.1.199:8443`; confirm the AI backend is `https://192.168.1.199:9443`, Qwen3-TTS 1.7B is available, and the intended uploaded real-person saved voice is selected.
 2. Start a call. Confirm model/prompt preparation is visible and the UI reaches `Listening` before speaking.
 3. Speak a normal turn and confirm audible response playback starts while the assistant/TTS stream is still completing.
 4. During a later spoken response, speak over RayMe once. Confirm playout stops promptly, the interruption becomes the next user turn, and the UI returns to `Listening` without ghost audio.

@@ -299,14 +299,14 @@ Resume file: None
 - [Phase 09]: Use a capacity-two blocking thread-to-async bridge with bridge totals emitted only at terminal time.
 - [Phase 09]: Signal the matching TTS request before cancelling the call task for both interrupt and hangup.
 - [Phase 09]: Canonical OMEN deploy alone owns exact Qwen source, model snapshot, CUDA attestation, and verified local model-path launcher wiring.
-- [Phase 09]: Real-person Qwen references require matching steward, authorization basis, LAN-test scope, reference hash, and transcript hash; invalid cases use deterministic non-person SAPI.
+- [Phase 09]: Uploading a Qwen reference through Voice Lab is the uploader's authorization; RayMe still requires a valid contained asset, stored asset hash, matching nonblank transcript, and acoustic alignment.
 - [Phase 09]: Windows Qwen workers use console Python and complete the mandatory CUDA load before starting the cancellation reader.
 - [Phase 09]: Prompt readiness is content-bound while the exact approved transcript enters full ICL unchanged.
 - [Phase 09]: Qwen clone alignment accepts when token coverage reaches 0.45 or normalized edit similarity reaches 0.50, caching only opaque identity and scalar results.
 - [Phase 09]: Only Qwen runtime/protocol failures mark the engine unavailable; validation, prompt, and ceiling failures remain correctable and scoped.
 - [Phase 09]: Qwen preview collects only validated native stream chunks; live-call whole-synthesis fallback remains prohibited.
-- [Phase 09]: Only exact persisted qwen3_0_6b values translate to qwen3_1_7b; migrated voices remain pending authorization confirmation.
-- [Phase 09]: Qwen authorization binds named stewardship and basis to LAN scope plus exact reference and transcript hashes without fabricating consent.
+- [Phase 09]: Only exact persisted qwen3_0_6b values translate to qwen3_1_7b; migration 0008 removes superseded qwen3_authorization metadata while preserving unrelated voice metadata.
+- [Phase 09]: Reference source, authorization basis, use scope, and authorization status are no longer product fields; save, preview, test-play, and call preparation infer authorization from the completed RayMe upload.
 - [Phase 09]: Live calls retain the durable saved voice id publicly while using a content-derived opaque voice key at the AI backend boundary.
 - [Phase 09]: Call preparation runs once and then polls separate shared model and prompt readiness with safe fixed failures.
 - [Phase 09]: Prompt ownership uses sha256('rayme:qwen3_1_7b:' + saved_voice_id), separate from private prompt-content cache identity.
@@ -321,13 +321,13 @@ Resume file: None
 - [Phase 09]: Keep first-audio startup evidence separate from terminal generation, playout, EOS, debt, underflow, join, order, and discard metrics.
 - [Phase 09]: Every terminal call control cancels the exact turn and request before normal completion, and late audio or ai_done is discarded.
 - [Phase 09]: Saved Qwen browser readiness evidence is labeled mocked_contract and cannot satisfy deployed release proof.
-- [Phase 09]: The live Qwen suite requires canonical OMEN URLs, the exact deployed commit, and a hash-bound local transcript/provenance fixture without fabricated permission.
+- [Phase 09]: The live Qwen suite requires canonical OMEN URLs, the exact deployed commit, and explicit local reference-audio/transcript fixtures; it must not require a separate authorization/provenance form.
 - [Phase 09]: Busy Qwen actions preserve initiating focus through guarded aria-disabled state while invalid actions remain natively disabled.
 - [Phase 09]: Incremental Qwen text uses the existing WebRTC speak endpoint through a capacity-two turn scheduler; no browser route or second service was added.
 - [Phase 09]: Natural sentence and safe newline boundaries emit as soon as useful, tiny fragments remain attached, and a late phrase boundary or the 60th word enforces the hard segment ceiling.
 - [Phase 09]: Only a typed normal terminal with completed playout authorizes one durable ai_speech row containing the exact visible accumulated text.
 - [Phase 09]: Hangup cancels the server-owned LLM/speech turn before ending the backend session so late completion cannot write history.
-- [Phase 09]: Freeze the selected release fixture to the passed hardware tracer generated non-person SAPI reference; prior product-owner listening is not speaker permission.
+- [Phase 09]: Freeze the selected release fixture to the passed hardware tracer generated non-person SAPI reference for transport evidence only; human likeness acceptance uses the intended reference uploaded through Voice Lab.
 - [Phase 09]: Run microsoft/wavlm-base-plus-sv only from revision feb593a6c23c1cc3d9510425c29b0a14d2b07b1e on pinned CUDA, retaining only hashes and cosine scalars.
 - [Phase 09]: Ignore stored overall booleans and independently recompute release thresholds from raw exact-commit evidence.
 - [Phase 09]: Keep autonomous release readiness separate from pending integrated listening and physical-call acceptance.

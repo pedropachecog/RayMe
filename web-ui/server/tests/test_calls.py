@@ -587,16 +587,12 @@ def test_offer_failure_returns_backend_public_detail(call_fixture: CallFixture) 
 @pytest.mark.parametrize(
     "invalid_reference",
     [
-        "missing_authorization",
-        "wrong_reference_hash",
-        "wrong_transcript_hash",
-        "wrong_scope",
-        "pending_authorization",
+        "changed_reference",
         "unsafe_path",
         "missing_file",
     ],
 )
-def test_qwen_call_start_rejects_unauthorized_or_uncontained_reference_before_backend_work(
+def test_qwen_call_start_rejects_tampered_or_uncontained_reference_before_backend_work(
     call_fixture: CallFixture,
     invalid_reference: str,
 ) -> None:
@@ -606,7 +602,11 @@ def test_qwen_call_start_rejects_unauthorized_or_uncontained_reference_before_ba
             invalid_reference=invalid_reference,
         )
     )
-    if invalid_reference == "missing_file":
+    if invalid_reference == "changed_reference":
+        (call_fixture.voice_blob_dir / f"voice_asset_{voice_id}.wav").write_bytes(
+            b"changed voice sample bytes"
+        )
+    elif invalid_reference == "missing_file":
         (call_fixture.voice_blob_dir / f"voice_asset_{voice_id}.wav").unlink()
 
     response = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id})
@@ -624,7 +624,7 @@ def test_qwen_call_start_rejects_unauthorized_or_uncontained_reference_before_ba
     assert "private.wav" not in public_body
 
 
-def test_qwen_offer_prepares_exact_authorized_reference_and_turn_uses_opaque_key(
+def test_qwen_offer_prepares_exact_uploaded_reference_and_turn_uses_opaque_key(
     call_fixture: CallFixture,
 ) -> None:
     call_fixture.completion.token_sequences = [["Prepared Qwen call reply."]]
@@ -2507,33 +2507,12 @@ async def _insert_qwen_thread_with_character_and_voice(
     voice_id = f"voice_{character_id}"
     reference_bytes = b"voice sample bytes"
     reference_transcript = "Reference transcript for Qwen call preparation."
-    authorization: dict[str, str] = {
-        "voice_data_steward": "steward_qwen_call_fixture",
-        "authorization_basis": "speaker_recorded_permission",
-        "use_scope": "rayme_lan_call_testing",
-        "reference_sha256": hashlib.sha256(reference_bytes).hexdigest(),
-        "transcript_sha256": hashlib.sha256(reference_transcript.encode("utf-8")).hexdigest(),
-        "authorization_status": "recorded",
-        "reference_kind": "real_person",
-    }
-    if invalid_reference == "missing_authorization":
-        metadata: dict[str, Any] = {}
-    else:
-        if invalid_reference == "wrong_reference_hash":
-            authorization["reference_sha256"] = "f" * 64
-        elif invalid_reference == "wrong_transcript_hash":
-            authorization["transcript_sha256"] = "e" * 64
-        elif invalid_reference == "wrong_scope":
-            authorization["use_scope"] = "hosted_service"
-        elif invalid_reference == "pending_authorization":
-            authorization["authorization_status"] = "needs_confirmation"
-        metadata = {"qwen3_authorization": authorization}
     await _insert_voice(
         sessionmaker,
         voice_id=voice_id,
         default_engine="qwen3_1_7b",
         reference_transcript=reference_transcript,
-        metadata=metadata,
+        metadata={},
     )
     if invalid_reference == "unsafe_path":
         async with sessionmaker() as session:

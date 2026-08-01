@@ -153,13 +153,30 @@ class ScriptedAlignmentSttAdapter:
         }
 
 
-def _reference_wav_bytes(*, amplitude: int = 2048) -> bytes:
+class SampleRateSensitiveAlignmentSttAdapter(ScriptedAlignmentSttAdapter):
+    def __init__(self, transcript: str, *, expected_sample_count: int) -> None:
+        super().__init__(transcript)
+        self.expected_sample_count = expected_sample_count
+
+    def transcribe(self, **kwargs: Any) -> dict[str, Any]:
+        audio = kwargs["audio"]
+        self.transcript = (
+            "The Voice Lab transcript matches this uploaded sample."
+            if len(audio) == self.expected_sample_count
+            else "Completely unrelated words caused by wrong-speed audio."
+        )
+        return super().transcribe(**kwargs)
+
+
+def _reference_wav_bytes(*, amplitude: int = 2048, sample_rate: int = 24000) -> bytes:
     buffer = BytesIO()
     with wave.open(buffer, "wb") as wav:
         wav.setnchannels(1)
         wav.setsampwidth(2)
-        wav.setframerate(24000)
-        wav.writeframes(amplitude.to_bytes(2, "little", signed=True) * 4800)
+        wav.setframerate(sample_rate)
+        wav.writeframes(
+            amplitude.to_bytes(2, "little", signed=True) * (sample_rate // 5)
+        )
     return buffer.getvalue()
 
 
@@ -688,6 +705,34 @@ def test_qwen_alignment_rejects_known_gross_mismatch_only_when_both_scores_are_l
     assert result.accepted is False
     assert result.token_coverage < 0.45
     assert result.edit_similarity < 0.50
+
+
+def test_qwen_alignment_resamples_uploaded_reference_like_voice_lab_transcription() -> None:
+    async def scenario() -> None:
+        manager, _, events = _build_manager()
+        manager.startup()
+        adapter = RecordingQwenAdapter(events)
+        manager.tts_adapters["qwen3_1_7b"] = adapter
+        alignment_stt = SampleRateSensitiveAlignmentSttAdapter(
+            "",
+            expected_sample_count=3200,
+        )
+        manager.stt_adapter = alignment_stt
+
+        result = await manager.prepare_tts_engine(
+            "qwen3_1_7b",
+            voice_key="voice-lab-48khz",
+            reference_audio=_reference_wav_bytes(sample_rate=48000),
+            reference_transcript=(
+                "The Voice Lab transcript matches this uploaded sample."
+            ),
+        )
+
+        assert result["prompt_state"] == "ready"
+        assert len(alignment_stt.calls[0]["audio"]) == 3200
+        assert len(adapter.prewarm_calls) == 1
+
+    asyncio.run(scenario())
 
 
 def test_qwen_alignment_is_cached_by_content_and_blocks_before_load_or_prompt() -> None:

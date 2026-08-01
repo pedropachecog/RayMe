@@ -512,9 +512,6 @@ export interface VoiceSavePayload {
   name: string;
   default_engine: TtsEngineId;
   reference_transcript?: string | null;
-  voice_data_steward?: string | null;
-  authorization_basis?: string | null;
-  use_scope?: string | null;
   metadata?: VoiceMetadata;
 }
 
@@ -523,9 +520,6 @@ export interface VoicePreviewPayload {
   name?: string | null;
   default_engine?: TtsEngineId | null;
   reference_transcript?: string | null;
-  voice_data_steward?: string | null;
-  authorization_basis?: string | null;
-  use_scope?: string | null;
   preview_text?: string | null;
   use_default_engine?: boolean;
   engine?: TtsEngineId | null;

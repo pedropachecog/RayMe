@@ -652,11 +652,10 @@ def test_runner_loads_tracer_canonical_authorization_contract() -> None:
     assert "_resolve_authorized_reference" in source
 
 
-def test_hardware_tracer_sends_canonical_top_level_voice_authorization(tmp_path: Path) -> None:
+def test_hardware_tracer_uses_upload_implied_authorization() -> None:
     import asyncio
 
     tracer = _runner_module("phase09_runner_saved_voice_contract").load_hardware_tracer()
-    selection = _fallback_selection(tmp_path / "selection")
 
     class CapturingApi:
         web_base_url = "https://rayme.invalid"
@@ -687,19 +686,17 @@ def test_hardware_tracer_sends_canonical_top_level_voice_authorization(tmp_path:
             api,
             reference_audio=b"RIFF-reference",
             transcript="Generated non person fixture.",
-            selection=selection,
         )
     )
 
     assert (voice_id, asset_id) == ("voice_phase09", "asset_phase09")
     assert api.saved_payload is not None
-    assert api.saved_payload["voice_data_steward"] == selection.steward_id
-    assert api.saved_payload["authorization_basis"] == selection.authorization_basis
-    assert api.saved_payload["use_scope"] == selection.use_scope
-    assert api.saved_payload["metadata"] == {
-        "source": "phase09_hardware_tracer",
-        "authorization": tracer._voice_provenance(selection),
-    }
+    assert api.saved_payload["metadata"] == {"source": "phase09_hardware_tracer"}
+    assert not {
+        "voice_data_steward",
+        "authorization_basis",
+        "use_scope",
+    }.intersection(api.saved_payload)
 
 
 def test_runner_writes_generated_non_person_fixture_sidecar_without_private_content(

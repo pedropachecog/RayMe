@@ -5,11 +5,11 @@ from collections import Counter
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from difflib import SequenceMatcher
-from io import BytesIO
 import logging
 import threading
 from typing import Any
 
+from app.audio.io import decode_audio_bytes
 from app.config import AiBackendSettings
 from app.models.engine_metadata import ENGINE_METADATA, EngineMetadata, EngineStatus
 from app.models.tts_qwen3 import (
@@ -581,20 +581,11 @@ class ModelManager:
 
         try:
             import numpy as np
-            import soundfile as sf
 
-            audio, sample_rate = sf.read(
-                BytesIO(reference_audio),
-                dtype="float32",
-                always_2d=False,
-            )
-            samples = np.asarray(audio, dtype=np.float32)
-            if samples.ndim > 1:
-                samples = samples.mean(axis=1)
-            samples = samples.reshape(-1)
+            decoded = decode_audio_bytes(reference_audio, target_sample_rate=16000)
+            samples = decoded.samples.reshape(-1)
             if (
                 samples.size == 0
-                or int(sample_rate) <= 0
                 or not np.isfinite(samples).all()
                 or float(np.max(np.abs(samples))) <= 1e-5
             ):

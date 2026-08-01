@@ -1020,7 +1020,7 @@ class CallService:
             if asset is None:
                 raise VoiceAssetNotFoundError(voice.id)
             sample = await voice_service.sample_blob(asset.id)
-            authorized = validate_saved_qwen3_reference(
+            saved_reference = validate_saved_qwen3_reference(
                 voice,
                 asset,
                 reference_bytes=sample.path.read_bytes(),
@@ -1034,15 +1034,15 @@ class CallService:
             raise CallVoiceUnavailableError() from None
         return CallVoicePreparation(
             voice_id=voice.id,
-            backend_voice_id=authorized.voice_key,
+            backend_voice_id=saved_reference.voice_key,
             engine_id=engine_id,
             reference_payload={
-                "voice_id": authorized.voice_key,
-                "reference_audio_base64": base64.b64encode(authorized.reference_bytes).decode(
+                "voice_id": saved_reference.voice_key,
+                "reference_audio_base64": base64.b64encode(saved_reference.reference_bytes).decode(
                     "ascii"
                 ),
-                "reference_audio_content_type": authorized.content_type,
-                "reference_transcript": authorized.reference_transcript,
+                "reference_audio_content_type": saved_reference.content_type,
+                "reference_transcript": saved_reference.reference_transcript,
             },
         )
 

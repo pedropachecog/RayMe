@@ -368,7 +368,7 @@ describe('Voice Lab Phase 2 source contract', () => {
     expect(routeSource).not.toMatch(/preview\s*(?:Succeeded|Complete|Ready)\s*&&\s*canSave/i);
   });
 
-  it('requires the three Qwen authorization fields and preserves them through preparation failures', async () => {
+  it('treats a Qwen upload as authorization and keeps readiness separate', async () => {
     const fetchMock = installFetch({
       model: { state: 'loading', engine_id: 'qwen3_1_7b' },
       prompt: { state: 'prewarming', voice_key: 'opaque', error_code: null }
@@ -380,24 +380,14 @@ describe('Voice Lab Phase 2 source contract', () => {
       init: { method: 'GET' }
     });
 
-    for (const label of ['Reference authorization', 'Reference source', 'Authorization basis', 'Use scope']) {
-      expect(routeSource).toContain(label);
-    }
     for (const field of ['voice_data_steward', 'authorization_basis', 'use_scope']) {
-      expect(apiTypesSource).toContain(field);
-      expect(routeSource).toContain(field);
+      expect(apiTypesSource).not.toContain(field);
+      expect(routeSource).not.toContain(field);
     }
-    const authorizationBlock = routeSource.slice(
-      routeSource.indexOf('<section class="authorization-panel"'),
-      routeSource.indexOf('<div class="readiness"', routeSource.indexOf('<section class="authorization-panel"'))
-    );
-    expect(authorizationBlock.match(/\brequired\b/g)).toHaveLength(3);
+    expect(routeSource).not.toContain('Reference authorization');
+    expect(routeSource).not.toContain('authorization-panel');
     expect(routeSource).toContain("selectedEngine === 'qwen3_1_7b'");
-    expect(routeSource).toContain("useScope = ''");
-    expect(routeSource).toContain('rayme_lan_call_testing');
     expect(routeSource).toContain('focusFirstInvalidQwenField');
-    expect(routeSource).toContain('authorizationBasis');
-    expect(routeSource).toContain('voiceDataSteward');
     expect(voicesApiSource).toContain("'/voices/preparation-status'");
   });
 
@@ -429,7 +419,6 @@ describe('Voice Lab Phase 2 source contract', () => {
     for (const copy of [
       'Add the matching reference transcript before using Qwen3-TTS 1.7B.',
       'This transcript does not appear to match the voice sample.',
-      'Add the reference source, authorization basis, and use scope before using this voice.',
       'RayMe could not prepare this voice. Retry preparation.',
       'RayMe stopped this voice because the generated audio exceeded its safe limit.',
       'Qwen3-TTS 1.7B is unavailable right now.'
@@ -440,6 +429,9 @@ describe('Voice Lab Phase 2 source contract', () => {
       expect(routeSource).not.toContain(forbidden);
       expect(callRouteSource).not.toContain(forbidden);
     }
+    expect(`${routeSource}\n${callRouteSource}`).not.toContain(
+      'Add the reference source, authorization basis, and use scope before using this voice.'
+    );
     const callFailureMapper = callRouteSource.slice(
       callRouteSource.indexOf('function messageForCallFailure'),
       callRouteSource.indexOf('function appendUserFinal')

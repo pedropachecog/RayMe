@@ -50,7 +50,7 @@ test.describe('Phase 09 Qwen readiness browser contract', () => {
     assertNoBrowserErrors();
   });
 
-  test('preserves Qwen authorization and form state through failed preparation, switching, and retry', async ({
+  test('uses upload-implied authorization and preserves form state through failed preparation, switching, and retry', async ({
     page
   }) => {
     const assertNoBrowserErrors = installBrowserErrorGuard(page);
@@ -72,11 +72,11 @@ test.describe('Phase 09 Qwen readiness browser contract', () => {
         const payload = route.request().postDataJSON() as Record<string, unknown>;
         expect(payload).toMatchObject({
           default_engine: QWEN_ENGINE_ID,
-          reference_transcript: referenceTranscript,
-          voice_data_steward: 'speaker-steward-17',
-          authorization_basis: 'Direct permission for this LAN test',
-          use_scope: 'rayme_lan_call_testing'
+          reference_transcript: referenceTranscript
         });
+        expect(payload).not.toHaveProperty('voice_data_steward');
+        expect(payload).not.toHaveProperty('authorization_basis');
+        expect(payload).not.toHaveProperty('use_scope');
         if (previewAttempt === 1) {
           await firstPreviewGate;
           await fulfillJson(route, {
@@ -99,21 +99,10 @@ test.describe('Phase 09 Qwen readiness browser contract', () => {
     await uploadAndTranscribeReference(page);
     await page.getByRole('radio', { name: new RegExp(QWEN_ENGINE_LABEL) }).check();
 
-    await expect(page.getByRole('heading', { name: 'Reference authorization' })).toBeVisible();
-    const referenceSource = page.getByLabel('Reference source');
-    const authorizationBasis = page.getByLabel('Authorization basis');
-    const useScope = page.getByLabel('Use scope');
-    for (const control of [referenceSource, authorizationBasis, useScope]) {
-      await expect(control).toHaveAttribute('required', '');
-    }
-    await expect(referenceSource).toHaveValue('');
-    await expect(authorizationBasis).toHaveValue('');
-    await expect(useScope).toHaveValue('');
-    await expect(page.getByRole('button', { name: 'Preview Voice' })).toBeDisabled();
-
-    await referenceSource.fill('speaker-steward-17');
-    await authorizationBasis.fill('Direct permission for this LAN test');
-    await useScope.selectOption('rayme_lan_call_testing');
+    await expect(page.getByRole('heading', { name: 'Reference authorization' })).toHaveCount(0);
+    await expect(page.getByLabel('Reference source')).toHaveCount(0);
+    await expect(page.getByLabel('Authorization basis')).toHaveCount(0);
+    await expect(page.getByLabel('Use scope')).toHaveCount(0);
     await page.getByLabel('Voice name').fill('Persistent Qwen Voice');
     await page.getByLabel('Preview text').fill('Keep every field while preparation runs.');
 
@@ -128,9 +117,6 @@ test.describe('Phase 09 Qwen readiness browser contract', () => {
     resolveFirstPreview();
     await expect(page.getByRole('alert').filter({ hasText: /Retry preparation/ })).toBeVisible();
     await expect(page.getByText(/C:\\private|worker exception|traceback/i)).toHaveCount(0);
-    await expect(referenceSource).toHaveValue('speaker-steward-17');
-    await expect(authorizationBasis).toHaveValue('Direct permission for this LAN test');
-    await expect(useScope).toHaveValue('rayme_lan_call_testing');
     await expect(page.getByLabel('Voice name')).toHaveValue('Persistent Qwen Voice');
     await expect(page.getByRole('textbox', { name: 'Reference transcript' })).toHaveValue(
       referenceTranscript
@@ -142,9 +128,7 @@ test.describe('Phase 09 Qwen readiness browser contract', () => {
     await page.getByRole('radio', { name: /F5-TTS/ }).check();
     await expect(page.getByRole('heading', { name: 'Reference authorization' })).toHaveCount(0);
     await page.getByRole('radio', { name: new RegExp(QWEN_ENGINE_LABEL) }).check();
-    await expect(referenceSource).toHaveValue('speaker-steward-17');
-    await expect(authorizationBasis).toHaveValue('Direct permission for this LAN test');
-    await expect(useScope).toHaveValue('rayme_lan_call_testing');
+    await expect(page.getByRole('heading', { name: 'Reference authorization' })).toHaveCount(0);
 
     preparation = loadingPreparation();
     await page.getByRole('button', { name: 'Preview Voice' }).click();

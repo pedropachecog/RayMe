@@ -313,8 +313,6 @@ def test_voice_save_without_preview_covers_full_engine_roster(
             default_engine=engine_name,
             reference_transcript=f"Editable transcript for {engine_name}.",
         )
-        if engine_name == "qwen3_1_7b":
-            payload.update(_qwen_authorization())
         response = client.post(
             "/api/voices",
             json=payload,
@@ -331,11 +329,11 @@ def test_voice_save_without_preview_covers_full_engine_roster(
         assert "preview_url" not in body
 
 
-def test_qwen_voice_save_binds_explicit_provenance_to_exact_reference(
+def test_qwen_voice_save_treats_uploaded_reference_as_authorized(
     voice_fixture: VoiceFixture,
 ) -> None:
-    audio = _wav_audio("authorized-qwen-reference.wav")
-    transcript = "  Exact steward-approved reference transcript.  "
+    audio = _wav_audio("uploaded-qwen-reference.wav")
+    transcript = "  Exact uploaded reference transcript.  "
     uploaded = _upload_voice_asset(voice_fixture.client, audio)
     assert uploaded.status_code == 201
 
@@ -344,44 +342,36 @@ def test_qwen_voice_save_binds_explicit_provenance_to_exact_reference(
         json={
             **_voice_payload(
                 asset_id=uploaded.json()["asset_id"],
-                name="Authorized Qwen voice",
+                name="Uploaded Qwen voice",
                 default_engine="qwen3_1_7b",
                 reference_transcript=transcript,
             ),
-            **_qwen_authorization(),
         },
     )
 
     assert response.status_code == 201, response.text
     assert response.json()["default_engine"] == "qwen3_1_7b"
     assert response.json()["reference_transcript"] == transcript
-    assert response.json()["metadata"]["qwen3_authorization"] == {
-        "voice_data_steward": "steward_rayme_owner",
-        "authorization_basis": "speaker_supplied_for_testing",
-        "use_scope": "rayme_lan_call_testing",
-        "reference_sha256": hashlib.sha256(audio.content).hexdigest(),
-        "transcript_sha256": hashlib.sha256(transcript.encode("utf-8")).hexdigest(),
-        "authorization_status": "recorded",
-        "reference_kind": "real_person",
+    assert response.json()["metadata"] == {
+        "sample_asset_id": uploaded.json()["asset_id"]
     }
+    assert "authorization" not in json.dumps(response.json()).lower()
 
 
 @pytest.mark.parametrize(
     ("missing_field", "value"),
     (
-        ("voice_data_steward", ""),
-        ("authorization_basis", ""),
-        ("use_scope", "some_other_scope"),
+        ("voice_data_steward", "legacy-steward"),
+        ("authorization_basis", "legacy-basis"),
+        ("use_scope", "rayme_lan_call_testing"),
     ),
 )
-def test_qwen_voice_save_rejects_missing_or_wrong_authorization(
+def test_qwen_voice_save_rejects_removed_authorization_fields(
     voice_fixture: VoiceFixture,
     missing_field: str,
     value: str,
 ) -> None:
-    uploaded = _upload_voice_asset(voice_fixture.client, _wav_audio("qwen-auth-reject.wav"))
-    authorization = _qwen_authorization()
-    authorization[missing_field] = value
+    uploaded = _upload_voice_asset(voice_fixture.client, _wav_audio("qwen-legacy-field.wav"))
 
     response = voice_fixture.client.post(
         "/api/voices",
@@ -392,41 +382,33 @@ def test_qwen_voice_save_rejects_missing_or_wrong_authorization(
                 default_engine="qwen3_1_7b",
                 reference_transcript="A matching nonblank transcript.",
             ),
-            **authorization,
+            missing_field: value,
         },
     )
 
     assert response.status_code == 422
     serialized = json.dumps(response.json())
     assert "Traceback" not in serialized
-    assert "qwen-auth-reject.wav" not in serialized
+    assert "qwen-legacy-field.wav" not in serialized
 
 
-def test_generated_non_person_qwen_fixture_is_never_recorded_as_a_persons_likeness(
+def test_qwen_voice_save_still_requires_nonblank_transcript(
     voice_fixture: VoiceFixture,
 ) -> None:
-    uploaded = _upload_voice_asset(voice_fixture.client, _wav_audio("synthetic-qwen.wav"))
+    uploaded = _upload_voice_asset(voice_fixture.client, _wav_audio("blank-qwen.wav"))
     response = voice_fixture.client.post(
         "/api/voices",
         json={
             **_voice_payload(
                 asset_id=uploaded.json()["asset_id"],
-                name="Synthetic Qwen fixture",
+                name="Blank Qwen transcript",
                 default_engine="qwen3_1_7b",
-                reference_transcript="Synthetic mechanical reference speech.",
-            ),
-            **_qwen_authorization(
-                voice_data_steward="rayme_test_harness",
-                authorization_basis="generated_non_person_fixture",
+                reference_transcript="   ",
             ),
         },
     )
 
-    assert response.status_code == 201, response.text
-    authorization = response.json()["metadata"]["qwen3_authorization"]
-    assert authorization["authorization_status"] == "non_person_fixture"
-    assert authorization["reference_kind"] == "generated_non_person_fixture"
-    assert "consent" not in json.dumps(authorization).lower()
+    assert response.status_code == 422
 
 
 def test_qwen_engine_normalization_is_narrow_and_legacy_reads_are_canonical(
@@ -459,7 +441,7 @@ def test_qwen_engine_normalization_is_narrow_and_legacy_reads_are_canonical(
     assert response.json()["default_engine"] == "qwen3_1_7b"
 
 
-def test_qwen_preview_uses_authorized_contained_reference_and_opaque_voice_key(
+def test_qwen_preview_uses_uploaded_contained_reference_and_opaque_voice_key(
     voice_fixture: VoiceFixture,
 ) -> None:
     audio = _wav_audio("qwen-preview-private-name.wav")
@@ -468,11 +450,10 @@ def test_qwen_preview_uses_authorized_contained_reference_and_opaque_voice_key(
         "/api/voices/preview",
         json={
             "asset_id": uploaded.json()["asset_id"],
-            "name": "Authorized preview",
+            "name": "Uploaded reference preview",
             "default_engine": "qwen3_1_7b",
             "reference_transcript": "Exact preview transcript.",
             "preview_text": "A bounded preview target.",
-            **_qwen_authorization(),
         },
     )
 
@@ -503,18 +484,18 @@ def test_qwen_owner_key_is_saved_voice_scoped_and_contains_no_private_content() 
     assert saved_voice_id not in expected
 
 
-def test_qwen_preview_requires_authorization_and_nonempty_target(
+def test_qwen_preview_requires_nonempty_transcript_and_target(
     voice_fixture: VoiceFixture,
 ) -> None:
     uploaded = _upload_voice_asset(voice_fixture.client, _wav_audio("qwen-preview-reject.wav"))
     before = len(voice_fixture.processor.calls or [])
 
-    missing_authorization = voice_fixture.client.post(
+    missing_transcript = voice_fixture.client.post(
         "/api/voices/preview",
         json={
             "asset_id": uploaded.json()["asset_id"],
             "default_engine": "qwen3_1_7b",
-            "reference_transcript": "Exact preview transcript.",
+            "reference_transcript": "   ",
             "preview_text": "Preview target.",
         },
     )
@@ -525,17 +506,16 @@ def test_qwen_preview_requires_authorization_and_nonempty_target(
             "default_engine": "qwen3_1_7b",
             "reference_transcript": "Exact preview transcript.",
             "preview_text": "   ",
-            **_qwen_authorization(),
         },
     )
 
-    assert missing_authorization.status_code == 422
+    assert missing_transcript.status_code == 422
     assert empty_target.status_code == 422
     assert len(voice_fixture.processor.calls or []) == before
 
 
-@pytest.mark.parametrize("tamper", ("reference", "transcript", "authorization", "path"))
-def test_qwen_test_play_rejects_tampered_saved_authorization(
+@pytest.mark.parametrize("tamper", ("reference", "path"))
+def test_qwen_test_play_rejects_tampered_or_uncontained_saved_reference(
     voice_fixture: VoiceFixture,
     tamper: str,
 ) -> None:
@@ -547,15 +527,7 @@ def test_qwen_test_play_rejects_tampered_saved_authorization(
             assert stored_voice is not None
             asset = await session.get(VoiceAsset, voice.asset_id)
             assert asset is not None
-            if tamper == "transcript":
-                stored_voice.reference_transcript = "Changed after authorization."
-            elif tamper == "authorization":
-                metadata = dict(stored_voice.metadata_json or {})
-                authorization = dict(metadata["qwen3_authorization"])
-                authorization["authorization_status"] = "needs_confirmation"
-                metadata["qwen3_authorization"] = authorization
-                stored_voice.metadata_json = metadata
-            elif tamper == "path":
+            if tamper == "path":
                 asset.storage_path = "../private-reference.wav"
             await session.commit()
 
@@ -574,7 +546,6 @@ def test_qwen_test_play_rejects_tampered_saved_authorization(
     assert len(voice_fixture.processor.calls or []) == before
     serialized = json.dumps(response.json())
     assert "private-reference" not in serialized
-    assert "Changed after authorization" not in serialized
     assert "Traceback" not in serialized
 
 
@@ -994,9 +965,6 @@ def test_preview_failure_does_not_echo_private_voice_state(
         "name": "SENTINEL_PRIVATE_VOICE_NAME",
         "default_engine": "qwen3_1_7b",
         "reference_transcript": "SENTINEL_PRIVATE_TRANSCRIPT",
-        "voice_data_steward": "SENTINEL_PRIVATE_STEWARD",
-        "authorization_basis": "SENTINEL_PRIVATE_AUTHORIZATION",
-        "use_scope": "rayme_lan_call_testing",
         "preview_text": "SENTINEL_PRIVATE_PREVIEW_TEXT",
         "metadata": {"private_note": "SENTINEL_PRIVATE_METADATA"},
         "use_default_engine": True,
@@ -1479,7 +1447,6 @@ def _create_qwen_voice(client: TestClient, *, name: str = "Saved Qwen voice") ->
                 default_engine="qwen3_1_7b",
                 reference_transcript="Exact saved Qwen transcript.",
             ),
-            **_qwen_authorization(),
         },
     )
     assert response.status_code == 201, response.text
@@ -1504,19 +1471,6 @@ def _voice_payload(
     assert "preview_url" not in payload
     assert "successful_synthesis_result" not in payload
     return payload
-
-
-def _qwen_authorization(
-    *,
-    voice_data_steward: str = "steward_rayme_owner",
-    authorization_basis: str = "speaker_supplied_for_testing",
-    use_scope: str = "rayme_lan_call_testing",
-) -> dict[str, str]:
-    return {
-        "voice_data_steward": voice_data_steward,
-        "authorization_basis": authorization_basis,
-        "use_scope": use_scope,
-    }
 
 
 def _character_payload(**overrides: Any) -> dict[str, Any]:

@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, basename, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,8 +10,6 @@ const canonicalLiveWebUrl = 'https://192.168.1.199:8443';
 const canonicalLiveAiHealthUrl = 'https://192.168.1.199:9443/health';
 const canonicalLiveWebRtcStatusUrl = 'https://192.168.1.199:9443/webrtc/status';
 const qwenEngineId = 'qwen3_1_7b';
-const qwenLanScope = 'rayme_lan_call_testing';
-const generatedNonPersonBasis = 'generated_non_person_fixture';
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 const liveEnabled = process.env.RAYME_ENABLE_LIVE_E2E === '1';
@@ -24,9 +21,6 @@ const liveReferenceAudioFile = resolveLiveFixturePath(
 const liveFakeAudioFile = resolveLiveFixturePath(process.env.RAYME_LIVE_FAKE_AUDIO_FILE);
 const liveReferenceTranscriptFile = resolveLiveFixturePath(
   process.env.RAYME_LIVE_REFERENCE_TRANSCRIPT_FILE
-);
-const liveReferenceProvenanceFile = resolveLiveFixturePath(
-  process.env.RAYME_LIVE_REFERENCE_PROVENANCE_FILE
 );
 const liveExpectedCommit = process.env.RAYME_LIVE_EXPECTED_COMMIT;
 const liveStabilityMs = parsePositiveInt(process.env.RAYME_LIVE_STABILITY_MS);
@@ -67,60 +61,6 @@ test.use({
 // The live suite mutates one OMEN runtime and exercises one GPU-backed call path.
 test.describe.configure({ mode: 'serial' });
 
-test('Qwen live fixture provenance fails closed and permits only hash-bound LAN scope', () => {
-  const referenceAudio = Buffer.from('deterministic non-person reference audio');
-  const transcriptBytes = Buffer.from('Deterministic non-person transcript.');
-  const permitted = {
-    voice_data_steward: 'rayme_sapi_fixture_steward',
-    authorization_basis: generatedNonPersonBasis,
-    use_scope: qwenLanScope,
-    reference_sha256: sha256(referenceAudio),
-    transcript_sha256: sha256(transcriptBytes)
-  };
-
-  expect(validateLiveReferenceProvenance(permitted, referenceAudio, transcriptBytes)).toEqual(
-    permitted
-  );
-  expect(() => validateLiveReferenceProvenance(null, referenceAudio, transcriptBytes)).toThrow(
-    'must be an object'
-  );
-  expect(() =>
-    validateLiveReferenceProvenance(
-      { ...permitted, reference_sha256: '0'.repeat(64) },
-      referenceAudio,
-      transcriptBytes
-    )
-  ).toThrow('audio hash does not match');
-  expect(() =>
-    validateLiveReferenceProvenance(
-      { ...permitted, transcript_sha256: '0'.repeat(64) },
-      referenceAudio,
-      transcriptBytes
-    )
-  ).toThrow('transcript hash does not match');
-  expect(() =>
-    validateLiveReferenceProvenance(
-      { ...permitted, use_scope: 'public_impersonation' },
-      referenceAudio,
-      transcriptBytes
-    )
-  ).toThrow('use scope is not permitted');
-  expect(() =>
-    validateLiveReferenceProvenance(
-      { ...permitted, authorization_basis: 'product_owner_listening' },
-      referenceAudio,
-      transcriptBytes
-    )
-  ).toThrow('is not speaker authorization');
-  expect(() =>
-    validateLiveReferenceProvenance(
-      { ...permitted, permission_confirmed: true },
-      referenceAudio,
-      transcriptBytes
-    )
-  ).toThrow('must not fabricate permission_confirmed');
-});
-
 test('live fixture paths resolve from the repository root', () => {
   const fixture = '.planning/phase-fixtures/reference.wav';
   expect(resolveLiveFixturePath(fixture)).toBe(resolve(repositoryRoot, fixture));
@@ -140,9 +80,8 @@ for (const liveTtsEngine of liveTtsEngines) {
         !liveReferenceAudioFile ||
         !liveFakeAudioFile ||
         !liveReferenceTranscriptFile ||
-        !liveReferenceProvenanceFile ||
         !liveExpectedCommit,
-      'Set RAYME_ENABLE_LIVE_E2E=1 plus canonical web/health URLs, expected commit, permitted reference/fake-mic files, and explicit transcript/provenance files to run live call acceptance.'
+      'Set RAYME_ENABLE_LIVE_E2E=1 plus canonical web/health URLs, expected commit, reference/fake-mic files, and an explicit transcript file to run live call acceptance.'
     );
     test.info().annotations.push({ type: 'environment', description: 'environment=deployed_live' });
     test.setTimeout(600_000 + liveStabilityMs);
@@ -351,16 +290,8 @@ async function createLiveCallFixture(apiRequest: APIRequestContext, liveTtsEngin
     name: `Live Call Voice ${timestamp}`,
     default_engine: liveTtsEngine,
     reference_transcript: fixture.referenceTranscript,
-    ...(liveTtsEngine === qwenEngineId
-      ? {
-          voice_data_steward: fixture.provenance.voice_data_steward,
-          authorization_basis: fixture.provenance.authorization_basis,
-          use_scope: fixture.provenance.use_scope
-        }
-      : {}),
     metadata
   };
-  expect(Object.prototype.hasOwnProperty.call(voicePayload, 'permission_confirmed')).toBe(false);
   const voiceResponse = await apiRequest.post(`${canonicalLiveWebUrl}/api/voices`, {
     data: voicePayload
   });
@@ -408,14 +339,6 @@ async function createLiveCallFixture(apiRequest: APIRequestContext, liveTtsEngin
   };
 }
 
-type LiveReferenceProvenance = {
-  voice_data_steward: string;
-  authorization_basis: string;
-  use_scope: typeof qwenLanScope;
-  reference_sha256: string;
-  transcript_sha256: string;
-};
-
 function resolveLiveFixturePath(value: string | undefined): string | undefined {
   if (!value) {
     return undefined;
@@ -426,95 +349,20 @@ function resolveLiveFixturePath(value: string | undefined): string | undefined {
 function loadLiveReferenceFixture(): {
   referenceAudio: Buffer;
   referenceTranscript: string;
-  provenance: LiveReferenceProvenance;
 } {
   expect(liveReferenceAudioFile, 'live reference audio fixture').toBeTruthy();
   expect(liveReferenceTranscriptFile, 'live reference transcript fixture').toBeTruthy();
-  expect(liveReferenceProvenanceFile, 'live reference provenance fixture').toBeTruthy();
 
   const referenceAudio = readFileSync(liveReferenceAudioFile!);
-  const transcriptBytes = readFileSync(liveReferenceTranscriptFile!);
-  const referenceTranscript = transcriptBytes.toString('utf8');
+  const referenceTranscript = readFileSync(liveReferenceTranscriptFile!, 'utf8');
   if (!referenceTranscript.trim()) {
     throw new Error('Live reference transcript fixture must be nonblank');
   }
 
-  let rawProvenance: unknown;
-  try {
-    rawProvenance = JSON.parse(readFileSync(liveReferenceProvenanceFile!, 'utf8'));
-  } catch {
-    throw new Error('Live reference provenance fixture must be valid JSON');
-  }
-  const provenance = validateLiveReferenceProvenance(
-    rawProvenance,
-    referenceAudio,
-    transcriptBytes
-  );
-
   return {
     referenceAudio,
-    referenceTranscript,
-    provenance
+    referenceTranscript
   };
-}
-
-function validateLiveReferenceProvenance(
-  rawProvenance: unknown,
-  referenceAudio: Buffer,
-  transcriptBytes: Buffer
-): LiveReferenceProvenance {
-  if (!rawProvenance || typeof rawProvenance !== 'object' || Array.isArray(rawProvenance)) {
-    throw new Error('Live reference provenance fixture must be an object');
-  }
-  const record = rawProvenance as Record<string, unknown>;
-  if (Object.prototype.hasOwnProperty.call(record, 'permission_confirmed')) {
-    throw new Error('Live reference provenance must not fabricate permission_confirmed');
-  }
-
-  const voiceDataSteward = requiredProvenanceText(record, 'voice_data_steward');
-  const authorizationBasis = requiredProvenanceText(record, 'authorization_basis');
-  const useScope = requiredProvenanceText(record, 'use_scope');
-  const referenceSha256 = requiredProvenanceText(record, 'reference_sha256');
-  const transcriptSha256 = requiredProvenanceText(record, 'transcript_sha256');
-  if (useScope !== qwenLanScope) {
-    throw new Error('Live reference provenance use scope is not permitted');
-  }
-  if (
-    ['product_owner_direction', 'product_owner_listening'].includes(
-      authorizationBasis.toLowerCase()
-    )
-  ) {
-    throw new Error('Product-owner direction or listening is not speaker authorization');
-  }
-  if (authorizationBasis === generatedNonPersonBasis && !voiceDataSteward) {
-    throw new Error('Generated non-person fixture must name its local data steward');
-  }
-  if (referenceSha256 !== sha256(referenceAudio)) {
-    throw new Error('Live reference provenance audio hash does not match fixture');
-  }
-  if (transcriptSha256 !== sha256(transcriptBytes)) {
-    throw new Error('Live reference provenance transcript hash does not match fixture');
-  }
-
-  return {
-    voice_data_steward: voiceDataSteward,
-    authorization_basis: authorizationBasis,
-    use_scope: qwenLanScope,
-    reference_sha256: referenceSha256,
-    transcript_sha256: transcriptSha256
-  };
-}
-
-function requiredProvenanceText(record: Record<string, unknown>, field: string): string {
-  const value = record[field];
-  if (typeof value !== 'string' || !value.trim()) {
-    throw new Error(`Live reference provenance requires ${field}`);
-  }
-  return value.trim();
-}
-
-function sha256(value: Buffer): string {
-  return createHash('sha256').update(value).digest('hex');
 }
 
 async function assertLiveDeployment(apiRequest: APIRequestContext) {
