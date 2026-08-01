@@ -267,20 +267,6 @@ async def create_webrtc_offer_answer(
                 "message": "Call session has ended; start a new call",
             },
         )
-    previous_peer_connection = (
-        existing_session.peer_connection if existing_session is not None else None
-    )
-    previous_outbound_audio_track = (
-        existing_session.outbound_audio_track if existing_session is not None else None
-    )
-    previous_data_channel = (
-        existing_session.data_channel if existing_session is not None else None
-    )
-    previous_state = existing_session.state if existing_session is not None else None
-    previous_end_reason = (
-        existing_session.end_reason if existing_session is not None else None
-    )
-    previous_ended_at = existing_session.ended_at if existing_session is not None else None
     offer_sdp = payload.offer.sdp
     logger.info(
         "[rayme-call] offer.received session=%s thread=%s sdp_len=%d "
@@ -296,11 +282,12 @@ async def create_webrtc_offer_answer(
     outbound_audio_track = _attach_outbound_audio_track(peer_connection)
 
     negotiate_started = time.monotonic()
+    pending_generation: int | None = None
     try:
         if existing_session is not None:
             session = existing_session
             session.mark_media_reconnect_pending()
-            session.mark_peer_connection_pending(
+            pending_generation = await session.mark_peer_connection_pending(
                 peer_connection,
                 outbound_audio_track=outbound_audio_track,
             )
@@ -329,23 +316,37 @@ async def create_webrtc_offer_answer(
                 outbound_audio_track=outbound_audio_track,
                 close_previous_peer=False,
             )
-        _attach_peer_handlers(peer_connection, session)
+        _attach_peer_handlers(
+            peer_connection,
+            session,
+            pending_generation=pending_generation,
+        )
         answer = await _negotiate_answer(peer_connection, payload.offer)
+        if (
+            existing_session is not None
+            and peer_connection is not session.peer_connection
+            and not session.is_peer_connection_pending(
+                peer_connection,
+                pending_generation,
+            )
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "webrtc_offer_superseded",
+                    "message": "A newer reconnect offer replaced this offer",
+                },
+            )
     except HTTPException:
         if existing_session is not None:
-            _restore_failed_offer_session(
+            await _restore_failed_offer_session(
                 existing_session,
                 peer_connection,
-                previous_peer_connection,
-                previous_outbound_audio_track,
-                previous_data_channel,
-                previous_state,
-                previous_end_reason,
-                previous_ended_at,
+                pending_generation,
             )
         else:
             await manager.remove_session(payload.session_id)
-        await _close_peer_connection(peer_connection)
+            await _close_peer_connection(peer_connection)
         logger.exception(
             "[rayme-call] offer.failed session=%s elapsed_ms=%d",
             payload.session_id,
@@ -354,19 +355,14 @@ async def create_webrtc_offer_answer(
         raise
     except asyncio.CancelledError:
         if existing_session is not None:
-            _restore_failed_offer_session(
+            await _restore_failed_offer_session(
                 existing_session,
                 peer_connection,
-                previous_peer_connection,
-                previous_outbound_audio_track,
-                previous_data_channel,
-                previous_state,
-                previous_end_reason,
-                previous_ended_at,
+                pending_generation,
             )
         else:
             await manager.remove_session(payload.session_id)
-        await _close_peer_connection(peer_connection)
+            await _close_peer_connection(peer_connection)
         logger.info(
             "[rayme-call] offer.cancelled session=%s elapsed_ms=%d",
             payload.session_id,
@@ -375,19 +371,14 @@ async def create_webrtc_offer_answer(
         raise
     except Exception as exc:
         if existing_session is not None:
-            _restore_failed_offer_session(
+            await _restore_failed_offer_session(
                 existing_session,
                 peer_connection,
-                previous_peer_connection,
-                previous_outbound_audio_track,
-                previous_data_channel,
-                previous_state,
-                previous_end_reason,
-                previous_ended_at,
+                pending_generation,
             )
         else:
             await manager.remove_session(payload.session_id)
-        await _close_peer_connection(peer_connection)
+            await _close_peer_connection(peer_connection)
         logger.exception(
             "[rayme-call] offer.unhandled session=%s elapsed_ms=%d exc=%s",
             payload.session_id,
@@ -804,26 +795,15 @@ async def _close_peer_connection(peer_connection: Any) -> None:
         await result
 
 
-def _restore_failed_offer_session(
+async def _restore_failed_offer_session(
     session: CallSession,
     failed_peer_connection: Any,
-    previous_peer_connection: Any,
-    previous_outbound_audio_track: Any,
-    previous_data_channel: Any,
-    previous_state: str | None,
-    previous_end_reason: str | None,
-    previous_ended_at: Any,
+    pending_generation: int | None,
 ) -> None:
-    session.discard_pending_peer_connection(failed_peer_connection)
-    if session.peer_connection is failed_peer_connection:
-        session.peer_connection = previous_peer_connection
-    if previous_outbound_audio_track is not None:
-        session.outbound_audio_track = previous_outbound_audio_track
-    session.data_channel = previous_data_channel
-    if previous_state is not None:
-        session.state = previous_state
-    session.end_reason = previous_end_reason
-    session.ended_at = previous_ended_at
+    await session.reject_pending_peer_connection(
+        failed_peer_connection,
+        generation=pending_generation,
+    )
 
 
 def _create_peer_connection(offer: SessionDescription) -> Any:
@@ -862,20 +842,33 @@ def _attach_outbound_audio_track(peer_connection: Any) -> QueuedAudioOutputTrack
         ) from exc
 
 
-def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
+def _attach_peer_handlers(
+    peer_connection: Any,
+    session: CallSession,
+    *,
+    pending_generation: int | None = None,
+) -> None:
     if not hasattr(peer_connection, "on"):
         return
 
     keepalive_task: asyncio.Task | None = None
 
     async def accept_pending_peer_if_connected(source: str) -> None:
-        if not session.is_peer_connection_pending(peer_connection):
+        if not session.is_peer_connection_pending(
+            peer_connection,
+            pending_generation,
+        ):
             return
         connection_state = getattr(peer_connection, "connectionState", None)
         ice_state = getattr(peer_connection, "iceConnectionState", None)
         if connection_state != "connected" and ice_state not in {"connected", "completed"}:
             return
-        previous_peer_connection = session.accept_pending_peer_connection(peer_connection)
+        accepted, previous_peer_connection = await session.accept_pending_peer_connection(
+            peer_connection,
+            generation=pending_generation,
+        )
+        if not accepted:
+            return
         logger.info(
             "[rayme-call] peer.pending.accepted session=%s source=%s conn=%s ice=%s",
             session.session_id,
@@ -890,13 +883,21 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
             await _close_peer_connection(previous_peer_connection)
 
     async def discard_failed_pending_peer(source: str) -> bool:
-        if not session.is_peer_connection_pending(peer_connection):
+        if not session.is_peer_connection_pending(
+            peer_connection,
+            pending_generation,
+        ):
             return False
         connection_state = getattr(peer_connection, "connectionState", None)
         ice_state = getattr(peer_connection, "iceConnectionState", None)
         if connection_state not in {"failed", "closed"} and ice_state not in {"failed", "closed"}:
             return False
-        session.discard_pending_peer_connection(peer_connection)
+        discarded = await session.reject_pending_peer_connection(
+            peer_connection,
+            generation=pending_generation,
+        )
+        if not discarded:
+            return False
         logger.info(
             "[rayme-call] peer.pending.discarded session=%s source=%s conn=%s ice=%s",
             session.session_id,
@@ -904,7 +905,6 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
             connection_state,
             ice_state,
         )
-        await _close_peer_connection(peer_connection)
         return True
 
     @peer_connection.on("datachannel")
@@ -919,7 +919,11 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
             ready,
         )
         if label == RAYME_EVENTS_CHANNEL:
-            session.set_data_channel_for_peer(peer_connection, channel)
+            session.set_data_channel_for_peer(
+                peer_connection,
+                channel,
+                generation=pending_generation,
+            )
 
             def start_keepalive() -> None:
                 nonlocal keepalive_task
@@ -979,7 +983,14 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
             track_id,
         )
         if kind == "audio":
-            asyncio.create_task(_receive_audio_track(session, track, peer_connection))
+            asyncio.create_task(
+                _receive_audio_track(
+                    session,
+                    track,
+                    peer_connection,
+                    pending_generation=pending_generation,
+                )
+            )
 
     @peer_connection.on("connectionstatechange")
     async def on_connectionstatechange() -> None:
@@ -992,7 +1003,8 @@ def _attach_peer_handlers(peer_connection: Any, session: CallSession) -> None:
         if await discard_failed_pending_peer("connectionstatechange"):
             return
         await accept_pending_peer_if_connected("connectionstatechange")
-        await session.handle_connection_state_change()
+        if peer_connection is session.peer_connection:
+            await session.handle_connection_state_change()
 
     @peer_connection.on("iceconnectionstatechange")
     async def on_iceconnectionstatechange() -> None:
@@ -1029,6 +1041,8 @@ async def _receive_audio_track(
     session: CallSession,
     track: Any,
     peer_connection: Any | None = None,
+    *,
+    pending_generation: int | None = None,
 ) -> None:
     logger.info(
         "[rayme-call] track.recv.start session=%s kind=%s id=%s",
@@ -1134,11 +1148,19 @@ async def _receive_audio_track(
         if frame_count == 1:
             if (
                 peer_connection is not None
-                and session.is_peer_connection_pending(peer_connection)
-            ):
-                previous_peer_connection = session.accept_pending_peer_connection(
-                    peer_connection
+                and session.is_peer_connection_pending(
+                    peer_connection,
+                    pending_generation,
                 )
+            ):
+                accepted, previous_peer_connection = (
+                    await session.accept_pending_peer_connection(
+                        peer_connection,
+                        generation=pending_generation,
+                    )
+                )
+                if not accepted:
+                    break
                 logger.info(
                     "[rayme-call] peer.pending.accepted session=%s source=first_audio_frame",
                     session.session_id,

@@ -2881,7 +2881,7 @@ def test_connected_replacement_keeps_prompt_lease_owned_through_reconnect() -> N
             lambda owner: released_owners.append(owner)
         )
         assert installed is True
-        session.mark_peer_connection_pending(replacement_peer)
+        generation = await session.mark_peer_connection_pending(replacement_peer)
         peer.connectionState = "closed"
         await session.handle_connection_state_change()
 
@@ -2889,8 +2889,12 @@ def test_connected_replacement_keeps_prompt_lease_owned_through_reconnect() -> N
         assert session.ended_at is None
         assert released_owners == []
 
-        previous_peer = session.accept_pending_peer_connection(replacement_peer)
+        accepted, previous_peer = await session.accept_pending_peer_connection(
+            replacement_peer,
+            generation=generation,
+        )
 
+        assert accepted is True
         assert previous_peer is peer
         assert session.peer_connection is replacement_peer
         assert session.state == "listening"
@@ -2902,6 +2906,76 @@ def test_connected_replacement_keeps_prompt_lease_owned_through_reconnect() -> N
     _run(scenario())
 
     assert released_owners == ["call-session-reconnect-lease"]
+
+
+def test_reconnect_candidate_supersession_is_ordered_and_closes_stale_peer() -> None:
+    session, active_peer = _new_session(session_id="call-session-reconnect-order")
+    first_candidate = ScriptedPeerConnection()
+    second_candidate = ScriptedPeerConnection()
+
+    async def scenario() -> None:
+        first_generation = await session.mark_peer_connection_pending(
+            first_candidate,
+            timeout_seconds=60.0,
+        )
+        second_generation = await session.mark_peer_connection_pending(
+            second_candidate,
+            timeout_seconds=60.0,
+        )
+
+        assert first_candidate.close_calls == 1
+        assert session._pending_peer_connections == [second_candidate]
+        assert session.is_peer_connection_pending(
+            first_candidate,
+            first_generation,
+        ) is False
+
+        stale_accepted, stale_previous = await session.accept_pending_peer_connection(
+            first_candidate,
+            generation=first_generation,
+        )
+        accepted, previous_peer = await session.accept_pending_peer_connection(
+            second_candidate,
+            generation=second_generation,
+        )
+
+        assert stale_accepted is False
+        assert stale_previous is None
+        assert accepted is True
+        assert previous_peer is active_peer
+        assert session.peer_connection is second_candidate
+
+    _run(scenario())
+
+
+def test_reconnect_candidate_timeout_closes_candidate_and_resolves_transport_loss() -> None:
+    session, active_peer = _new_session(session_id="call-session-reconnect-timeout")
+    candidate = ScriptedPeerConnection()
+    released_owners: list[str] = []
+
+    async def scenario() -> None:
+        await session.install_or_release_tts_prompt_lease(
+            lambda owner: released_owners.append(owner)
+        )
+        await session.mark_peer_connection_pending(
+            candidate,
+            timeout_seconds=0.01,
+        )
+        active_peer.connectionState = "closed"
+        await session.handle_connection_state_change()
+
+        assert session.state == "reconnecting"
+        assert released_owners == []
+
+        await asyncio.sleep(0.03)
+
+    _run(scenario())
+
+    assert candidate.close_calls == 1
+    assert session._pending_peer_connections == []
+    assert session.state == "ended"
+    assert session.end_reason == "connection_closed"
+    assert released_owners == ["call-session-reconnect-timeout"]
 
 
 def test_stats_returns_session_state_and_audio_counters() -> None:

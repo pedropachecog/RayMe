@@ -73,6 +73,7 @@ CALL_BARGE_IN_MIN_RMS = 200.0
 CALL_RECOVERABLE_EVENT_TYPES = {"user_final", "failed"}
 CALL_ENDED_EVENT_RECOVERY_GRACE_SECONDS = 60.0
 CALL_PEER_RECONNECT_GRACE_SECONDS = 8.0
+CALL_PEER_REPLACEMENT_TIMEOUT_SECONDS = 8.0
 
 
 def _voxcpm2_options_for_engine(engine_id: str, options: dict[str, Any]) -> dict[str, Any]:
@@ -218,6 +219,8 @@ class CallSession:
         self._pending_peer_connections: list[Any] = []
         self._pending_data_channels: list[tuple[Any, Any]] = []
         self._pending_outbound_audio_tracks: list[tuple[Any, Any]] = []
+        self._pending_peer_generation = 0
+        self._pending_peer_timeout_task: asyncio.Task[None] | None = None
         self._lifecycle_lock = asyncio.Lock()
         self._tts_prompt_lease_releaser: PromptLeaseReleaser | None = None
         self._deferred_peer_terminal_state: str | None = None
@@ -352,26 +355,52 @@ class CallSession:
             int(CALL_RECONNECT_BACKFILL_HOLD_SECONDS * 1000),
         )
 
-    def mark_peer_connection_pending(
+    async def mark_peer_connection_pending(
         self,
         peer_connection: Any,
         *,
         outbound_audio_track: Any | None = None,
-    ) -> None:
-        if peer_connection not in self._pending_peer_connections:
-            self._pending_peer_connections.append(peer_connection)
-        if outbound_audio_track is not None:
-            self._pending_outbound_audio_tracks = [
-                (peer, track)
-                for peer, track in self._pending_outbound_audio_tracks
+        timeout_seconds: float = CALL_PEER_REPLACEMENT_TIMEOUT_SECONDS,
+    ) -> int:
+        async with self._lifecycle_lock:
+            superseded_peers = [
+                peer
+                for peer in self._pending_peer_connections
                 if peer is not peer_connection
             ]
-            self._pending_outbound_audio_tracks.append(
-                (peer_connection, outbound_audio_track)
+            self._cancel_pending_peer_timeout_locked()
+            self._pending_peer_generation += 1
+            generation = self._pending_peer_generation
+            self._pending_peer_connections = [peer_connection]
+            self._pending_data_channels = []
+            self._pending_outbound_audio_tracks = (
+                [(peer_connection, outbound_audio_track)]
+                if outbound_audio_track is not None
+                else []
             )
+            self._pending_peer_timeout_task = asyncio.create_task(
+                self._expire_pending_peer_connection(
+                    peer_connection,
+                    generation,
+                    timeout_seconds,
+                )
+            )
+        for superseded_peer in superseded_peers:
+            await self._close_peer(superseded_peer)
+        return generation
 
-    def is_peer_connection_pending(self, peer_connection: Any) -> bool:
-        return peer_connection in self._pending_peer_connections
+    def is_peer_connection_pending(
+        self,
+        peer_connection: Any,
+        generation: int | None = None,
+    ) -> bool:
+        return (
+            self._pending_peer_connections == [peer_connection]
+            and (
+                generation is None
+                or generation == self._pending_peer_generation
+            )
+        )
 
     def is_peer_connection_active_or_pending(self, peer_connection: Any) -> bool:
         return (
@@ -379,11 +408,17 @@ class CallSession:
             or peer_connection in self._pending_peer_connections
         )
 
-    def set_data_channel_for_peer(self, peer_connection: Any, data_channel: Any) -> None:
+    def set_data_channel_for_peer(
+        self,
+        peer_connection: Any,
+        data_channel: Any,
+        *,
+        generation: int | None = None,
+    ) -> None:
         if peer_connection is self.peer_connection:
             self.data_channel = data_channel
             return
-        if peer_connection not in self._pending_peer_connections:
+        if not self.is_peer_connection_pending(peer_connection, generation):
             return
         self._pending_data_channels = [
             (peer, channel)
@@ -392,31 +427,53 @@ class CallSession:
         ]
         self._pending_data_channels.append((peer_connection, data_channel))
 
-    def accept_pending_peer_connection(
+    async def accept_pending_peer_connection(
         self,
         peer_connection: Any,
         *,
+        generation: int | None = None,
         outbound_audio_track: Any | None = None,
-    ) -> Any | None:
-        previous_peer_connection = (
-            self.peer_connection if self.peer_connection is not peer_connection else None
-        )
-        self.peer_connection = peer_connection
-        if outbound_audio_track is None:
-            for peer, track in self._pending_outbound_audio_tracks:
+    ) -> tuple[bool, Any | None]:
+        async with self._lifecycle_lock:
+            if not self.is_peer_connection_pending(peer_connection, generation):
+                return False, None
+            previous_peer_connection = (
+                self.peer_connection
+                if self.peer_connection is not peer_connection
+                else None
+            )
+            self.peer_connection = peer_connection
+            if outbound_audio_track is None:
+                for peer, track in self._pending_outbound_audio_tracks:
+                    if peer is peer_connection:
+                        outbound_audio_track = track
+                        break
+            if outbound_audio_track is not None:
+                self.outbound_audio_track = outbound_audio_track
+            for peer, channel in self._pending_data_channels:
                 if peer is peer_connection:
-                    outbound_audio_track = track
-                    break
-        if outbound_audio_track is not None:
-            self.outbound_audio_track = outbound_audio_track
-        for peer, channel in list(self._pending_data_channels):
-            if peer is peer_connection:
-                self.data_channel = channel
-        self.discard_pending_peer_connection(peer_connection)
-        self._complete_transport_reconnect()
-        return previous_peer_connection
+                    self.data_channel = channel
+            self._clear_pending_peer_locked(peer_connection)
+            self._complete_transport_reconnect()
+            return True, previous_peer_connection
 
-    def discard_pending_peer_connection(self, peer_connection: Any) -> None:
+    async def reject_pending_peer_connection(
+        self,
+        peer_connection: Any,
+        *,
+        generation: int | None = None,
+        resolve_deferred: bool = False,
+    ) -> bool:
+        async with self._lifecycle_lock:
+            if not self.is_peer_connection_pending(peer_connection, generation):
+                return False
+            self._clear_pending_peer_locked(peer_connection)
+        await self._close_peer(peer_connection)
+        if resolve_deferred:
+            await self.resolve_deferred_connection_state()
+        return True
+
+    def _clear_pending_peer_locked(self, peer_connection: Any) -> None:
         self._pending_peer_connections = [
             peer for peer in self._pending_peer_connections if peer is not peer_connection
         ]
@@ -430,6 +487,46 @@ class CallSession:
             for peer, track in self._pending_outbound_audio_tracks
             if peer is not peer_connection
         ]
+        self._cancel_pending_peer_timeout_locked()
+
+    def _cancel_pending_peer_timeout_locked(self) -> None:
+        task = self._pending_peer_timeout_task
+        self._pending_peer_timeout_task = None
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
+
+    async def _expire_pending_peer_connection(
+        self,
+        peer_connection: Any,
+        generation: int,
+        timeout_seconds: float,
+    ) -> None:
+        try:
+            await asyncio.sleep(max(timeout_seconds, 0.0))
+            expired = await self.reject_pending_peer_connection(
+                peer_connection,
+                generation=generation,
+                resolve_deferred=True,
+            )
+            if expired:
+                logger.info(
+                    "[rayme-call] peer.pending.timeout session=%s generation=%d "
+                    "timeout_seconds=%.1f",
+                    self.session_id,
+                    generation,
+                    timeout_seconds,
+                )
+        except asyncio.CancelledError:
+            return
+
+    @staticmethod
+    async def _close_peer(peer_connection: Any) -> None:
+        close = getattr(peer_connection, "close", None)
+        if not callable(close):
+            return
+        result = close()
+        if inspect.isawaitable(result):
+            await result
 
     async def backfill_reconnect_audio(
         self,
@@ -2093,6 +2190,7 @@ class CallSession:
 
     async def end(self, *, reason: str = "ended") -> dict[str, Any]:
         cancel_context: dict[str, Any] = {}
+        pending_peers: list[Any] = []
         async with self._lifecycle_lock:
             first_end = self.ended_at is None
             if first_end:
@@ -2102,6 +2200,9 @@ class CallSession:
                 self.ended_at = datetime.now(timezone.utc)
                 self.end_reason = reason
                 self.state = "ended"
+                pending_peers = list(self._pending_peer_connections)
+                for pending_peer in pending_peers:
+                    self._clear_pending_peer_locked(pending_peer)
             elif self.end_reason is None:
                 self.end_reason = reason
         if first_end:
@@ -2117,6 +2218,8 @@ class CallSession:
                 result = close()
                 if inspect.isawaitable(result):
                     await result
+            for pending_peer in pending_peers:
+                await self._close_peer(pending_peer)
             await self._release_tts_prompt_lease()
 
         return await self.emit_event(
@@ -2136,6 +2239,7 @@ class CallSession:
 
     async def fail(self, *, reason: str = "connection_failed") -> dict[str, Any]:
         cancel_context: dict[str, Any] = {}
+        pending_peers: list[Any] = []
         async with self._lifecycle_lock:
             if self.ended_at is None:
                 self._cancel_peer_reconnect_grace_locked()
@@ -2144,6 +2248,9 @@ class CallSession:
                 self.state = "failed"
                 self.end_reason = reason
                 self.ended_at = datetime.now(timezone.utc)
+                pending_peers = list(self._pending_peer_connections)
+                for pending_peer in pending_peers:
+                    self._clear_pending_peer_locked(pending_peer)
         if (
             self.active_turn_task is not None
             or self._active_tts_turn_id is not None
@@ -2155,6 +2262,8 @@ class CallSession:
             result = close()
             if inspect.isawaitable(result):
                 await result
+        for pending_peer in pending_peers:
+            await self._close_peer(pending_peer)
         await self._release_tts_prompt_lease()
         return await self.emit_event(
             simple_event(
