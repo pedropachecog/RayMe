@@ -441,10 +441,11 @@ if ($verifyVoxCpm2) {
   Invoke-RayMeVoxCpm2Verification
 }
 
-if ($verifyQwen3Tracer -or $verifyQwen3 -or $qwenFidelitySweep) {
-  Stop-RayMePortOwners
-  Invoke-RayMeQwen3Provisioning
-}
+# Qwen is a shipped engine, not an optional evidence-only dependency. Keep the
+# expensive tracer/fidelity work behind its flags, but make every canonical
+# deployment materialize and attest the locked runtime/model before launch.
+Stop-RayMePortOwners
+Invoke-RayMeQwen3Provisioning
 
 Write-Host "== Verifying AI GPU runtime"
 $env:PATH = "$cudaRuntimeBin;$env:PATH"
@@ -721,6 +722,37 @@ $aiStatus = $aiHealth | ConvertFrom-Json
 $aiStatus | Select-Object service,status,stt_ready,vad_ready,resident_tts_engine | Format-List
 if (-not $aiStatus.stt_ready -or -not $aiStatus.vad_ready -or $aiStatus.resident_tts_engine -ne "f5") {
   throw "AI backend is not ready for live calls"
+}
+$qwenManifestPath = Join-Path $qwenModelDir "rayme-model-revision.json"
+if (-not (Test-Path $qwenManifestPath)) {
+  throw "Pinned Qwen model manifest is missing after canonical provisioning"
+}
+$qwenManifest = Get-Content -Raw $qwenManifestPath | ConvertFrom-Json
+$qwenEngineStatus = @($aiStatus.available_engines) |
+  Where-Object { [string]$_.id -eq "qwen3_1_7b" } |
+  Select-Object -First 1
+if (
+  -not $script:QwenRuntimeIdentity -or
+  [string]$script:QwenRuntimeIdentity.runtime_source_commit -ne $qwenRuntimeCommit -or
+  [string]$script:QwenRuntimeIdentity.model_id -ne $qwenModelId -or
+  [string]$script:QwenRuntimeIdentity.model_revision -ne $qwenModelRevision -or
+  [string]$qwenManifest.model_id -ne $qwenModelId -or
+  [string]$qwenManifest.model_revision -ne $qwenModelRevision -or
+  -not $qwenEngineStatus -or
+  $qwenEngineStatus.available -eq $false -or
+  [string]$qwenEngineStatus.state -eq "unavailable"
+) {
+  throw "Pinned Qwen runtime, model identity, or engine availability is not ready"
+}
+$webrtcStatus = curl.exe -k -sS https://192.168.1.199:9443/webrtc/status
+if ($LASTEXITCODE -ne 0) { throw "AI backend WebRTC readiness request failed" }
+$webrtcStatus = $webrtcStatus | ConvertFrom-Json
+if (
+  [string]$webrtcStatus.status -ne "ready" -or
+  -not $webrtcStatus.live_call_ready -or
+  [string]$webrtcStatus.deployed_commit -ne $actualHead
+) {
+  throw "AI backend Qwen live-call readiness or deployed identity is not ready"
 }
 $webStatus = ($webHealth | ConvertFrom-Json).ai_backend_status
 $webStatus | Select-Object endpoint_status,resident_tts_engine | Format-List
