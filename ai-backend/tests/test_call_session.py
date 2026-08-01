@@ -2834,6 +2834,12 @@ def test_failed_connection_records_connection_failed_reason() -> None:
 
     _run(session.handle_connection_state_change())
 
+    assert session.state == "reconnecting"
+    assert session.end_reason is None
+    assert peer.close_calls == 0
+
+    _run(session.resolve_deferred_connection_state())
+
     assert session.state == "failed"
     assert session.end_reason == "connection_failed"
     assert peer.close_calls == 1
@@ -2851,12 +2857,51 @@ def test_closed_connection_ends_session_and_releases_prompt_lease() -> None:
         peer.connectionState = "closed"
         await session.handle_connection_state_change()
 
+        assert session.state == "reconnecting"
+        assert session.end_reason is None
+        assert released_owners == []
+
+        await session.resolve_deferred_connection_state()
+
     _run(scenario())
 
     assert session.state == "ended"
     assert session.end_reason == "connection_closed"
     assert peer.close_calls == 1
     assert released_owners == ["call-session-remote-closed"]
+
+
+def test_connected_replacement_keeps_prompt_lease_owned_through_reconnect() -> None:
+    session, peer = _new_session(session_id="call-session-reconnect-lease")
+    replacement_peer = ScriptedPeerConnection()
+    released_owners: list[str] = []
+
+    async def scenario() -> None:
+        installed = await session.install_or_release_tts_prompt_lease(
+            lambda owner: released_owners.append(owner)
+        )
+        assert installed is True
+        session.mark_peer_connection_pending(replacement_peer)
+        peer.connectionState = "closed"
+        await session.handle_connection_state_change()
+
+        assert session.state == "reconnecting"
+        assert session.ended_at is None
+        assert released_owners == []
+
+        previous_peer = session.accept_pending_peer_connection(replacement_peer)
+
+        assert previous_peer is peer
+        assert session.peer_connection is replacement_peer
+        assert session.state == "listening"
+        assert session.ended_at is None
+        assert released_owners == []
+
+        await session.end(reason="hangup")
+
+    _run(scenario())
+
+    assert released_owners == ["call-session-reconnect-lease"]
 
 
 def test_stats_returns_session_state_and_audio_counters() -> None:

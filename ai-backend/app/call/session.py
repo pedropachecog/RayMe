@@ -72,6 +72,7 @@ CALL_BARGE_IN_MAX_ONSET_BUFFER_MS = 1000
 CALL_BARGE_IN_MIN_RMS = 200.0
 CALL_RECOVERABLE_EVENT_TYPES = {"user_final", "failed"}
 CALL_ENDED_EVENT_RECOVERY_GRACE_SECONDS = 60.0
+CALL_PEER_RECONNECT_GRACE_SECONDS = 8.0
 
 
 def _voxcpm2_options_for_engine(engine_id: str, options: dict[str, Any]) -> dict[str, Any]:
@@ -219,6 +220,9 @@ class CallSession:
         self._pending_outbound_audio_tracks: list[tuple[Any, Any]] = []
         self._lifecycle_lock = asyncio.Lock()
         self._tts_prompt_lease_releaser: PromptLeaseReleaser | None = None
+        self._deferred_peer_terminal_state: str | None = None
+        self._peer_reconnect_grace_task: asyncio.Task[None] | None = None
+        self._state_before_peer_reconnect: str | None = None
 
     @property
     def active_ai_turn(self) -> Any | None:
@@ -409,6 +413,7 @@ class CallSession:
             if peer is peer_connection:
                 self.data_channel = channel
         self.discard_pending_peer_connection(peer_connection)
+        self._complete_transport_reconnect()
         return previous_peer_connection
 
     def discard_pending_peer_connection(self, peer_connection: Any) -> None:
@@ -2091,6 +2096,9 @@ class CallSession:
         async with self._lifecycle_lock:
             first_end = self.ended_at is None
             if first_end:
+                self._cancel_peer_reconnect_grace_locked()
+                self._deferred_peer_terminal_state = None
+                self._state_before_peer_reconnect = None
                 self.ended_at = datetime.now(timezone.utc)
                 self.end_reason = reason
                 self.state = "ended"
@@ -2130,6 +2138,9 @@ class CallSession:
         cancel_context: dict[str, Any] = {}
         async with self._lifecycle_lock:
             if self.ended_at is None:
+                self._cancel_peer_reconnect_grace_locked()
+                self._deferred_peer_terminal_state = None
+                self._state_before_peer_reconnect = None
                 self.state = "failed"
                 self.end_reason = reason
                 self.ended_at = datetime.now(timezone.utc)
@@ -2174,10 +2185,71 @@ class CallSession:
 
     async def handle_connection_state_change(self) -> None:
         connection_state = getattr(self.peer_connection, "connectionState", None)
-        if connection_state == "failed":
+        if connection_state in {"failed", "closed"}:
+            await self._begin_transport_reconnect(connection_state)
+
+    async def _begin_transport_reconnect(self, terminal_state: str) -> None:
+        async with self._lifecycle_lock:
+            if self.ended_at is not None or self.state in {"ended", "failed"}:
+                return
+            if self._state_before_peer_reconnect is None:
+                self._state_before_peer_reconnect = self.state
+            if terminal_state == "failed" or self._deferred_peer_terminal_state is None:
+                self._deferred_peer_terminal_state = terminal_state
+            self.state = "reconnecting"
+            if (
+                self._peer_reconnect_grace_task is None
+                or self._peer_reconnect_grace_task.done()
+            ):
+                self._peer_reconnect_grace_task = asyncio.create_task(
+                    self._expire_peer_reconnect_grace()
+                )
+        logger.info(
+            "[rayme-call] peer.active.terminal_deferred session=%s state=%s "
+            "grace_seconds=%.1f",
+            self.session_id,
+            terminal_state,
+            CALL_PEER_RECONNECT_GRACE_SECONDS,
+        )
+
+    async def _expire_peer_reconnect_grace(self) -> None:
+        try:
+            await asyncio.sleep(CALL_PEER_RECONNECT_GRACE_SECONDS)
+            await self.resolve_deferred_connection_state()
+        except asyncio.CancelledError:
+            return
+
+    async def resolve_deferred_connection_state(self) -> bool:
+        async with self._lifecycle_lock:
+            terminal_state = self._deferred_peer_terminal_state
+            if terminal_state is None or self.ended_at is not None:
+                return False
+            self._deferred_peer_terminal_state = None
+            self._state_before_peer_reconnect = None
+            self._cancel_peer_reconnect_grace_locked()
+        if terminal_state == "failed":
             await self.fail(reason="connection_failed")
-        elif connection_state == "closed" and self.ended_at is None:
+        else:
             await self.end(reason="connection_closed")
+        return True
+
+    async def complete_transport_reconnect(self) -> None:
+        async with self._lifecycle_lock:
+            self._complete_transport_reconnect()
+
+    def _complete_transport_reconnect(self) -> None:
+        self._deferred_peer_terminal_state = None
+        restored_state = self._state_before_peer_reconnect
+        self._state_before_peer_reconnect = None
+        self._cancel_peer_reconnect_grace_locked()
+        if self.state == "reconnecting":
+            self.state = restored_state or "listening"
+
+    def _cancel_peer_reconnect_grace_locked(self) -> None:
+        task = self._peer_reconnect_grace_task
+        self._peer_reconnect_grace_task = None
+        if task is not None and task is not asyncio.current_task() and not task.done():
+            task.cancel()
 
     def stats(self) -> dict[str, Any]:
         return {
@@ -2953,13 +3025,7 @@ class CallSessionManager:
             ):
                 previous_peer = existing.peer_connection
                 existing.peer_connection = peer_connection
-                if (
-                    existing.state == "failed"
-                    and existing.end_reason == "connection_failed"
-                ):
-                    existing.state = "listening"
-                    existing.end_reason = None
-                    existing.ended_at = None
+                await existing.complete_transport_reconnect()
                 existing.mark_media_reconnect_pending()
                 if close_previous_peer:
                     close = getattr(previous_peer, "close", None)
