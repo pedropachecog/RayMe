@@ -749,6 +749,65 @@ def test_reconnect_offer_rejects_explicitly_ended_session_before_allocating_medi
     assert session.end_reason == "hangup"
 
 
+def test_concurrent_hangup_wins_before_reconnect_candidate_registration(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_webrtc: None,
+) -> None:
+    client = _client()
+    session_id = "reconnect-races-explicit-hangup"
+    first = client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+    assert first.status_code == 200
+    session = client.app.state.call_session_manager.get_session(session_id)
+
+    registration_reached = threading.Event()
+    allow_registration = threading.Event()
+    original_register = session.mark_peer_connection_pending
+    allocated_peers: list[Any] = []
+
+    class TrackingPeerConnection(StubPeerConnection):
+        def __init__(self) -> None:
+            super().__init__()
+            self.close_calls = 0
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    def create_peer_connection(_offer: Any) -> TrackingPeerConnection:
+        peer = TrackingPeerConnection()
+        allocated_peers.append(peer)
+        return peer
+
+    async def blocked_register(*args: Any, **kwargs: Any) -> int:
+        registration_reached.set()
+        await asyncio.to_thread(allow_registration.wait)
+        return await original_register(*args, **kwargs)
+
+    monkeypatch.setattr(webrtc_module, "_create_peer_connection", create_peer_connection)
+    monkeypatch.setattr(session, "mark_peer_connection_pending", blocked_register)
+    responses: list[Any] = []
+
+    offer_thread = threading.Thread(
+        target=lambda: responses.append(
+            client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+        )
+    )
+    offer_thread.start()
+    try:
+        assert registration_reached.wait(2)
+        asyncio.run(session.end(reason="hangup"))
+    finally:
+        allow_registration.set()
+        offer_thread.join(2)
+
+    assert not offer_thread.is_alive()
+    assert responses[0].status_code == 409
+    assert responses[0].json()["detail"]["code"] == "call_session_terminal"
+    assert session.state == "ended"
+    assert session._pending_peer_connections == []
+    assert len(allocated_peers) == 1
+    assert allocated_peers[0].close_calls == 1
+
+
 def test_failed_reconnect_offer_preserves_existing_session_media(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

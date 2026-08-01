@@ -14,7 +14,11 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 
 from app.api.stt import _settings_from_app, _stt_adapter_from_app, _vad_adapter_from_app
 from app.api.tts import _qwen_error_detail, _qwen_http_status
-from app.call.session import CallSession, CallSessionManager
+from app.call.session import (
+    CallSession,
+    CallSessionManager,
+    TerminalCallSessionError,
+)
 from app.call.tracks import QueuedAudioOutputTrack
 from app.models.model_manager import ModelManager
 from app.models.tts_qwen3 import Qwen3WorkerError
@@ -337,6 +341,20 @@ async def create_webrtc_offer_answer(
                     "message": "A newer reconnect offer replaced this offer",
                 },
             )
+    except TerminalCallSessionError as exc:
+        await _close_peer_connection(peer_connection)
+        logger.info(
+            "[rayme-call] offer.rejected_terminal session=%s elapsed_ms=%d",
+            payload.session_id,
+            int((time.monotonic() - negotiate_started) * 1000),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "call_session_terminal",
+                "message": "Call session has ended; start a new call",
+            },
+        ) from exc
     except HTTPException:
         if existing_session is not None:
             await _restore_failed_offer_session(

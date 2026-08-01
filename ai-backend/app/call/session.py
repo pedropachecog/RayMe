@@ -401,6 +401,14 @@ class CallSession:
     ) -> int:
         async with self._lifecycle_lock:
             lifecycle = self._peer_lifecycle
+            if (
+                self.ended_at is not None
+                or self.state in {"ended", "failed"}
+                or lifecycle.phase == "terminal"
+            ):
+                raise TerminalCallSessionError(
+                    "cannot register a peer candidate on a terminal call"
+                )
             superseded_candidate = lifecycle.candidate
             superseded_peers = (
                 [superseded_candidate.peer_connection]
