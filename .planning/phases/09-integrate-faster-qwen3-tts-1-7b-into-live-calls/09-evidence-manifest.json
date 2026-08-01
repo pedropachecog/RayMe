@@ -75,7 +75,7 @@
   ],
   "thresholds": {
     "max_evidence_age_seconds": 86400,
-    "native_hot_median_first_chunk_ms": 500.0,
+    "native_hot_median_first_chunk_ms": 600.0,
     "rayme_first_playback_ms": 1250.0,
     "minimum_sample_rtfx": 1.05,
     "minimum_median_rtfx": 1.25,

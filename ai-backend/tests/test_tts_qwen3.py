@@ -1323,8 +1323,8 @@ class ScriptedNativeRuntime:
 
     def generate_voice_clone_streaming(self, **kwargs: Any):
         self.streaming_calls.append(kwargs)
-        yield ([0.1] * 5760, 24000, {"total_steps": 3})
-        yield ([0.1] * 5760, 24000, {"total_steps": 6})
+        yield ([0.1] * 7680, 24000, {"total_steps": 4})
+        yield ([0.1] * 7680, 24000, {"total_steps": 8})
 
 
 def test_qwen_worker_loads_only_exact_cuda_torch_runtime_settings(
@@ -1533,7 +1533,7 @@ def test_qwen_worker_pulls_only_native_full_icl_stream_with_locked_settings(
     call = runtime.streaming_calls[0]
     assert call["voice_clone_prompt"] is prompt.prompt_items
     assert call["ref_text"] == prompt.reference_transcript
-    assert call["chunk_size"] == 3
+    assert call["chunk_size"] == 4
     assert call["xvec_only"] is False
     assert call["non_streaming_mode"] is True
     assert call["append_silence"] is True

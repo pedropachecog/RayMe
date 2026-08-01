@@ -30,7 +30,7 @@ def _scripted_wav_bytes(*, sample_count: int = 2880) -> bytes:
 
 
 SCRIPTED_WAV_BYTES = _scripted_wav_bytes()
-QWEN_STREAM_CHUNK_WAV_BYTES = _scripted_wav_bytes(sample_count=5760)
+QWEN_STREAM_CHUNK_WAV_BYTES = _scripted_wav_bytes(sample_count=7680)
 
 
 def _run(value: Any) -> Any:
@@ -1479,9 +1479,9 @@ def test_voxcpm2_slow_stream_starts_playback_before_stream_completion(monkeypatc
 
 def test_qwen_slow_stream_starts_playback_before_stream_completion() -> None:
     adapter = SlowQwenStreamingTtsAdapter(
-        chunk_count=4,
+        chunk_count=3,
         wav_bytes=QWEN_STREAM_CHUNK_WAV_BYTES,
-        duration_ms=240.0,
+        duration_ms=320.0,
     )
     events: list[dict[str, Any]] = []
 
@@ -1536,10 +1536,10 @@ def test_qwen_slow_stream_starts_playback_before_stream_completion() -> None:
     assert "total_generation_ms" not in event["ai_audio_started_event"]["tts_playback"]
     assert event["tts_playback_final"]["bridge_queue_capacity"] == 2
     assert event["tts_playback_final"]["bridge_queue_high_water"] <= 2
-    assert event["ai_audio_started_event"]["tts_playback"]["startup_buffered_chunks"] == 3
-    assert event["ai_audio_started_event"]["tts_playback"]["startup_buffered_audio_ms"] == 720.0
+    assert event["ai_audio_started_event"]["tts_playback"]["startup_buffered_chunks"] == 2
+    assert event["ai_audio_started_event"]["tts_playback"]["startup_buffered_audio_ms"] == 640.0
     assert event["ai_audio_started_event"]["tts_playback"]["startup_buffer_target_ms"] == 600.0
-    assert track.preroll_seconds == [0.0, 0.0, 0.0, 0.0]
+    assert track.preroll_seconds == [0.0, 0.0, 0.0]
     assert adapter.requests[0]["request_id"] == "ai-turn-qwen-slow-stream"
     assert adapter.requests[0]["voice_key"] == "voice-qwen"
 

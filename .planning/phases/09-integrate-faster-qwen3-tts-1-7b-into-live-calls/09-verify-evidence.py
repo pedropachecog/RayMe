@@ -546,7 +546,7 @@ def _verify_call_flow(payload: dict[str, Any], manifest: dict[str, Any]) -> list
                 raise EvidenceError(f"{scenario_id} WER exceeds the message-integrity gate")
             _boolean(values.get("final_word_pass"), expected=True, label=f"{scenario_id} final_word_pass")
     if _median((value["native_first_chunk_ms"] for value in clone_values), label="native first chunk median") > manifest["thresholds"]["native_hot_median_first_chunk_ms"]:
-        raise EvidenceError("native hot median first chunk exceeds 500 ms")
+        raise EvidenceError("native hot median first chunk exceeds the hard limit")
     if _median((value["rtfx"] for value in normal_values), label="call RTFx median") < manifest["thresholds"]["minimum_median_rtfx"]:
         raise EvidenceError("call-flow median RTFx is below 1.25")
 

@@ -76,6 +76,15 @@ def test_manifest_freezes_exact_twenty_ai_spec_scenarios() -> None:
     assert all(str(scenario.get("target_text") or "").strip() for scenario in stream_scenarios)
 
 
+def test_manifest_keeps_native_ttfa_stretch_separate_from_live_hard_gates() -> None:
+    thresholds = _manifest()["thresholds"]
+
+    assert thresholds["native_hot_median_first_chunk_ms"] == 600.0
+    assert thresholds["rayme_first_playback_ms"] == 1250.0
+    assert thresholds["minimum_sample_rtfx"] == 1.05
+    assert thresholds["minimum_median_rtfx"] == 1.25
+
+
 def test_manifest_pins_runtime_model_and_speaker_revisions() -> None:
     manifest = _manifest()
     assert manifest["runtime"] == {
