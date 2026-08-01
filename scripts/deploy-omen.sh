@@ -461,6 +461,7 @@ if ($qwenFidelitySweep) {
 }
 
 Write-Host "== Writing scheduled task launchers"
+$aiPythonw = Join-Path $repo "ai-backend\.venv\Scripts\pythonw.exe"
 $aiLauncher = @"
 @echo off
 cd /d C:\Users\pmpg\rayme\RayMe
@@ -468,7 +469,7 @@ set "PATH=$cudaRuntimeBin;%PATH%"
 set "RAYME_DEPLOYED_COMMIT=$actualHead"
 set "RAYME_QWEN3_MODEL_DIR=$qwenModelDir"
 set "RAYME_QWEN3_MODEL_REVISION=$qwenModelRevision"
-ai-backend\.venv\Scripts\pythonw.exe ai-backend\scripts\run_https.py --host 192.168.1.199 --port 9443 --cert C:\Users\pmpg\rayme\phase1-tls\rayme.local+1.pem --key C:\Users\pmpg\rayme\phase1-tls\rayme.local+1-key.pem >> C:\Users\pmpg\rayme\logs\ai-backend.run.log 2>>&1
+"$aiPythonw" ai-backend\scripts\run_https.py --host 192.168.1.199 --port 9443 --cert C:\Users\pmpg\rayme\phase1-tls\rayme.local+1.pem --key C:\Users\pmpg\rayme\phase1-tls\rayme.local+1-key.pem >> C:\Users\pmpg\rayme\logs\ai-backend.run.log 2>>&1
 "@
 Set-Content -Path "C:\Users\pmpg\rayme\start-ai-backend.cmd" -Value $aiLauncher -Encoding ASCII
 
@@ -484,6 +485,54 @@ set "RAYME_ALLOWED_ORIGINS=https://192.168.1.199:8443,https://rayme.local:8443"
 web-ui\server\.venv\Scripts\pythonw.exe web-ui\server\scripts\run_dev_https.py --host 192.168.1.199 --port 8443 --cert C:\Users\pmpg\rayme\phase1-tls\rayme.local+1.pem --key C:\Users\pmpg\rayme\phase1-tls\rayme.local+1-key.pem >> C:\Users\pmpg\rayme\logs\web-ui.run.log 2>>&1
 "@
 Set-Content -Path "C:\Users\pmpg\rayme\start-web-ui.cmd" -Value $webLauncher -Encoding ASCII
+
+function Ensure-RayMeWebRtcFirewallRule {
+  if (-not (Test-Path $aiPythonw)) {
+    throw "RayMe AI runtime is missing at $aiPythonw"
+  }
+
+  $firewallRule = [pscustomobject]@{
+    Name = "RayMeAIWebRTCMediaUDP"
+    DisplayName = "RayMe AI WebRTC media (LAN UDP)"
+  }
+  Get-NetFirewallRule -Name $firewallRule.Name -ErrorAction SilentlyContinue |
+    Remove-NetFirewallRule
+  New-NetFirewallRule `
+    -Name $firewallRule.Name `
+    -DisplayName $firewallRule.DisplayName `
+    -Program $aiPythonw `
+    -Direction Inbound `
+    -Action Allow `
+    -Enabled True `
+    -Profile Any `
+    -Protocol UDP `
+    -LocalPort Any `
+    -RemoteAddress LocalSubnet | Out-Host
+
+  $installedRule = Get-NetFirewallRule -Name $firewallRule.Name -ErrorAction Stop
+  $applicationFilter = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $installedRule
+  $portFilter = Get-NetFirewallPortFilter -AssociatedNetFirewallRule $installedRule
+  $addressFilter = Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $installedRule
+  $programMatches = [System.StringComparer]::OrdinalIgnoreCase.Equals(
+    [string]$applicationFilter.Program,
+    [string]$aiPythonw
+  )
+  if (
+    [string]$installedRule.Enabled -ne "True" -or
+    [string]$installedRule.Direction -ne "Inbound" -or
+    [string]$installedRule.Action -ne "Allow" -or
+    [string]$installedRule.Profile -ne "Any" -or
+    -not $programMatches -or
+    [string]$portFilter.Protocol -ne "UDP" -or
+    [string]$portFilter.LocalPort -ne "Any" -or
+    [string]$addressFilter.RemoteAddress -ne "LocalSubnet"
+  ) {
+    throw "RayMe AI WebRTC firewall rule does not match the canonical LAN UDP contract"
+  }
+}
+
+Write-Host "== Installing canonical WebRTC media firewall rule"
+Ensure-RayMeWebRtcFirewallRule
 
 function Write-RayMeDesktopShortcut {
   $launcherScript = Join-Path $repo "scripts\start-rayme-omen.ps1"
