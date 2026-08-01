@@ -9,6 +9,7 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
@@ -138,6 +139,43 @@ class NullPeerConnection:
         return None
 
 
+class TerminalCallSessionError(RuntimeError):
+    """Raised when a peer candidate cannot be registered on a terminal call."""
+
+
+@dataclass
+class _PendingPeerCandidate:
+    peer_connection: Any
+    generation: int
+    epoch: int
+    outbound_audio_track: Any | None = None
+    data_channel: Any | None = None
+    timeout_task: asyncio.Task[None] | None = None
+
+
+@dataclass
+class _PeerLifecycle:
+    """All peer replacement and reconnect ownership guarded by one lock."""
+
+    epoch: int = 0
+    phase: str = "stable"
+    candidate_generation: int = 0
+    candidate: _PendingPeerCandidate | None = None
+    terminal_state: str | None = None
+    state_before_reconnect: str | None = None
+    grace_peer: Any | None = None
+    grace_task: asyncio.Task[None] | None = None
+
+
+@dataclass(frozen=True)
+class _TerminalCleanup:
+    target_state: str
+    reason: str
+    active_peer: Any
+    candidate_peer: Any | None
+    prompt_lease_releaser: PromptLeaseReleaser | None
+
+
 class CallSession:
     def __init__(
         self,
@@ -217,16 +255,14 @@ class CallSession:
         self._reconnect_live_frame_hold_until = 0.0
         self._reconnect_live_frame_hold_logged = False
         self._reconnect_live_frame_hold_frames: list[PcmAudioFrame] = []
-        self._pending_peer_connections: list[Any] = []
-        self._pending_data_channels: list[tuple[Any, Any]] = []
-        self._pending_outbound_audio_tracks: list[tuple[Any, Any]] = []
-        self._pending_peer_generation = 0
-        self._pending_peer_timeout_task: asyncio.Task[None] | None = None
         self._lifecycle_lock = asyncio.Lock()
+        self._peer_lifecycle = _PeerLifecycle()
         self._tts_prompt_lease_releaser: PromptLeaseReleaser | None = None
-        self._deferred_peer_terminal_state: str | None = None
-        self._peer_reconnect_grace_task: asyncio.Task[None] | None = None
-        self._state_before_peer_reconnect: str | None = None
+
+    @property
+    def _pending_peer_connections(self) -> list[Any]:
+        candidate = self._peer_lifecycle.candidate
+        return [candidate.peer_connection] if candidate is not None else []
 
     @property
     def active_ai_turn(self) -> Any | None:
@@ -364,22 +400,25 @@ class CallSession:
         timeout_seconds: float = CALL_PEER_REPLACEMENT_TIMEOUT_SECONDS,
     ) -> int:
         async with self._lifecycle_lock:
-            superseded_peers = [
-                peer
-                for peer in self._pending_peer_connections
-                if peer is not peer_connection
-            ]
-            self._cancel_pending_peer_timeout_locked()
-            self._pending_peer_generation += 1
-            generation = self._pending_peer_generation
-            self._pending_peer_connections = [peer_connection]
-            self._pending_data_channels = []
-            self._pending_outbound_audio_tracks = (
-                [(peer_connection, outbound_audio_track)]
-                if outbound_audio_track is not None
+            lifecycle = self._peer_lifecycle
+            superseded_candidate = lifecycle.candidate
+            superseded_peers = (
+                [superseded_candidate.peer_connection]
+                if superseded_candidate is not None
+                and superseded_candidate.peer_connection is not peer_connection
                 else []
             )
-            self._pending_peer_timeout_task = asyncio.create_task(
+            self._cancel_pending_peer_timeout_locked()
+            lifecycle.candidate_generation += 1
+            generation = lifecycle.candidate_generation
+            candidate = _PendingPeerCandidate(
+                peer_connection=peer_connection,
+                generation=generation,
+                epoch=lifecycle.epoch,
+                outbound_audio_track=outbound_audio_track,
+            )
+            lifecycle.candidate = candidate
+            candidate.timeout_task = asyncio.create_task(
                 self._expire_pending_peer_connection(
                     peer_connection,
                     generation,
@@ -395,11 +434,13 @@ class CallSession:
         peer_connection: Any,
         generation: int | None = None,
     ) -> bool:
+        candidate = self._peer_lifecycle.candidate
         return (
-            self._pending_peer_connections == [peer_connection]
+            candidate is not None
+            and candidate.peer_connection is peer_connection
             and (
                 generation is None
-                or generation == self._pending_peer_generation
+                or generation == candidate.generation
             )
         )
 
@@ -421,12 +462,9 @@ class CallSession:
             return
         if not self.is_peer_connection_pending(peer_connection, generation):
             return
-        self._pending_data_channels = [
-            (peer, channel)
-            for peer, channel in self._pending_data_channels
-            if peer is not peer_connection
-        ]
-        self._pending_data_channels.append((peer_connection, data_channel))
+        candidate = self._peer_lifecycle.candidate
+        if candidate is not None:
+            candidate.data_channel = data_channel
 
     async def accept_pending_peer_connection(
         self,
@@ -436,7 +474,16 @@ class CallSession:
         outbound_audio_track: Any | None = None,
     ) -> tuple[bool, Any | None]:
         async with self._lifecycle_lock:
-            if not self.is_peer_connection_pending(peer_connection, generation):
+            lifecycle = self._peer_lifecycle
+            candidate = lifecycle.candidate
+            if (
+                candidate is None
+                or candidate.peer_connection is not peer_connection
+                or (generation is not None and generation != candidate.generation)
+                or candidate.epoch != lifecycle.epoch
+                or lifecycle.phase == "terminal"
+                or self.ended_at is not None
+            ):
                 return False, None
             previous_peer_connection = (
                 self.peer_connection
@@ -445,17 +492,13 @@ class CallSession:
             )
             self.peer_connection = peer_connection
             if outbound_audio_track is None:
-                for peer, track in self._pending_outbound_audio_tracks:
-                    if peer is peer_connection:
-                        outbound_audio_track = track
-                        break
+                outbound_audio_track = candidate.outbound_audio_track
             if outbound_audio_track is not None:
                 self.outbound_audio_track = outbound_audio_track
-            for peer, channel in self._pending_data_channels:
-                if peer is peer_connection:
-                    self.data_channel = channel
+            if candidate.data_channel is not None:
+                self.data_channel = candidate.data_channel
             self._clear_pending_peer_locked(peer_connection)
-            self._complete_transport_reconnect()
+            self._complete_transport_reconnect_locked()
             return True, previous_peer_connection
 
     async def reject_pending_peer_connection(
@@ -475,24 +518,17 @@ class CallSession:
         return True
 
     def _clear_pending_peer_locked(self, peer_connection: Any) -> None:
-        self._pending_peer_connections = [
-            peer for peer in self._pending_peer_connections if peer is not peer_connection
-        ]
-        self._pending_data_channels = [
-            (peer, channel)
-            for peer, channel in self._pending_data_channels
-            if peer is not peer_connection
-        ]
-        self._pending_outbound_audio_tracks = [
-            (peer, track)
-            for peer, track in self._pending_outbound_audio_tracks
-            if peer is not peer_connection
-        ]
+        candidate = self._peer_lifecycle.candidate
+        if candidate is None or candidate.peer_connection is not peer_connection:
+            return
         self._cancel_pending_peer_timeout_locked()
+        self._peer_lifecycle.candidate = None
 
     def _cancel_pending_peer_timeout_locked(self) -> None:
-        task = self._pending_peer_timeout_task
-        self._pending_peer_timeout_task = None
+        candidate = self._peer_lifecycle.candidate
+        task = candidate.timeout_task if candidate is not None else None
+        if candidate is not None:
+            candidate.timeout_task = None
         if task is not None and task is not asyncio.current_task() and not task.done():
             task.cancel()
 
@@ -2201,37 +2237,16 @@ class CallSession:
 
     async def end(self, *, reason: str = "ended") -> dict[str, Any]:
         cancel_context: dict[str, Any] = {}
-        pending_peers: list[Any] = []
         async with self._lifecycle_lock:
-            first_end = self.ended_at is None
-            if first_end:
-                self._cancel_peer_reconnect_grace_locked()
-                self._deferred_peer_terminal_state = None
-                self._state_before_peer_reconnect = None
-                self.ended_at = datetime.now(timezone.utc)
+            cleanup = self._transition_terminal_locked(
+                target_state="ended",
+                reason=reason,
+            )
+            if cleanup is None and self.end_reason is None:
                 self.end_reason = reason
-                self.state = "ended"
-                pending_peers = list(self._pending_peer_connections)
-                for pending_peer in pending_peers:
-                    self._clear_pending_peer_locked(pending_peer)
-            elif self.end_reason is None:
-                self.end_reason = reason
-        if first_end:
-            if (
-                self.active_turn_task is not None
-                or self._active_tts_turn_id is not None
-                or self._pending_speech_terminal_turn_id is not None
-            ):
-                cause = "session_close" if reason == "removed" else reason
-                cancel_context = await self.cancel_ai_turn(cause=cause)
-            close = getattr(self.peer_connection, "close", None)
-            if callable(close):
-                result = close()
-                if inspect.isawaitable(result):
-                    await result
-            for pending_peer in pending_peers:
-                await self._close_peer(pending_peer)
-            await self._release_tts_prompt_lease()
+        if cleanup is not None:
+            cause = "session_close" if reason == "removed" else reason
+            cancel_context = await self._run_terminal_cleanup(cleanup, cause=cause)
 
         return await self.emit_event(
             simple_event(
@@ -2250,32 +2265,16 @@ class CallSession:
 
     async def fail(self, *, reason: str = "connection_failed") -> dict[str, Any]:
         cancel_context: dict[str, Any] = {}
-        pending_peers: list[Any] = []
         async with self._lifecycle_lock:
-            if self.ended_at is None:
-                self._cancel_peer_reconnect_grace_locked()
-                self._deferred_peer_terminal_state = None
-                self._state_before_peer_reconnect = None
-                self.state = "failed"
-                self.end_reason = reason
-                self.ended_at = datetime.now(timezone.utc)
-                pending_peers = list(self._pending_peer_connections)
-                for pending_peer in pending_peers:
-                    self._clear_pending_peer_locked(pending_peer)
-        if (
-            self.active_turn_task is not None
-            or self._active_tts_turn_id is not None
-            or self._pending_speech_terminal_turn_id is not None
-        ):
-            cancel_context = await self.cancel_ai_turn(cause="connection_failure")
-        close = getattr(self.peer_connection, "close", None)
-        if callable(close):
-            result = close()
-            if inspect.isawaitable(result):
-                await result
-        for pending_peer in pending_peers:
-            await self._close_peer(pending_peer)
-        await self._release_tts_prompt_lease()
+            cleanup = self._transition_terminal_locked(
+                target_state="failed",
+                reason=reason,
+            )
+        if cleanup is not None:
+            cancel_context = await self._run_terminal_cleanup(
+                cleanup,
+                cause="connection_failure",
+            )
         return await self.emit_event(
             simple_event(
                 FAILED_EVENT,
@@ -2286,6 +2285,63 @@ class CallSession:
                 **cancel_context,
             )
         )
+
+    def _transition_terminal_locked(
+        self,
+        *,
+        target_state: str,
+        reason: str,
+    ) -> _TerminalCleanup | None:
+        if self.ended_at is not None or self._peer_lifecycle.phase == "terminal":
+            return None
+        lifecycle = self._peer_lifecycle
+        lifecycle.epoch += 1
+        lifecycle.phase = "terminal"
+        lifecycle.terminal_state = None
+        lifecycle.state_before_reconnect = None
+        lifecycle.grace_peer = None
+        self._cancel_peer_reconnect_grace_locked()
+        candidate = lifecycle.candidate
+        candidate_peer = candidate.peer_connection if candidate is not None else None
+        if candidate is not None:
+            self._clear_pending_peer_locked(candidate.peer_connection)
+        releaser = self._tts_prompt_lease_releaser
+        self._tts_prompt_lease_releaser = None
+        self.ended_at = datetime.now(timezone.utc)
+        self.end_reason = reason
+        self.state = target_state
+        return _TerminalCleanup(
+            target_state=target_state,
+            reason=reason,
+            active_peer=self.peer_connection,
+            candidate_peer=candidate_peer,
+            prompt_lease_releaser=releaser,
+        )
+
+    async def _run_terminal_cleanup(
+        self,
+        cleanup: _TerminalCleanup,
+        *,
+        cause: str,
+    ) -> dict[str, Any]:
+        cancel_context: dict[str, Any] = {}
+        if (
+            self.active_turn_task is not None
+            or self._active_tts_turn_id is not None
+            or self._pending_speech_terminal_turn_id is not None
+        ):
+            cancel_context = await self.cancel_ai_turn(cause=cause)
+        await self._close_peer(cleanup.active_peer)
+        if (
+            cleanup.candidate_peer is not None
+            and cleanup.candidate_peer is not cleanup.active_peer
+        ):
+            await self._close_peer(cleanup.candidate_peer)
+        if cleanup.prompt_lease_releaser is not None:
+            await self._invoke_tts_prompt_lease_releaser(
+                cleanup.prompt_lease_releaser
+            )
+        return cancel_context
 
     async def _release_tts_prompt_lease(self) -> None:
         async with self._lifecycle_lock:
@@ -2314,23 +2370,43 @@ class CallSession:
             return
         connection_state = terminal_state or getattr(peer, "connectionState", None)
         if connection_state in {"failed", "closed"}:
-            await self._begin_transport_reconnect(connection_state)
+            await self._begin_transport_reconnect(peer, connection_state)
+        elif connection_state in {"connected", "completed"}:
+            await self._recover_active_transport(peer)
 
-    async def _begin_transport_reconnect(self, terminal_state: str) -> None:
+    async def _begin_transport_reconnect(
+        self,
+        peer_connection: Any,
+        terminal_state: str,
+    ) -> None:
         async with self._lifecycle_lock:
-            if self.ended_at is not None or self.state in {"ended", "failed"}:
+            lifecycle = self._peer_lifecycle
+            if (
+                self.ended_at is not None
+                or lifecycle.phase == "terminal"
+                or peer_connection is not self.peer_connection
+            ):
                 return
-            if self._state_before_peer_reconnect is None:
-                self._state_before_peer_reconnect = self.state
-            if terminal_state == "failed" or self._deferred_peer_terminal_state is None:
-                self._deferred_peer_terminal_state = terminal_state
+            if lifecycle.phase != "reconnecting" or lifecycle.grace_peer is not peer_connection:
+                lifecycle.epoch += 1
+                lifecycle.phase = "reconnecting"
+                lifecycle.state_before_reconnect = self.state
+                lifecycle.grace_peer = peer_connection
+                candidate = lifecycle.candidate
+                if candidate is not None:
+                    candidate.epoch = lifecycle.epoch
+            if terminal_state == "failed" or lifecycle.terminal_state is None:
+                lifecycle.terminal_state = terminal_state
             self.state = "reconnecting"
             if (
-                self._peer_reconnect_grace_task is None
-                or self._peer_reconnect_grace_task.done()
+                lifecycle.grace_task is None
+                or lifecycle.grace_task.done()
             ):
-                self._peer_reconnect_grace_task = asyncio.create_task(
-                    self._expire_peer_reconnect_grace()
+                lifecycle.grace_task = asyncio.create_task(
+                    self._expire_peer_reconnect_grace(
+                        lifecycle.epoch,
+                        peer_connection,
+                    )
                 )
         logger.info(
             "[rayme-call] peer.active.terminal_deferred session=%s state=%s "
@@ -2340,42 +2416,108 @@ class CallSession:
             CALL_PEER_RECONNECT_GRACE_SECONDS,
         )
 
-    async def _expire_peer_reconnect_grace(self) -> None:
+    async def _expire_peer_reconnect_grace(
+        self,
+        epoch: int,
+        peer_connection: Any,
+    ) -> None:
         try:
             await asyncio.sleep(CALL_PEER_RECONNECT_GRACE_SECONDS)
-            await self.resolve_deferred_connection_state()
+            await self.resolve_deferred_connection_state(
+                epoch=epoch,
+                peer_connection=peer_connection,
+            )
         except asyncio.CancelledError:
             return
 
-    async def resolve_deferred_connection_state(self) -> bool:
+    async def resolve_deferred_connection_state(
+        self,
+        *,
+        epoch: int | None = None,
+        peer_connection: Any | None = None,
+    ) -> bool:
         async with self._lifecycle_lock:
-            terminal_state = self._deferred_peer_terminal_state
-            if terminal_state is None or self.ended_at is not None:
+            lifecycle = self._peer_lifecycle
+            terminal_state = lifecycle.terminal_state
+            if (
+                lifecycle.phase != "reconnecting"
+                or terminal_state is None
+                or self.ended_at is not None
+                or (epoch is not None and epoch != lifecycle.epoch)
+                or (
+                    peer_connection is not None
+                    and peer_connection is not lifecycle.grace_peer
+                )
+            ):
                 return False
-            self._deferred_peer_terminal_state = None
-            self._state_before_peer_reconnect = None
-            self._cancel_peer_reconnect_grace_locked()
-        if terminal_state == "failed":
-            await self.fail(reason="connection_failed")
+            target_state = "failed" if terminal_state == "failed" else "ended"
+            reason = (
+                "connection_failed"
+                if terminal_state == "failed"
+                else "connection_closed"
+            )
+            cleanup = self._transition_terminal_locked(
+                target_state=target_state,
+                reason=reason,
+            )
+        if cleanup is None:
+            return False
+        cancel_context = await self._run_terminal_cleanup(
+            cleanup,
+            cause="connection_failure" if target_state == "failed" else reason,
+        )
+        if target_state == "failed":
+            await self.emit_event(
+                simple_event(
+                    FAILED_EVENT,
+                    session_id=self.session_id,
+                    code=reason,
+                    message="Call session failed.",
+                    retry_allowed=True,
+                    **cancel_context,
+                )
+            )
         else:
-            await self.end(reason="connection_closed")
+            await self.emit_event(
+                simple_event(
+                    ENDED_EVENT,
+                    session_id=self.session_id,
+                    reason=reason,
+                    **cancel_context,
+                )
+            )
         return True
 
     async def complete_transport_reconnect(self) -> None:
         async with self._lifecycle_lock:
-            self._complete_transport_reconnect()
+            self._complete_transport_reconnect_locked()
 
-    def _complete_transport_reconnect(self) -> None:
-        self._deferred_peer_terminal_state = None
-        restored_state = self._state_before_peer_reconnect
-        self._state_before_peer_reconnect = None
+    async def _recover_active_transport(self, peer_connection: Any) -> bool:
+        async with self._lifecycle_lock:
+            lifecycle = self._peer_lifecycle
+            if (
+                lifecycle.phase != "reconnecting"
+                or lifecycle.grace_peer is not peer_connection
+                or peer_connection is not self.peer_connection
+            ):
+                return False
+            self._complete_transport_reconnect_locked()
+            return True
+
+    def _complete_transport_reconnect_locked(self) -> None:
+        lifecycle = self._peer_lifecycle
+        lifecycle.terminal_state = None
+        restored_state = lifecycle.state_before_reconnect
+        lifecycle.state_before_reconnect = None
+        lifecycle.grace_peer = None
         self._cancel_peer_reconnect_grace_locked()
+        lifecycle.phase = "stable"
         if self.state == "reconnecting":
             self.state = restored_state or "listening"
 
     def _cancel_peer_reconnect_grace_locked(self) -> None:
-        task = self._peer_reconnect_grace_task
-        self._peer_reconnect_grace_task = None
+        task = self._peer_lifecycle.grace_task
+        self._peer_lifecycle.grace_task = None
         if task is not None and task is not asyncio.current_task() and not task.done():
             task.cancel()
 
