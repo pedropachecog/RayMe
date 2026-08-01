@@ -1007,6 +1007,72 @@ def test_inflight_reconnect_offer_does_not_steal_active_session_media(
     assert original_peer.close_calls == 1
 
 
+@pytest.mark.parametrize(
+    ("candidate_event", "candidate_state_attribute"),
+    [
+        ("connectionstatechange", "connectionState"),
+        ("iceconnectionstatechange", "iceConnectionState"),
+    ],
+)
+def test_failed_replacement_callback_resolves_deferred_active_close(
+    candidate_event: str,
+    candidate_state_attribute: str,
+) -> None:
+    from app.call.session import CallSession
+
+    class CallbackPeer:
+        def __init__(self) -> None:
+            self.connectionState = "new"
+            self.iceConnectionState = "new"
+            self.handlers: dict[str, Any] = {}
+            self.close_calls = 0
+
+        def on(self, event_name: str) -> Any:
+            def decorator(handler: Any) -> Any:
+                self.handlers[event_name] = handler
+                return handler
+
+            return decorator
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    async def scenario() -> tuple[CallSession, CallbackPeer, CallbackPeer]:
+        active_peer = CallbackPeer()
+        candidate = CallbackPeer()
+        session = CallSession(
+            session_id=f"replacement-fails-{candidate_event}",
+            peer_connection=active_peer,
+        )
+        generation = await session.mark_peer_connection_pending(
+            candidate,
+            timeout_seconds=60.0,
+        )
+        webrtc_module._attach_peer_handlers(active_peer, session)
+        webrtc_module._attach_peer_handlers(
+            candidate,
+            session,
+            pending_generation=generation,
+        )
+
+        active_peer.connectionState = "closed"
+        await active_peer.handlers["connectionstatechange"]()
+        assert session.state == "reconnecting"
+        assert session.ended_at is None
+
+        setattr(candidate, candidate_state_attribute, "failed")
+        await candidate.handlers[candidate_event]()
+        return session, active_peer, candidate
+
+    session, active_peer, candidate = asyncio.run(scenario())
+
+    assert candidate.close_calls == 1
+    assert active_peer.close_calls == 1
+    assert session._pending_peer_connections == []
+    assert session.state == "ended"
+    assert session.end_reason == "connection_closed"
+
+
 def test_webrtc_mute_control_returns_session_state(stub_webrtc: None) -> None:
     client = _client()
     session_id = "call-session-1"
