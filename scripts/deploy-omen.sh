@@ -463,6 +463,11 @@ if ($verifyVoxCpm2) {
 Stop-RayMePortOwners
 Invoke-RayMeQwen3Provisioning
 
+Write-Host "== Applying web database migrations"
+$env:RAYME_DATABASE_URL = "sqlite+aiosqlite:///C:/Users/pmpg/rayme/RayMe/web-ui/server/data/rayme.sqlite3"
+& "$repo\web-ui\server\.venv\Scripts\python.exe" -m alembic -c "$repo\web-ui\server\alembic.ini" upgrade head
+if ($LASTEXITCODE -ne 0) { throw "Web database migration failed" }
+
 Write-Host "== Verifying AI GPU runtime"
 $env:PATH = "$cudaRuntimeBin;$env:PATH"
 & "$repo\ai-backend\.venv\Scripts\python.exe" -c "import torch, torchaudio; assert '+cpu' not in torch.__version__.lower(), torch.__version__; assert torch.version.cuda, torch.__version__; assert torch.cuda.is_available(), torch.__version__; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'device', torch.cuda.get_device_name(0)); print('torchaudio', torchaudio.__version__)"

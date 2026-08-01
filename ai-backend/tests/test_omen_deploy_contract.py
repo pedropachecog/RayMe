@@ -55,6 +55,33 @@ def test_default_omen_deploy_provisions_and_attests_qwen_before_launch() -> None
     assert "$webrtcStatus.deployed_commit -ne $actualHead" in health_gate
 
 
+def test_omen_deploy_upgrades_persistent_web_schema_before_launch() -> None:
+    source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    services_stopped = "Stop-RayMePortOwners\nInvoke-RayMeQwen3Provisioning"
+    database_url = (
+        '$env:RAYME_DATABASE_URL = '
+        '"sqlite+aiosqlite:///C:/Users/pmpg/rayme/RayMe/web-ui/server/data/rayme.sqlite3"'
+    )
+    migration_marker = 'Write-Host "== Applying web database migrations"'
+    migration_command = (
+        '& "$repo\\web-ui\\server\\.venv\\Scripts\\python.exe" -m alembic '
+        '-c "$repo\\web-ui\\server\\alembic.ini" upgrade head'
+    )
+    migration_failure = (
+        'if ($LASTEXITCODE -ne 0) { throw "Web database migration failed" }'
+    )
+    launcher_write = 'Write-Host "== Writing scheduled task launchers"'
+
+    assert database_url in source
+    assert migration_marker in source
+    assert migration_command in source
+    assert migration_failure in source
+    assert source.index(services_stopped) < source.index(database_url)
+    assert source.index(database_url) < source.index(migration_command)
+    assert source.index(migration_command) < source.index(launcher_write)
+
+
 def test_omen_qwen_probe_validates_actual_pep610_source_identity_after_install() -> None:
     source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
     probe_start = source.index("EXPECTED_RUNTIME_VERSION = \"0.3.2\"")
