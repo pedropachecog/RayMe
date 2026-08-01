@@ -44,6 +44,7 @@ REFERENCE_TRANSCRIPT = (
 FAKE_MICROPHONE_TRANSCRIPT = (
     "This is the separate deterministic RayMe microphone fixture for local browser call testing."
 )
+FAKE_MICROPHONE_TRAILING_SILENCE_MS = 2500
 BASELINE_TEXTS = {
     "short": "The RayMe hardware tracer is speaking now.",
     "medium": (
@@ -281,6 +282,34 @@ def _generate_sapi_wav(output_path: Path, transcript: str) -> None:
     content = output_path.read_bytes()
     if len(content) < 1024 or not content.startswith(b"RIFF"):
         raise TracerFailure("Deterministic Windows SAPI fixture is invalid")
+
+
+def _append_pcm_wav_silence(output_path: Path, duration_ms: int) -> None:
+    """Append enough true silence for the live-call VAD to close a turn."""
+    if duration_ms <= 0:
+        raise TracerFailure("Fake microphone trailing silence must be positive")
+    temporary_path = output_path.with_suffix(".silence.tmp.wav")
+    try:
+        with wave.open(str(output_path), "rb") as source:
+            channels = source.getnchannels()
+            sample_width = source.getsampwidth()
+            sample_rate = source.getframerate()
+            compression_type = source.getcomptype()
+            compression_name = source.getcompname()
+            frames = source.readframes(source.getnframes())
+        if compression_type != "NONE":
+            raise TracerFailure("Fake microphone WAV must use uncompressed PCM")
+        silence_frames = max(int(sample_rate * duration_ms / 1000), 1)
+        silence = b"\x00" * silence_frames * channels * sample_width
+        with wave.open(str(temporary_path), "wb") as target:
+            target.setnchannels(channels)
+            target.setsampwidth(sample_width)
+            target.setframerate(sample_rate)
+            target.setcomptype(compression_type, compression_name)
+            target.writeframes(frames + silence)
+        temporary_path.replace(output_path)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def _create_non_person_reference(work_dir: Path) -> ReferenceSelection:
@@ -1114,6 +1143,10 @@ async def _generate_hardware_evidence(args: argparse.Namespace) -> dict[str, Any
     )
     fake_microphone_path = work_dir / "synthetic-fake-microphone.wav"
     _generate_sapi_wav(fake_microphone_path, FAKE_MICROPHONE_TRANSCRIPT)
+    _append_pcm_wav_silence(
+        fake_microphone_path,
+        FAKE_MICROPHONE_TRAILING_SILENCE_MS,
+    )
     fake_microphone_hash = _sha256(fake_microphone_path)
 
     upload_reference = work_dir / "upload-reference.wav"

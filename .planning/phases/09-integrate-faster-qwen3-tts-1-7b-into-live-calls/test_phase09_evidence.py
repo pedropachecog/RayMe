@@ -6,6 +6,7 @@ import math
 import re
 import subprocess
 import sys
+import wave
 from pathlib import Path
 from types import ModuleType
 
@@ -407,6 +408,32 @@ class _FakeReferenceSelection:
 
 def _runner_module(name: str = "phase09_omen_runner") -> ModuleType:
     return _load_module(RUNNER_PATH, name)
+
+
+def test_hardware_tracer_fake_microphone_has_vad_closing_silence(tmp_path: Path) -> None:
+    tracer = _runner_module("phase09_runner_fake_microphone_silence").load_hardware_tracer()
+    fixture = tmp_path / "fake-microphone.wav"
+    sample_rate = 16_000
+    voiced_frames = sample_rate
+    with wave.open(str(fixture), "wb") as target:
+        target.setnchannels(1)
+        target.setsampwidth(2)
+        target.setframerate(sample_rate)
+        target.writeframes(b"\x01\x00" * voiced_frames)
+
+    tracer._append_pcm_wav_silence(
+        fixture,
+        tracer.FAKE_MICROPHONE_TRAILING_SILENCE_MS,
+    )
+
+    with wave.open(str(fixture), "rb") as source:
+        frames = source.readframes(source.getnframes())
+        trailing_frames = int(
+            sample_rate * tracer.FAKE_MICROPHONE_TRAILING_SILENCE_MS / 1000
+        )
+        assert source.getnframes() == voiced_frames + trailing_frames
+    assert frames[-trailing_frames * 2 :] == b"\x00" * trailing_frames * 2
+    assert tracer.FAKE_MICROPHONE_TRAILING_SILENCE_MS > 1800
 
 
 def test_hardware_tracer_preserves_planar_int16_pcm_scale() -> None:

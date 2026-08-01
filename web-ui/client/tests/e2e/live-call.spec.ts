@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { basename } from 'node:path';
+import { dirname, basename, isAbsolute, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { expect, test, type APIRequestContext, type Page, type Request } from '@playwright/test';
 
@@ -12,14 +13,21 @@ const canonicalLiveWebRtcStatusUrl = 'https://192.168.1.199:9443/webrtc/status';
 const qwenEngineId = 'qwen3_1_7b';
 const qwenLanScope = 'rayme_lan_call_testing';
 const generatedNonPersonBasis = 'generated_non_person_fixture';
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
 const liveEnabled = process.env.RAYME_ENABLE_LIVE_E2E === '1';
 const liveWebUrl = process.env.RAYME_LIVE_WEB_URL;
 const liveAiHealthUrl = process.env.RAYME_LIVE_AI_HEALTH_URL;
-const liveReferenceAudioFile = process.env.RAYME_LIVE_REFERENCE_AUDIO_FILE;
-const liveFakeAudioFile = process.env.RAYME_LIVE_FAKE_AUDIO_FILE;
-const liveReferenceTranscriptFile = process.env.RAYME_LIVE_REFERENCE_TRANSCRIPT_FILE;
-const liveReferenceProvenanceFile = process.env.RAYME_LIVE_REFERENCE_PROVENANCE_FILE;
+const liveReferenceAudioFile = resolveLiveFixturePath(
+  process.env.RAYME_LIVE_REFERENCE_AUDIO_FILE
+);
+const liveFakeAudioFile = resolveLiveFixturePath(process.env.RAYME_LIVE_FAKE_AUDIO_FILE);
+const liveReferenceTranscriptFile = resolveLiveFixturePath(
+  process.env.RAYME_LIVE_REFERENCE_TRANSCRIPT_FILE
+);
+const liveReferenceProvenanceFile = resolveLiveFixturePath(
+  process.env.RAYME_LIVE_REFERENCE_PROVENANCE_FILE
+);
 const liveExpectedCommit = process.env.RAYME_LIVE_EXPECTED_COMMIT;
 const liveStabilityMs = parsePositiveInt(process.env.RAYME_LIVE_STABILITY_MS);
 const liveTtsEngines = (process.env.RAYME_LIVE_TTS_ENGINES ?? qwenEngineId)
@@ -111,6 +119,13 @@ test('Qwen live fixture provenance fails closed and permits only hash-bound LAN 
       transcriptBytes
     )
   ).toThrow('must not fabricate permission_confirmed');
+});
+
+test('live fixture paths resolve from the repository root', () => {
+  const fixture = '.planning/phase-fixtures/reference.wav';
+  expect(resolveLiveFixturePath(fixture)).toBe(resolve(repositoryRoot, fixture));
+  expect(resolveLiveFixturePath('/tmp/reference.wav')).toBe('/tmp/reference.wav');
+  expect(resolveLiveFixturePath(undefined)).toBeUndefined();
 });
 
 for (const liveTtsEngine of liveTtsEngines) {
@@ -400,6 +415,13 @@ type LiveReferenceProvenance = {
   reference_sha256: string;
   transcript_sha256: string;
 };
+
+function resolveLiveFixturePath(value: string | undefined): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+  return isAbsolute(value) ? value : resolve(repositoryRoot, value);
+}
 
 function loadLiveReferenceFixture(): {
   referenceAudio: Buffer;
