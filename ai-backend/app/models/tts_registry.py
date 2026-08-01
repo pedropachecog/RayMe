@@ -69,6 +69,7 @@ class TtsSynthesisInput(BaseModel):
         pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
     )
     turn_id: str | None = Field(default=None, min_length=1, max_length=128)
+    segment_ordinal: int = Field(default=0, ge=0, le=100_000)
     voice_key: str | None = Field(
         default=None,
         min_length=1,

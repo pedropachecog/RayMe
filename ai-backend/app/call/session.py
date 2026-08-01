@@ -183,6 +183,7 @@ class CallSession:
         self._turn_frames: list[PcmAudioFrame] = []
         self._turn_started_at: str | None = None
         self._turn_index = 0
+        self._tts_turn_segment_ordinals: dict[str, int] = {}
         self._speech_seen = False
         self._silence_ms = 0
         self._speech_start_frame: int | None = None
@@ -1314,6 +1315,7 @@ class CallSession:
             await self.emit_event(event)
             return event
 
+        self._tts_turn_segment_ordinals.pop(turn_id, None)
         playback_final = dict(self._pending_speech_playback_final or {})
         self._clear_pending_speech_terminal()
         self.state = "listening"
@@ -1351,6 +1353,11 @@ class CallSession:
     ) -> dict[str, Any]:
         self._cancelled_ai_turns.discard(turn_id)
         self._cancelling_ai_turns.discard(turn_id)
+        segment_ordinal = self._tts_turn_segment_ordinals.get(turn_id, 0)
+        if final_chunk:
+            self._tts_turn_segment_ordinals.pop(turn_id, None)
+        else:
+            self._tts_turn_segment_ordinals[turn_id] = segment_ordinal + 1
         self.state = "rehearsing"
         current_task = asyncio.current_task()
         if current_task is not None:
@@ -1384,6 +1391,7 @@ class CallSession:
                     voxcpm2_options=voxcpm2_options,
                     qwen3_release_evidence_mode=qwen3_release_evidence_mode,
                     qwen3_release_evidence_seed=qwen3_release_evidence_seed,
+                    segment_ordinal=segment_ordinal,
                 )
 
             result = await self._synthesize_speech(
@@ -1531,6 +1539,7 @@ class CallSession:
         voxcpm2_options: dict[str, Any],
         qwen3_release_evidence_mode: str | None,
         qwen3_release_evidence_seed: int | None,
+        segment_ordinal: int,
     ) -> dict[str, Any]:
         started_at = time.perf_counter()
         queue: asyncio.Queue[Any] = asyncio.Queue(
@@ -1762,6 +1771,7 @@ class CallSession:
                 voxcpm2_options=_voxcpm2_live_stream_options(engine_id, voxcpm2_options),
                 qwen3_release_evidence_mode=qwen3_release_evidence_mode,
                 qwen3_release_evidence_seed=qwen3_release_evidence_seed,
+                segment_ordinal=segment_ordinal,
             )
             loop = asyncio.get_running_loop()
 
@@ -2122,6 +2132,7 @@ class CallSession:
         playback_final: dict[str, Any] | None = None
         if resolved_turn_id is not None:
             self._cancelling_ai_turns.add(resolved_turn_id)
+            self._tts_turn_segment_ordinals.pop(resolved_turn_id, None)
         cancel_started = asyncio.Event()
         cancel_task = asyncio.create_task(
             self._cancel_active_tts_generation(
@@ -2870,6 +2881,7 @@ class CallSession:
         voxcpm2_options: dict[str, Any],
         qwen3_release_evidence_mode: str | None = None,
         qwen3_release_evidence_seed: int | None = None,
+        segment_ordinal: int = 0,
     ) -> TtsSynthesisInput:
         if not reference_audio_b64:
             raise ValueError("call TTS reference audio is required")
@@ -2880,6 +2892,7 @@ class CallSession:
             reference_audio_content_type=reference_audio_content_type,
             request_id=turn_id,
             turn_id=turn_id,
+            segment_ordinal=segment_ordinal,
             voice_key=voice_id,
             speech_speed=1.0,
             qwen3_release_evidence_mode=qwen3_release_evidence_mode,

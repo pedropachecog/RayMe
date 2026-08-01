@@ -1516,6 +1516,45 @@ def test_streaming_metrics_do_not_fabricate_zeroes_without_track_provider() -> N
     assert "track_admission_capacity_samples" not in final
 
 
+def test_qwen_incremental_turn_carries_monotonic_segment_ordinals() -> None:
+    adapter = SlowQwenStreamingTtsAdapter(chunk_count=2)
+    adapter.release_completion.set()
+    session, _ = _new_session(
+        tts_adapter=adapter,
+        outbound_audio_track=ScriptedOutboundAudioTrack(),
+    )
+
+    async def scenario() -> None:
+        await session.speak_text(
+            "turn-segment-entropy",
+            "The first sentence keeps the prepared speaker.",
+            "voice-qwen",
+            "qwen3_1_7b",
+            final_chunk=False,
+            reference_audio_b64="cmVhbC1zYW1wbGU=",
+            reference_transcript="The exact reference transcript.",
+        )
+        await session.speak_text(
+            "turn-segment-entropy",
+            "The second sentence gets a fresh deterministic trajectory.",
+            "voice-qwen",
+            "qwen3_1_7b",
+            final_chunk=True,
+            reference_audio_b64="cmVhbC1zYW1wbGU=",
+            reference_transcript="The exact reference transcript.",
+        )
+
+    _run(scenario())
+
+    requests = [item["request"] for item in adapter.requests]
+    assert [request.turn_id for request in requests] == [
+        "turn-segment-entropy",
+        "turn-segment-entropy",
+    ]
+    assert [request.segment_ordinal for request in requests] == [0, 1]
+    assert "turn-segment-entropy" not in session._tts_turn_segment_ordinals
+
+
 def test_voxcpm2_slow_stream_starts_playback_before_stream_completion(monkeypatch: Any) -> None:
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.2)
     events: list[dict[str, Any]] = []

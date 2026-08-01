@@ -809,7 +809,7 @@ def test_qwen_worker_reads_reserved_memory_from_its_own_torch_allocator(
     assert worker._torch_reserved_mib() == 5604.0
 
 
-def test_qwen_adapter_emits_explicit_v2_seed_contract(
+def test_qwen_adapter_keeps_speaker_seed_and_varies_deterministic_segment_entropy(
     qwen_runtime_available: None,
 ) -> None:
     from app.models.tts_registry import TtsSynthesisInput
@@ -823,7 +823,12 @@ def test_qwen_adapter_emits_explicit_v2_seed_contract(
         reference_audio=b"RIFF-reference",
         reference_transcript="The exact spoken reference.",
     )
-    ordinary = _request()
+    ordinary_segment_0 = _request().model_copy(
+        update={"turn_id": "ordinary-turn", "segment_ordinal": 0}
+    )
+    ordinary_segment_1 = _request().model_copy(
+        update={"turn_id": "ordinary-turn", "segment_ordinal": 1}
+    )
     evidence = TtsSynthesisInput(
         text="A deterministic release evidence anchor.",
         reference_audio=b"RIFF-reference",
@@ -833,19 +838,23 @@ def test_qwen_adapter_emits_explicit_v2_seed_contract(
         qwen3_release_evidence_seed=91_001,
     )
 
-    list(adapter.stream(ordinary, request_id="ordinary-turn"))
+    list(adapter.stream(ordinary_segment_0, request_id="ordinary-turn-segment-0"))
+    list(adapter.stream(ordinary_segment_1, request_id="ordinary-turn-segment-1"))
+    list(adapter.stream(ordinary_segment_1, request_id="ordinary-turn-segment-1-repeat"))
     list(adapter.stream(evidence, request_id="evidence-turn"))
 
     generated = [payload for payload in process.ops if payload["op"] == "generate"]
     assert generated[0]["schema_version"] == 2
-    assert generated[0]["speaker_seed"] == generated[0]["generation_seed"]
+    assert generated[0]["speaker_seed"] == generated[1]["speaker_seed"]
+    assert generated[0]["generation_seed"] != generated[1]["generation_seed"]
+    assert generated[1]["generation_seed"] == generated[2]["generation_seed"]
     assert generated[0]["release_evidence_mode"] is None
     assert generated[0]["release_evidence_seed"] is None
-    assert generated[1]["schema_version"] == 2
-    assert generated[1]["speaker_seed"] == generated[0]["speaker_seed"]
-    assert generated[1]["generation_seed"] == 91_001
-    assert generated[1]["release_evidence_mode"] == "phase09_release_evidence"
-    assert generated[1]["release_evidence_seed"] == 91_001
+    assert generated[3]["schema_version"] == 2
+    assert generated[3]["speaker_seed"] == generated[0]["speaker_seed"]
+    assert generated[3]["generation_seed"] == 91_001
+    assert generated[3]["release_evidence_mode"] == "phase09_release_evidence"
+    assert generated[3]["release_evidence_seed"] == 91_001
 
 
 def test_qwen_worker_generation_rng_is_repeatable_and_restores_all_rng_states(
