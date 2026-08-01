@@ -178,6 +178,7 @@ class ScriptedPreparingModelManager(ScriptedModelManager):
         self.ready = ready
         self.prepare_error = prepare_error
         self.prepare_calls: list[dict[str, Any]] = []
+        self.released_prompt_leases: list[str] = []
 
     async def prepare_tts_engine(self, engine_id: str, **kwargs: Any) -> dict[str, Any]:
         self.prepare_calls.append({"engine_id": engine_id, **kwargs})
@@ -198,6 +199,10 @@ class ScriptedPreparingModelManager(ScriptedModelManager):
         **_kwargs: Any,
     ) -> bool:
         return engine_id == "qwen3_1_7b" and voice_key == "voice-qwen" and self.ready
+
+    async def release_tts_prompt_lease(self, owner: str) -> bool:
+        self.released_prompt_leases.append(owner)
+        return True
 
     def health(self) -> dict[str, Any]:
         return {
@@ -359,9 +364,14 @@ def test_webrtc_prepare_qwen_uses_only_contained_reference_and_exact_transcript(
             "voice_key": "voice-qwen",
             "reference_audio": b"contained-reference",
             "reference_transcript": "The exact reference transcript.",
+            "prompt_lease_owner": session_id,
         }
     ]
     assert response.json()["prompt_state"] == "ready"
+
+    ended = client.post(END_ROUTE_TEMPLATE.format(session_id=session_id), json={})
+    assert ended.status_code == 200
+    assert manager.released_prompt_leases == [session_id]
 
     rejected = client.post(
         f"/webrtc/sessions/{session_id}/prepare",

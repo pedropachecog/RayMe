@@ -217,7 +217,11 @@ async def prepare_session_speech(
             voice_key=payload.voice_id,
             reference_audio=reference_audio,
             reference_transcript=payload.reference_transcript,
+            prompt_lease_owner=session_id,
         )
+        release_lease = getattr(model_manager, "release_tts_prompt_lease", None)
+        if callable(release_lease):
+            session.set_tts_prompt_lease_releaser(release_lease)
     except HTTPException:
         raise
     except Qwen3WorkerError as exc:

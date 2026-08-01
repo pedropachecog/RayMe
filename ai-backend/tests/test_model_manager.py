@@ -395,6 +395,82 @@ def test_prepare_qwen_keeps_status_responsive_and_separates_model_from_prompt() 
     asyncio.run(scenario())
 
 
+def test_live_call_prompt_lease_rejects_competing_preview_and_preserves_stream() -> None:
+    async def scenario() -> None:
+        qwen_module = importlib.import_module("app.models.tts_qwen3")
+        lease_error = _require_attr(qwen_module, "Qwen3PromptLeaseError")
+
+        class CapacityOneQwenAdapter(RecordingQwenAdapter):
+            def __init__(self, events: list[str]) -> None:
+                super().__init__(events)
+                self.selected_voice_key: str | None = None
+
+            def prewarm(self, **kwargs: Any) -> object:
+                self.selected_voice_key = str(kwargs["voice_key"])
+                return super().prewarm(**kwargs)
+
+            def stream(
+                self,
+                _request: object,
+                *,
+                request_id: str,
+                voice_key: str,
+            ) -> Any:
+                assert request_id == "call-a-next-segment"
+                assert voice_key == self.selected_voice_key
+                yield voice_key
+
+        manager, adapters, events = _build_manager()
+        manager.startup()
+        qwen = CapacityOneQwenAdapter(events)
+        adapters["qwen3_1_7b"] = qwen
+        manager.tts_adapters["qwen3_1_7b"] = qwen
+        voice_a_audio = _reference_wav_bytes(amplitude=2048)
+        voice_b_audio = _reference_wav_bytes(amplitude=1024)
+
+        await manager.prepare_tts_engine(
+            "qwen3_1_7b",
+            voice_key="voice-a",
+            reference_audio=voice_a_audio,
+            reference_transcript="The exact reference transcript.",
+            prompt_lease_owner="live-call-a",
+        )
+
+        with pytest.raises(lease_error) as rejected:
+            await manager.prepare_tts_engine(
+                "qwen3_1_7b",
+                voice_key="voice-b",
+                reference_audio=voice_b_audio,
+                reference_transcript="A different approved transcript.",
+            )
+        assert rejected.value.code == "qwen3_prompt_leased"
+        assert manager.is_tts_prompt_ready(
+            "qwen3_1_7b",
+            "voice-a",
+            reference_audio=voice_a_audio,
+            reference_transcript="The exact reference transcript.",
+        )
+        assert list(
+            qwen.stream(
+                object(),
+                request_id="call-a-next-segment",
+                voice_key="voice-a",
+            )
+        ) == ["voice-a"]
+        assert [call["voice_key"] for call in qwen.prewarm_calls] == ["voice-a"]
+
+        assert await manager.release_tts_prompt_lease("live-call-a") is True
+        prepared_b = await manager.prepare_tts_engine(
+            "qwen3_1_7b",
+            voice_key="voice-b",
+            reference_audio=voice_b_audio,
+            reference_transcript="A different approved transcript.",
+        )
+        assert prepared_b["voice_key"] == "voice-b"
+
+    asyncio.run(scenario())
+
+
 def test_qwen_prompt_invalidation_resets_matching_cache_and_preserves_unrelated_voice() -> None:
     async def scenario() -> None:
         qwen_module = importlib.import_module("app.models.tts_qwen3")

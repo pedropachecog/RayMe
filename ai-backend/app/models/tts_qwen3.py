@@ -84,6 +84,12 @@ class Qwen3PromptError(Qwen3WorkerError):
     default_code = "qwen3_prompt_failed"
 
 
+class Qwen3PromptLeaseError(Qwen3PromptError):
+    """A live call owns the capacity-one prompt slot."""
+
+    default_code = "qwen3_prompt_leased"
+
+
 class Qwen3GenerationError(Qwen3WorkerError):
     """One generation failed without proving the worker identity is corrupt."""
 

@@ -45,6 +45,7 @@ from app.models.tts_registry import (
 )
 
 EventSink = Callable[[dict[str, Any]], Awaitable[None] | None]
+PromptLeaseReleaser = Callable[[str], Awaitable[bool] | bool]
 
 CALL_TTS_AUDIO_PREROLL_SECONDS = 0.25
 CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS = 0.75
@@ -204,6 +205,7 @@ class CallSession:
         self._pending_peer_connections: list[Any] = []
         self._pending_data_channels: list[tuple[Any, Any]] = []
         self._pending_outbound_audio_tracks: list[tuple[Any, Any]] = []
+        self._tts_prompt_lease_releaser: PromptLeaseReleaser | None = None
 
     @property
     def active_ai_turn(self) -> Any | None:
@@ -212,6 +214,12 @@ class CallSession:
     @active_ai_turn.setter
     def active_ai_turn(self, value: Any | None) -> None:
         self.active_turn_task = value
+
+    def set_tts_prompt_lease_releaser(
+        self,
+        releaser: PromptLeaseReleaser,
+    ) -> None:
+        self._tts_prompt_lease_releaser = releaser
 
     async def handle_inbound_audio_frame(self, frame: Any) -> dict[str, Any] | bool | None:
         self.incoming_audio_frames += 1
@@ -1843,6 +1851,7 @@ class CallSession:
                 result = close()
                 if inspect.isawaitable(result):
                     await result
+            await self._release_tts_prompt_lease()
         elif self.end_reason is None:
             self.end_reason = reason
 
@@ -1878,6 +1887,7 @@ class CallSession:
             result = close()
             if inspect.isawaitable(result):
                 await result
+        await self._release_tts_prompt_lease()
         return await self.emit_event(
             simple_event(
                 FAILED_EVENT,
@@ -1888,6 +1898,15 @@ class CallSession:
                 **cancel_context,
             )
         )
+
+    async def _release_tts_prompt_lease(self) -> None:
+        releaser = self._tts_prompt_lease_releaser
+        if releaser is None:
+            return
+        self._tts_prompt_lease_releaser = None
+        result = releaser(self.session_id)
+        if inspect.isawaitable(result):
+            await result
 
     async def handle_connection_state_change(self) -> None:
         if getattr(self.peer_connection, "connectionState", None) == "failed":

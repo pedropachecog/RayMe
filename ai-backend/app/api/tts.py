@@ -15,6 +15,7 @@ from app.models.model_manager import ModelManager
 from app.models.tts_qwen3 import (
     Qwen3GenerationCeilingError,
     Qwen3PromptError,
+    Qwen3PromptLeaseError,
     Qwen3ValidationError,
     Qwen3WorkerError,
 )
@@ -292,6 +293,8 @@ def _mark_engine_unavailable(
 
 
 def _qwen_http_status(error: Qwen3WorkerError) -> int:
+    if isinstance(error, Qwen3PromptLeaseError):
+        return 409
     if isinstance(error, (Qwen3ValidationError, Qwen3PromptError)):
         return 422
     if isinstance(error, Qwen3GenerationCeilingError):
@@ -310,6 +313,7 @@ def _qwen_error_detail(
         "qwen3_transcript_mismatch": "Reference audio and transcript do not match",
         "qwen3_alignment_failed": "Reference alignment could not be verified",
         "qwen3_prompt_failed": "Voice preparation failed",
+        "qwen3_prompt_leased": "Voice is in use by an active call",
         "qwen3_prompt_not_ready": "Selected voice is not ready",
         "qwen3_target_required": "Speech text is required",
         "qwen3_target_too_long": "Speech segment is too long",
