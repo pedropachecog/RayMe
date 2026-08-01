@@ -3344,6 +3344,42 @@ def test_terminal_cleanup_ledger_retries_only_failed_resources(
     assert prompt_attempts == (2 if failed_step == "prompt_lease" else 1)
 
 
+@pytest.mark.parametrize("first_terminal", ["end", "fail"])
+def test_terminal_race_emits_only_the_winning_outcome(first_terminal: str) -> None:
+    events: list[dict[str, Any]] = []
+    session, peer = _new_session(event_sink=events.append)
+
+    async def scenario() -> list[dict[str, Any]]:
+        await session._lifecycle_lock.acquire()
+        try:
+            if first_terminal == "end":
+                first = asyncio.create_task(session.end(reason="hangup"))
+                await asyncio.sleep(0)
+                second = asyncio.create_task(session.fail(reason="connection_failed"))
+            else:
+                first = asyncio.create_task(session.fail(reason="connection_failed"))
+                await asyncio.sleep(0)
+                second = asyncio.create_task(session.end(reason="hangup"))
+        finally:
+            session._lifecycle_lock.release()
+        results = list(await asyncio.gather(first, second))
+        results.append(await session.end(reason="repeated"))
+        results.append(await session.fail(reason="repeated_failure"))
+        return results
+
+    results = _run(scenario())
+    terminal_events = [
+        event for event in events if event["type"] in {"ended", "failed"}
+    ]
+
+    assert len(terminal_events) == 1
+    expected_type = "ended" if first_terminal == "end" else "failed"
+    assert terminal_events[0]["type"] == expected_type
+    assert [result["type"] for result in results] == [expected_type] * 4
+    assert peer.close_calls == 1
+    assert session.state == expected_type
+
+
 def test_failed_connection_records_connection_failed_reason() -> None:
     session, peer = _new_session()
     peer.connectionState = "failed"

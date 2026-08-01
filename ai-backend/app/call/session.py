@@ -194,6 +194,15 @@ class _TerminalCleanup:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
+@dataclass
+class _TerminalOutcome:
+    target_state: str
+    reason: str
+    event: dict[str, Any] | None = None
+    ready: asyncio.Event = field(default_factory=asyncio.Event)
+    emission_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
 class CallSession:
     def __init__(
         self,
@@ -278,6 +287,7 @@ class CallSession:
         self._peer_lifecycle = _PeerLifecycle()
         self._tts_prompt_lease_releaser: PromptLeaseReleaser | None = None
         self._terminal_cleanup: _TerminalCleanup | None = None
+        self._terminal_outcome: _TerminalOutcome | None = None
 
     @property
     def _pending_peer_connections(self) -> list[Any]:
@@ -2382,19 +2392,19 @@ class CallSession:
                 target_state="ended",
                 reason=reason,
             )
+            owns_emission = cleanup is not None
             if cleanup is None and self.end_reason is None:
                 self.end_reason = reason
             cleanup = cleanup or self._terminal_cleanup
+            outcome = self._terminal_outcome
         if cleanup is not None:
             cancel_context = await self._run_terminal_cleanup(cleanup)
-
-        return await self.emit_event(
-            simple_event(
-                ENDED_EVENT,
-                session_id=self.session_id,
-                reason=self.end_reason or reason,
-                **cancel_context,
-            )
+        if outcome is None:
+            raise RuntimeError("terminal outcome was not recorded")
+        return await self._publish_terminal_outcome(
+            outcome,
+            cancel_context=cancel_context,
+            owns_emission=owns_emission,
         )
 
     def _clear_pending_speech_terminal(self) -> None:
@@ -2410,18 +2420,17 @@ class CallSession:
                 target_state="failed",
                 reason=reason,
             )
+            owns_emission = cleanup is not None
             cleanup = cleanup or self._terminal_cleanup
+            outcome = self._terminal_outcome
         if cleanup is not None:
             cancel_context = await self._run_terminal_cleanup(cleanup)
-        return await self.emit_event(
-            simple_event(
-                FAILED_EVENT,
-                session_id=self.session_id,
-                code=reason,
-                message="Call session failed.",
-                retry_allowed=True,
-                **cancel_context,
-            )
+        if outcome is None:
+            raise RuntimeError("terminal outcome was not recorded")
+        return await self._publish_terminal_outcome(
+            outcome,
+            cancel_context=cancel_context,
+            owns_emission=owns_emission,
         )
 
     def _transition_terminal_locked(
@@ -2473,7 +2482,45 @@ class CallSession:
             prompt_lease_pending=releaser is not None,
         )
         self._terminal_cleanup = cleanup
+        self._terminal_outcome = _TerminalOutcome(
+            target_state=target_state,
+            reason=reason,
+        )
         return cleanup
+
+    async def _publish_terminal_outcome(
+        self,
+        outcome: _TerminalOutcome,
+        *,
+        cancel_context: dict[str, Any],
+        owns_emission: bool,
+    ) -> dict[str, Any]:
+        if not owns_emission:
+            await outcome.ready.wait()
+            if outcome.event is None:
+                raise RuntimeError("terminal outcome emission did not complete")
+            return dict(outcome.event)
+        async with outcome.emission_lock:
+            if outcome.event is None:
+                if outcome.target_state == "failed":
+                    event = simple_event(
+                        FAILED_EVENT,
+                        session_id=self.session_id,
+                        code=outcome.reason,
+                        message="Call session failed.",
+                        retry_allowed=True,
+                        **cancel_context,
+                    )
+                else:
+                    event = simple_event(
+                        ENDED_EVENT,
+                        session_id=self.session_id,
+                        reason=outcome.reason,
+                        **cancel_context,
+                    )
+                outcome.event = dict(await self.emit_event(event))
+                outcome.ready.set()
+        return dict(outcome.event)
 
     async def _run_terminal_cleanup(
         self,
@@ -2655,26 +2702,14 @@ class CallSession:
         if cleanup is None:
             return False
         cancel_context = await self._run_terminal_cleanup(cleanup)
-        if target_state == "failed":
-            await self.emit_event(
-                simple_event(
-                    FAILED_EVENT,
-                    session_id=self.session_id,
-                    code=reason,
-                    message="Call session failed.",
-                    retry_allowed=True,
-                    **cancel_context,
-                )
-            )
-        else:
-            await self.emit_event(
-                simple_event(
-                    ENDED_EVENT,
-                    session_id=self.session_id,
-                    reason=reason,
-                    **cancel_context,
-                )
-            )
+        outcome = self._terminal_outcome
+        if outcome is None:
+            raise RuntimeError("terminal outcome was not recorded")
+        await self._publish_terminal_outcome(
+            outcome,
+            cancel_context=cancel_context,
+            owns_emission=True,
+        )
         return True
 
     async def complete_transport_reconnect(self) -> None:
