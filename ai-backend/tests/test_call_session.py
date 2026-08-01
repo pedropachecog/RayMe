@@ -2220,11 +2220,23 @@ def test_engine_switch_silences_old_and_new_tracks_before_cancel_ack() -> None:
         assert active_peer.close_calls == 1
         assert acceptance.done() is False
         assert len(old_track.chunks) == old_chunk_count
+        assert session._peer_lifecycle.phase == "switching"
+        assert session.voice_id == "voice-before"
+        with pytest.raises(SpeechSessionSelectionError):
+            await session.reserve_accepted_speech_configuration(
+                voice_id="voice-after",
+                engine_id="f5",
+            )
 
         adapter.allow_cancel_ack.set()
         accepted, previous_peer = await acceptance
         assert accepted is True
         assert previous_peer is active_peer
+        accepted_selection = await session.reserve_accepted_speech_configuration(
+            voice_id="voice-after",
+            engine_id="f5",
+        )
+        assert accepted_selection.epoch == session._peer_lifecycle.epoch
         try:
             await speech
         except asyncio.CancelledError:

@@ -224,6 +224,17 @@ class _TerminalOutcome:
     transaction_task: asyncio.Task[dict[str, Any]] | None = None
 
 
+@dataclass(frozen=True)
+class _CapturedTurnCancellation:
+    active_task: Any | None
+    turn_id: str | None
+    request_id: str | None
+    adapter: Any | None
+    metrics_snapshot: Callable[[], dict[str, Any]] | None
+    pending_terminal_turn_id: str | None
+    pending_playback_final: dict[str, Any] | None
+
+
 @dataclass
 class _TtsSegmentLedgerEntry:
     segment_id: str
@@ -372,6 +383,7 @@ class CallSession:
             if (
                 self.ended_at is not None
                 or lifecycle.phase == "terminal"
+                or lifecycle.phase == "switching"
                 or self.state in {"ended", "failed"}
             ):
                 raise SpeechSessionSelectionError("call session is terminal")
@@ -394,6 +406,7 @@ class CallSession:
             if (
                 self.ended_at is not None
                 or lifecycle.phase == "terminal"
+                or lifecycle.phase == "switching"
                 or reservation.epoch != lifecycle.epoch
                 or reservation.voice_id != self.voice_id
                 or reservation.engine_id != self.engine_id
@@ -600,6 +613,8 @@ class CallSession:
     ) -> tuple[bool, Any | None]:
         selection_changed = False
         cancel_selection = False
+        captured_cancellation: _CapturedTurnCancellation | None = None
+        accepted_configuration: PeerOfferConfiguration | None = None
         previous_outbound_audio_track: Any | None = None
         accepted_outbound_audio_track: Any | None = None
         async with self._lifecycle_lock:
@@ -628,35 +643,33 @@ class CallSession:
             accepted_outbound_audio_track = self.outbound_audio_track
             if candidate.data_channel is not None:
                 self.data_channel = candidate.data_channel
-            configuration = candidate.configuration
-            if configuration is not None:
+            accepted_configuration = candidate.configuration
+            if accepted_configuration is not None:
                 selection_changed = (
-                    configuration.voice_id != self.voice_id
-                    or configuration.engine_id != self.engine_id
+                    accepted_configuration.voice_id != self.voice_id
+                    or accepted_configuration.engine_id != self.engine_id
                 )
-                self.thread_id = configuration.thread_id
-                self.voice_id = configuration.voice_id
-                self.engine_id = configuration.engine_id
-                self.prompt_messages = [
-                    dict(message) for message in configuration.prompt_messages
-                ]
-                self.vad_adapter = configuration.vad_adapter
-                self.stt_adapter = configuration.stt_adapter
             cancel_selection = selection_changed and (
                 self.active_turn_task is not None
                 or self._active_tts_turn_id is not None
                 or self._pending_speech_terminal_turn_id is not None
             )
             if cancel_selection:
-                cancelling_turn_id = (
-                    self._active_tts_turn_id
-                    or self._pending_speech_terminal_turn_id
-                )
+                captured_cancellation = self._capture_turn_cancellation_locked()
+                cancelling_turn_id = captured_cancellation.turn_id
                 if cancelling_turn_id is not None:
                     self._cancelling_ai_turns.add(cancelling_turn_id)
             self._clear_pending_peer_locked(peer_connection)
-            self._complete_transport_reconnect_locked()
-        if cancel_selection:
+            if selection_changed:
+                # Do not publish the candidate selection while old generation
+                # ownership is unresolved. Speech reservations are rejected in
+                # this phase, so no new turn can be mistaken for the old one.
+                lifecycle.phase = "switching"
+            else:
+                if accepted_configuration is not None:
+                    self._apply_peer_configuration_locked(accepted_configuration)
+                self._complete_transport_reconnect_locked()
+        if selection_changed:
             playout_tracks = (
                 previous_outbound_audio_track,
                 accepted_outbound_audio_track,
@@ -664,21 +677,72 @@ class CallSession:
             await self._stop_and_drain_outbound_playout(
                 tracks=playout_tracks,
             )
-            cancel_task = asyncio.create_task(
-                self.cancel_ai_turn(
-                    cause="engine_switch",
-                    playout_tracks=playout_tracks,
-                    playout_already_stopped=True,
+            cancel_task = (
+                asyncio.create_task(
+                    self.cancel_ai_turn(
+                        cause="engine_switch",
+                        playout_tracks=playout_tracks,
+                        playout_already_stopped=True,
+                        captured=captured_cancellation,
+                    )
                 )
+                if captured_cancellation is not None
+                else None
             )
             if previous_peer_connection is not None:
                 await self._close_peer(previous_peer_connection)
-            await cancel_task
-            if self.state not in {"ended", "failed"}:
-                self.state = "listening"
+            if cancel_task is not None:
+                await cancel_task
+            async with self._lifecycle_lock:
+                lifecycle = self._peer_lifecycle
+                if lifecycle.phase == "terminal" or self.ended_at is not None:
+                    return False, previous_peer_connection
+                if lifecycle.phase == "switching":
+                    if accepted_configuration is not None:
+                        self._apply_peer_configuration_locked(accepted_configuration)
+                    self._complete_transport_reconnect_locked()
+                    if self.state not in {"ended", "failed"}:
+                        self.state = "listening"
         elif previous_peer_connection is not None:
             await self._close_peer(previous_peer_connection)
         return True, previous_peer_connection
+
+    def _apply_peer_configuration_locked(
+        self,
+        configuration: PeerOfferConfiguration,
+    ) -> None:
+        self.thread_id = configuration.thread_id
+        self.voice_id = configuration.voice_id
+        self.engine_id = configuration.engine_id
+        self.prompt_messages = [
+            dict(message) for message in configuration.prompt_messages
+        ]
+        self.vad_adapter = configuration.vad_adapter
+        self.stt_adapter = configuration.stt_adapter
+
+    def _capture_turn_cancellation_locked(self) -> _CapturedTurnCancellation:
+        resolved_turn_id = (
+            self._active_tts_turn_id
+            or self._pending_speech_terminal_turn_id
+        )
+        return _CapturedTurnCancellation(
+            active_task=self.active_turn_task,
+            turn_id=resolved_turn_id,
+            request_id=self._active_tts_request_id,
+            adapter=self._active_tts_adapter,
+            metrics_snapshot=(
+                self._active_tts_metrics_snapshot
+                if self._active_tts_request_id is not None
+                and resolved_turn_id == self._active_tts_turn_id
+                else None
+            ),
+            pending_terminal_turn_id=self._pending_speech_terminal_turn_id,
+            pending_playback_final=(
+                dict(self._pending_speech_playback_final)
+                if self._pending_speech_playback_final is not None
+                else None
+            ),
+        )
 
     async def reject_pending_peer_connection(
         self,
@@ -2607,16 +2671,22 @@ class CallSession:
         self,
         turn_id: str | None,
         *,
+        request_id: str | None = None,
+        adapter: Any | None = None,
         cancel_started: asyncio.Event | None = None,
     ) -> bool | None:
-        request_id = self._active_tts_request_id
-        active_turn_id = self._active_tts_turn_id
-        adapter = self._active_tts_adapter
+        request_id = request_id or self._active_tts_request_id
+        active_turn_id = turn_id or self._active_tts_turn_id
+        adapter = adapter or self._active_tts_adapter
+        is_current_generation = (
+            request_id is not None
+            and request_id == self._active_tts_request_id
+            and adapter is self._active_tts_adapter
+        )
         if (
             request_id is None
             or adapter is None
-            or self._active_tts_cancel_requested
-            or (turn_id is not None and active_turn_id != turn_id)
+            or (is_current_generation and self._active_tts_cancel_requested)
         ):
             if cancel_started is not None:
                 cancel_started.set()
@@ -2628,7 +2698,8 @@ class CallSession:
                 cancel_started.set()
             return None
 
-        self._active_tts_cancel_requested = True
+        if is_current_generation:
+            self._active_tts_cancel_requested = True
         loop = asyncio.get_running_loop()
 
         def cancel_exact_request() -> Any:
@@ -2686,20 +2757,38 @@ class CallSession:
         cause: str = "interrupt",
         playout_tracks: tuple[Any | None, ...] | None = None,
         playout_already_stopped: bool = False,
+        captured: _CapturedTurnCancellation | None = None,
     ) -> dict[str, Any]:
         cancel_started_at = time.perf_counter()
-        active = self.active_turn_task
+        if captured is None:
+            captured = _CapturedTurnCancellation(
+                active_task=self.active_turn_task,
+                turn_id=(
+                    turn_id
+                    or self._active_tts_turn_id
+                    or self._pending_speech_terminal_turn_id
+                ),
+                request_id=self._active_tts_request_id,
+                adapter=self._active_tts_adapter,
+                metrics_snapshot=(
+                    self._active_tts_metrics_snapshot
+                    if self._active_tts_request_id is not None
+                    else None
+                ),
+                pending_terminal_turn_id=self._pending_speech_terminal_turn_id,
+                pending_playback_final=(
+                    dict(self._pending_speech_playback_final)
+                    if self._pending_speech_playback_final is not None
+                    else None
+                ),
+            )
+        active = captured.active_task
         resolved_turn_id = (
             turn_id
-            or self._active_tts_turn_id
-            or self._pending_speech_terminal_turn_id
+            or captured.turn_id
         )
-        request_id = self._active_tts_request_id
-        metrics_snapshot = (
-            self._active_tts_metrics_snapshot
-            if request_id is not None and resolved_turn_id == self._active_tts_turn_id
-            else None
-        )
+        request_id = captured.request_id
+        metrics_snapshot = captured.metrics_snapshot
         playback_final: dict[str, Any] | None = None
         if resolved_turn_id is not None:
             self._cancelling_ai_turns.add(resolved_turn_id)
@@ -2708,6 +2797,8 @@ class CallSession:
         cancel_task = asyncio.create_task(
             self._cancel_active_tts_generation(
                 resolved_turn_id,
+                request_id=request_id,
+                adapter=captured.adapter,
                 cancel_started=cancel_started,
             )
         )
@@ -2729,8 +2820,8 @@ class CallSession:
             if resolved_turn_id is not None:
                 self._cancelled_ai_turns.add(resolved_turn_id)
                 self._cancelling_ai_turns.discard(resolved_turn_id)
-        if playback_final is None and self._pending_speech_playback_final is not None:
-            playback_final = dict(self._pending_speech_playback_final)
+        if playback_final is None and captured.pending_playback_final is not None:
+            playback_final = dict(captured.pending_playback_final)
         cancel_context: dict[str, Any] = {"control_cause": cause}
         if resolved_turn_id is not None:
             cancel_context["cancelled_turn_id"] = resolved_turn_id
@@ -2741,7 +2832,8 @@ class CallSession:
         if playback_final is not None:
             cancel_context["tts_playback_final"] = playback_final
         self._last_tts_cancel_context = dict(cancel_context)
-        self._clear_pending_speech_terminal()
+        if self._pending_speech_terminal_turn_id == captured.pending_terminal_turn_id:
+            self._clear_pending_speech_terminal()
 
         if active is not None and active is not asyncio.current_task():
             cancel = getattr(active, "cancel", None)
