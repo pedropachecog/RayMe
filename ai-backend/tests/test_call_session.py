@@ -2253,6 +2253,58 @@ def test_engine_switch_silences_old_and_new_tracks_before_cancel_ack() -> None:
     assert len(old_track.chunks) == 2
 
 
+def test_switching_away_from_qwen_releases_prompt_for_another_session() -> None:
+    lease_owner: str | None = "qwen-owner-one"
+    releases: list[str] = []
+
+    async def release_prompt(owner: str) -> bool:
+        nonlocal lease_owner
+        releases.append(owner)
+        if lease_owner == owner:
+            lease_owner = None
+            return True
+        return False
+
+    async def scenario() -> None:
+        nonlocal lease_owner
+        first, _ = _new_session(session_id="qwen-owner-one")
+        first.voice_id = "voice-qwen"
+        first.engine_id = "qwen3_1_7b"
+        assert await first.install_or_release_tts_prompt_lease(release_prompt)
+
+        candidate = ScriptedPeerConnection()
+        generation = await first.mark_peer_connection_pending(
+            candidate,
+            configuration=PeerOfferConfiguration(
+                thread_id="thread-f5",
+                voice_id="voice-f5",
+                engine_id="f5",
+                prompt_messages=(),
+                vad_adapter=None,
+                stt_adapter=None,
+            ),
+            timeout_seconds=60.0,
+        )
+        accepted, _ = await first.accept_pending_peer_connection(
+            candidate,
+            generation=generation,
+        )
+
+        assert accepted is True
+        assert first.engine_id == "f5"
+        assert first._tts_prompt_lease_releaser is None
+        assert releases == ["qwen-owner-one"]
+        assert lease_owner is None
+
+        second, _ = _new_session(session_id="qwen-owner-two")
+        if lease_owner is None:
+            lease_owner = second.session_id
+        assert lease_owner == "qwen-owner-two"
+        assert await second.install_or_release_tts_prompt_lease(release_prompt)
+
+    _run(scenario())
+
+
 def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
     monkeypatch: Any,
 ) -> None:

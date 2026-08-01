@@ -615,6 +615,7 @@ class CallSession:
         cancel_selection = False
         captured_cancellation: _CapturedTurnCancellation | None = None
         accepted_configuration: PeerOfferConfiguration | None = None
+        released_prompt_lease: PromptLeaseReleaser | None = None
         previous_outbound_audio_track: Any | None = None
         accepted_outbound_audio_track: Any | None = None
         async with self._lifecycle_lock:
@@ -659,6 +660,14 @@ class CallSession:
                 cancelling_turn_id = captured_cancellation.turn_id
                 if cancelling_turn_id is not None:
                     self._cancelling_ai_turns.add(cancelling_turn_id)
+            if (
+                selection_changed
+                and self.engine_id == "qwen3_1_7b"
+                and accepted_configuration is not None
+                and accepted_configuration.engine_id != "qwen3_1_7b"
+            ):
+                released_prompt_lease = self._tts_prompt_lease_releaser
+                self._tts_prompt_lease_releaser = None
             self._clear_pending_peer_locked(peer_connection)
             if selection_changed:
                 # Do not publish the candidate selection while old generation
@@ -693,6 +702,10 @@ class CallSession:
                 await self._close_peer(previous_peer_connection)
             if cancel_task is not None:
                 await cancel_task
+            if released_prompt_lease is not None:
+                await self._invoke_tts_prompt_lease_releaser(
+                    released_prompt_lease
+                )
             async with self._lifecycle_lock:
                 lifecycle = self._peer_lifecycle
                 if lifecycle.phase == "terminal" or self.ended_at is not None:
