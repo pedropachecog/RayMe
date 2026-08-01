@@ -2012,6 +2012,12 @@ class CallSession:
             or self._pending_speech_terminal_turn_id
         )
         request_id = self._active_tts_request_id
+        metrics_snapshot = (
+            self._active_tts_metrics_snapshot
+            if request_id is not None and resolved_turn_id == self._active_tts_turn_id
+            else None
+        )
+        playback_final: dict[str, Any] | None = None
         if resolved_turn_id is not None:
             self._cancelling_ai_turns.add(resolved_turn_id)
         cancel_started = asyncio.Event()
@@ -2028,14 +2034,14 @@ class CallSession:
             await cancel_started.wait()
             try:
                 await self._stop_and_drain_outbound_playout()
+                if callable(metrics_snapshot):
+                    playback_final = metrics_snapshot()
             finally:
                 cancel_acknowledged = await cancel_task
         finally:
             if resolved_turn_id is not None:
                 self._cancelled_ai_turns.add(resolved_turn_id)
                 self._cancelling_ai_turns.discard(resolved_turn_id)
-        metrics_snapshot = self._active_tts_metrics_snapshot
-        playback_final = metrics_snapshot() if callable(metrics_snapshot) else None
         if playback_final is None and self._pending_speech_playback_final is not None:
             playback_final = dict(self._pending_speech_playback_final)
         cancel_context: dict[str, Any] = {"control_cause": cause}

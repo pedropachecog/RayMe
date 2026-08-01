@@ -2194,11 +2194,23 @@ def test_qwen_spoken_vad_barge_in_preserves_mic_turn_and_silences_real_playout(
             assert np.max(np.abs(silent_during_ack_delay.to_ndarray())) == 0
             assert track.pending_samples == 0
 
+            # The speech task is allowed to settle and clear its active fields
+            # before the worker acknowledges cancellation. The request-scoped
+            # metrics callback captured by cancel_ai_turn must remain usable.
+            await asyncio.wait_for(asyncio.shield(speech), timeout=1.0)
+            assert speech.done()
+            assert not barge_in.done()
+            assert session._active_tts_metrics_snapshot is None
+
             adapter.release_cancel_ack.set()
             interrupted = await asyncio.wait_for(barge_in, timeout=1.0)
-            await asyncio.wait_for(speech, timeout=1.0)
             assert interrupted["type"] == "interrupted"
             assert interrupted["control_cause"] == "vad_barge_in"
+            playback_final = interrupted["tts_playback_final"]
+            assert playback_final["track_metrics_present"] is True
+            assert playback_final["track_admission_capacity_samples"] > 0
+            assert playback_final["track_pending_samples"] == 0
+            assert playback_final["track_pending_audio_ms"] == 0.0
             assert adapter.first_stream_drained.is_set()
             assert session._active_tts_adapter is None
             assert session._active_tts_request_id is None
