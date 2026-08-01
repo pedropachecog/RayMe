@@ -560,17 +560,146 @@ def test_hardware_tracer_distinguishes_bounded_transport_drain_from_late_audio()
     ) == (2, 1)
 
 
-def test_hardware_tracer_requires_explicit_zero_pending_audio_metric() -> None:
+def test_hardware_tracer_requires_measured_exact_zero_pending_track_metrics() -> None:
     tracer = _runner_module("phase09_runner_cancel_pending_metric").load_hardware_tracer()
+    measured_zero = {
+        "track_metrics_present": True,
+        "track_admission_capacity_samples": 72_000,
+        "track_pending_samples": 0,
+        "track_pending_audio_ms": 0.0,
+    }
 
-    assert tracer._require_zero_track_pending_audio_ms(
-        {"track_pending_audio_ms": 0.0}
-    ) == 0.0
-    for invalid in ({}, {"track_pending_audio_ms": None}, {"track_pending_audio_ms": "0"}):
-        with pytest.raises(tracer.TracerFailure, match="pending audio metric"):
-            tracer._require_zero_track_pending_audio_ms(invalid)
+    assert tracer._require_zero_track_pending_metrics(measured_zero) == measured_zero
+    for invalid in (
+        {},
+        {**measured_zero, "track_metrics_present": False},
+        {**measured_zero, "track_admission_capacity_samples": 0},
+        {**measured_zero, "track_pending_samples": "0"},
+        {**measured_zero, "track_pending_audio_ms": None},
+        {**measured_zero, "track_pending_audio_ms": "0"},
+    ):
+        with pytest.raises(tracer.TracerFailure):
+            tracer._require_zero_track_pending_metrics(invalid)
+    with pytest.raises(tracer.TracerFailure, match="retained pending samples"):
+        tracer._require_zero_track_pending_metrics(
+            {
+                **measured_zero,
+                "track_pending_samples": 1,
+                "track_pending_audio_ms": 0.0,
+            }
+        )
     with pytest.raises(tracer.TracerFailure, match="retained pending audio"):
-        tracer._require_zero_track_pending_audio_ms({"track_pending_audio_ms": 0.1})
+        tracer._require_zero_track_pending_metrics(
+            {**measured_zero, "track_pending_audio_ms": 0.1}
+        )
+
+
+def test_hardware_tracer_stored_result_rechecks_receiver_and_track_truth() -> None:
+    import copy
+
+    tracer = _runner_module("phase09_runner_stored_cancellation_truth").load_hardware_tracer()
+    commit = "a" * 40
+    digest = "b" * 64
+    stream = {
+        "event_order": ["ai_audio_started", "ai_done"],
+        "pcm_sha256": digest,
+        "wav_sha256": digest,
+        "peak": 512,
+        "immediate": {
+            "streaming_used": True,
+            "fallback_used": False,
+            "whole_wav_fallback_used": False,
+        },
+        "final": {"bridge_queue_capacity": 2, "bridge_queue_high_water": 1},
+    }
+    payload = {
+        "schema_version": tracer.SCHEMA_VERSION,
+        "phase": "09",
+        "plan": "04",
+        "commit_sha": commit,
+        "runtime_identity": {
+            "runtime_version": tracer.RUNTIME_VERSION,
+            "runtime_source_commit": tracer.RUNTIME_COMMIT,
+            "model_id": tracer.MODEL_ID,
+            "model_revision": tracer.MODEL_REVISION,
+            "declared_model_revision": tracer.MODEL_REVISION,
+            "torch_version": tracer.EXPECTED_TORCH,
+            "torch_cuda_version": tracer.EXPECTED_CUDA,
+            "cuda_available": True,
+            "gpu_name": tracer.EXPECTED_GPU,
+            "sample_rate": 24000,
+            "deployed_commit": commit,
+        },
+        "reference_authorization": {
+            "voice_data_steward": "steward-opaque",
+            "authorization_basis": "generated_non_person_fixture",
+            "use_scope": tracer.AUTHORIZED_SCOPE,
+            "source": "generated_non_person_fixture",
+            "opaque_voice_id": "voice-opaque",
+            "opaque_asset_id": "asset-opaque",
+            "reference_sha256": digest,
+            "transcript_sha256": digest,
+            "fake_microphone_sha256": digest,
+            "temporary_reference_deleted_after_upload": True,
+            "temporary_transcript_deleted_after_upload": True,
+        },
+        "readiness": {
+            "observations": [
+                {"loading_engine": tracer.ENGINE_ID, "prompt_state": "prewarming"},
+                {"loading_engine": None, "prompt_state": "ready"},
+            ],
+            "prepared_model_state": "resident",
+            "prepared_prompt_state": "ready",
+            "resident_tts_engine": tracer.ENGINE_ID,
+            "resident_tts_count": 1,
+            "status_deployed_commit": commit,
+        },
+        "normal_streams": [
+            {**stream, "bucket_id": "short"},
+            {
+                **stream,
+                "bucket_id": "medium",
+                "producer_running_at_audio_started": True,
+                "producer_running_at_remote_playout": True,
+                "first_before_completion": True,
+                "remote_before_response": True,
+            },
+            {
+                **stream,
+                "bucket_id": "long",
+                "producer_running_at_audio_started": True,
+                "producer_running_at_remote_playout": True,
+                "first_before_completion": True,
+                "remote_before_response": True,
+            },
+        ],
+        "cancellation": {
+            "audio_started_count": 1,
+            "normal_ai_done_count": 0,
+            "post_cancel_nonzero_frames": 0,
+            "worker_ack_upper_bound_ms": 10.0,
+            "receiver_drain_ms": 250,
+            "track_metrics_present": True,
+            "track_admission_capacity_samples": 72_000,
+            "track_pending_samples": 0,
+            "track_pending_audio_ms": 0.0,
+            "forced_termination_detected": False,
+            "recovery": {"passed": True, "pcm_sha256": digest, "wav_sha256": digest},
+        },
+    }
+
+    tracer._verify_payload(payload, expected_commit=commit)
+    for field, value, message in (
+        ("receiver_drain_ms", None, "receiver drain contract"),
+        ("track_metrics_present", False, "no measured track telemetry"),
+        ("track_admission_capacity_samples", 0, "admission capacity"),
+        ("track_pending_samples", 1, "retained pending samples"),
+        ("track_pending_audio_ms", 0.1, "retained pending audio"),
+    ):
+        invalid = copy.deepcopy(payload)
+        invalid["cancellation"][field] = value
+        with pytest.raises(tracer.TracerFailure, match=message):
+            tracer._verify_payload(invalid, expected_commit=commit)
 
 
 def test_hardware_tracer_observes_past_delayed_interrupt_event_boundary(
@@ -615,7 +744,12 @@ def test_hardware_tracer_observes_past_delayed_interrupt_event_boundary(
                     "cancelled_turn_id": captured_turn_id,
                     "receiver_drain_ms": 250,
                     "_received_monotonic": event_received_at,
-                    "tts_playback_final": {"track_pending_audio_ms": 0.0},
+                    "tts_playback_final": {
+                        "track_metrics_present": True,
+                        "track_admission_capacity_samples": 72_000,
+                        "track_pending_samples": 0,
+                        "track_pending_audio_ms": 0.0,
+                    },
                 },
             ]
 

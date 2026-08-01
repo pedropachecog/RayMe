@@ -965,7 +965,27 @@ def _partition_interrupt_audio_frames(
     return transport_drain_nonzero, post_drain_nonzero
 
 
-def _require_zero_track_pending_audio_ms(playback_final: dict[str, Any]) -> float:
+def _require_zero_track_pending_metrics(
+    playback_final: dict[str, Any],
+) -> dict[str, int | float | bool]:
+    if playback_final.get("track_metrics_present") is not True:
+        raise TracerFailure("Qwen interrupted event has no measured track telemetry")
+    raw_capacity_samples = playback_final.get("track_admission_capacity_samples")
+    if (
+        isinstance(raw_capacity_samples, bool)
+        or not isinstance(raw_capacity_samples, int)
+        or raw_capacity_samples <= 0
+    ):
+        raise TracerFailure("Qwen interrupted event has invalid track admission capacity")
+    raw_pending_samples = playback_final.get("track_pending_samples")
+    if (
+        isinstance(raw_pending_samples, bool)
+        or not isinstance(raw_pending_samples, int)
+        or raw_pending_samples < 0
+    ):
+        raise TracerFailure("Qwen interrupted event has an invalid pending sample count")
+    if raw_pending_samples != 0:
+        raise TracerFailure("Qwen server retained pending samples after cancellation")
     raw_pending_audio_ms = playback_final.get("track_pending_audio_ms")
     if (
         isinstance(raw_pending_audio_ms, bool)
@@ -976,7 +996,12 @@ def _require_zero_track_pending_audio_ms(playback_final: dict[str, Any]) -> floa
     pending_audio_ms = float(raw_pending_audio_ms)
     if pending_audio_ms != 0.0:
         raise TracerFailure("Qwen server retained pending audio after cancellation")
-    return pending_audio_ms
+    return {
+        "track_metrics_present": True,
+        "track_admission_capacity_samples": raw_capacity_samples,
+        "track_pending_samples": raw_pending_samples,
+        "track_pending_audio_ms": pending_audio_ms,
+    }
 
 
 def _interrupt_capture_deadline(
@@ -1061,7 +1086,7 @@ async def _run_cancel_sample(
     playback_final = interrupted_event.get("tts_playback_final")
     if not isinstance(playback_final, dict):
         raise TracerFailure("Qwen interrupted event omitted final playout metrics")
-    track_pending_audio_ms = _require_zero_track_pending_audio_ms(playback_final)
+    track_pending_metrics = _require_zero_track_pending_metrics(playback_final)
     speak_response = await speak_task
     capture_until = _interrupt_capture_deadline(
         interrupt_acknowledged=interrupt_acknowledged,
@@ -1098,7 +1123,7 @@ async def _run_cancel_sample(
         "worker_ack_upper_bound_ms": acknowledgement_ms,
         "receiver_drain_ms": receiver_drain_ms,
         "transport_drain_nonzero_frames": transport_drain_nonzero,
-        "track_pending_audio_ms": track_pending_audio_ms,
+        **track_pending_metrics,
         "post_cancel_nonzero_frames": post_drain_nonzero,
         "forced_termination_detected": False,
     }
@@ -1522,6 +1547,14 @@ def _verify_payload(payload: dict[str, Any], *, expected_commit: str) -> None:
         raise TracerFailure("Cancelled request emitted normal completion")
     if cancellation.get("post_cancel_nonzero_frames") != 0:
         raise TracerFailure("Cancelled request leaked audible frames")
+    raw_receiver_drain_ms = cancellation.get("receiver_drain_ms")
+    if (
+        isinstance(raw_receiver_drain_ms, bool)
+        or not isinstance(raw_receiver_drain_ms, int)
+        or not 1 <= raw_receiver_drain_ms <= MAX_INTERRUPT_RECEIVER_DRAIN_MS
+    ):
+        raise TracerFailure("Cancellation receiver drain contract is invalid")
+    _require_zero_track_pending_metrics(cancellation)
     if _number(cancellation.get("worker_ack_upper_bound_ms"), "cancel acknowledgement") >= 2000:
         raise TracerFailure("Cancellation acknowledgement exceeded two seconds")
     if cancellation.get("forced_termination_detected") is not False:

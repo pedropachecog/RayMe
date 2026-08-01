@@ -1233,6 +1233,8 @@ def test_interrupt_cancels_active_ai_turn() -> None:
     assert active_turn.cancel_calls == 1
     assert event["type"] == "interrupted"
     assert event["session_id"] == "call-session-1"
+    assert event["receiver_drain_ms"] == session_module.CALL_INTERRUPT_RECEIVER_DRAIN_MS
+    assert 100 < event["receiver_drain_ms"] <= 500
 
 
 def test_speak_text_queues_audio_and_emits_done_for_final_chunk() -> None:
@@ -1487,6 +1489,33 @@ def test_voxcpm2_streaming_speak_buffers_bounded_startup_chunks_without_final_me
     assert [item["type"] for item in events] == ["ai_audio_started", "ai_done"]
 
 
+def test_streaming_metrics_do_not_fabricate_zeroes_without_track_provider() -> None:
+    adapter = SlowQwenStreamingTtsAdapter(chunk_count=2)
+    adapter.release_completion.set()
+    session, _ = _new_session(
+        tts_adapter=adapter,
+        outbound_audio_track=ScriptedOutboundAudioTrack(),
+    )
+
+    event = _run(
+        session.speak_text(
+            "turn-missing-track-metrics",
+            "Track telemetry must be measured, never invented.",
+            "voice-qwen",
+            "qwen3_1_7b",
+            final_chunk=True,
+            reference_audio_b64="cmVhbC1zYW1wbGU=",
+            reference_transcript="The exact reference transcript.",
+        )
+    )
+
+    final = event["tts_playback_final"]
+    assert final["track_metrics_present"] is False
+    assert "track_pending_samples" not in final
+    assert "track_pending_audio_ms" not in final
+    assert "track_admission_capacity_samples" not in final
+
+
 def test_voxcpm2_slow_stream_starts_playback_before_stream_completion(monkeypatch: Any) -> None:
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.2)
     events: list[dict[str, Any]] = []
@@ -1667,6 +1696,7 @@ def test_qwen_capacity_two_bridge_blocks_producer_without_dropping_chunks(
 
     assert event["type"] == "ai_done"
     final = event["tts_playback_final"]
+    assert final["track_metrics_present"] is False
     assert final["bridge_queue_capacity"] == 2
     assert final["bridge_queue_high_water"] == 2
     assert final["producer_block_time_ms"] > 0
@@ -1740,6 +1770,7 @@ def test_qwen_fast_producer_is_bounded_by_paced_track_consumption(
     assert "playout_complete_ms" not in immediate
     assert "track_pending_audio_high_water_ms" not in immediate
     final = event["tts_playback_final"]
+    assert final["track_metrics_present"] is True
     assert final["bridge_queue_capacity"] == 2
     assert final["bridge_queue_high_water"] <= 2
     assert final["bridge_producer_block_count"] > 0
@@ -2353,7 +2384,8 @@ def test_qwen_control_causes_are_request_scoped_terminal_safe_and_recoverable(
         assert terminal["cancelled_request_id"] == turn_id
         final = terminal["tts_playback_final"]
         assert final["natural_eos"] is False
-        assert final["track_discarded_samples"] >= 0
+        assert final["track_metrics_present"] is False
+        assert "track_discarded_samples" not in final
 
 
 def test_cancelled_turn_rejects_late_audio_and_normal_terminal_events() -> None:

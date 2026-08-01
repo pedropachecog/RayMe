@@ -56,6 +56,7 @@ CALL_QWEN3_TTS_AUDIO_PREROLL_SECONDS = 0.0
 CALL_QWEN3_STREAM_START_MIN_AUDIO_SECONDS = 0.60
 CALL_TTS_STREAM_BRIDGE_CAPACITY = 2
 CALL_TTS_CANCEL_DRAIN_TIMEOUT_SECONDS = 2.0
+CALL_INTERRUPT_RECEIVER_DRAIN_MS = 250
 LIVE_STREAMING_TTS_ENGINES = frozenset({"voxcpm2", "qwen3_1_7b"})
 VOXCPM2_LIVE_MAX_INFERENCE_TIMESTEPS = 4
 VOXCPM2_LIVE_NORMALIZE = False
@@ -1154,6 +1155,7 @@ class CallSession:
             simple_event(
                 INTERRUPTED_EVENT,
                 session_id=self.session_id,
+                receiver_drain_ms=CALL_INTERRUPT_RECEIVER_DRAIN_MS,
                 **cancel_context,
             )
         )
@@ -1479,30 +1481,13 @@ class CallSession:
         def track_metrics() -> dict[str, Any]:
             snapshot = getattr(self.outbound_audio_track, "playout_metrics", None)
             if not callable(snapshot):
-                return {
-                    "track_pending_samples": 0,
-                    "track_pending_audio_ms": 0.0,
-                    "track_pending_samples_high_water": 0,
-                    "track_pending_audio_high_water_ms": 0.0,
-                    "track_admission_capacity_samples": 0,
-                    "track_admission_capacity_ms": 0.0,
-                    "track_admission_block_count": 0,
-                    "track_admission_block_time_ms": 0.0,
-                    "track_underflow_frames": 0,
-                    "track_playout_debt_ms": 0.0,
-                    "track_playout_debt_high_water_ms": 0.0,
-                    "track_enqueued_chunks": 0,
-                    "track_played_samples": 0,
-                    "track_discarded_chunks": 0,
-                    "track_discarded_samples": 0,
-                    "track_join_count": 0,
-                    "track_order_violation_count": 0,
-                    "track_idle_wait_completed_count": 0,
-                    "track_idle_wait_timeout_count": 0,
-                }
+                return {"track_metrics_present": False}
             return {
-                f"track_{key}": value
-                for key, value in dict(snapshot()).items()
+                "track_metrics_present": True,
+                **{
+                    f"track_{key}": value
+                    for key, value in dict(snapshot()).items()
+                },
             }
 
         def final_metrics() -> dict[str, Any]:
