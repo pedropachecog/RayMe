@@ -713,6 +713,42 @@ def test_webrtc_offer_creates_session_answer_and_events_channel(stub_webrtc: Non
     assert session.outbound_audio_track.kind == "audio"
 
 
+def test_reconnect_offer_rejects_explicitly_ended_session_before_allocating_media(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_webrtc: None,
+) -> None:
+    client = _client()
+    session_id = "reconnect-after-explicit-hangup"
+    first = client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+    assert first.status_code == 200
+    session = client.app.state.call_session_manager.get_session(session_id)
+    original_peer = session.peer_connection
+    asyncio.run(session.end(reason="hangup"))
+    allocation_calls = 0
+
+    def reject_allocation(_offer: Any) -> Any:
+        nonlocal allocation_calls
+        allocation_calls += 1
+        raise AssertionError("terminal offers must not allocate a peer")
+
+    monkeypatch.setattr(webrtc_module, "_create_peer_connection", reject_allocation)
+
+    replacement = client.post(
+        "/webrtc/offer",
+        json=_offer_payload(session_id=session_id),
+    )
+
+    assert replacement.status_code == 409
+    assert replacement.json()["detail"] == {
+        "code": "call_session_terminal",
+        "message": "Call session has ended; start a new call",
+    }
+    assert allocation_calls == 0
+    assert session.peer_connection is original_peer
+    assert session.state == "ended"
+    assert session.end_reason == "hangup"
+
+
 def test_failed_reconnect_offer_preserves_existing_session_media(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

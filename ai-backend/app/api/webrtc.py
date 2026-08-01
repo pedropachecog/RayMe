@@ -256,6 +256,17 @@ async def create_webrtc_offer_answer(
 ) -> dict[str, Any]:
     manager = _manager_from_app(request)
     existing_session = manager.get_session(payload.session_id)
+    if (
+        existing_session is not None
+        and existing_session.state in {"ended", "failed"}
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "call_session_terminal",
+                "message": "Call session has ended; start a new call",
+            },
+        )
     previous_peer_connection = (
         existing_session.peer_connection if existing_session is not None else None
     )
@@ -288,13 +299,6 @@ async def create_webrtc_offer_answer(
     try:
         if existing_session is not None:
             session = existing_session
-            if (
-                session.state == "failed"
-                and session.end_reason == "connection_failed"
-            ):
-                session.state = "listening"
-                session.end_reason = None
-                session.ended_at = None
             session.mark_media_reconnect_pending()
             session.mark_peer_connection_pending(
                 peer_connection,
