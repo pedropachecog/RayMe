@@ -143,6 +143,10 @@ class TerminalCallSessionError(RuntimeError):
     """Raised when a peer candidate cannot be registered on a terminal call."""
 
 
+class PeerSwitchInProgressError(RuntimeError):
+    """Raised when a second candidate races an owned engine switch."""
+
+
 class SpeechSessionSelectionError(RuntimeError):
     """Raised when speech does not match the accepted call configuration."""
 
@@ -191,6 +195,8 @@ class _PeerLifecycle:
     phase: str = "stable"
     candidate_generation: int = 0
     candidate: _PendingPeerCandidate | None = None
+    switch_generation: int = 0
+    switch_owner: Any | None = None
     terminal_state: str | None = None
     state_before_reconnect: str | None = None
     grace_peer: Any | None = None
@@ -548,6 +554,7 @@ class CallSession:
         configuration: PeerOfferConfiguration | None = None,
         timeout_seconds: float = CALL_PEER_REPLACEMENT_TIMEOUT_SECONDS,
     ) -> int:
+        reject_switching = False
         async with self._lifecycle_lock:
             lifecycle = self._peer_lifecycle
             if (
@@ -558,30 +565,40 @@ class CallSession:
                 raise TerminalCallSessionError(
                     "cannot register a peer candidate on a terminal call"
                 )
-            superseded_candidate = lifecycle.candidate
-            superseded_peers = (
-                [superseded_candidate.peer_connection]
-                if superseded_candidate is not None
-                and superseded_candidate.peer_connection is not peer_connection
-                else []
-            )
-            self._cancel_pending_peer_timeout_locked()
-            lifecycle.candidate_generation += 1
-            generation = lifecycle.candidate_generation
-            candidate = _PendingPeerCandidate(
-                peer_connection=peer_connection,
-                generation=generation,
-                epoch=lifecycle.epoch,
-                outbound_audio_track=outbound_audio_track,
-                configuration=configuration,
-            )
-            lifecycle.candidate = candidate
-            candidate.timeout_task = asyncio.create_task(
-                self._expire_pending_peer_connection(
-                    peer_connection,
-                    generation,
-                    timeout_seconds,
+            if lifecycle.phase == "switching":
+                reject_switching = True
+                superseded_peers: list[Any] = []
+                generation = lifecycle.candidate_generation
+            else:
+                superseded_candidate = lifecycle.candidate
+                superseded_peers = (
+                    [superseded_candidate.peer_connection]
+                    if superseded_candidate is not None
+                    and superseded_candidate.peer_connection is not peer_connection
+                    else []
                 )
+                self._cancel_pending_peer_timeout_locked()
+                lifecycle.candidate_generation += 1
+                generation = lifecycle.candidate_generation
+                candidate = _PendingPeerCandidate(
+                    peer_connection=peer_connection,
+                    generation=generation,
+                    epoch=lifecycle.epoch,
+                    outbound_audio_track=outbound_audio_track,
+                    configuration=configuration,
+                )
+                lifecycle.candidate = candidate
+                candidate.timeout_task = asyncio.create_task(
+                    self._expire_pending_peer_connection(
+                        peer_connection,
+                        generation,
+                        timeout_seconds,
+                    )
+                )
+        if reject_switching:
+            await self._close_peer(peer_connection)
+            raise PeerSwitchInProgressError(
+                "cannot register a peer candidate during an engine switch"
             )
         for superseded_peer in superseded_peers:
             await self._close_peer(superseded_peer)
@@ -635,6 +652,7 @@ class CallSession:
         cancel_selection = False
         captured_cancellation: _CapturedTurnCancellation | None = None
         accepted_configuration: PeerOfferConfiguration | None = None
+        switch_generation: int | None = None
         released_prompt_lease: PromptLeaseReleaser | None = None
         previous_outbound_audio_track: Any | None = None
         accepted_outbound_audio_track: Any | None = None
@@ -695,6 +713,9 @@ class CallSession:
                 # ownership is unresolved. Speech reservations are rejected in
                 # this phase, so no new turn can be mistaken for the old one.
                 lifecycle.phase = "switching"
+                lifecycle.switch_generation += 1
+                switch_generation = lifecycle.switch_generation
+                lifecycle.switch_owner = peer_connection
             else:
                 if accepted_configuration is not None:
                     self._apply_peer_configuration_locked(accepted_configuration)
@@ -731,12 +752,21 @@ class CallSession:
                 lifecycle = self._peer_lifecycle
                 if lifecycle.phase == "terminal" or self.ended_at is not None:
                     return False, previous_peer_connection
-                if lifecycle.phase == "switching":
+                owns_switch = (
+                    lifecycle.phase == "switching"
+                    and lifecycle.switch_generation == switch_generation
+                    and lifecycle.switch_owner is peer_connection
+                    and self.peer_connection is peer_connection
+                )
+                if owns_switch:
                     if accepted_configuration is not None:
                         self._apply_peer_configuration_locked(accepted_configuration)
                     self._complete_transport_reconnect_locked()
+                    lifecycle.switch_owner = None
                     if self.state not in {"ended", "failed"}:
                         self.state = "listening"
+                else:
+                    return False, previous_peer_connection
         elif previous_peer_connection is not None:
             await self._close_peer(previous_peer_connection)
         return True, previous_peer_connection

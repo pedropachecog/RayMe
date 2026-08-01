@@ -21,6 +21,7 @@ from app.call.session import (
     CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS,
     CallSession,
     CallSessionManager,
+    PeerSwitchInProgressError,
     PeerOfferConfiguration,
     SpeechSegmentConflictError,
     SpeechSessionSelectionError,
@@ -2317,6 +2318,81 @@ def test_reserved_speech_cannot_claim_after_engine_switch() -> None:
         assert adapter.requests == []
         assert track.chunks == []
         assert session._speech_admission is None
+
+    _run(scenario())
+
+
+def test_overlapping_engine_switch_rejects_and_closes_second_peer() -> None:
+    class BlockingClosePeer(ScriptedPeerConnection):
+        def __init__(self) -> None:
+            super().__init__()
+            self.close_started = asyncio.Event()
+            self.release_close = asyncio.Event()
+
+        async def close(self) -> None:
+            self.close_calls += 1
+            self.close_started.set()
+            await self.release_close.wait()
+
+    async def scenario() -> None:
+        session, _ = _new_session(
+            outbound_audio_track=ScriptedOutboundAudioTrack()
+        )
+        old_peer = BlockingClosePeer()
+        session.peer_connection = old_peer
+        session.voice_id = "voice-before"
+        session.engine_id = "qwen3_1_7b"
+
+        first_peer = ScriptedPeerConnection()
+        first_generation = await session.mark_peer_connection_pending(
+            first_peer,
+            outbound_audio_track=ScriptedOutboundAudioTrack(),
+            configuration=PeerOfferConfiguration(
+                thread_id="thread-first",
+                voice_id="voice-first",
+                engine_id="f5",
+                prompt_messages=(),
+                vad_adapter=None,
+                stt_adapter=None,
+            ),
+            timeout_seconds=60.0,
+        )
+        first_accept = asyncio.create_task(
+            session.accept_pending_peer_connection(
+                first_peer,
+                generation=first_generation,
+            )
+        )
+        await old_peer.close_started.wait()
+        assert session._peer_lifecycle.phase == "switching"
+
+        second_peer = ScriptedPeerConnection()
+        with pytest.raises(PeerSwitchInProgressError):
+            await session.mark_peer_connection_pending(
+                second_peer,
+                configuration=PeerOfferConfiguration(
+                    thread_id="thread-second",
+                    voice_id="voice-second",
+                    engine_id="voxcpm2",
+                    prompt_messages=(),
+                    vad_adapter=None,
+                    stt_adapter=None,
+                ),
+                timeout_seconds=60.0,
+            )
+        assert second_peer.close_calls == 1
+
+        old_peer.release_close.set()
+        accepted, previous_peer = await first_accept
+        assert accepted is True
+        assert previous_peer is old_peer
+        assert session.peer_connection is first_peer
+        assert session.thread_id == "thread-first"
+        assert session.voice_id == "voice-first"
+        assert session.engine_id == "f5"
+        assert session._peer_lifecycle.phase == "stable"
+        assert session._peer_lifecycle.switch_owner is None
+        assert first_peer.close_calls == 0
 
     _run(scenario())
 
