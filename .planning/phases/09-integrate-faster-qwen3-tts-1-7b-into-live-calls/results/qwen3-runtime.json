@@ -1,0 +1,44 @@
+{
+  "artifact": "runtime",
+  "critical_gates": [
+    "runtime_identity_cuda_one_hot"
+  ],
+  "deployed_commit": "5e8a49c5179e4d38c55994625cd9ab18718e2962",
+  "generated_at": "2026-08-01T02:16:45.963690Z",
+  "identity": {
+    "cpu_fallback_detected": false,
+    "cuda_available": true,
+    "device": "cuda",
+    "engine_id": "qwen3_1_7b",
+    "gpu_name": "NVIDIA GeForce RTX 3060",
+    "model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+    "model_parameters_cuda_only": true,
+    "model_revision": "fd4b254389122332181a7c3db7f27e918eec64e3",
+    "other_resident_engines": [],
+    "package": "faster-qwen3-tts==0.3.2",
+    "resident_tts_count": 1,
+    "resident_tts_engine": "qwen3_1_7b",
+    "runtime_source_commit": "a70afc0f81f7f5f8801c3227968f1102f43f211c",
+    "system_gpu_mib": 8245.2,
+    "torch_cuda_version": "12.6",
+    "torch_reserved_mib": 5690.0,
+    "torch_version": "2.10.0+cu126"
+  },
+  "phase": "09",
+  "scenario_results": [
+    {
+      "measurements": {
+        "attested": true,
+        "resident_tts_count": 1
+      },
+      "observed_events": [
+        "runtime_attested",
+        "model_resident",
+        "prompt_ready"
+      ],
+      "scenario_id": "runtime-identity-one-hot",
+      "seed": 91017
+    }
+  ],
+  "schema_version": 1
+}

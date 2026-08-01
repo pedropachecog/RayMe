@@ -1,3 +1,8 @@
 *
 !.gitignore
 !qwen3-hardware-tracer.json
+!qwen3-runtime.json
+!qwen3-webrtc-status.json
+!qwen3-call-flow.json
+!qwen3-soak.json
+!qwen3-stt.json

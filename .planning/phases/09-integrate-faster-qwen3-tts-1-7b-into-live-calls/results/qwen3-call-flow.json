@@ -1,0 +1,638 @@
+{
+  "artifact": "call_flow",
+  "critical_gates": [
+    "all_scenarios_observed",
+    "early_playback_before_completion",
+    "bounded_bridge_and_track",
+    "no_whole_synthesis_fallback",
+    "terminal_safe_cancellation"
+  ],
+  "deployed_commit": "5e8a49c5179e4d38c55994625cd9ab18718e2962",
+  "generated_at": "2026-08-01T02:16:45.963690Z",
+  "phase": "09",
+  "reference_authorization": {
+    "authorization_basis": "generated_non_person_fixture",
+    "fixture_kind": "generated_non_person_fixture",
+    "opaque_asset_id": "voice_asset_c4a180c91578400eb7836cf41475bf54",
+    "reference_sha256": "b58c9c9926cd7a535db401fe82ac18af8aa3a1e8532ef513197d463dc9fb9a8b",
+    "transcript_sha256": "fc4f6a7f4b2f8e6fe7de46941b5b5cb8f35f4d21a11529542c403e347853aa96",
+    "use_scope": "rayme_lan_call_testing",
+    "voice_data_steward": "non_person_sapi_david_v1"
+  },
+  "scenario_results": [
+    {
+      "measurements": {
+        "audio_sha256": "2f3304a5b0667cf5cbd07ae1a8e6df048b08599843339120bd94e921d86dba07",
+        "bridge_capacity": 2,
+        "bridge_high_water": 1,
+        "chunk_count": 9,
+        "fallback_used": false,
+        "final_fields": [
+          "chunk_count",
+          "generation_complete_ms",
+          "join_violation_count",
+          "native_generation_ms",
+          "natural_eos",
+          "playout_complete_ms",
+          "rtfx",
+          "source_audio_sha256",
+          "underflow_count"
+        ],
+        "first_playback_ms": 798.3,
+        "generation_complete_ms": 2288.7,
+        "immediate_fields": [
+          "ai_audio_started_ms",
+          "fallback_used",
+          "first_chunk_enqueued_ms",
+          "first_chunk_generated_ms",
+          "startup_buffer_target_ms",
+          "startup_buffer_wait_ms",
+          "startup_buffered_audio_ms",
+          "startup_buffered_chunks",
+          "streaming_used",
+          "whole_wav_fallback_used"
+        ],
+        "join_violation_count": 0,
+        "native_first_chunk_ms": 369.235,
+        "native_generation_ms": 2278.2,
+        "natural_eos": true,
+        "playout_complete_ms": 4138.3,
+        "queue_block_time_ms": 12.9,
+        "rtfx": 1.194,
+        "source_audio_sha256": "31459107bd9b9badf7d7b7947f5a25a1b84f4df5ab43fe1440250387b3720ae0",
+        "startup_buffer_target_ms": 600.0,
+        "startup_buffer_wait_ms": 262.9,
+        "startup_buffered_audio_ms": 640.0,
+        "startup_buffered_chunks": 2,
+        "streaming_used": true,
+        "track_capacity_audio_ms": 1500.0,
+        "track_high_water_audio_ms": 1060.0,
+        "underflow_count": 0,
+        "valid_audio": true,
+        "whole_wav_fallback_used": false
+      },
+      "observed_events": [
+        "prompt_ready",
+        "ai_audio_started",
+        "generation_complete",
+        "playout_complete",
+        "ai_done"
+      ],
+      "scenario_id": "clone-valid-short",
+      "seed": 91001
+    },
+    {
+      "measurements": {
+        "audio_sha256": "0de291f2dcbb943e305a3501a21320d9211bb2bd1793add6806950befb83450b",
+        "bridge_capacity": 2,
+        "bridge_high_water": 2,
+        "chunk_count": 26,
+        "fallback_used": false,
+        "final_fields": [
+          "chunk_count",
+          "generation_complete_ms",
+          "join_violation_count",
+          "native_generation_ms",
+          "natural_eos",
+          "playout_complete_ms",
+          "rtfx",
+          "source_audio_sha256",
+          "underflow_count"
+        ],
+        "first_playback_ms": 918.6,
+        "generation_complete_ms": 7516.9,
+        "immediate_fields": [
+          "ai_audio_started_ms",
+          "fallback_used",
+          "first_chunk_enqueued_ms",
+          "first_chunk_generated_ms",
+          "startup_buffer_target_ms",
+          "startup_buffer_wait_ms",
+          "startup_buffered_audio_ms",
+          "startup_buffered_chunks",
+          "streaming_used",
+          "whole_wav_fallback_used"
+        ],
+        "join_violation_count": 0,
+        "native_first_chunk_ms": 514.857,
+        "native_generation_ms": 5617.0,
+        "natural_eos": true,
+        "playout_complete_ms": 9839.9,
+        "queue_block_time_ms": 2564.2,
+        "rtfx": 1.453,
+        "source_audio_sha256": "abb53a274c3abb89f2b6b7c6665477bfc6e1eef87f0ce8bc60163b5db204c7a8",
+        "startup_buffer_target_ms": 600.0,
+        "startup_buffer_wait_ms": 260.7,
+        "startup_buffered_audio_ms": 640.0,
+        "startup_buffered_chunks": 2,
+        "streaming_used": true,
+        "track_capacity_audio_ms": 1500.0,
+        "track_high_water_audio_ms": 1500.0,
+        "underflow_count": 0,
+        "valid_audio": true,
+        "whole_wav_fallback_used": false
+      },
+      "observed_events": [
+        "prompt_ready",
+        "ai_audio_started",
+        "generation_complete",
+        "playout_complete",
+        "ai_done"
+      ],
+      "scenario_id": "clone-valid-medium",
+      "seed": 91002
+    },
+    {
+      "measurements": {
+        "audio_sha256": "b0da13526a925ec2ba5edc818967b2406a0eb22021a0702bff00db1acc2723f4",
+        "bridge_capacity": 2,
+        "bridge_high_water": 2,
+        "chunk_count": 62,
+        "fallback_used": false,
+        "final_fields": [
+          "chunk_count",
+          "generation_complete_ms",
+          "join_violation_count",
+          "native_generation_ms",
+          "natural_eos",
+          "playout_complete_ms",
+          "rtfx",
+          "source_audio_sha256",
+          "underflow_count"
+        ],
+        "first_playback_ms": 1051.8,
+        "generation_complete_ms": 19462.7,
+        "immediate_fields": [
+          "ai_audio_started_ms",
+          "fallback_used",
+          "first_chunk_enqueued_ms",
+          "first_chunk_generated_ms",
+          "startup_buffer_target_ms",
+          "startup_buffer_wait_ms",
+          "startup_buffered_audio_ms",
+          "startup_buffered_chunks",
+          "streaming_used",
+          "whole_wav_fallback_used"
+        ],
+        "join_violation_count": 0,
+        "native_first_chunk_ms": 624.129,
+        "native_generation_ms": 12540.7,
+        "natural_eos": true,
+        "playout_complete_ms": 21754.5,
+        "queue_block_time_ms": 14190.8,
+        "rtfx": 1.569,
+        "source_audio_sha256": "f8c1afc35a165192bc483aa22e09d3035bf954b1d24778e4d9fdb79531ca611d",
+        "startup_buffer_target_ms": 600.0,
+        "startup_buffer_wait_ms": 264.6,
+        "startup_buffered_audio_ms": 640.0,
+        "startup_buffered_chunks": 2,
+        "streaming_used": true,
+        "track_capacity_audio_ms": 1500.0,
+        "track_high_water_audio_ms": 1500.0,
+        "underflow_count": 0,
+        "valid_audio": true,
+        "whole_wav_fallback_used": false
+      },
+      "observed_events": [
+        "prompt_ready",
+        "ai_audio_started",
+        "generation_complete",
+        "playout_complete",
+        "ai_done"
+      ],
+      "scenario_id": "clone-valid-long",
+      "seed": 91003
+    },
+    {
+      "measurements": {
+        "accepted": true,
+        "audio_sha256": "e30f5ba1b3efdfc856bccde394ffeaadb0e1609334d313a9871333d3fa4224ea",
+        "bridge_capacity": 2,
+        "bridge_high_water": 2,
+        "chunk_count": 17,
+        "fallback_used": false,
+        "final_fields": [
+          "chunk_count",
+          "generation_complete_ms",
+          "join_violation_count",
+          "native_generation_ms",
+          "natural_eos",
+          "playout_complete_ms",
+          "rtfx",
+          "source_audio_sha256",
+          "underflow_count"
+        ],
+        "final_word_pass": true,
+        "first_playback_ms": 1029.8,
+        "generation_complete_ms": 4633.9,
+        "immediate_fields": [
+          "ai_audio_started_ms",
+          "fallback_used",
+          "first_chunk_enqueued_ms",
+          "first_chunk_generated_ms",
+          "startup_buffer_target_ms",
+          "startup_buffer_wait_ms",
+          "startup_buffered_audio_ms",
+          "startup_buffered_chunks",
+          "streaming_used",
+          "whole_wav_fallback_used"
+        ],
+        "join_violation_count": 0,
+        "native_first_chunk_ms": 601.285,
+        "native_generation_ms": 4125.6,
+        "natural_eos": true,
+        "playout_complete_ms": 6942.5,
+        "queue_block_time_ms": 76.9,
+        "rtfx": 1.26,
+        "source_audio_sha256": "3b25efdd697952e311319af8a51acdc92e0de4a70343b2cec2a483f7824fc17e",
+        "startup_buffer_target_ms": 600.0,
+        "startup_buffer_wait_ms": 270.2,
+        "startup_buffered_audio_ms": 640.0,
+        "startup_buffered_chunks": 2,
+        "streaming_used": true,
+        "track_capacity_audio_ms": 1500.0,
+        "track_high_water_audio_ms": 1500.0,
+        "underflow_count": 0,
+        "valid_audio": true,
+        "wer": 0.0,
+        "whole_wav_fallback_used": false
+      },
+      "observed_events": [
+        "ai_audio_started",
+        "generation_complete",
+        "playout_complete",
+        "ai_done"
+      ],
+      "scenario_id": "message-integrity-names-numbers",
+      "seed": 91004
+    },
+    {
+      "measurements": {
+        "accepted": true,
+        "audio_sha256": "3f1087a840a304cf7514c7c712023fd6337585b5b50b2bc210e339e66f5cffbc",
+        "bridge_capacity": 2,
+        "bridge_high_water": 2,
+        "chunk_count": 19,
+        "fallback_used": false,
+        "final_fields": [
+          "chunk_count",
+          "generation_complete_ms",
+          "join_violation_count",
+          "native_generation_ms",
+          "natural_eos",
+          "playout_complete_ms",
+          "rtfx",
+          "source_audio_sha256",
+          "underflow_count"
+        ],
+        "final_word_pass": true,
+        "first_playback_ms": 763.1,
+        "generation_complete_ms": 5161.8,
+        "immediate_fields": [
+          "ai_audio_started_ms",
+          "fallback_used",
+          "first_chunk_enqueued_ms",
+          "first_chunk_generated_ms",
+          "startup_buffer_target_ms",
+          "startup_buffer_wait_ms",
+          "startup_buffered_audio_ms",
+          "startup_buffered_chunks",
+          "streaming_used",
+          "whole_wav_fallback_used"
+        ],
+        "join_violation_count": 0,
+        "native_first_chunk_ms": 360.847,
+        "native_generation_ms": 4178.2,
+        "natural_eos": true,
+        "playout_complete_ms": 7467.7,
+        "queue_block_time_ms": 455.3,
+        "rtfx": 1.436,
+        "source_audio_sha256": "6be95207218e8d0e9a455440b7651bfd8ac047f58b3245415805ce3132398896",
+        "startup_buffer_target_ms": 600.0,
+        "startup_buffer_wait_ms": 263.1,
+        "startup_buffered_audio_ms": 640.0,
+        "startup_buffered_chunks": 2,
+        "streaming_used": true,
+        "track_capacity_audio_ms": 1500.0,
+        "track_high_water_audio_ms": 1500.0,
+        "underflow_count": 0,
+        "valid_audio": true,
+        "wer": 0.0,
+        "whole_wav_fallback_used": false
+      },
+      "observed_events": [
+        "ai_audio_started",
+        "generation_complete",
+        "playout_complete",
+        "ai_done"
+      ],
+      "scenario_id": "message-integrity-negation-abbreviations",
+      "seed": 91005
+    },
+    {
+      "measurements": {
+        "accepted": true,
+        "audio_sha256": "21f561daeb703ad6873215d65f0c2a30dc38993ee14f8e4f75b53b2c95296e6b",
+        "bridge_capacity": 2,
+        "bridge_high_water": 2,
+        "chunk_count": 20,
+        "fallback_used": false,
+        "final_fields": [
+          "chunk_count",
+          "generation_complete_ms",
+          "join_violation_count",
+          "native_generation_ms",
+          "natural_eos",
+          "playout_complete_ms",
+          "rtfx",
+          "source_audio_sha256",
+          "underflow_count"
+        ],
+        "final_word_pass": true,
+        "first_playback_ms": 780.7,
+        "generation_complete_ms": 5363.2,
+        "immediate_fields": [
+          "ai_audio_started_ms",
+          "fallback_used",
+          "first_chunk_enqueued_ms",
+          "first_chunk_generated_ms",
+          "startup_buffer_target_ms",
+          "startup_buffer_wait_ms",
+          "startup_buffered_audio_ms",
+          "startup_buffered_chunks",
+          "streaming_used",
+          "whole_wav_fallback_used"
+        ],
+        "join_violation_count": 0,
+        "native_first_chunk_ms": 369.285,
+        "native_generation_ms": 4335.8,
+        "natural_eos": true,
+        "playout_complete_ms": 7700.4,
+        "queue_block_time_ms": 624.1,
+        "rtfx": 1.439,
+        "source_audio_sha256": "3aadf377adf246dac9d29dd3d6f139b4f4f3499cff80806593d783574ebf5bca",
+        "startup_buffer_target_ms": 600.0,
+        "startup_buffer_wait_ms": 259.4,
+        "startup_buffered_audio_ms": 640.0,
+        "startup_buffered_chunks": 2,
+        "streaming_used": true,
+        "track_capacity_audio_ms": 1500.0,
+        "track_high_water_audio_ms": 1500.0,
+        "underflow_count": 0,
+        "valid_audio": true,
+        "wer": 0.0,
+        "whole_wav_fallback_used": false
+      },
+      "observed_events": [
+        "ai_audio_started",
+        "generation_complete",
+        "playout_complete",
+        "ai_done"
+      ],
+      "scenario_id": "message-integrity-punctuation-final-word",
+      "seed": 91006
+    },
+    {
+      "measurements": {
+        "alignment_accepted": true,
+        "edit_similarity": 1.0,
+        "prompt_ready": true,
+        "token_coverage": 1.0
+      },
+      "observed_events": [
+        "alignment_accepted",
+        "prompt_ready"
+      ],
+      "scenario_id": "alignment-tolerant-punctuation-case",
+      "seed": 91007
+    },
+    {
+      "measurements": {
+        "alignment_accepted": true,
+        "edit_similarity": 0.9934,
+        "prompt_ready": true,
+        "token_coverage": 0.9615
+      },
+      "observed_events": [
+        "alignment_accepted",
+        "prompt_ready"
+      ],
+      "scenario_id": "alignment-tolerant-accented-english",
+      "seed": 91008
+    },
+    {
+      "measurements": {
+        "alignment_accepted": false,
+        "generation_started": false,
+        "public_error_code": "qwen_reference_transcript_required"
+      },
+      "observed_events": [
+        "alignment_rejected"
+      ],
+      "scenario_id": "alignment-invalid-blank",
+      "seed": 91009
+    },
+    {
+      "measurements": {
+        "alignment_accepted": false,
+        "edit_similarity": 0.283,
+        "generation_started": false,
+        "token_coverage": 0.0769
+      },
+      "observed_events": [
+        "alignment_rejected"
+      ],
+      "scenario_id": "alignment-invalid-known-mismatch",
+      "seed": 91010
+    },
+    {
+      "measurements": {
+        "audio_seconds": 0.0,
+        "ceiling_triggered": true,
+        "complete_persistence_count": 0,
+        "max_new_tokens": 384,
+        "natural_eos": false,
+        "normal_ai_done_count": 0
+      },
+      "observed_events": [
+        "generation_started",
+        "generation_cancelled",
+        "qwen_generation_ceiling"
+      ],
+      "scenario_id": "runaway-ceiling",
+      "seed": 91011
+    },
+    {
+      "measurements": {
+        "audio_sha256": "f9484cafa39648b4db3b64508f638b5270d5ecc4f218b02cd28a0fa3afcff2d9",
+        "bridge_capacity": 2,
+        "bridge_high_water": 2,
+        "chunk_count": 28,
+        "fallback_used": false,
+        "final_fields": [
+          "chunk_count",
+          "generation_complete_ms",
+          "join_violation_count",
+          "native_generation_ms",
+          "natural_eos",
+          "playout_complete_ms",
+          "rtfx",
+          "source_audio_sha256",
+          "underflow_count"
+        ],
+        "first_playback_ms": 767.4,
+        "generation_complete_ms": 7958.3,
+        "immediate_fields": [
+          "ai_audio_started_ms",
+          "fallback_used",
+          "first_chunk_enqueued_ms",
+          "first_chunk_generated_ms",
+          "startup_buffer_target_ms",
+          "startup_buffer_wait_ms",
+          "startup_buffered_audio_ms",
+          "startup_buffered_chunks",
+          "streaming_used",
+          "whole_wav_fallback_used"
+        ],
+        "join_violation_count": 0,
+        "native_first_chunk_ms": 356.992,
+        "native_generation_ms": 5800.3,
+        "natural_eos": true,
+        "playout_complete_ms": 10229.1,
+        "queue_block_time_ms": 3205.3,
+        "rtfx": 1.503,
+        "source_audio_sha256": "644cf2fc27018f1015e203b8be4e684fe84c913eaf0392576f28802f07cf2108",
+        "startup_buffer_target_ms": 600.0,
+        "startup_buffer_wait_ms": 261.9,
+        "startup_buffered_audio_ms": 640.0,
+        "startup_buffered_chunks": 2,
+        "streaming_used": true,
+        "track_capacity_audio_ms": 1500.0,
+        "track_high_water_audio_ms": 1500.0,
+        "underflow_count": 0,
+        "valid_audio": true,
+        "whole_wav_fallback_used": false
+      },
+      "observed_events": [
+        "ai_audio_started",
+        "generation_complete",
+        "playout_complete",
+        "ai_done"
+      ],
+      "scenario_id": "slow-stream-backpressure",
+      "seed": 91012
+    },
+    {
+      "measurements": {
+        "audio_started_count": 1,
+        "cancel_ack_ms": 125.6,
+        "complete_persistence_count": 0,
+        "late_audio_count": 0,
+        "late_enqueue_count": 0,
+        "normal_ai_done_count": 0,
+        "recovery": true
+      },
+      "observed_events": [
+        "ai_audio_started",
+        "cancel_signalled",
+        "cancelled"
+      ],
+      "scenario_id": "cancel-after-audio",
+      "seed": 91013
+    },
+    {
+      "measurements": {
+        "audio_started_count": 0,
+        "cancel_ack_ms": 75.8,
+        "complete_persistence_count": 0,
+        "late_audio_count": 0,
+        "late_enqueue_count": 0,
+        "normal_ai_done_count": 0,
+        "recovery": true
+      },
+      "observed_events": [
+        "cancel_signalled",
+        "cancelled"
+      ],
+      "scenario_id": "cancel-before-audio",
+      "seed": 91014
+    },
+    {
+      "measurements": {
+        "audio_started_count": 1,
+        "cancel_ack_ms": 67.4,
+        "complete_persistence_count": 0,
+        "late_audio_count": 0,
+        "late_enqueue_count": 0,
+        "normal_ai_done_count": 0,
+        "recovery": true
+      },
+      "observed_events": [
+        "cancel_signalled",
+        "cancelled",
+        "session_ended",
+        "recovery_ready"
+      ],
+      "scenario_id": "hangup-and-switch-hangup",
+      "seed": 91015
+    },
+    {
+      "measurements": {
+        "audio_started_count": 1,
+        "cancel_ack_ms": 101.9,
+        "complete_persistence_count": 0,
+        "late_audio_count": 0,
+        "late_enqueue_count": 0,
+        "normal_ai_done_count": 0,
+        "recovery": true
+      },
+      "observed_events": [
+        "cancel_signalled",
+        "cancelled",
+        "engine_switched",
+        "recovery_ready"
+      ],
+      "scenario_id": "hangup-and-switch-engine-switch",
+      "seed": 91016
+    },
+    {
+      "measurements": {
+        "backend_healthy": true,
+        "other_engines_usable": true,
+        "private_leak_count": 0,
+        "recovery": true,
+        "stable_error_code": "qwen_runtime_failed"
+      },
+      "observed_events": [
+        "worker_error",
+        "engine_unavailable",
+        "backend_healthy",
+        "recovery_ready"
+      ],
+      "scenario_id": "worker-failure-sanitized",
+      "seed": 91018
+    },
+    {
+      "measurements": {
+        "cancelled_persistence_count": 0,
+        "canonical_public_api": true,
+        "late_audio_count": 0,
+        "normal_persistence_count": 1
+      },
+      "observed_events": [
+        "model_resident",
+        "prompt_ready",
+        "ai_audio_started",
+        "generation_complete",
+        "playout_complete",
+        "ai_done",
+        "cancel_signalled",
+        "cancelled",
+        "session_ended"
+      ],
+      "scenario_id": "canonical-deployed-call",
+      "seed": 91020
+    }
+  ],
+  "schema_version": 1
+}

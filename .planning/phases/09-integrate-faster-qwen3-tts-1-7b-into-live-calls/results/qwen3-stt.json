@@ -1,0 +1,332 @@
+{
+  "artifact": "stt",
+  "critical_gates": [
+    "spoken_message_integrity"
+  ],
+  "deployed_commit": "5e8a49c5179e4d38c55994625cd9ab18718e2962",
+  "generated_at": "2026-08-01T02:16:45.963690Z",
+  "message_integrity": [
+    {
+      "consequential_terms_pass": true,
+      "final_word_pass": true,
+      "scenario_id": "message-integrity-names-numbers",
+      "wer": 0.0
+    },
+    {
+      "consequential_terms_pass": true,
+      "final_word_pass": true,
+      "scenario_id": "message-integrity-negation-abbreviations",
+      "wer": 0.0
+    },
+    {
+      "consequential_terms_pass": true,
+      "final_word_pass": true,
+      "scenario_id": "message-integrity-punctuation-final-word",
+      "wer": 0.0
+    }
+  ],
+  "phase": "09",
+  "samples": [
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 1,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 2,
+      "wer": 0.076923
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 3,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 4,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 5,
+      "wer": 0.076923
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 6,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 7,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 8,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 9,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 10,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 11,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 12,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 13,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 14,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 15,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 16,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 17,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 18,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 19,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 20,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 21,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 22,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 23,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 24,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 25,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 26,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 27,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 28,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 29,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 30,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 31,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 32,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 33,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 34,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 35,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 36,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 37,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 38,
+      "wer": 0.076923
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 39,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 40,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 41,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 42,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 43,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 44,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 45,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 46,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 47,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 48,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 49,
+      "wer": 0.0
+    },
+    {
+      "accepted": true,
+      "final_word_pass": true,
+      "turn": 50,
+      "wer": 0.0
+    }
+  ],
+  "schema_version": 1
+}
