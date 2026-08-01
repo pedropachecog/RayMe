@@ -867,7 +867,14 @@ def test_failed_reconnect_offer_preserves_existing_session_media(
     original_peer = session.peer_connection
     original_track = session.outbound_audio_track
 
-    second = client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+    failed_payload = {
+        **_offer_payload(session_id=session_id),
+        "thread_id": "failed-thread",
+        "voice_id": "failed-voice",
+        "engine_id": "voxcpm2",
+        "prompt_messages": [{"role": "system", "content": "Failed prompt."}],
+    }
+    second = client.post("/webrtc/offer", json=failed_payload)
 
     assert second.status_code == 502
     assert len(peers) == 2
@@ -875,6 +882,13 @@ def test_failed_reconnect_offer_preserves_existing_session_media(
     assert session.peer_connection is original_peer
     assert session.outbound_audio_track is original_track
     assert original_peer.close_calls == 0
+    assert session.thread_id == "thread-1"
+    assert session.voice_id == "voice-1"
+    assert session.engine_id == "f5"
+    assert session.prompt_messages == [
+        {"role": "system", "content": "Stay in character."},
+        {"role": "user", "content": "Hello before the call."},
+    ]
 
 
 def test_cancelled_reconnect_offer_preserves_existing_session_media(
@@ -1029,11 +1043,18 @@ def test_inflight_reconnect_offer_does_not_steal_active_session_media(
     original_track = session.outbound_audio_track
     responses: list[Any] = []
     errors: list[BaseException] = []
+    accepted_payload = {
+        **_offer_payload(session_id=session_id),
+        "thread_id": "accepted-thread",
+        "voice_id": "accepted-voice",
+        "engine_id": "voxcpm2",
+        "prompt_messages": [{"role": "system", "content": "Accepted prompt."}],
+    }
 
     def post_reconnect_offer() -> None:
         try:
             responses.append(
-                client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+                client.post("/webrtc/offer", json=accepted_payload)
             )
         except BaseException as exc:
             errors.append(exc)
@@ -1047,6 +1068,8 @@ def test_inflight_reconnect_offer_does_not_steal_active_session_media(
         assert session.peer_connection is original_peer
         assert session.outbound_audio_track is original_track
         assert peers[1] in session._pending_peer_connections
+        assert session.thread_id == "thread-1"
+        assert session.engine_id == "f5"
     finally:
         release_reconnect_offer.set()
         thread.join(2)
@@ -1064,6 +1087,12 @@ def test_inflight_reconnect_offer_does_not_steal_active_session_media(
     assert session.peer_connection is peers[1]
     assert session.outbound_audio_track is tracks[1]
     assert original_peer.close_calls == 1
+    assert session.thread_id == "accepted-thread"
+    assert session.voice_id == "accepted-voice"
+    assert session.engine_id == "voxcpm2"
+    assert session.prompt_messages == [
+        {"role": "system", "content": "Accepted prompt."}
+    ]
 
 
 @pytest.mark.parametrize(

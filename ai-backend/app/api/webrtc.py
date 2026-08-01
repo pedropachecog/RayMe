@@ -17,6 +17,7 @@ from app.api.tts import _qwen_error_detail, _qwen_http_status
 from app.call.session import (
     CallSession,
     CallSessionManager,
+    PeerOfferConfiguration,
     TerminalCallSessionError,
 )
 from app.call.tracks import QueuedAudioOutputTrack
@@ -294,17 +295,18 @@ async def create_webrtc_offer_answer(
             pending_generation = await session.mark_peer_connection_pending(
                 peer_connection,
                 outbound_audio_track=outbound_audio_track,
+                configuration=PeerOfferConfiguration(
+                    thread_id=payload.thread_id,
+                    voice_id=payload.voice_id,
+                    engine_id=payload.engine_id,
+                    prompt_messages=tuple(
+                        message.model_dump()
+                        for message in payload.prompt_messages
+                    ),
+                    vad_adapter=_vad_adapter(request),
+                    stt_adapter=_stt_adapter(request),
+                ),
             )
-            session.thread_id = payload.thread_id
-            await session.update_call_selection(
-                voice_id=payload.voice_id,
-                engine_id=payload.engine_id,
-            )
-            session.prompt_messages = [
-                message.model_dump() for message in payload.prompt_messages
-            ]
-            session.vad_adapter = _vad_adapter(request)
-            session.stt_adapter = _stt_adapter(request)
         else:
             session = await manager.create_session(
                 session_id=payload.session_id,

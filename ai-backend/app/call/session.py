@@ -143,6 +143,16 @@ class TerminalCallSessionError(RuntimeError):
     """Raised when a peer candidate cannot be registered on a terminal call."""
 
 
+@dataclass(frozen=True)
+class PeerOfferConfiguration:
+    thread_id: str
+    voice_id: str
+    engine_id: str
+    prompt_messages: tuple[dict[str, Any], ...]
+    vad_adapter: Any | None
+    stt_adapter: Any | None
+
+
 @dataclass
 class _PendingPeerCandidate:
     peer_connection: Any
@@ -151,6 +161,7 @@ class _PendingPeerCandidate:
     outbound_audio_track: Any | None = None
     data_channel: Any | None = None
     timeout_task: asyncio.Task[None] | None = None
+    configuration: PeerOfferConfiguration | None = None
 
 
 @dataclass
@@ -397,6 +408,7 @@ class CallSession:
         peer_connection: Any,
         *,
         outbound_audio_track: Any | None = None,
+        configuration: PeerOfferConfiguration | None = None,
         timeout_seconds: float = CALL_PEER_REPLACEMENT_TIMEOUT_SECONDS,
     ) -> int:
         async with self._lifecycle_lock:
@@ -424,6 +436,7 @@ class CallSession:
                 generation=generation,
                 epoch=lifecycle.epoch,
                 outbound_audio_track=outbound_audio_track,
+                configuration=configuration,
             )
             lifecycle.candidate = candidate
             candidate.timeout_task = asyncio.create_task(
@@ -481,6 +494,7 @@ class CallSession:
         generation: int | None = None,
         outbound_audio_track: Any | None = None,
     ) -> tuple[bool, Any | None]:
+        selection_changed = False
         async with self._lifecycle_lock:
             lifecycle = self._peer_lifecycle
             candidate = lifecycle.candidate
@@ -505,9 +519,31 @@ class CallSession:
                 self.outbound_audio_track = outbound_audio_track
             if candidate.data_channel is not None:
                 self.data_channel = candidate.data_channel
+            configuration = candidate.configuration
+            if configuration is not None:
+                selection_changed = (
+                    configuration.voice_id != self.voice_id
+                    or configuration.engine_id != self.engine_id
+                )
+                self.thread_id = configuration.thread_id
+                self.voice_id = configuration.voice_id
+                self.engine_id = configuration.engine_id
+                self.prompt_messages = [
+                    dict(message) for message in configuration.prompt_messages
+                ]
+                self.vad_adapter = configuration.vad_adapter
+                self.stt_adapter = configuration.stt_adapter
             self._clear_pending_peer_locked(peer_connection)
             self._complete_transport_reconnect_locked()
-            return True, previous_peer_connection
+        if selection_changed and (
+            self.active_turn_task is not None
+            or self._active_tts_turn_id is not None
+            or self._pending_speech_terminal_turn_id is not None
+        ):
+            await self.cancel_ai_turn(cause="engine_switch")
+            if self.state not in {"ended", "failed"}:
+                self.state = "listening"
+        return True, previous_peer_connection
 
     async def reject_pending_peer_connection(
         self,
