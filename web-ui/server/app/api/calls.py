@@ -341,25 +341,80 @@ async def create_call_turn(
 ) -> StreamingResponse:
     service = CallService(session)
     try:
-        session_id = service.session_for_call(call_id)
-        _reject_mismatched_session(session_id, payload.session_id)
-        call = service.active_call(call_id)
-        await service.record_user_speech(call_id, payload.text)
-        prompt_messages = await build_call_prompt_context(
-            call["thread_id"],
-            repository=SqlAlchemyPromptRepository(session),
-            max_turns=24,
-        )
-        try:
-            voice_reference = await service.voice_reference_for_call(call_id, voice_blob_dir)
-        except CallServiceError as exc:
-            logger.warning(
-                "[call-turn] voice_reference.unavailable call=%s err=%s — aborting turn",
-                call_id,
-                exc.message,
-            )
+        stored_session_id = service.session_for_call(call_id)
+        _reject_mismatched_session(stored_session_id, payload.session_id)
+    except CallServiceError as exc:
+        raise _call_error(exc) from exc
 
-            async def _voice_unavailable_events() -> AsyncIterator[str]:
+    async def events() -> AsyncIterator[str]:
+        current_task = asyncio.current_task()
+        reservation_created = False
+        terminal_state: Literal["completed", "failed", "cancelled"] = "failed"
+        accumulated: list[str] = []
+        speech_turn: SpeechTurn | None = None
+        rehearsing_sent = False
+        first_token_logged = False
+        try:
+            session_id = stored_session_id
+            reservation = await service.reserve_call_turn(
+                call_id,
+                turn_id=payload.turn_id,
+                text=payload.text,
+                task=current_task,
+            )
+            if not reservation.created:
+                if reservation.request_matches:
+                    yield _sse(
+                        {
+                            "type": "turn_existing",
+                            "turn_id": payload.turn_id,
+                            "state": reservation.state,
+                        }
+                    )
+                else:
+                    yield _sse(
+                        {
+                            "type": "error",
+                            "turn_id": payload.turn_id,
+                            "code": "call_turn_conflict",
+                            "message": "Turn identifier is already in use",
+                        }
+                    )
+                return
+            reservation_created = True
+            call = service.active_call(call_id)
+            user_message = await service.record_reserved_user_speech(
+                call_id,
+                turn_id=payload.turn_id,
+                text=payload.text,
+            )
+            if user_message is None:
+                terminal_state = "cancelled"
+                yield _sse(
+                    {
+                        "type": "error",
+                        "turn_id": payload.turn_id,
+                        "code": CALL_SESSION_NOT_FOUND_CODE,
+                        "message": "Call session was not found",
+                    }
+                )
+                return
+            prompt_messages = await build_call_prompt_context(
+                call["thread_id"],
+                repository=SqlAlchemyPromptRepository(session),
+                max_turns=24,
+            )
+            try:
+                voice_reference = await service.voice_reference_for_call(
+                    call_id,
+                    voice_blob_dir,
+                )
+            except CallServiceError as exc:
+                logger.warning(
+                    "[call-turn] voice_reference.unavailable call=%s err=%s",
+                    call_id,
+                    exc.message,
+                )
                 yield _sse(
                     {
                         "type": "error",
@@ -368,41 +423,18 @@ async def create_call_turn(
                         "message": "Speech playback failed: voice audio unavailable.",
                     }
                 )
-
-            return StreamingResponse(_voice_unavailable_events(), media_type="text/event-stream")
-        endpoint_settings = await SettingsService(session, runtime_settings).read()
-    except CallServiceError as exc:
-        raise _call_error(exc) from exc
-
-    completion_settings = ChatCompletionSettings(
-        base_url=endpoint_settings.llm_base_url,
-        api_key=endpoint_settings.llm_api_key,
-        model=endpoint_settings.llm_model,
-        disable_thinking=endpoint_settings.llm_disable_thinking,
-    )
-
-    async def events() -> AsyncIterator[str]:
-        current_task = asyncio.current_task()
-        if current_task is not None and not await service.register_active_turn(
-            call_id,
-            current_task,
-        ):
-            yield _sse(
-                {
-                    "type": "error",
-                    "turn_id": payload.turn_id,
-                    "code": CALL_SESSION_NOT_FOUND_CODE,
-                    "message": "Call session was not found",
-                }
+                return
+            endpoint_settings = await SettingsService(session, runtime_settings).read()
+            completion_settings = ChatCompletionSettings(
+                base_url=endpoint_settings.llm_base_url,
+                api_key=endpoint_settings.llm_api_key,
+                model=endpoint_settings.llm_model,
+                disable_thinking=endpoint_settings.llm_disable_thinking,
             )
-            return
-        accumulated: list[str] = []
-        speech_turn: SpeechTurn | None = None
-        segmenter = CallTtsSegmenter() if call["engine_id"] == "qwen3_1_7b" else None
-        rehearsing_sent = False
-        llm_started = time.perf_counter()
-        first_token_logged = False
-        try:
+            segmenter = (
+                CallTtsSegmenter() if call["engine_id"] == "qwen3_1_7b" else None
+            )
+            llm_started = time.perf_counter()
             async for raw_event in stream_chat_completion(
                 completion_settings,
                 prompt_messages,
@@ -470,6 +502,7 @@ async def create_call_turn(
                 len(visible_text),
             )
             if not visible_text.strip():
+                terminal_state = "completed"
                 yield _sse(
                     {
                         "type": "ai_done",
@@ -509,6 +542,7 @@ async def create_call_turn(
             if audio_started_event is not None:
                 yield _sse(audio_started_event)
             if terminal.status == "cancelled":
+                terminal_state = "cancelled"
                 return
             if terminal.status != "normal" or not terminal.playout_completed:
                 logger.warning(
@@ -533,7 +567,9 @@ async def create_call_turn(
                 terminal=terminal,
             )
             if message is None:
+                terminal_state = "cancelled"
                 return
+            terminal_state = "completed"
             logger.info(
                 "[call-turn] ai_done call=%s turn=%s visible_text_len=%d",
                 call_id,
@@ -548,9 +584,20 @@ async def create_call_turn(
                 }
             )
         except asyncio.CancelledError:
+            terminal_state = "cancelled"
             if speech_turn is not None:
                 await speech_turn.cancel()
             return
+        except CallServiceError as exc:
+            terminal_state = "cancelled"
+            yield _sse(
+                {
+                    "type": "error",
+                    "turn_id": payload.turn_id,
+                    "code": exc.code,
+                    "message": exc.message,
+                }
+            )
         except AiBackendClientError:
             if speech_turn is not None:
                 await speech_turn.cancel()
@@ -576,7 +623,19 @@ async def create_call_turn(
         finally:
             if speech_turn is not None and speech_turn.terminal is None:
                 await speech_turn.cancel()
-            if current_task is not None:
+            if reservation_created and terminal_state != "completed":
+                await service.finish_call_turn(
+                    call_id,
+                    turn_id=payload.turn_id,
+                    state=terminal_state,
+                )
+            elif reservation_created:
+                await service.finish_call_turn(
+                    call_id,
+                    turn_id=payload.turn_id,
+                    state="completed",
+                )
+            if reservation_created and current_task is not None:
                 await service.unregister_active_turn(call_id, current_task)
 
     return StreamingResponse(events(), media_type="text/event-stream")

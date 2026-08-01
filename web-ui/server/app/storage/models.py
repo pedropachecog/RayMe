@@ -29,6 +29,7 @@ VOICE_ASSETS_TABLE = "voice_assets"
 THREADS_TABLE = "threads"
 MESSAGES_TABLE = "messages"
 MESSAGE_ALTERNATES_TABLE = "message_alternates"
+CALL_TURNS_TABLE = "call_turns"
 
 MODEL_TABLE_NAMES = (
     APP_SETTINGS_TABLE,
@@ -39,6 +40,7 @@ MODEL_TABLE_NAMES = (
     THREADS_TABLE,
     MESSAGES_TABLE,
     MESSAGE_ALTERNATES_TABLE,
+    CALL_TURNS_TABLE,
 )
 
 MESSAGE_KIND_VALUES = (
@@ -292,6 +294,31 @@ class Message(TimestampMixin, Base):
         ForeignKey(f"{MESSAGES_TABLE}.id", ondelete="SET NULL"),
         nullable=True,
     )
+
+
+class CallTurn(TimestampMixin, Base):
+    __tablename__ = CALL_TURNS_TABLE
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('reserved', 'running', 'completed', 'failed', 'cancelled')",
+            name="ck_call_turns_state",
+        ),
+        UniqueConstraint("call_id", "turn_id", name="uq_call_turns_call_turn"),
+        Index("ix_call_turns_thread_id", "thread_id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    call_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    turn_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    thread_id: Mapped[str] = mapped_column(
+        String(64),
+        ForeignKey(f"{THREADS_TABLE}.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    request_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(24), nullable=False)
+    user_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    assistant_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
 
 class MessageAlternate(TimestampMixin, Base):

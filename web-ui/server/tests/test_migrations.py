@@ -220,6 +220,40 @@ def test_completed_call_turn_identity_is_durably_unique(tmp_path: Path) -> None:
             )
 
 
+def test_call_turn_lifecycle_reservation_is_durably_unique(tmp_path: Path) -> None:
+    db_path = run_migration(tmp_path)
+
+    with connect(db_path) as connection:
+        insert_thread(connection)
+        assert "call_turns" in table_names(connection)
+        assert {
+            "call_id",
+            "turn_id",
+            "thread_id",
+            "request_sha256",
+            "state",
+            "user_message_id",
+            "assistant_message_id",
+        }.issubset(column_names(connection, "call_turns"))
+        connection.execute(
+            """
+            INSERT INTO call_turns
+                (id, call_id, turn_id, thread_id, request_sha256, state)
+            VALUES ('call-turn-1', 'call-1', 'turn-1', 'thread-1', ?, 'reserved')
+            """,
+            ("a" * 64,),
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute(
+                """
+                INSERT INTO call_turns
+                    (id, call_id, turn_id, thread_id, request_sha256, state)
+                VALUES ('call-turn-2', 'call-1', 'turn-1', 'thread-1', ?, 'running')
+                """,
+                ("a" * 64,),
+            )
+
+
 def test_message_alternates_accept_only_supported_source_actions(tmp_path: Path) -> None:
     db_path = run_migration(tmp_path)
 

@@ -10,6 +10,7 @@ import json
 import logging
 import threading
 from collections.abc import AsyncIterator, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api.characters import get_character_session
@@ -33,7 +34,7 @@ from app.domain.ai_backend_client import (
 )
 from app.main import create_app
 from app.domain.call_service import CallService
-from app.storage.models import Base, Character, Message, Thread, Voice, VoiceAsset
+from app.storage.models import Base, CallTurn, Character, Message, Thread, Voice, VoiceAsset
 from app.storage.session import create_engine
 
 
@@ -1118,6 +1119,18 @@ def test_concurrent_duplicate_completed_turn_is_reserved_and_persisted_once(
     async def scenario() -> None:
         async with call_fixture.sessionmaker() as session:
             service = CallService(session)
+            reservation = await service.reserve_call_turn(
+                started["call_id"],
+                turn_id="turn-duplicate",
+                text="User request.",
+                task=None,
+            )
+            assert reservation.created is True
+            assert await service.record_reserved_user_speech(
+                started["call_id"],
+                turn_id="turn-duplicate",
+                text="User request.",
+            ) is not None
             original_stage = service._stage_message
             stage_entered = asyncio.Event()
             release_stage = asyncio.Event()
@@ -1182,6 +1195,18 @@ def test_hangup_marked_during_assistant_append_rolls_back_uncommitted_turn(
     async def scenario() -> None:
         async with call_fixture.sessionmaker() as session:
             service = CallService(session)
+            reservation = await service.reserve_call_turn(
+                started["call_id"],
+                turn_id="turn-hangup-race",
+                text="User request before hangup.",
+                task=None,
+            )
+            assert reservation.created is True
+            assert await service.record_reserved_user_speech(
+                started["call_id"],
+                turn_id="turn-hangup-race",
+                text="User request before hangup.",
+            ) is not None
             original_stage = service._stage_message
             stage_entered = asyncio.Event()
             release_stage = asyncio.Event()
@@ -1230,6 +1255,154 @@ def test_hangup_marked_during_assistant_append_rolls_back_uncommitted_turn(
             assert persisted is None
 
     asyncio.run(scenario())
+
+
+def test_concurrent_duplicate_turn_endpoint_reuses_reservation_without_replay(
+    call_fixture: CallFixture,
+) -> None:
+    class BlockingCompletion(ScriptedCompletionClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.started = threading.Event()
+            self.release = threading.Event()
+
+        async def stream_chat_completion_tokens(
+            self,
+            settings: Any,
+            messages: Any,
+        ) -> AsyncIterator[str]:
+            self.requests.append({"settings": settings, "messages": list(messages)})
+            self.started.set()
+            assert await asyncio.to_thread(self.release.wait, 2.0)
+            yield "One endpoint execution only."
+
+    thread_id = asyncio.run(
+        _insert_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started_call = call_fixture.client.post(
+        "/api/calls/start",
+        json={"thread_id": thread_id},
+    ).json()
+    calls_module = importlib.import_module("app.api.calls")
+    completion = BlockingCompletion()
+    call_fixture.app.dependency_overrides[
+        calls_module.get_call_completion_client
+    ] = lambda: completion
+    payload = {
+        "session_id": started_call["session_id"],
+        "turn_id": "turn-endpoint-duplicate",
+        "text": "Run this live turn exactly once.",
+        "source": "user_final",
+    }
+    route = f"/api/calls/{started_call['call_id']}/turns"
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        first_future = executor.submit(call_fixture.client.post, route, json=payload)
+        assert completion.started.wait(2.0)
+        duplicate = call_fixture.client.post(route, json=payload)
+        completion.release.set()
+        first = first_future.result(timeout=5.0)
+
+    assert first.status_code == 200
+    assert duplicate.status_code == 200
+    assert _sse_events(duplicate.text) == [
+        {
+            "type": "turn_existing",
+            "turn_id": "turn-endpoint-duplicate",
+            "state": "running",
+        }
+    ]
+    assert len(completion.requests) == 1
+    assert len(call_fixture.backend.speak_calls) == 1
+
+    async def persisted() -> tuple[list[Message], list[CallTurn]]:
+        async with call_fixture.sessionmaker() as session:
+            messages = (
+                await session.execute(
+                    select(Message).where(
+                        Message.thread_id == thread_id,
+                        Message.message_kind.in_(("user_speech", "ai_speech")),
+                    )
+                )
+            ).scalars().all()
+            turns = (
+                await session.execute(
+                    select(CallTurn).where(
+                        CallTurn.call_id == started_call["call_id"],
+                        CallTurn.turn_id == "turn-endpoint-duplicate",
+                    )
+                )
+            ).scalars().all()
+            return messages, turns
+
+    messages, turns = asyncio.run(persisted())
+    assert [(row.message_kind, row.content_text) for row in messages] == [
+        ("user_speech", "Run this live turn exactly once."),
+        ("ai_speech", "One endpoint execution only."),
+    ]
+    assert len(turns) == 1
+    assert turns[0].state == "completed"
+    assert turns[0].user_message_id == messages[0].id
+    assert turns[0].assistant_message_id == messages[1].id
+
+
+def test_post_hangup_turn_endpoint_rejects_before_history_llm_or_tts(
+    call_fixture: CallFixture,
+) -> None:
+    thread_id = asyncio.run(
+        _insert_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post(
+        "/api/calls/start",
+        json={"thread_id": thread_id},
+    ).json()
+    ended = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/end",
+        json={"session_id": started["session_id"], "reason": "hangup"},
+    )
+    assert ended.status_code == 200
+    completion_calls = len(call_fixture.completion.requests)
+    speech_calls = len(call_fixture.backend.speak_calls)
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-after-hangup",
+            "text": "This must have no durable or model side effect.",
+            "source": "user_final",
+        },
+    )
+
+    assert response.status_code == 200
+    assert _sse_events(response.text) == [
+        {
+            "type": "error",
+            "turn_id": "turn-after-hangup",
+            "code": "call_session_not_found",
+            "message": "Call session was not found",
+        }
+    ]
+    assert len(call_fixture.completion.requests) == completion_calls
+    assert len(call_fixture.backend.speak_calls) == speech_calls
+
+    async def side_effects() -> tuple[int, int]:
+        async with call_fixture.sessionmaker() as session:
+            message_count = await session.scalar(
+                select(func.count(Message.id)).where(
+                    Message.thread_id == thread_id,
+                    Message.message_kind == "user_speech",
+                )
+            )
+            turn_count = await session.scalar(
+                select(func.count(CallTurn.id)).where(
+                    CallTurn.call_id == started["call_id"],
+                    CallTurn.turn_id == "turn-after-hangup",
+                )
+            )
+            return int(message_count or 0), int(turn_count or 0)
+
+    assert asyncio.run(side_effects()) == (0, 0)
 
 
 @pytest.mark.parametrize(

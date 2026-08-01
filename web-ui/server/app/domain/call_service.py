@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -11,7 +12,7 @@ from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -32,7 +33,7 @@ from app.domain.voice_service import (
     normalize_voxcpm2_engine_settings,
     validate_saved_qwen3_reference,
 )
-from app.storage.models import Character, Message, Thread, Voice, utc_now
+from app.storage.models import CallTurn, Character, Message, Thread, Voice, utc_now
 
 logger = logging.getLogger(__name__)
 
@@ -104,6 +105,7 @@ class ActiveCall:
     lifecycle_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     persistence_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     active_turn_tasks: set[Any] = field(default_factory=set, repr=False)
+    turn_states: dict[str, str] = field(default_factory=dict, repr=False)
     end_message_recorded: bool = field(default=False, repr=False)
 
     def to_public_dict(self) -> dict[str, Any]:
@@ -125,6 +127,13 @@ class CallVoicePreparation:
     backend_voice_id: str
     engine_id: str
     reference_payload: dict[str, Any] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class CallTurnReservation:
+    created: bool
+    state: str
+    request_matches: bool
 
 
 _ACTIVE_CALLS: dict[str, ActiveCall] = {}
@@ -241,6 +250,90 @@ class CallService:
     def active_call(self, call_id: str) -> dict[str, Any]:
         return self._active_call(call_id).to_public_dict()
 
+    async def reserve_call_turn(
+        self,
+        call_id: str,
+        *,
+        turn_id: str,
+        text: str,
+        task: Any | None,
+    ) -> CallTurnReservation:
+        """Durably own a turn before user history, prompt, LLM, or TTS work."""
+        call = self._active_call(call_id)
+        request_sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        async with call.lifecycle_lock:
+            if call.ended_at is not None:
+                raise CallSessionNotFoundError()
+            known_state = call.turn_states.get(turn_id)
+            if known_state is not None:
+                existing = await self.session.scalar(
+                    select(CallTurn).where(
+                        CallTurn.call_id == call_id,
+                        CallTurn.turn_id == turn_id,
+                    )
+                )
+                return CallTurnReservation(
+                    created=False,
+                    state=known_state,
+                    request_matches=(
+                        existing is not None
+                        and existing.request_sha256 == request_sha256
+                    ),
+                )
+
+            existing = await self.session.scalar(
+                select(CallTurn).where(
+                    CallTurn.call_id == call_id,
+                    CallTurn.turn_id == turn_id,
+                )
+            )
+            if existing is not None:
+                call.turn_states[turn_id] = existing.state
+                return CallTurnReservation(
+                    created=False,
+                    state=existing.state,
+                    request_matches=existing.request_sha256 == request_sha256,
+                )
+
+            now = utc_now()
+            turn = CallTurn(
+                id=f"call_turn_{uuid4().hex}",
+                call_id=call_id,
+                turn_id=turn_id,
+                thread_id=call.thread_id,
+                request_sha256=request_sha256,
+                state="reserved",
+                created_at=now,
+                updated_at=now,
+            )
+            self.session.add(turn)
+            try:
+                await self.session.commit()
+            except IntegrityError:
+                await self.session.rollback()
+                existing = await self.session.scalar(
+                    select(CallTurn).where(
+                        CallTurn.call_id == call_id,
+                        CallTurn.turn_id == turn_id,
+                    )
+                )
+                if existing is None:
+                    raise
+                call.turn_states[turn_id] = existing.state
+                return CallTurnReservation(
+                    created=False,
+                    state=existing.state,
+                    request_matches=existing.request_sha256 == request_sha256,
+                )
+            call.turn_states[turn_id] = "reserved"
+            if task is not None:
+                call.active_turn_tasks.add(task)
+            return CallTurnReservation(
+                created=True,
+                state="reserved",
+                request_matches=True,
+            )
+
     async def register_active_turn(self, call_id: str, task: Any) -> bool:
         call = self._active_call(call_id)
         async with call.lifecycle_lock:
@@ -275,6 +368,43 @@ class CallService:
             role="user",
         )
 
+    async def record_reserved_user_speech(
+        self,
+        call_id: str,
+        *,
+        turn_id: str,
+        text: str,
+    ) -> dict[str, Any] | None:
+        call = self._active_call(call_id)
+        async with call.persistence_lock:
+            async with call.lifecycle_lock:
+                if (
+                    call.ended_at is not None
+                    or call.turn_states.get(turn_id) != "reserved"
+                ):
+                    return None
+                message = await self._stage_message(
+                    call.thread_id,
+                    text,
+                    message_kind="user_speech",
+                    role="user",
+                )
+                turn = await self.session.scalar(
+                    select(CallTurn).where(
+                        CallTurn.call_id == call_id,
+                        CallTurn.turn_id == turn_id,
+                    )
+                )
+                if turn is None or turn.state != "reserved":
+                    await self.session.rollback()
+                    return None
+                turn.user_message_id = str(message["id"])
+                turn.state = "running"
+                turn.updated_at = utc_now()
+                await self.session.commit()
+                call.turn_states[turn_id] = "running"
+                return message
+
     async def record_ai_speech(self, call_id: str, text: str) -> dict[str, Any]:
         call = self._active_call(call_id)
         return await self._append_message(
@@ -299,6 +429,7 @@ class CallService:
         async with call.lifecycle_lock:
             if (
                 call.ended_at is not None
+                or call.turn_states.get(turn_id) != "running"
                 or turn_id in call.completed_ai_turn_ids
                 or turn_id in call.pending_ai_turn_ids
             ):
@@ -329,6 +460,19 @@ class CallService:
                         await self.session.rollback()
                         call.pending_ai_turn_ids.discard(turn_id)
                         return None
+                    turn = await self.session.scalar(
+                        select(CallTurn).where(
+                            CallTurn.call_id == call.call_id,
+                            CallTurn.turn_id == turn_id,
+                        )
+                    )
+                    if turn is None or turn.state != "running":
+                        await self.session.rollback()
+                        call.pending_ai_turn_ids.discard(turn_id)
+                        return None
+                    turn.assistant_message_id = str(message["id"])
+                    turn.state = "completed"
+                    turn.updated_at = utc_now()
                     try:
                         await self.session.commit()
                     except IntegrityError:
@@ -346,6 +490,7 @@ class CallService:
                         raise
                     call.pending_ai_turn_ids.discard(turn_id)
                     call.completed_ai_turn_ids.add(turn_id)
+                    call.turn_states[turn_id] = "completed"
                     return message
         except asyncio.CancelledError:
             await self.session.rollback()
@@ -371,6 +516,32 @@ class CallService:
             async with call.lifecycle_lock:
                 call.pending_ai_turn_ids.discard(turn_id)
             raise
+
+    async def finish_call_turn(
+        self,
+        call_id: str,
+        *,
+        turn_id: str,
+        state: Literal["completed", "failed", "cancelled"],
+    ) -> None:
+        call = self._active_call(call_id)
+        async with call.persistence_lock:
+            async with call.lifecycle_lock:
+                current = call.turn_states.get(turn_id)
+                if current not in {"reserved", "running"}:
+                    return
+                turn = await self.session.scalar(
+                    select(CallTurn).where(
+                        CallTurn.call_id == call_id,
+                        CallTurn.turn_id == turn_id,
+                    )
+                )
+                if turn is None or turn.state not in {"reserved", "running"}:
+                    return
+                turn.state = state
+                turn.updated_at = utc_now()
+                await self.session.commit()
+                call.turn_states[turn_id] = state
 
     async def voice_reference_for_call(self, call_id: str, voice_blob_dir: Path) -> dict[str, Any]:
         call = self._active_call(call_id)
@@ -420,12 +591,27 @@ class CallService:
             await asyncio.gather(*awaitable_tasks, return_exceptions=True)
         async with call.lifecycle_lock:
             call.active_turn_tasks.difference_update(tasks)
+            active_turn_ids = {
+                turn_id
+                for turn_id, state in call.turn_states.items()
+                if state in {"reserved", "running"}
+            }
+            for turn_id in active_turn_ids:
+                call.turn_states[turn_id] = "cancelled"
         return call.to_public_dict()
 
     async def end_call(self, call_id: str, reason: str = "hangup") -> dict[str, Any]:
         call = self._active_call(call_id)
         await self.begin_end(call_id)
         async with call.persistence_lock:
+            await self.session.execute(
+                update(CallTurn)
+                .where(
+                    CallTurn.call_id == call_id,
+                    CallTurn.state.in_(("reserved", "running")),
+                )
+                .values(state="cancelled", updated_at=utc_now())
+            )
             async with call.lifecycle_lock:
                 if not call.end_message_recorded:
                     await self._append_message(
