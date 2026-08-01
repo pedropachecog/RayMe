@@ -471,6 +471,80 @@ def test_live_call_prompt_lease_rejects_competing_preview_and_preserves_stream()
     asyncio.run(scenario())
 
 
+@pytest.mark.parametrize("first_owner_released", ("call-a", "call-b"))
+def test_same_prompt_calls_hold_lease_until_last_session_releases(
+    first_owner_released: str,
+) -> None:
+    async def scenario() -> None:
+        qwen_module = importlib.import_module("app.models.tts_qwen3")
+        lease_error = _require_attr(qwen_module, "Qwen3PromptLeaseError")
+
+        class SharedPromptQwenAdapter(RecordingQwenAdapter):
+            def __init__(self, events: list[str]) -> None:
+                super().__init__(events)
+                self.selected_voice_key: str | None = None
+
+            def prewarm(self, **kwargs: Any) -> object:
+                self.selected_voice_key = str(kwargs["voice_key"])
+                return super().prewarm(**kwargs)
+
+            def stream(self, _request: object, **kwargs: Any) -> Any:
+                assert kwargs["voice_key"] == self.selected_voice_key
+                yield kwargs["voice_key"]
+
+        manager, adapters, events = _build_manager()
+        manager.startup()
+        qwen = SharedPromptQwenAdapter(events)
+        adapters["qwen3_1_7b"] = qwen
+        manager.tts_adapters["qwen3_1_7b"] = qwen
+        shared_audio = _reference_wav_bytes(amplitude=2048)
+        replacement_audio = _reference_wav_bytes(amplitude=1024)
+        shared_transcript = "The exact reference transcript."
+
+        for owner in ("call-a", "call-b"):
+            await manager.prepare_tts_engine(
+                "qwen3_1_7b",
+                voice_key="voice-shared",
+                reference_audio=shared_audio,
+                reference_transcript=shared_transcript,
+                prompt_lease_owner=owner,
+            )
+        assert manager._qwen_prompt_lease_owners == {"call-a", "call-b"}
+        assert len(qwen.prewarm_calls) == 1
+
+        remaining_owner = ({"call-a", "call-b"} - {first_owner_released}).pop()
+        assert await manager.release_tts_prompt_lease(first_owner_released) is True
+        assert manager._qwen_prompt_lease_owners == {remaining_owner}
+        with pytest.raises(lease_error):
+            await manager.prepare_tts_engine(
+                "qwen3_1_7b",
+                voice_key="voice-replacement",
+                reference_audio=replacement_audio,
+                reference_transcript="A different approved transcript.",
+            )
+        with pytest.raises(lease_error):
+            manager.switch_tts_engine("f5")
+        assert list(
+            qwen.stream(
+                object(),
+                request_id="remaining-call-segment",
+                voice_key="voice-shared",
+            )
+        ) == ["voice-shared"]
+
+        assert await manager.release_tts_prompt_lease(remaining_owner) is True
+        assert not manager._qwen_prompt_lease_owners
+        replacement = await manager.prepare_tts_engine(
+            "qwen3_1_7b",
+            voice_key="voice-replacement",
+            reference_audio=replacement_audio,
+            reference_transcript="A different approved transcript.",
+        )
+        assert replacement["voice_key"] == "voice-replacement"
+
+    asyncio.run(scenario())
+
+
 def test_qwen_prompt_invalidation_resets_matching_cache_and_preserves_unrelated_voice() -> None:
     async def scenario() -> None:
         qwen_module = importlib.import_module("app.models.tts_qwen3")

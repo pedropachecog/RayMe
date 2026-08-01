@@ -114,7 +114,7 @@ class ModelManager:
             "error_code": None,
         }
         self._selected_prompt_cache_key: str | None = None
-        self._qwen_prompt_lease_owner: str | None = None
+        self._qwen_prompt_lease_owners: set[str] = set()
         self._qwen_prompt_lease_voice_key: str | None = None
         self._qwen_prompt_lease_cache_key: str | None = None
         self._qwen_alignment_cache: tuple[str, QwenTranscriptAlignment] | None = None
@@ -195,7 +195,7 @@ class ModelManager:
 
         if (
             self.resident_tts_engine == "qwen3_1_7b"
-            and self._qwen_prompt_lease_owner is not None
+            and self._qwen_prompt_lease_owners
             and engine_id != "qwen3_1_7b"
         ):
             raise Qwen3PromptLeaseError(
@@ -378,9 +378,11 @@ class ModelManager:
         if self._prepare_lock is None:
             self._prepare_lock = asyncio.Lock()
         async with self._prepare_lock:
-            if self._qwen_prompt_lease_owner != prompt_lease_owner:
+            if prompt_lease_owner not in self._qwen_prompt_lease_owners:
                 return False
-            self._clear_qwen_prompt_lease()
+            self._qwen_prompt_lease_owners.remove(prompt_lease_owner)
+            if not self._qwen_prompt_lease_owners:
+                self._clear_qwen_prompt_lease()
             return True
 
     async def invalidate_tts_prompt(
@@ -404,7 +406,7 @@ class ModelManager:
             self._prepare_lock = asyncio.Lock()
         async with self._prepare_lock:
             if (
-                self._qwen_prompt_lease_owner is not None
+                self._qwen_prompt_lease_owners
                 and self._qwen_prompt_lease_voice_key == voice_key
             ):
                 raise Qwen3PromptLeaseError(
@@ -526,12 +528,17 @@ class ModelManager:
         prompt_cache_key: str,
         prompt_lease_owner: str | None,
     ) -> None:
-        lease_owner = self._qwen_prompt_lease_owner
-        if lease_owner is None or lease_owner == prompt_lease_owner:
+        if not self._qwen_prompt_lease_owners:
             return
-        if (
+        same_identity = (
             self._qwen_prompt_lease_voice_key == voice_key
             and self._qwen_prompt_lease_cache_key == prompt_cache_key
+        )
+        if same_identity:
+            return
+        if (
+            prompt_lease_owner is not None
+            and self._qwen_prompt_lease_owners == {prompt_lease_owner}
         ):
             return
         raise Qwen3PromptLeaseError(
@@ -544,12 +551,21 @@ class ModelManager:
         voice_key: str,
         prompt_cache_key: str,
     ) -> None:
-        self._qwen_prompt_lease_owner = owner
+        if self._qwen_prompt_lease_owners and (
+            self._qwen_prompt_lease_voice_key != voice_key
+            or self._qwen_prompt_lease_cache_key != prompt_cache_key
+        ):
+            if self._qwen_prompt_lease_owners != {owner}:
+                raise Qwen3PromptLeaseError(
+                    "Qwen3 prompt is leased to an active live call"
+                )
+            self._qwen_prompt_lease_owners.clear()
+        self._qwen_prompt_lease_owners.add(owner)
         self._qwen_prompt_lease_voice_key = voice_key
         self._qwen_prompt_lease_cache_key = prompt_cache_key
 
     def _clear_qwen_prompt_lease(self) -> None:
-        self._qwen_prompt_lease_owner = None
+        self._qwen_prompt_lease_owners.clear()
         self._qwen_prompt_lease_voice_key = None
         self._qwen_prompt_lease_cache_key = None
 
