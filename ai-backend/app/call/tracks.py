@@ -91,6 +91,7 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
         self._idle_wait_completed_count = 0
         self._idle_wait_timeout_count = 0
         self._playout_measurement_active = False
+        self._playout_input_complete = False
         self._pts = 0
         self._recv_count = 0
         self._idle_frame_count = 0
@@ -122,6 +123,11 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
         self._idle_wait_completed_count = 0
         self._idle_wait_timeout_count = 0
         self._playout_measurement_active = False
+        self._playout_input_complete = False
+
+    def mark_playout_input_complete(self) -> None:
+        """Mark natural EOS so terminal frame padding is not an underflow."""
+        self._playout_input_complete = True
 
     def playout_metrics(self) -> dict[str, float | int | bool]:
         pending_ms = self._samples_to_ms(self._pending_samples)
@@ -246,6 +252,7 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
             self._buffer = np.asarray([], dtype=np.int16)
             self._last_consumed_sequence = None
             self._playout_measurement_active = False
+            self._playout_input_complete = False
             self._pending_condition.notify_all()
 
     def stop(self) -> None:
@@ -308,7 +315,11 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
                     float(np.sqrt(np.mean(np.square(samples.astype(np.float32))))),
                     peak,
                 )
-        if consumed_samples < self.frame_samples and self._playout_measurement_active:
+        if (
+            consumed_samples < self.frame_samples
+            and self._playout_measurement_active
+            and not self._playout_input_complete
+        ):
             self._underflow_frames += 1
         if not consumed_samples:
             # Emit silence while no AI audio is queued so recv() continues to
@@ -319,6 +330,7 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
 
     async def _admit_samples(self, samples: np.ndarray) -> None:
         epoch = self._playout_epoch
+        self._playout_input_complete = False
         offset = 0
         self._enqueued_chunks += 1
         if self._pending_samples > 0:
@@ -384,6 +396,7 @@ class QueuedAudioOutputTrack(MediaStreamTrack):
         self._buffer = np.asarray([], dtype=np.int16)
         self._last_consumed_sequence = None
         self._playout_measurement_active = False
+        self._playout_input_complete = False
 
     async def _notify_pending_waiters(self) -> None:
         async with self._pending_condition:

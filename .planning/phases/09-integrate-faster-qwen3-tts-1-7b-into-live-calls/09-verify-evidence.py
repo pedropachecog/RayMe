@@ -79,6 +79,7 @@ BASE64_VALUE = re.compile(r"^[A-Za-z0-9+/]{512,}={0,2}$")
 AUDIO_EXTENSION = re.compile(r"(?i)\.(?:wav|mp3|flac|ogg|m4a|opus)(?:$|[?#\s\"'])")
 FINAL_ONLY_FIELDS = {
     "generation_complete_ms",
+    "native_generation_ms",
     "playout_complete_ms",
     "chunk_count",
     "natural_eos",
@@ -491,6 +492,8 @@ def _stream_measurements(row: dict[str, Any], manifest: dict[str, Any], *, label
         raise EvidenceError(f"{label} first playback exceeds the bound")
     if _number(values.get("native_first_chunk_ms"), label=f"{label} native_first_chunk_ms") < 0:
         raise EvidenceError(f"{label} native first chunk must be non-negative")
+    if _number(values.get("native_generation_ms"), label=f"{label} native_generation_ms") <= 0:
+        raise EvidenceError(f"{label} native generation time must be positive")
     if _number(values.get("rtfx"), label=f"{label} rtfx") < thresholds["minimum_sample_rtfx"]:
         raise EvidenceError(f"{label} realtime supply failed")
     _boolean(values.get("natural_eos"), expected=True, label=f"{label} natural EOS")
@@ -920,6 +923,7 @@ def _scenario_measurements(scenario_id: str) -> dict[str, Any]:
         "whole_wav_fallback_used": False,
         "valid_audio": True,
         "native_first_chunk_ms": 380.0,
+        "native_generation_ms": 1800.0,
         "first_playback_ms": 720.0,
         "generation_complete_ms": 2100.0,
         "rtfx": 1.5,

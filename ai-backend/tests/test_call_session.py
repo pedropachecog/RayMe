@@ -22,14 +22,15 @@ from app.call.session import (
 from app.models.tts_registry import TtsAudioChunk
 
 
-def _scripted_wav_bytes() -> bytes:
+def _scripted_wav_bytes(*, sample_count: int = 2880) -> bytes:
     buffer = BytesIO()
-    samples = np.full(2880, 512 / np.iinfo(np.int16).max, dtype=np.float32)
+    samples = np.full(sample_count, 512 / np.iinfo(np.int16).max, dtype=np.float32)
     sf.write(buffer, samples, 24000, format="WAV")
     return buffer.getvalue()
 
 
 SCRIPTED_WAV_BYTES = _scripted_wav_bytes()
+QWEN_STREAM_CHUNK_WAV_BYTES = _scripted_wav_bytes(sample_count=7680)
 
 
 def _run(value: Any) -> Any:
@@ -222,8 +223,16 @@ class SlowStreamingTtsAdapter:
 class SlowQwenStreamingTtsAdapter:
     engine_id = "qwen3_1_7b"
 
-    def __init__(self, *, chunk_count: int = 3) -> None:
+    def __init__(
+        self,
+        *,
+        chunk_count: int = 3,
+        wav_bytes: bytes = SCRIPTED_WAV_BYTES,
+        duration_ms: float = 120.0,
+    ) -> None:
         self.chunk_count = chunk_count
+        self.wav_bytes = wav_bytes
+        self.duration_ms = duration_ms
         self.requests: list[dict[str, Any]] = []
         self.second_chunk_yielded = threading.Event()
         self.release_completion = threading.Event()
@@ -251,9 +260,9 @@ class SlowQwenStreamingTtsAdapter:
             yield TtsAudioChunk(
                 engine_id=self.engine_id,
                 chunk_index=index,
-                wav_bytes=SCRIPTED_WAV_BYTES,
+                wav_bytes=self.wav_bytes,
                 sample_rate=24000,
-                duration_ms=120,
+                duration_ms=self.duration_ms,
                 generated_at_ms=25.0 + index * 60.0,
             )
             if index == 1:
@@ -1468,12 +1477,14 @@ def test_voxcpm2_slow_stream_starts_playback_before_stream_completion(monkeypatc
     assert event["tts_playback_final"]["realtime_generation_ratio"] < 1.05
 
 
-def test_qwen_slow_stream_starts_playback_before_stream_completion(monkeypatch: Any) -> None:
-    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.2)
+def test_qwen_slow_stream_starts_playback_before_stream_completion() -> None:
+    adapter = SlowQwenStreamingTtsAdapter(
+        wav_bytes=QWEN_STREAM_CHUNK_WAV_BYTES,
+        duration_ms=320.0,
+    )
     events: list[dict[str, Any]] = []
-    adapter = SlowQwenStreamingTtsAdapter()
 
-    async def scenario() -> dict[str, Any]:
+    async def scenario() -> tuple[dict[str, Any], ObservableStreamingOutboundAudioTrack]:
         audio_started = asyncio.Event()
 
         def sink(event: dict[str, Any]) -> None:
@@ -1510,13 +1521,13 @@ def test_qwen_slow_stream_starts_playback_before_stream_completion(monkeypatch: 
             assert track.chunks
             assert not speech.done()
             adapter.release_completion.set()
-            return await speech
+            return await speech, track
         finally:
             adapter.release_completion.set()
             if not speech.done():
                 speech.cancel()
 
-    event = _run(scenario())
+    event, track = _run(scenario())
 
     assert event["type"] == "ai_done"
     assert [item["type"] for item in events] == ["ai_audio_started", "ai_done"]
@@ -1524,6 +1535,10 @@ def test_qwen_slow_stream_starts_playback_before_stream_completion(monkeypatch: 
     assert "total_generation_ms" not in event["ai_audio_started_event"]["tts_playback"]
     assert event["tts_playback_final"]["bridge_queue_capacity"] == 2
     assert event["tts_playback_final"]["bridge_queue_high_water"] <= 2
+    assert event["ai_audio_started_event"]["tts_playback"]["startup_buffered_chunks"] == 2
+    assert event["ai_audio_started_event"]["tts_playback"]["startup_buffered_audio_ms"] == 640.0
+    assert event["ai_audio_started_event"]["tts_playback"]["startup_buffer_target_ms"] == 600.0
+    assert track.preroll_seconds == [0.0, 0.0, 0.0]
     assert adapter.requests[0]["request_id"] == "ai-turn-qwen-slow-stream"
     assert adapter.requests[0]["voice_key"] == "voice-qwen"
 
@@ -1533,6 +1548,7 @@ def test_qwen_capacity_two_bridge_blocks_producer_without_dropping_chunks(
 ) -> None:
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
+    monkeypatch.setattr(session_module, "CALL_QWEN3_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
 
     async def scenario() -> dict[str, Any]:
         track = BlockingFirstEnqueueTrack()
@@ -1584,6 +1600,7 @@ def test_qwen_fast_producer_is_bounded_by_paced_track_consumption(
 ) -> None:
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
+    monkeypatch.setattr(session_module, "CALL_QWEN3_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
     monkeypatch.setattr(session_module, "CALL_TTS_AUDIO_PREROLL_SECONDS", 0.0)
     events: list[dict[str, Any]] = []
     stream_completed_at_start: list[bool] = []
@@ -1658,6 +1675,8 @@ def test_qwen_fast_producer_is_bounded_by_paced_track_consumption(
     assert final["track_playout_debt_ms"] == 0.0
     assert final["playout_wait_completed"] is True
     assert final["playout_complete_ms"] >= final["generation_complete_ms"]
+    assert final["native_generation_ms"] == 325.0
+    assert final["realtime_generation_ratio"] == pytest.approx(720.0 / 325.0, abs=0.001)
     assert track.pending_samples == 0
 
 
@@ -1701,6 +1720,7 @@ def test_qwen_termination_cancels_exact_request_and_rejects_normal_completion(
 ) -> None:
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
+    monkeypatch.setattr(session_module, "CALL_QWEN3_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
     events: list[dict[str, Any]] = []
 
     async def scenario() -> tuple[ObservableStreamingOutboundAudioTrack, str]:
@@ -1785,6 +1805,7 @@ def test_qwen_control_causes_are_request_scoped_terminal_safe_and_recoverable(
 ) -> None:
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
+    monkeypatch.setattr(session_module, "CALL_QWEN3_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
     events: list[dict[str, Any]] = []
 
     async def scenario() -> tuple[
@@ -2065,6 +2086,25 @@ def test_queued_audio_output_track_preroll_sends_silence_before_tts() -> None:
     assert np.max(np.abs(first.to_ndarray())) == 0
     assert np.max(np.abs(second.to_ndarray())) == 0
     assert np.max(np.abs(third.to_ndarray())) > 0
+
+
+def test_queued_audio_output_track_natural_partial_tail_is_not_underflow() -> None:
+    async def scenario() -> dict[str, Any]:
+        track = QueuedAudioOutputTrack(sample_rate=16000, frame_ms=20)
+        samples = np.full(330, 0.25, dtype=np.float32)
+        buffer = BytesIO()
+        sf.write(buffer, samples, 16000, format="WAV")
+
+        await track.enqueue(buffer.getvalue())
+        track.mark_playout_input_complete()
+        await track.recv()
+        await track.recv()
+        return track.playout_metrics()
+
+    metrics = _run(scenario())
+
+    assert metrics["played_samples"] == 330
+    assert metrics["underflow_frames"] == 0
 
 
 def test_queued_audio_output_track_idle_frames_emit_silent_keepalive() -> None:

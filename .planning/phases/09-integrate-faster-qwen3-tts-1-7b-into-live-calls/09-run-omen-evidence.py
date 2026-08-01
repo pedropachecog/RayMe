@@ -49,6 +49,7 @@ AUTHORIZED_SCOPE = "rayme_lan_call_testing"
 SCHEMA_VERSION = 1
 FINAL_ONLY_FIELDS = {
     "generation_complete_ms",
+    "native_generation_ms",
     "playout_complete_ms",
     "chunk_count",
     "natural_eos",
@@ -645,6 +646,7 @@ class RayMeProductionPath:
             "whole_wav_fallback_used": immediate.get("whole_wav_fallback_used") is True,
             "valid_audio": bool(raw.get("peak", 0) >= 128),
             "native_first_chunk_ms": float(immediate.get("first_chunk_generated_ms") or 0.0),
+            "native_generation_ms": float(final.get("native_generation_ms") or 0.0),
             "first_playback_ms": float(raw.get("first_remote_audio_ms") or 0.0),
             "generation_complete_ms": float(final.get("generation_complete_ms") or final.get("total_generation_ms") or 0.0),
             "playout_complete_ms": float(final.get("playout_complete_ms") or final.get("total_playback_ms") or 0.0),
@@ -658,6 +660,10 @@ class RayMeProductionPath:
             "track_capacity_audio_ms": track_capacity,
             "track_high_water_audio_ms": track_high_water,
             "queue_block_time_ms": float(final.get("producer_block_time_ms") or 0.0),
+            "startup_buffered_chunks": int(immediate.get("startup_buffered_chunks") or 0),
+            "startup_buffered_audio_ms": float(immediate.get("startup_buffered_audio_ms") or 0.0),
+            "startup_buffer_target_ms": float(immediate.get("startup_buffer_target_ms") or 0.0),
+            "startup_buffer_wait_ms": float(immediate.get("startup_buffer_wait_ms") or 0.0),
             "immediate_fields": sorted(immediate),
             "final_fields": sorted(FINAL_ONLY_FIELDS),
             "audio_sha256": _sha256(path),

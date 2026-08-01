@@ -51,6 +51,8 @@ CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS = 0.75
 CALL_TTS_STREAM_START_MIN_CHUNKS = 2
 CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS = 0.75
 CALL_TTS_STREAM_MAX_STARTUP_BUFFER_SECONDS = 1.25
+CALL_QWEN3_TTS_AUDIO_PREROLL_SECONDS = 0.0
+CALL_QWEN3_STREAM_START_MIN_AUDIO_SECONDS = 0.60
 CALL_TTS_STREAM_BRIDGE_CAPACITY = 2
 CALL_TTS_CANCEL_DRAIN_TIMEOUT_SECONDS = 2.0
 LIVE_STREAMING_TTS_ENGINES = frozenset({"voxcpm2", "qwen3_1_7b"})
@@ -1157,6 +1159,16 @@ class CallSession:
         source_audio_hasher = (
             hashlib.sha256() if qwen3_release_evidence_mode is not None else None
         )
+        startup_min_audio_seconds = (
+            CALL_QWEN3_STREAM_START_MIN_AUDIO_SECONDS
+            if engine_id == "qwen3_1_7b"
+            else CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS
+        )
+        first_chunk_preroll_seconds = (
+            CALL_QWEN3_TTS_AUDIO_PREROLL_SECONDS
+            if engine_id == "qwen3_1_7b"
+            else CALL_TTS_AUDIO_PREROLL_SECONDS
+        )
 
         reset_track_metrics = getattr(
             self.outbound_audio_track,
@@ -1206,9 +1218,22 @@ class CallSession:
             )
             generated_audio_ms = round(generated_audio_seconds * 1000, 1)
             total_playback_ms = round(playback_seconds * 1000, 1)
+            native_generation_ms = (
+                round(generated_at_values[-1], 1)
+                if generated_at_values
+                else round(generation_ms, 1)
+            )
+            ratio_generation_ms = (
+                native_generation_ms
+                if engine_id == "qwen3_1_7b"
+                else generation_ms
+            )
             realtime_generation_ratio = 0.0
-            if generation_ms > 0:
-                realtime_generation_ratio = round(generated_audio_ms / generation_ms, 3)
+            if ratio_generation_ms > 0:
+                realtime_generation_ratio = round(
+                    generated_audio_ms / ratio_generation_ms,
+                    3,
+                )
             metrics = {
                 "streaming_used": True,
                 "fallback_used": False,
@@ -1217,6 +1242,7 @@ class CallSession:
                 "total_generation_ms": round(generation_ms, 1),
                 "total_playback_ms": total_playback_ms,
                 "generated_audio_ms": generated_audio_ms,
+                "native_generation_ms": native_generation_ms,
                 "realtime_generation_ratio": realtime_generation_ratio,
                 "under_realtime_generation": realtime_generation_ratio < 1.05,
                 "inter_chunk_gaps_ms": list(inter_chunk_gaps_ms),
@@ -1247,7 +1273,7 @@ class CallSession:
                 return False
             buffered_enough = (
                 len(pending_chunks) >= CALL_TTS_STREAM_START_MIN_CHUNKS
-                and pending_audio_seconds() >= CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS
+                and pending_audio_seconds() >= startup_min_audio_seconds
             )
             if buffered_enough:
                 return True
@@ -1260,7 +1286,7 @@ class CallSession:
             nonlocal playback_seconds
             playback_seconds += await self._queue_outbound_audio(
                 bytes(chunk["wav_bytes"]),
-                preroll_seconds=CALL_TTS_AUDIO_PREROLL_SECONDS if first else 0.0,
+                preroll_seconds=first_chunk_preroll_seconds if first else 0.0,
             )
 
         async def start_playback_from_buffer() -> None:
@@ -1309,7 +1335,7 @@ class CallSession:
                     "startup_buffered_audio_ms": buffered_audio_ms,
                     "startup_buffer_wait_ms": startup_wait_ms,
                     "startup_buffer_target_ms": round(
-                        CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS * 1000,
+                        startup_min_audio_seconds * 1000,
                         1,
                     ),
                     "startup_buffer_max_wait_ms": round(
@@ -1504,6 +1530,15 @@ class CallSession:
             generation_complete_ms = elapsed_ms()
             if generated_at_values:
                 generation_complete_ms = max(generation_complete_ms, generated_at_values[-1])
+
+            if stream_completed_normally:
+                mark_track_input_complete = getattr(
+                    self.outbound_audio_track,
+                    "mark_playout_input_complete",
+                    None,
+                )
+                if callable(mark_track_input_complete):
+                    mark_track_input_complete()
 
             if turn_id in self._cancelled_ai_turns:
                 self.state = "listening"
