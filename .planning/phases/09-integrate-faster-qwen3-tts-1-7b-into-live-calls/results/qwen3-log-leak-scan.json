@@ -3,9 +3,9 @@
   "critical_gates": [
     "private_evidence_clean"
   ],
-  "deployed_commit": "3501a1a1e2b4371a46d6d65322975134b0d35a5f",
+  "deployed_commit": "2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae",
   "findings": [],
-  "generated_at": "2026-08-01T06:11:21.966252Z",
+  "generated_at": "2026-08-01T12:32:43.632659Z",
   "phase": "09",
   "scanned_artifacts": [
     "qwen3-runtime.json",

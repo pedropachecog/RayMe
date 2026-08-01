@@ -3,7 +3,7 @@
   "artifact": "speaker",
   "audio_and_embeddings_retained": "local_only_uncommitted",
   "autonomous_release_ready": "pending_other_gates",
-  "baseline_commit": "3501a1a1e2b4371a46d6d65322975134b0d35a5f",
+  "baseline_commit": "2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae",
   "baseline_scores": [
     {
       "audio_sha256": "2f3304a5b0667cf5cbd07ae1a8e6df048b08599843339120bd94e921d86dba07",
@@ -24,18 +24,18 @@
   "critical_gates": [
     "speaker_stability"
   ],
-  "deployed_commit": "3501a1a1e2b4371a46d6d65322975134b0d35a5f",
+  "deployed_commit": "2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae",
   "early_median": 0.968299968623129,
   "early_scores": [
     {
-      "audio_sha256": "6613f1ed4a2a2869739c28a30a07f0a3489ebf3f251d654e0a8959ee9dc7b818",
+      "audio_sha256": "19de2081da4436368e96b051d04e585ff35484201947ded4867d413a81470c97",
       "bucket_id": 1,
-      "cosine": 0.9448910115474559
+      "cosine": 0.9449476137931075
     },
     {
-      "audio_sha256": "55ea1c15ddd51a5d277ea8c7e541821cdaad9928c4658b736bf6860a17f9b6de",
+      "audio_sha256": "242d6307af7fb4eae7e6680ee08d2c68b95e931d108e64c5ae54770464e119b2",
       "bucket_id": 2,
-      "cosine": 0.9762461597980859
+      "cosine": 0.9762309951933724
     },
     {
       "audio_sha256": "b38e728bf5d2ef4b29bc11a75a7d1efdd86d299d73041f7f718a39c5f4e43d95",
@@ -53,7 +53,7 @@
       "cosine": 0.968299968623129
     }
   ],
-  "generated_at": "2026-08-01T06:11:21.030041Z",
+  "generated_at": "2026-08-01T12:32:42.698693Z",
   "integrated_baseline_median": 0.9721072191160505,
   "integrated_human_listening_status": "pending",
   "late_median": 0.9473899870154929,

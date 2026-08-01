@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: ready_to_verify
 stopped_at: Completed 09-15-PLAN.md
-last_updated: "2026-08-01T06:42:45.393Z"
+last_updated: "2026-08-01T12:38:06Z"
 last_activity: 2026-08-01
 progress:
   total_phases: 11
@@ -12,7 +12,7 @@ progress:
   total_plans: 112
   completed_plans: 109
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
-last_activity_desc: "Completed Phase 09 Plan 15: same-commit acoustic, privacy, real browser, decision-ready, and operational handoff evidence"
+last_activity_desc: "Reconciled Phase 09 Plan 15 at deployed commit 2721a4e: post-review repairs, same-commit evidence, real browser E2E, and release handoff are green; human acceptance remains pending"
 ---
 
 ## Phase Status
@@ -84,7 +84,7 @@ last_activity_desc: "Completed Phase 09 Plan 15: same-commit acoustic, privacy, 
 - Phase 08.1 planned on 2026-05-16: urgent incident repair now covers removal of the invalid full-response live-call TTS buffering fix, bounded live-stream startup buffering only, executable tests that reject generate-then-play call fixes, and durable GSD/live-call invariant guardrails.
 - Phase 08.1 plan 08.1-02 added on 2026-05-16 after deployed retest exposed a native VoxCPM2/PyTorch crash: production VoxCPM2 must run behind a CUDA-only supervised worker process so worker death or hang becomes a recoverable `call_tts_failed` instead of killing the AI backend or blocking future call startup.
 - Phase 08.1 plan 08.1-03 added on 2026-05-16 after deployed retest showed bounded startup buffering only delays VoxCPM2 stutter: live VoxCPM2 must be measurement-gated by generated playable audio per wall-clock second, and sustained under-realtime streams must not be allowed to masquerade as smooth live-call playback.
-- Phase 09 plan 09-15 completed on 2026-08-01: exact deployed commit `3501a1a1e2b4371a46d6d65322975134b0d35a5f` passed pinned acoustic/privacy gates, real desktop/mobile Qwen browser E2E, decision-ready verification, and the operational handoff gate; integrated human listening and the physical-call workflow remain explicitly pending acceptance.
+- Phase 09 plan 09-15 release handoff reconciled on 2026-08-01: exact OMEN deployed commit `2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae` includes the database-migration, finish-session lease, and loop-safe fake-mic/closed-peer incident repairs; canonical deploy/core evidence, same-commit acoustic/privacy evidence, exact real desktop/mobile Qwen browser E2E (6/6 in 3.4m), semantic decision-ready verification, and the operational handoff gate pass. The mandatory code review is clean (60 files, 0 findings); integrated human listening and physical real-device multi-turn/barge-in/reconnect acceptance remain explicitly pending.
 
 ## Current Decisions
 

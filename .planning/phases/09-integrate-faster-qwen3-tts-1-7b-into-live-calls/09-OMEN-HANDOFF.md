@@ -1,6 +1,6 @@
 # Phase 09 OMEN Qwen Handoff
 
-RayMe is autonomously release-ready at deployed commit `3501a1a1e2b4371a46d6d65322975134b0d35a5f`. The remaining work is human acceptance: integrated listening and one physical multi-turn/barge-in call. Neither has been claimed as complete.
+RayMe is autonomously release-ready at deployed commit `2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae`. The remaining work is human acceptance: integrated listening and one physical multi-turn/barge-in/reconnect call on a real device. Neither has been claimed as complete.
 
 ## Live OMEN State
 
@@ -9,9 +9,10 @@ RayMe is autonomously release-ready at deployed commit `3501a1a1e2b4371a46d6d653
 | Web | `https://192.168.1.199:8443` |
 | AI health | `https://192.168.1.199:9443/health` |
 | WebRTC status | `https://192.168.1.199:9443/webrtc/status` — `ready`, live call ready, media transport ready |
-| Deployed commit | `3501a1a1e2b4371a46d6d65322975134b0d35a5f` |
+| Deployed commit | `2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae` |
 | Resident engine | `qwen3_1_7b` |
 | Selected prompt | `ready` |
+| Active sessions | `0` before and after the real browser suite |
 | Saved voice ID | `voice_2ff7f9b73a4040648d2d8317b07cf02d` |
 | Saved voice name | `Live Call Voice 1785565019627` |
 | Prompt owner key | `8481585640f8e716076611f1f49b8ae034cb58cabd95460b7c55165e48da1df2` — matches the live ready prompt |
@@ -29,10 +30,18 @@ All final release evidence below records the same deployed SHA:
 - `results/qwen3-soak.json` — 50-turn non-degradation and memory/throughput stability.
 - `results/qwen3-stt.json` — 50-turn spoken-message integrity.
 - `results/qwen3-speaker.json` — pinned WavLM early/middle/late and integrated-baseline drift proof.
-- `results/qwen3-browser.json` — real canonical desktop/mobile Chromium call proof, 6/6 passed, with two completed cycles and two listening recoveries per device.
+- `results/qwen3-browser.json` — real canonical desktop/mobile Chromium call proof, 6/6 passed in 3.4 minutes, with two completed cycles, two `ai_audio_started` events, two `ai_done` events, and two listening recoveries per device; provenance and fixture-path guards passed.
 - `results/qwen3-log-leak-scan.json` — no raw reference audio, transcript, or local-path leakage in structured evidence or service logs.
 
 Raw reference audio, transcripts, embeddings, and scorer audio remain local and uncommitted.
+
+## Canonical Deployment, Review, and Incident Repair Record
+
+- The only deployment command was `RAYME_OMEN_VERIFY_QWEN3=1 scripts/deploy-omen.sh`.
+- The canonical deploy passed database schema migration, pinned Faster Qwen3-TTS `v0.3.2`/source/model identity, CUDA RTX 3060 residency, the production streaming tracer, exact 50-turn core evidence, and the independent core verifier.
+- The mandatory Phase 09 code review is `CLEAN`: 60 files reviewed, 0 findings.
+- Three post-review incident repairs are included in the deployed SHA: `2ed38e3` runs the OMEN database migration before launch, `f7feb6c` releases the finish-session prompt lease, and `2721a4e` makes the fake microphone loop-safe while cleaning up closed peers so the real browser suite preserves Qwen reply completion.
+- The same-commit acoustic/leak finish runner and the real browser suite were rerun after those repairs. The desktop two-cycle test passed in 1.5 minutes, the mobile two-cycle test passed in 1.6 minutes, all 6 tests passed in 3.4 minutes, and the pre/post status remained live/media ready with `qwen3_1_7b` prompt ready and `active_sessions=0`.
 
 ## Automated Gate Commands
 
@@ -50,7 +59,7 @@ Then run the exact operational gate:
 scripts/operational-check.sh handoff --phase-dir .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls --commit "$(python3 .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-verify-evidence.py --print-deployed-commit)" --tests "PASS: full backend/server/client unit suites, mocked readiness UI, verifier self-test, canonical deploy evidence, and deployed Qwen live-call E2E" --ui-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-browser.json --live-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-call-flow.json --gpu-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-runtime.json
 ```
 
-Observed result: `operational-check: handoff gate passed` for commit `3501a1a1e2b4371a46d6d65322975134b0d35a5f`.
+Observed result: `operational-check: handoff gate passed` for commit `2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae`.
 
 ## Physical Multi-Turn and Barge-In Acceptance
 

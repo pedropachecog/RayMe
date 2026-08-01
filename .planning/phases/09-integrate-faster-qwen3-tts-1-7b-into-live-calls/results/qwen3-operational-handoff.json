@@ -2,8 +2,8 @@
   "schema_version": 1,
   "phase": "09",
   "plan": "15",
-  "generated_at": "2026-08-01T06:36:30Z",
-  "deployed_commit": "3501a1a1e2b4371a46d6d65322975134b0d35a5f",
+  "generated_at": "2026-08-01T12:38:06Z",
+  "deployed_commit": "2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae",
   "canonical_endpoints": {
     "web_url": "https://192.168.1.199:8443",
     "ai_health_url": "https://192.168.1.199:9443/health",
@@ -14,7 +14,24 @@
     "live_call_ready": true,
     "media_transport_ready": true,
     "resident_engine": "qwen3_1_7b",
-    "selected_prompt_state": "ready"
+    "selected_prompt_state": "ready",
+    "active_sessions": 0
+  },
+  "browser_suite_status": {
+    "pre_suite": {
+      "live_call_ready": true,
+      "media_transport_ready": true,
+      "resident_engine": "qwen3_1_7b",
+      "selected_prompt_state": "ready",
+      "active_sessions": 0
+    },
+    "post_suite": {
+      "live_call_ready": true,
+      "media_transport_ready": true,
+      "resident_engine": "qwen3_1_7b",
+      "selected_prompt_state": "ready",
+      "active_sessions": 0
+    }
   },
   "selected_saved_voice": {
     "voice_id": "voice_2ff7f9b73a4040648d2d8317b07cf02d",
@@ -47,11 +64,46 @@
     "decision_ready_output": "PASS",
     "operational_handoff_command": "scripts/operational-check.sh handoff --phase-dir .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls --commit \"$(python3 .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-verify-evidence.py --print-deployed-commit)\" --tests \"PASS: full backend/server/client unit suites, mocked readiness UI, verifier self-test, canonical deploy evidence, and deployed Qwen live-call E2E\" --ui-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-browser.json --live-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-call-flow.json --gpu-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-runtime.json",
     "operational_handoff_output": "operational-check: handoff gate passed",
-    "browser_live_e2e": "6/6 passed across desktop and mobile Chromium",
-    "browser_live_e2e_duration": "11.1m",
+    "browser_live_e2e": "6/6 passed across desktop and mobile Chromium, including provenance and fixture-path guards",
+    "browser_live_e2e_duration": "3.4m",
+    "desktop_two_cycle_duration": "1.5m",
+    "mobile_two_cycle_duration": "1.6m",
     "real_user_to_ai_cycles_per_device": 2,
     "listening_recoveries_per_device": 2
   },
+  "canonical_deployment": {
+    "command": "RAYME_OMEN_VERIFY_QWEN3=1 scripts/deploy-omen.sh",
+    "result": "pass",
+    "verified": [
+      "database schema migration completed before service launch",
+      "faster-qwen3-tts==0.3.2 and source commit a70afc0f81f7f5f8801c3227968f1102f43f211c",
+      "Qwen/Qwen3-TTS-12Hz-1.7B-Base revision fd4b254389122332181a7c3db7f27e918eec64e3",
+      "CUDA on NVIDIA GeForce RTX 3060 with one-hot qwen3_1_7b residency",
+      "production streaming tracer",
+      "exact 50-turn core evidence",
+      "independent core evidence verifier"
+    ]
+  },
+  "mandatory_code_review": {
+    "status": "clean",
+    "files_reviewed": 60,
+    "findings": 0,
+    "reviewed_commit": "4f6efd9"
+  },
+  "post_review_incident_repairs": [
+    {
+      "commit": "2ed38e3",
+      "repair": "Run the canonical OMEN database migration before service launch."
+    },
+    {
+      "commit": "f7feb6c",
+      "repair": "Release the evidence prompt lease when the finish session closes."
+    },
+    {
+      "commit": "2721a4e",
+      "repair": "Use loop-safe fake microphone teardown and clean up closed peers so real live E2E preserves Qwen reply completion."
+    }
+  ],
   "physical_acceptance_workflow": [
     "Open the canonical RayMe web URL from the physical test device and confirm Settings still names the canonical AI backend and qwen3_1_7b.",
     "In Voice Lab, save or select the intended real-person Qwen reference only after confirming the data steward, authorization basis, LAN test scope, matching transcript, and retention/deletion terms.",

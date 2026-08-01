@@ -4,15 +4,15 @@
   "browser_errors": [],
   "canonical_public_api": true,
   "critical_gates": [],
-  "deployed_commit": "3501a1a1e2b4371a46d6d65322975134b0d35a5f",
+  "deployed_commit": "2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae",
   "engine_id": "qwen3_1_7b",
   "evidence_state": "passed_real_live_e2e",
-  "expected_commit": "3501a1a1e2b4371a46d6d65322975134b0d35a5f",
-  "generated_at": "2026-08-01T06:24:23Z",
+  "expected_commit": "2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae",
+  "generated_at": "2026-08-01T12:31:00Z",
   "integrated_human_listening_status": "pending",
   "live_e2e_enabled": true,
   "mocked": false,
-  "observed_commit": "3501a1a1e2b4371a46d6d65322975134b0d35a5f",
+  "observed_commit": "2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae",
   "observed_events": [
     "model_resident",
     "prompt_ready",
@@ -35,9 +35,15 @@
   "test_result": {
     "desktop_chromium": "passed_two_user_to_ai_cycles",
     "mobile_chromium": "passed_two_user_to_ai_cycles",
+    "desktop_ai_audio_started_events": 2,
+    "mobile_ai_audio_started_events": 2,
     "desktop_ai_done_events": 2,
     "mobile_ai_done_events": 2,
-    "total_tests_passed": 6
+    "desktop_listening_recoveries": 2,
+    "mobile_listening_recoveries": 2,
+    "total_tests_passed": 6,
+    "duration_minutes": 3.4,
+    "post_suite_active_sessions": 0
   },
   "web_url": "https://192.168.1.199:8443"
 }

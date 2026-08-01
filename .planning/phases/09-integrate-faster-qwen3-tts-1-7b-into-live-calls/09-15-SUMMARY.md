@@ -9,8 +9,9 @@ requires:
     provides: Canonical exact-commit OMEN deployment and five independently verified core Qwen evidence artifacts
 provides:
   - Same-commit WavLM speaker stability, private-data leak scan, and real desktop/mobile browser-call evidence
-  - Decision-ready autonomous Qwen release proof at deployed commit 3501a1a1e2b4371a46d6d65322975134b0d35a5f
+  - Decision-ready autonomous Qwen release proof at deployed commit 2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae
   - Exact OMEN operator handoff with the active saved voice and physical multi-turn/barge-in workflow
+  - Clean mandatory code review plus same-commit post-review repair, acoustic/privacy, and real browser revalidation
 affects: [omen-operations, qwen3-release, live-call-acceptance, phase-09-verification]
 
 actuals:
@@ -63,7 +64,7 @@ coverage:
     requirement: REQ-45
     verification:
       - kind: e2e
-        ref: "live-call.spec.ts at 3501a1a1e2b4371a46d6d65322975134b0d35a5f (6/6 passed in 11.1m)"
+        ref: "live-call.spec.ts at 2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae (6/6 passed in 3.4m)"
         status: pass
       - kind: integration
         ref: "09-verify-evidence.py --decision-ready"
@@ -88,25 +89,27 @@ status: complete
 
 # Phase 09 Plan 15: Same-Commit Qwen Release Handoff Summary
 
-**Faster Qwen3-TTS 1.7B is autonomously release-ready on OMEN at exact commit `3501a1a`, with real browser cycles, stable speaker identity, clean privacy evidence, and an honest physical-call handoff.**
+**Faster Qwen3-TTS 1.7B is autonomously release-ready on OMEN at exact commit `2721a4e`, with repaired deployment/session cleanup, real browser cycles, stable speaker identity, clean privacy evidence, and an honest physical-call handoff.**
 
 ## Performance
 
 - **Duration:** 4h 08m
 - **Started:** 2026-08-01T02:32:20Z
 - **Completed:** 2026-08-01T06:40:20Z
+- **Release evidence reconciled:** 2026-08-01T12:38:06Z
 - **Tasks:** 2
 - **Files modified:** 26 implementation and evidence files
-- **Deployed implementation:** `3501a1a1e2b4371a46d6d65322975134b0d35a5f`
+- **Deployed implementation:** `2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae`
 
 ## Accomplishments
 
 - Recorded pinned CUDA WavLM early/middle/late and integrated-baseline scores. The late median drop is 0.02091 versus early and 0.02472 versus baseline, both inside the 0.05 ceiling; no audio or embeddings were committed.
 - Proved the sanitized evidence bundle and AI/Web log streams contain no raw reference audio, transcript, or local reference path content.
-- Completed the real canonical `live-call.spec.ts` suite 6/6 across desktop and mobile Chromium in 11.1 minutes. Each device completed two user-to-AI cycles with connected ICE/datachannel, early audio, two `ai_done`/Listening recoveries, and durable speech rows.
+- Completed the exact real canonical `live-call.spec.ts` suite 6/6 across desktop and mobile Chromium in 3.4 minutes. Desktop completed two cycles in 1.5 minutes, mobile completed two cycles in 1.6 minutes, provenance/path guards passed, and each device recorded two `ai_audio_started`, two `ai_done`, and two Listening recoveries.
 - Repaired the production speaking stall with synthesis-free boundary terminalization, preserving early playback, interruption, and the prohibition on whole-synthesis fallback.
 - Hardened canonical OMEN deployment so LocalSubnet WebRTC UDP ingress targets the base Python image actually serving port 9443 and is asserted against the live owner.
 - Published the active saved Qwen voice, canonical URLs/status, all nine release evidence inputs, exact automated commands, and the builder's physical multi-turn/barge-in/reconnect workflow.
+- Reconciled the release after the clean 60-file/0-finding code review: canonical deployment now migrates the database before launch, finish evidence releases its prompt lease, and loop-safe fake-mic/closed-peer cleanup preserves Qwen reply completion.
 
 ## Task Commits
 
@@ -123,6 +126,15 @@ Task 1 — same-commit acoustic, privacy, and browser gates:
 Task 2 — operational handoff:
 
 1. `c2f5b80` — publish Qwen operational handoff
+
+## Post-Review Release Reconciliation
+
+- `42e95aa` — mandatory Phase 09 code review recorded `CLEAN` across 60 files with 0 findings.
+- `2ed38e3` — run the canonical OMEN database migration before service launch.
+- `f7feb6c` — release the prompt lease when the finish evidence session closes.
+- `2721a4e` — make fake-microphone teardown loop-safe and clean up closed peers so the exact real browser suite preserves Qwen reply completion.
+
+The deployed code commit is `2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae`. It contains all three incident repairs. Deployment used only `RAYME_OMEN_VERIFY_QWEN3=1 scripts/deploy-omen.sh`; the schema, pinned runtime/source/model, CUDA RTX 3060, production streaming tracer, exact 50-turn core evidence, and independent core verifier all passed. The same-commit acoustic/leak finish runner and exact browser suite were then rerun successfully.
 
 ## Files Created/Modified
 
@@ -186,7 +198,7 @@ Task 2 — operational handoff:
 - **Found during:** Task 1 canonical deployed browser call
 - **Issue:** Windows reported the live UDP owner as the base Python executable, not the virtual-environment redirector initially targeted by the firewall rule.
 - **Fix:** The sole canonical deploy script now creates a LocalSubnet-only dynamic UDP rule for the resolved base executable and asserts that port 9443's live owner matches the rule application filter.
-- **Verification:** Canonical deploy passed at `3501a1a`; the exact browser suite established ICE/datachannel and completed 6/6 tests.
+- **Verification:** The initial canonical deploy passed at `3501a1a`; the repaired canonical release was redeployed and independently revalidated at `2721a4e`, where the exact browser suite established ICE/datachannel and completed 6/6 tests in 3.4 minutes.
 - **Committed in:** `bf76a54`, `3501a1a`
 
 ---
@@ -203,6 +215,7 @@ None.
 
 - The first real browser attempt exposed a genuine production stall rather than a flaky assertion. Work paused at the GSD checkpoint, the incident was investigated under `.planning/debug/resolved/qwen-browser-speaking-stuck.md`, and Plan 09-15 resumed only after the exact deployed browser suite and semantic verifier passed.
 - The operational shell gate checks arguments and artifact presence. The handoff therefore fixes the order explicitly: semantic decision-ready verification first, operational shell verification second.
+- Post-review OMEN execution exposed three release-path defects: a missing pre-launch database migration, a finish-session prompt lease that survived teardown, and loop/peer cleanup that could truncate reply completion in the real browser suite. Commits `2ed38e3`, `f7feb6c`, and `2721a4e` repaired them before the final same-commit deployment and evidence rerun.
 
 ## Known Stubs
 
@@ -231,4 +244,4 @@ No infrastructure setup is required. Follow `09-OMEN-HANDOFF.md`; save or select
 
 ## Self-Check: PASSED
 
-All five Plan 09-15 output artifacts and this summary exist. Every implementation, repair, debug-resolution, evidence, and handoff commit listed above is present in git history.
+All five Plan 09-15 output artifacts, the eight refreshed sanitized evidence files, this summary, and the operator handoff exist. The deployed commit contains all three post-review incident repairs; the semantic verifier and exact operational handoff gate pass against it. Integrated human listening and physical real-device acceptance remain pending by design.
