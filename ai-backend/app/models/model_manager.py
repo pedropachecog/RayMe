@@ -80,26 +80,39 @@ def evaluate_qwen_transcript_alignment(
         observed_text,
         autojunk=False,
     ).ratio()
+    exact_match = approved_text == observed_text
     prefix_only = approved_tokens != observed_tokens and (
         approved_tokens == observed_tokens[: len(approved_tokens)]
         or observed_tokens == approved_tokens[: len(observed_tokens)]
+    )
+    prefix_delta = abs(len(approved_tokens) - len(observed_tokens))
+    one_token_edge_variation = prefix_delta == 1 and (
+        approved_tokens == observed_tokens[1:]
+        or approved_tokens == observed_tokens[:-1]
+        or observed_tokens == approved_tokens[1:]
+        or observed_tokens == approved_tokens[:-1]
+    )
+    acceptable_edge_variation = (
+        one_token_edge_variation
+        and token_length_ratio >= QWEN_ALIGNMENT_MIN_TOKEN_LENGTH_RATIO
     )
     meaningful_transcripts = (
         len(approved_tokens) >= QWEN_ALIGNMENT_MIN_MEANINGFUL_TOKENS
         and len(observed_tokens) >= QWEN_ALIGNMENT_MIN_MEANINGFUL_TOKENS
     )
-    accepted = (
-        meaningful_transcripts
-        and not prefix_only
-        and token_length_ratio >= QWEN_ALIGNMENT_MIN_TOKEN_LENGTH_RATIO
-        and (
-            edit_similarity >= QWEN_ALIGNMENT_MIN_EDIT_SIMILARITY
-            or (
-                token_coverage >= QWEN_ALIGNMENT_MIN_TOKEN_COVERAGE
-                and ordered_token_similarity
-                >= QWEN_ALIGNMENT_MIN_ORDERED_TOKEN_SIMILARITY
-            )
+    similarity_checks_pass = (
+        edit_similarity >= QWEN_ALIGNMENT_MIN_EDIT_SIMILARITY
+        or (
+            token_coverage >= QWEN_ALIGNMENT_MIN_TOKEN_COVERAGE
+            and ordered_token_similarity
+            >= QWEN_ALIGNMENT_MIN_ORDERED_TOKEN_SIMILARITY
         )
+    )
+    accepted = exact_match or (
+        (meaningful_transcripts or acceptable_edge_variation)
+        and token_length_ratio >= QWEN_ALIGNMENT_MIN_TOKEN_LENGTH_RATIO
+        and (not prefix_only or prefix_delta <= 1)
+        and similarity_checks_pass
     )
     return QwenTranscriptAlignment(
         accepted=accepted,

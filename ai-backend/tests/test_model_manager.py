@@ -721,7 +721,7 @@ def test_qwen_alignment_rejects_known_gross_mismatch() -> None:
         ),
         (
             "The approved sentence contains enough meaningful reference words for alignment.",
-            "The approved sentence contains enough meaningful reference words",
+            "The approved sentence contains enough",
         ),
         (
             "alpha beta gamma delta epsilon zeta",
@@ -738,6 +738,34 @@ def test_qwen_alignment_rejects_short_prefix_tail_and_reordered_transcripts(
     result = manager_module.evaluate_qwen_transcript_alignment(approved, observed)
 
     assert result.accepted is False
+
+
+@pytest.mark.parametrize(
+    ("approved", "observed"),
+    [
+        ("Hello", "hello"),
+        (
+            "one two three four five six seven eight nine ten",
+            "one two three four five six seven eight nine ten softly",
+        ),
+        (
+            "one two three four five six seven eight nine ten",
+            "one two three four five six seven eight nine",
+        ),
+        ("alpha beta gamma", "well alpha beta gamma"),
+        ("alpha beta gamma delta", "beta gamma delta"),
+    ],
+)
+def test_qwen_alignment_accepts_exact_short_and_one_token_edge_variants(
+    approved: str,
+    observed: str,
+) -> None:
+    manager_module = importlib.import_module("app.models.model_manager")
+
+    result = manager_module.evaluate_qwen_transcript_alignment(approved, observed)
+
+    assert result.accepted is True
+    assert result.token_coverage >= 0.75
 
 
 def test_qwen_alignment_token_coverage_penalizes_observed_extra_speech() -> None:
