@@ -768,6 +768,115 @@ def test_runner_main_sanitizes_unexpected_exceptions_without_private_detail(
     assert "Traceback" not in captured.err
 
 
+@pytest.mark.parametrize("failure_type", (OSError, RuntimeError, ValueError))
+def test_runner_main_sanitizes_expected_builtin_exception_messages(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure_type: type[Exception],
+) -> None:
+    runner = _runner_module(f"phase09_runner_{failure_type.__name__.lower()}_failure")
+    private_detail = r"C:\private\voice.wav exact secret transcript"
+    args = SimpleNamespace(
+        expected_commit="a" * 40,
+        dry_run=True,
+        core_only=False,
+        finish_acoustic_leak=False,
+    )
+
+    def fail_manifest_load() -> dict[str, object]:
+        raise failure_type(private_detail)
+
+    monkeypatch.setattr(runner, "_parse_args", lambda argv: args)
+    monkeypatch.setattr(runner, "load_manifest", fail_manifest_load)
+
+    assert runner.main([]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        f"FAIL: Unexpected evidence runner failure ({failure_type.__name__})\n"
+    )
+    assert private_detail not in captured.err
+    assert "voice.wav" not in captured.err
+    assert "secret transcript" not in captured.err
+    assert "Traceback" not in captured.err
+
+
+def test_runner_main_preserves_curated_domain_diagnostic(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    runner = _runner_module("phase09_runner_curated_domain_failure")
+    args = SimpleNamespace(
+        expected_commit="a" * 40,
+        dry_run=True,
+        core_only=False,
+        finish_acoustic_leak=False,
+    )
+
+    def fail_manifest_load() -> dict[str, object]:
+        raise runner.EvidenceRunnerError("Evidence manifest is invalid")
+
+    monkeypatch.setattr(runner, "_parse_args", lambda argv: args)
+    monkeypatch.setattr(runner, "load_manifest", fail_manifest_load)
+
+    assert runner.main([]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "FAIL: Evidence manifest is invalid\n"
+
+
+def test_runner_main_success_remains_visible(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    runner = _runner_module("phase09_runner_success")
+    args = SimpleNamespace(
+        expected_commit="a" * 40,
+        dry_run=True,
+        core_only=False,
+        finish_acoustic_leak=False,
+    )
+
+    monkeypatch.setattr(runner, "_parse_args", lambda argv: args)
+    monkeypatch.setattr(runner, "load_manifest", lambda: {})
+
+    assert runner.main([]) == 0
+    captured = capsys.readouterr()
+    assert captured.out == "PASS\n"
+    assert captured.err == ""
+
+
+@pytest.mark.parametrize("failure", (KeyboardInterrupt(), SystemExit(7)))
+def test_runner_main_does_not_swallow_base_exceptions(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: BaseException,
+) -> None:
+    runner = _runner_module(
+        f"phase09_runner_{failure.__class__.__name__.lower()}_failure"
+    )
+    args = SimpleNamespace(
+        expected_commit="a" * 40,
+        dry_run=True,
+        core_only=False,
+        finish_acoustic_leak=False,
+    )
+
+    def fail_manifest_load() -> dict[str, object]:
+        raise failure
+
+    monkeypatch.setattr(runner, "_parse_args", lambda argv: args)
+    monkeypatch.setattr(runner, "load_manifest", fail_manifest_load)
+
+    with pytest.raises(failure.__class__) as raised:
+        runner.main([])
+    if isinstance(failure, SystemExit):
+        assert raised.value.code == 7
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
 def test_runner_writes_generated_non_person_fixture_sidecar_without_private_content(
     tmp_path: Path,
 ) -> None:

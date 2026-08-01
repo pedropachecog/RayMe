@@ -1646,7 +1646,7 @@ def main(argv: list[str] | None = None) -> int:
             raise EvidenceRunnerError("no evidence runner mode selected")
         print("PASS")
         return 0
-    except (EvidenceRunnerError, OSError, RuntimeError, ValueError) as exc:
+    except EvidenceRunnerError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
     except Exception as exc:
