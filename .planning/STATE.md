@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready_to_execute
-stopped_at: Completed 09-13-PLAN.md
-last_updated: "2026-07-31T22:01:29.041Z"
-last_activity: 2026-07-31
+stopped_at: Completed 09-14-PLAN.md
+last_updated: "2026-08-01T02:30:09.466Z"
+last_activity: 2026-08-01
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 112
-  completed_plans: 106
+  completed_plans: 107
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
-last_activity_desc: "Completed Phase 09 Plan 13: production OMEN evidence runner, release-only deterministic anchors, and split CUDA scoring lifecycle"
+last_activity_desc: "Completed Phase 09 Plan 14: exact-commit OMEN Qwen deployment with verified 20-scenario and 50-turn core evidence"
 ---
 
 ## Phase Status
@@ -259,9 +259,9 @@ last_activity_desc: "Completed Phase 09 Plan 13: production OMEN evidence runner
 
 ## Session Continuity
 
-Last activity: 2026-07-31
-Last session: 2026-07-31T22:01:28.726Z
-Stopped at: Completed 09-13-PLAN.md
+Last activity: 2026-08-01
+Last session: 2026-08-01T02:30:09.127Z
+Stopped at: Completed 09-14-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -283,6 +283,7 @@ Resume file: None
 | Phase 09 P10 | 18min | 2 tasks | 6 files |
 | Phase 09 P12 | 17min | 2 tasks | 4 files |
 | Phase 09 P13 | 30min | 2 tasks | 11 files |
+| Phase 09 P14 | 4h 19m | 2 tasks | 36 files |
 
 ## Decisions
 
@@ -332,3 +333,7 @@ Resume file: None
 - [Phase 09]: Evidence requests restore Python, NumPy, Torch, and CUDA RNG state so ordinary live calls retain independent sampling.
 - [Phase 09]: Every deterministic anchor is bound to its own captured WAV hash and any mismatch fails the release evidence run.
 - [Phase 09]: Core evidence acquisition precedes GPU-exclusive WavLM scoring, after which Qwen must reload and prewarm before readiness.
+- [Phase 09]: The final Qwen verification flag extends scripts/deploy-omen.sh; no alternate OMEN deployment, launcher, scheduled task, or evidence path is permitted.
+- [Phase 09]: Four-step native Qwen streaming with a 1536-position static cache is the verified RTX 3060 balance for caller latency, sustained RTFx, zero underflows, and VRAM headroom.
+- [Phase 09]: Live caller playback and sustained supply remain authoritative: retain the 1.25 second playback and RTFx gates while using 600 ms as the native median hard bound.
+- [Phase 09]: Physical-call and integrated human listening acceptance remain explicit Plan 09-15 work and cannot be inferred from automated core evidence.

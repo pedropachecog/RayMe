@@ -1,10 +1,10 @@
 ---
 schema_version: 1
-open_count: 2
+open_count: 3
 waived_count: 0
 fixed_count: 1
-total_count: 3
-last_updated: 2026-07-31T22:00:58.618Z
+total_count: 4
+last_updated: 2026-08-01T02:27:33.764Z
 ---
 
 # Broken Windows Ledger
@@ -18,6 +18,7 @@ last_updated: 2026-07-31T22:00:58.618Z
 | 1 | 09 | deviation | ai-backend/app/models/tts_qwen3_worker.py |  | Extended worker protocol and saved-call assertions for exact owner eviction semantics | open |  | 2026-07-31T19:05:52.973Z |  |
 | 2 | 09 | stub | .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-run-omen-evidence.py | 967 | _browser_placeholder emits awaiting_real_live_e2e until Plan 15 records real browser and physical-call evidence | open |  | 2026-07-31T22:00:46.604Z |  |
 | 3 | 09 | deviation | ai-backend/app/api/webrtc.py |  | Authorized deterministic release-evidence seed contract added across production API and Qwen worker | fixed |  | 2026-07-31T22:00:46.695Z | 2026-07-31T22:00:58.618Z |
+| 4 | 09 | stub | .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-run-omen-evidence.py | 1025 | Browser evidence remains an explicit awaiting_real_live_e2e placeholder for Plan 09-15 physical-call handoff | open |  | 2026-08-01T02:27:33.764Z |  |
 
 ````json
 [
@@ -56,6 +57,18 @@ last_updated: 2026-07-31T22:00:58.618Z
     "reason": "",
     "recorded_at": "2026-07-31T22:00:46.695Z",
     "resolved_at": "2026-07-31T22:00:58.618Z"
+  },
+  {
+    "id": 4,
+    "kind": "stub",
+    "phase": "09",
+    "file": ".planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-run-omen-evidence.py",
+    "line": 1025,
+    "description": "Browser evidence remains an explicit awaiting_real_live_e2e placeholder for Plan 09-15 physical-call handoff",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-01T02:27:33.764Z",
+    "resolved_at": null
   }
 ]
 ````
