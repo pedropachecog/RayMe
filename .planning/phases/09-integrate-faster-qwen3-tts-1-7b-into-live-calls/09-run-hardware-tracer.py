@@ -510,8 +510,6 @@ class WebRtcCapture:
         raise TracerFailure("Timed out waiting for audible WebRTC playout")
 
     async def _consume_audio(self, track: Any) -> None:
-        import numpy as np
-
         while True:
             try:
                 frame = await track.recv()
@@ -520,20 +518,30 @@ class WebRtcCapture:
             if self._capture_turn is None:
                 continue
             received_at = time.perf_counter()
-            raw = np.asarray(frame.to_ndarray())
-            if raw.ndim > 1:
-                raw = raw.astype(np.float64).mean(axis=0)
-            raw = raw.reshape(-1)
-            if np.issubdtype(raw.dtype, np.floating):
-                samples = np.clip(raw, -1.0, 1.0)
-                samples = np.rint(samples * 32767.0).astype(np.int16)
-            else:
-                samples = np.clip(raw, -32768, 32767).astype(np.int16)
+            samples = _decoded_audio_frame_to_int16(frame)
             self._captured_frames.append((received_at, samples.copy()))
             if self._first_nonzero_at is None and samples.size:
                 peak = int(np.max(np.abs(samples.astype(np.int32))))
                 if peak >= 128:
                     self._first_nonzero_at = received_at
+
+
+def _decoded_audio_frame_to_int16(frame: Any) -> Any:
+    """Preserve integer PCM scale while collapsing PyAV's channel axis."""
+    import numpy as np
+
+    raw = np.asarray(frame.to_ndarray())
+    floating_pcm = np.issubdtype(raw.dtype, np.floating)
+    if raw.ndim > 1:
+        if raw.shape[0] == 1:
+            raw = raw[0]
+        else:
+            raw = raw.astype(np.float64).mean(axis=0)
+    raw = raw.reshape(-1)
+    if floating_pcm:
+        normalized = np.clip(raw, -1.0, 1.0)
+        return np.rint(normalized * 32767.0).astype(np.int16)
+    return np.rint(np.clip(raw, -32768, 32767)).astype(np.int16)
 
 
 def _voice_provenance(selection: ReferenceSelection) -> dict[str, str]:
@@ -772,6 +780,14 @@ def _event_scalars(event: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any
         "startup_buffered_chunks": int(immediate.get("startup_buffered_chunks") or 0),
         "startup_buffered_audio_ms": _number(
             immediate.get("startup_buffered_audio_ms"), "startup buffered audio"
+        ),
+        "startup_buffer_target_ms": _number(
+            immediate.get("startup_buffer_target_ms") or 0.0,
+            "startup buffer target",
+        ),
+        "startup_buffer_wait_ms": _number(
+            immediate.get("startup_buffer_wait_ms") or 0.0,
+            "startup buffer wait",
         ),
     }
     final_scalars = {

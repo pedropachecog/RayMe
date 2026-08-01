@@ -398,6 +398,36 @@ def _runner_module(name: str = "phase09_omen_runner") -> ModuleType:
     return _load_module(RUNNER_PATH, name)
 
 
+def test_hardware_tracer_preserves_planar_int16_pcm_scale() -> None:
+    import numpy as np
+
+    tracer = _runner_module("phase09_runner_int16_capture").load_hardware_tracer()
+
+    class Frame:
+        def to_ndarray(self) -> object:
+            return np.asarray([[-2048, -128, 0, 128, 2048]], dtype=np.int16)
+
+    actual = tracer._decoded_audio_frame_to_int16(Frame())
+
+    assert actual.dtype == np.int16
+    assert actual.tolist() == [-2048, -128, 0, 128, 2048]
+
+
+def test_hardware_tracer_scales_normalized_float_pcm_once() -> None:
+    import numpy as np
+
+    tracer = _runner_module("phase09_runner_float_capture").load_hardware_tracer()
+
+    class Frame:
+        def to_ndarray(self) -> object:
+            return np.asarray([[-1.0, -0.5, 0.0, 0.5, 1.0]], dtype=np.float32)
+
+    actual = tracer._decoded_audio_frame_to_int16(Frame())
+
+    assert actual.dtype == np.int16
+    assert actual.tolist() == [-32767, -16384, 0, 16384, 32767]
+
+
 def _hash_bytes(value: bytes) -> str:
     import hashlib
 
