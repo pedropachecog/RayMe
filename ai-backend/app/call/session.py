@@ -566,6 +566,9 @@ class CallSession:
         outbound_audio_track: Any | None = None,
     ) -> tuple[bool, Any | None]:
         selection_changed = False
+        cancel_selection = False
+        previous_outbound_audio_track: Any | None = None
+        accepted_outbound_audio_track: Any | None = None
         async with self._lifecycle_lock:
             lifecycle = self._peer_lifecycle
             candidate = lifecycle.candidate
@@ -583,11 +586,13 @@ class CallSession:
                 if self.peer_connection is not peer_connection
                 else None
             )
+            previous_outbound_audio_track = self.outbound_audio_track
             self.peer_connection = peer_connection
             if outbound_audio_track is None:
                 outbound_audio_track = candidate.outbound_audio_track
             if outbound_audio_track is not None:
                 self.outbound_audio_track = outbound_audio_track
+            accepted_outbound_audio_track = self.outbound_audio_track
             if candidate.data_channel is not None:
                 self.data_channel = candidate.data_channel
             configuration = candidate.configuration
@@ -604,16 +609,42 @@ class CallSession:
                 ]
                 self.vad_adapter = configuration.vad_adapter
                 self.stt_adapter = configuration.stt_adapter
+            cancel_selection = selection_changed and (
+                self.active_turn_task is not None
+                or self._active_tts_turn_id is not None
+                or self._pending_speech_terminal_turn_id is not None
+            )
+            if cancel_selection:
+                cancelling_turn_id = (
+                    self._active_tts_turn_id
+                    or self._pending_speech_terminal_turn_id
+                )
+                if cancelling_turn_id is not None:
+                    self._cancelling_ai_turns.add(cancelling_turn_id)
             self._clear_pending_peer_locked(peer_connection)
             self._complete_transport_reconnect_locked()
-        if selection_changed and (
-            self.active_turn_task is not None
-            or self._active_tts_turn_id is not None
-            or self._pending_speech_terminal_turn_id is not None
-        ):
-            await self.cancel_ai_turn(cause="engine_switch")
+        if cancel_selection:
+            playout_tracks = (
+                previous_outbound_audio_track,
+                accepted_outbound_audio_track,
+            )
+            await self._stop_and_drain_outbound_playout(
+                tracks=playout_tracks,
+            )
+            cancel_task = asyncio.create_task(
+                self.cancel_ai_turn(
+                    cause="engine_switch",
+                    playout_tracks=playout_tracks,
+                    playout_already_stopped=True,
+                )
+            )
+            if previous_peer_connection is not None:
+                await self._close_peer(previous_peer_connection)
+            await cancel_task
             if self.state not in {"ended", "failed"}:
                 self.state = "listening"
+        elif previous_peer_connection is not None:
+            await self._close_peer(previous_peer_connection)
         return True, previous_peer_connection
 
     async def reject_pending_peer_connection(
@@ -2350,12 +2381,22 @@ class CallSession:
             )
             return False
 
-    async def _stop_and_drain_outbound_playout(self) -> None:
-        stop = getattr(self.outbound_audio_track, "stop_current", None)
-        if callable(stop):
-            result = stop()
-            if inspect.isawaitable(result):
-                await result
+    async def _stop_and_drain_outbound_playout(
+        self,
+        *,
+        tracks: tuple[Any | None, ...] | None = None,
+    ) -> None:
+        targets = tracks or (self.outbound_audio_track,)
+        stopped_track_ids: set[int] = set()
+        for track in targets:
+            if track is None or id(track) in stopped_track_ids:
+                continue
+            stopped_track_ids.add(id(track))
+            stop = getattr(track, "stop_current", None)
+            if callable(stop):
+                result = stop()
+                if inspect.isawaitable(result):
+                    await result
         self.outbound_audio_buffer.drain()
 
     async def cancel_ai_turn(
@@ -2363,6 +2404,8 @@ class CallSession:
         turn_id: str | None = None,
         *,
         cause: str = "interrupt",
+        playout_tracks: tuple[Any | None, ...] | None = None,
+        playout_already_stopped: bool = False,
     ) -> dict[str, Any]:
         cancel_started_at = time.perf_counter()
         active = self.active_turn_task
@@ -2394,7 +2437,10 @@ class CallSession:
             # cancelling guard remain live until that terminal is drained.
             await cancel_started.wait()
             try:
-                await self._stop_and_drain_outbound_playout()
+                if not playout_already_stopped:
+                    await self._stop_and_drain_outbound_playout(
+                        tracks=playout_tracks,
+                    )
                 if callable(metrics_snapshot):
                     playback_final = metrics_snapshot()
             finally:

@@ -1649,6 +1649,128 @@ def test_qwen_failed_segment_retries_keep_reserved_ordinal_until_success() -> No
     )
 
 
+def test_engine_switch_silences_old_and_new_tracks_before_cancel_ack() -> None:
+    class BlockedCancelAdapter:
+        engine_id = "qwen3_1_7b"
+
+        def __init__(self) -> None:
+            self.stream_blocked = threading.Event()
+            self.release_stream = threading.Event()
+            self.stream_drained = threading.Event()
+            self.cancel_entered = threading.Event()
+            self.allow_cancel_ack = threading.Event()
+            self.cancel_calls: list[str] = []
+
+        def synthesize(self, _request: Any) -> Any:
+            raise AssertionError("whole synthesis fallback was used")
+
+        def stream(
+            self,
+            _request: Any,
+            *,
+            request_id: str,
+            voice_key: str,
+        ) -> Any:
+            del voice_key
+            try:
+                for chunk_index in range(2):
+                    yield TtsAudioChunk(
+                        engine_id=self.engine_id,
+                        chunk_index=chunk_index,
+                        wav_bytes=QWEN_STREAM_CHUNK_WAV_BYTES,
+                        sample_rate=24_000,
+                        duration_ms=320.0,
+                        generated_at_ms=25.0 + chunk_index * 25.0,
+                    )
+                self.stream_blocked.set()
+                self.release_stream.wait()
+            finally:
+                self.stream_drained.set()
+
+        def cancel(self, request_id: str) -> bool:
+            self.cancel_calls.append(request_id)
+            self.cancel_entered.set()
+            self.allow_cancel_ack.wait(timeout=1.0)
+            self.release_stream.set()
+            return self.stream_drained.wait(timeout=1.0)
+
+    async def scenario() -> tuple[
+        BlockedCancelAdapter,
+        ScriptedPeerConnection,
+        ScriptedOutboundAudioTrack,
+        ScriptedOutboundAudioTrack,
+    ]:
+        adapter = BlockedCancelAdapter()
+        old_track = ScriptedOutboundAudioTrack()
+        new_track = ScriptedOutboundAudioTrack()
+        session, active_peer = _new_session(
+            tts_adapter=adapter,
+            outbound_audio_track=old_track,
+        )
+        session.voice_id = "voice-before"
+        session.engine_id = "qwen3_1_7b"
+        candidate = ScriptedPeerConnection()
+        speech = asyncio.create_task(
+            session.speak_text(
+                "turn-engine-switch-order",
+                "The old voice must stop before acknowledgement.",
+                "voice-before",
+                "qwen3_1_7b",
+                final_chunk=True,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="The exact reference transcript.",
+            )
+        )
+        assert await asyncio.to_thread(adapter.stream_blocked.wait, 1.0)
+        old_chunk_count = len(old_track.chunks)
+        assert old_chunk_count == 2
+
+        generation = await session.mark_peer_connection_pending(
+            candidate,
+            outbound_audio_track=new_track,
+            configuration=PeerOfferConfiguration(
+                thread_id="thread-after",
+                voice_id="voice-after",
+                engine_id="f5",
+                prompt_messages=(),
+                vad_adapter=None,
+                stt_adapter=None,
+            ),
+            timeout_seconds=60.0,
+        )
+        acceptance = asyncio.create_task(
+            session.accept_pending_peer_connection(
+                candidate,
+                generation=generation,
+            )
+        )
+        assert await asyncio.to_thread(adapter.cancel_entered.wait, 1.0)
+
+        assert old_track.stop_calls == 1
+        assert new_track.stop_calls == 1
+        assert active_peer.close_calls == 1
+        assert acceptance.done() is False
+        assert len(old_track.chunks) == old_chunk_count
+
+        adapter.allow_cancel_ack.set()
+        accepted, previous_peer = await acceptance
+        assert accepted is True
+        assert previous_peer is active_peer
+        try:
+            await speech
+        except asyncio.CancelledError:
+            pass
+        return adapter, active_peer, old_track, new_track
+
+    adapter, active_peer, old_track, new_track = _run(scenario())
+
+    assert adapter.cancel_calls == ["turn-engine-switch-order"]
+    assert active_peer.close_calls == 1
+    assert old_track.stop_calls == 1
+    assert new_track.stop_calls == 1
+    assert len(old_track.chunks) == 2
+
+
 def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
     monkeypatch: Any,
 ) -> None:

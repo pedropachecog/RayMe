@@ -905,7 +905,7 @@ def _attach_peer_handlers(
         ice_state = getattr(peer_connection, "iceConnectionState", None)
         if connection_state != "connected" and ice_state not in {"connected", "completed"}:
             return
-        accepted, previous_peer_connection = await session.accept_pending_peer_connection(
+        accepted, _ = await session.accept_pending_peer_connection(
             peer_connection,
             generation=pending_generation,
         )
@@ -918,11 +918,6 @@ def _attach_peer_handlers(
             connection_state,
             ice_state,
         )
-        if (
-            previous_peer_connection is not None
-            and previous_peer_connection is not peer_connection
-        ):
-            await _close_peer_connection(previous_peer_connection)
 
     async def discard_failed_pending_peer(source: str) -> bool:
         if not session.is_peer_connection_pending(
@@ -1222,7 +1217,7 @@ async def _receive_audio_track(
                     pending_generation,
                 )
             ):
-                accepted, previous_peer_connection = (
+                accepted, _ = (
                     await session.accept_pending_peer_connection(
                         peer_connection,
                         generation=pending_generation,
@@ -1234,11 +1229,6 @@ async def _receive_audio_track(
                     "[rayme-call] peer.pending.accepted session=%s source=first_audio_frame",
                     session.session_id,
                 )
-                if (
-                    previous_peer_connection is not None
-                    and previous_peer_connection is not peer_connection
-                ):
-                    await _close_peer_connection(previous_peer_connection)
             session.start_media_reconnect_grace_if_pending()
             logger.info(
                 "[rayme-call] track.recv.first_frame session=%s sample_rate=%s "
