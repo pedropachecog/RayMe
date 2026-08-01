@@ -45,11 +45,12 @@ def upgrade() -> None:
     ).mappings()
     for row in legacy_rows:
         metadata = _metadata_object(row["metadata_json"])
-        existing_authorization = metadata.get(AUTHORIZATION_METADATA_KEY)
-        if not isinstance(existing_authorization, Mapping):
-            metadata[AUTHORIZATION_METADATA_KEY] = {
-                "authorization_status": "needs_confirmation"
-            }
+        # Authorization is model-identity-specific. A legacy 0.6B grant cannot
+        # authorize the materially different 1.7B engine, even when the old
+        # mapping was otherwise complete and valid.
+        metadata[AUTHORIZATION_METADATA_KEY] = {
+            "authorization_status": "needs_confirmation"
+        }
         connection.execute(
             sa.update(voices)
             .where(voices.c.id == row["id"])

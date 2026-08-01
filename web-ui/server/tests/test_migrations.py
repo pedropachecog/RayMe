@@ -300,6 +300,25 @@ def test_qwen3_identity_upgrade_is_exact_truthful_and_idempotent(tmp_path: Path)
                     json.dumps({"authorization_status": "external"}),
                 ),
                 (
+                    "voice-legacy-recorded",
+                    "Legacy Recorded Qwen",
+                    "qwen3_0_6b",
+                    "Recorded legacy transcript.",
+                    json.dumps(
+                        {
+                            "keep": "preserved",
+                            "qwen3_authorization": {
+                                "authorization_status": "recorded",
+                                "voice_data_steward": "private-steward",
+                                "authorization_basis": "legacy-grant",
+                                "use_scope": "rayme_lan_call_testing",
+                                "reference_sha256": "a" * 64,
+                                "transcript_sha256": "b" * 64,
+                            },
+                        }
+                    ),
+                ),
+                (
                     "voice-unknown-qwen",
                     "Unknown Qwen",
                     "qwen3_future_unknown",
@@ -337,6 +356,9 @@ def test_qwen3_identity_upgrade_is_exact_truthful_and_idempotent(tmp_path: Path)
             )
         }
         legacy_metadata = json.loads(voices["voice-legacy-qwen"]["metadata_json"])
+        recorded_legacy_metadata = json.loads(
+            voices["voice-legacy-recorded"]["metadata_json"]
+        )
         current_metadata = json.loads(voices["voice-current-qwen"]["metadata_json"])
         unknown_metadata = json.loads(voices["voice-unknown-qwen"]["metadata_json"])
 
@@ -344,6 +366,13 @@ def test_qwen3_identity_upgrade_is_exact_truthful_and_idempotent(tmp_path: Path)
         assert legacy_metadata["keep"] == {"nested": True}
         assert legacy_metadata["qwen3_authorization"] == {
             "authorization_status": "needs_confirmation"
+        }
+        assert voices["voice-legacy-recorded"]["default_engine"] == "qwen3_1_7b"
+        assert recorded_legacy_metadata == {
+            "keep": "preserved",
+            "qwen3_authorization": {
+                "authorization_status": "needs_confirmation"
+            },
         }
         assert voices["voice-current-qwen"]["default_engine"] == "qwen3_1_7b"
         assert current_metadata == {"authorization_status": "external"}
