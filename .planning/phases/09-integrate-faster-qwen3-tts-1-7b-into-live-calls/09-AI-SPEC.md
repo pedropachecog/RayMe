@@ -201,7 +201,7 @@ from faster_qwen3_tts import FasterQwen3TTS
 ### Entry Point Pattern
 ```python
 MODEL_REVISION = "fd4b254389122332181a7c3db7f27e918eec64e3"
-CHUNK_SIZE = 4  # 4 codec steps ~= 320-333 ms in the accepted OMEN run
+CHUNK_SIZE = 2  # 2 codec steps ~= 160-167 ms; RayMe still buffers >=600 ms before playout
 
 
 def load_runtime(model_dir: Path) -> FasterQwen3TTS:
@@ -361,7 +361,7 @@ scripts/
 | Backend/device | `backend="torch"`, `device="cuda"`, `dtype=torch.bfloat16`, `attn_implementation="sdpa"` | Accepted RTX 3060 CUDA-graph path; no FlashAttention dependency or CPU fallback. |
 | Static cache | `max_seq_len=2048` | Accepted upstream/spike setting; validate prompt plus target text before generation. |
 | Clone mode | `xvec_only=False`, exact `ref_text`, precomputed ICL prompt, `append_silence=True` | Highest-fidelity selected voice-cloning path and clean reference ending. |
-| Text/audio streaming | `language="English"`, `non_streaming_mode=True`, `chunk_size=4`, `parity_mode=False` | Accepted quality path with approximately 320 ms native chunks and median 368.9 ms native TTFA. |
+| Text/audio streaming | `language="English"`, `non_streaming_mode=True`, `chunk_size=2`, `parity_mode=False` | Approximately 160 ms native chunks keep hot native TTFA inside the 500 ms gate; RayMe independently accumulates at least 600 ms before playout for smoothness. |
 | Sampling | `temperature=0.9`, `top_k=50`, `top_p=1.0`, `do_sample=True`, `repetition_penalty=1.05`, `min_new_tokens=2` | Upstream defaults used by the accepted runtime. Use a different recorded random seed per segment, not one repeated production seed. |
 
 Use a text-relative generation ceiling rather than upstream's permissive
@@ -569,7 +569,7 @@ Initial release budgets come from the accepted evidence:
 |--------|--------------------|
 | Cold model load | Visible throughout; accepted cold evidence was 92.7 s plus 2.59 s graph warmup. Do not allow call speech until resident. |
 | Selected-voice prewarm | Visible and complete before first call response; target <=15 s on cached model. |
-| Native hot first chunk | Median <=500 ms at `chunk_size=4`; accepted median 368.9 ms. |
+| Native hot first chunk | Median <=500 ms at `chunk_size=2`; caller playout still uses the bounded >=600 ms startup buffer. |
 | RayMe first playback | Before stream completion, normally <=1.25 s bounded startup wait; immediate timing emitted separately. |
 | Sustained generation | RTFx >=1.05 every accepted sample; target median >=1.25 (accepted 1.46). No positive growing chunk debt. |
 | Queue | Capacity/high-water <=2; never proportional to turn length. |

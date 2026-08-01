@@ -13,7 +13,7 @@
 | `generate_voice_clone_streaming()` | INTEGRATE | |
 | Public `generate()` default-voice method | OPT-OUT | At pinned commit it raises `NotImplementedError` and directs callers to voice cloning; Phase 09 has no default-voice path. |
 | Native chunk timing metadata | INTEGRATE | |
-| `chunk_size=4` | INTEGRATE | |
+| `chunk_size=2` | INTEGRATE | Keeps native hot first-chunk latency inside the 500 ms gate while RayMe retains its separate 600 ms startup audio buffer. |
 | `non_streaming_mode=True` for the current bounded text segment | INTEGRATE | |
 | `append_silence=True` | INTEGRATE | |
 | Generator close/exhaustion terminal semantics | INTEGRATE | |
