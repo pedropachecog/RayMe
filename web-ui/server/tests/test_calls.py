@@ -13,6 +13,7 @@ import time
 from collections.abc import AsyncIterator, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -20,7 +21,7 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from app.api.characters import get_character_session
@@ -35,7 +36,16 @@ from app.domain.ai_backend_client import (
 )
 from app.main import create_app
 from app.domain.call_service import CallService
-from app.storage.models import Base, CallTurn, Character, Message, Thread, Voice, VoiceAsset
+from app.storage.models import (
+    Base,
+    CallTurn,
+    Character,
+    Message,
+    Thread,
+    Voice,
+    VoiceAsset,
+    utc_now,
+)
 from app.storage.session import create_engine
 
 
@@ -1366,6 +1376,191 @@ def test_concurrent_duplicate_turn_endpoint_reuses_reservation_without_replay(
     assert turns[0].state == "completed"
     assert turns[0].user_message_id == messages[0].id
     assert turns[0].assistant_message_id == messages[1].id
+
+
+def test_reservation_commit_that_persists_then_cancels_is_terminalized_by_owner(
+    call_fixture: CallFixture,
+) -> None:
+    thread_id = asyncio.run(
+        _insert_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post(
+        "/api/calls/start",
+        json={"thread_id": thread_id},
+    ).json()
+
+    async def scenario() -> tuple[CallTurn, bool, str, int]:
+        owner_task = object()
+        async with call_fixture.sessionmaker() as session:
+            service = CallService(session)
+            original_commit = session.commit
+
+            async def commit_then_cancel() -> None:
+                await original_commit()
+                raise asyncio.CancelledError()
+
+            session.commit = commit_then_cancel  # type: ignore[method-assign]
+            with pytest.raises(asyncio.CancelledError):
+                await service.reserve_call_turn(
+                    started["call_id"],
+                    turn_id="turn-reservation-cancelled-after-commit",
+                    text="Persist the reservation, then cancel the waiter.",
+                    task=owner_task,
+                )
+            call = service._active_call(started["call_id"])
+            owner_removed = (
+                "turn-reservation-cancelled-after-commit" not in call.turn_owners
+                and owner_task not in call.active_turn_tasks
+            )
+
+        async with call_fixture.sessionmaker() as verification_session:
+            turn = await verification_session.scalar(
+                select(CallTurn).where(
+                    CallTurn.call_id == started["call_id"],
+                    CallTurn.turn_id == "turn-reservation-cancelled-after-commit",
+                )
+            )
+            assert turn is not None
+            retry = await CallService(verification_session).reserve_call_turn(
+                started["call_id"],
+                turn_id="turn-reservation-cancelled-after-commit",
+                text="Persist the reservation, then cancel the waiter.",
+                task=None,
+            )
+            message_count = int(
+                await verification_session.scalar(
+                    select(func.count(Message.id)).where(
+                        Message.thread_id == thread_id,
+                        Message.message_kind.in_(("user_speech", "ai_speech")),
+                    )
+                )
+                or 0
+            )
+            return turn, owner_removed, retry.state, message_count
+
+    turn, owner_removed, retry_state, message_count = asyncio.run(scenario())
+
+    assert turn.state == "cancelled"
+    assert turn.owner_token is None
+    assert turn.lease_expires_at is None
+    assert owner_removed is True
+    assert retry_state == "cancelled"
+    assert message_count == 0
+
+
+def test_expired_restart_style_turn_is_failed_without_llm_or_tts_replay(
+    call_fixture: CallFixture,
+) -> None:
+    thread_id = asyncio.run(
+        _insert_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post(
+        "/api/calls/start",
+        json={"thread_id": thread_id},
+    ).json()
+    turn_id = "turn-expired-after-restart"
+    text = "Do not replay this abandoned turn."
+
+    async def abandon_owner() -> str:
+        async with call_fixture.sessionmaker() as session:
+            service = CallService(session)
+            reservation = await service.reserve_call_turn(
+                started["call_id"],
+                turn_id=turn_id,
+                text=text,
+                task=object(),
+            )
+            assert reservation.owner_token is not None
+            assert await service.record_reserved_user_speech(
+                started["call_id"],
+                turn_id=turn_id,
+                text=text,
+                owner_token=reservation.owner_token,
+            ) is not None
+            await session.execute(
+                update(CallTurn)
+                .where(
+                    CallTurn.call_id == started["call_id"],
+                    CallTurn.turn_id == turn_id,
+                )
+                .values(lease_expires_at=utc_now() - timedelta(seconds=1))
+            )
+            await session.commit()
+            call = service._active_call(started["call_id"])
+            call.turn_owners.clear()
+            call.turn_owner_tasks.clear()
+            call.active_turn_tasks.clear()
+
+        async with call_fixture.sessionmaker() as restart_session:
+            assert await CallService(restart_session).reconcile_stale_call_turns() == 1
+        return reservation.owner_token
+
+    expired_owner = asyncio.run(abandon_owner())
+
+    route = f"/api/calls/{started['call_id']}/turns"
+    payload = {
+        "session_id": started["session_id"],
+        "turn_id": turn_id,
+        "text": text,
+        "source": "user_final",
+    }
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        retries = [
+            executor.submit(call_fixture.client.post, route, json=payload)
+            for _ in range(2)
+        ]
+        responses = [retry.result(timeout=5.0) for retry in retries]
+
+    for response in responses:
+        assert response.status_code == 200
+        assert _sse_events(response.text) == [
+            {
+                "type": "turn_existing",
+                "turn_id": turn_id,
+                "state": "failed",
+                "recoverable": True,
+            }
+        ]
+    assert call_fixture.completion.requests == []
+    assert call_fixture.backend.speak_calls == []
+
+    async def persisted() -> tuple[CallTurn, list[Message], dict[str, Any] | None]:
+        async with call_fixture.sessionmaker() as session:
+            late_owner_write = await CallService(session).record_completed_ai_speech(
+                started["call_id"],
+                turn_id=turn_id,
+                text="A stale owner must not publish this answer.",
+                terminal=SpeechTurnTerminal(
+                    status="normal",
+                    playout_completed=True,
+                ),
+                owner_token=expired_owner,
+            )
+            turn = await session.scalar(
+                select(CallTurn).where(
+                    CallTurn.call_id == started["call_id"],
+                    CallTurn.turn_id == turn_id,
+                )
+            )
+            assert turn is not None
+            messages = (
+                await session.execute(
+                    select(Message).where(
+                        Message.thread_id == thread_id,
+                        Message.message_kind.in_(("user_speech", "ai_speech")),
+                    )
+                )
+            ).scalars().all()
+            return turn, messages, late_owner_write
+
+    turn, messages, late_owner_write = asyncio.run(persisted())
+    assert turn.state == "failed"
+    assert turn.owner_token is None
+    assert turn.lease_expires_at is None
+    assert late_owner_write is None
+    assert [(message.message_kind, message.content_text) for message in messages] == [
+        ("user_speech", text)
+    ]
 
 
 def test_post_hangup_turn_endpoint_rejects_before_history_llm_or_tts(

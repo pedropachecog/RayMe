@@ -359,6 +359,7 @@ async def create_call_turn(
     async def events() -> AsyncIterator[str]:
         current_task = asyncio.current_task()
         reservation_created = False
+        reservation_owner_token: str | None = None
         terminal_state: Literal["completed", "failed", "cancelled"] = "failed"
         accumulated: list[str] = []
         speech_turn: SpeechTurn | None = None
@@ -421,11 +422,15 @@ async def create_call_turn(
                     )
                 return
             reservation_created = True
+            reservation_owner_token = reservation.owner_token
+            if reservation_owner_token is None:
+                raise RuntimeError("created call turn reservation has no owner")
             call = service.active_call(call_id)
             user_message = await service.record_reserved_user_speech(
                 call_id,
                 turn_id=payload.turn_id,
                 text=payload.text,
+                owner_token=reservation_owner_token,
             )
             if user_message is None:
                 terminal_state = "cancelled"
@@ -604,6 +609,7 @@ async def create_call_turn(
                 turn_id=payload.turn_id,
                 text=visible_text,
                 terminal=terminal,
+                owner_token=reservation_owner_token,
             )
             if message is None:
                 terminal_state = "cancelled"
@@ -667,15 +673,22 @@ async def create_call_turn(
                     call_id,
                     turn_id=payload.turn_id,
                     state=terminal_state,
+                    owner_token=reservation_owner_token,
                 )
             elif reservation_created:
                 await service.finish_call_turn(
                     call_id,
                     turn_id=payload.turn_id,
                     state="completed",
+                    owner_token=reservation_owner_token,
                 )
             if reservation_created and current_task is not None:
-                await service.unregister_active_turn(call_id, current_task)
+                await service.unregister_active_turn(
+                    call_id,
+                    current_task,
+                    turn_id=payload.turn_id,
+                    owner_token=reservation_owner_token,
+                )
 
     return StreamingResponse(events(), media_type="text/event-stream")
 

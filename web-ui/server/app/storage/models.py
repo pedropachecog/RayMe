@@ -317,6 +317,11 @@ class CallTurn(TimestampMixin, Base):
     )
     request_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     state: Mapped[str] = mapped_column(String(24), nullable=False)
+    owner_token: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     user_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     assistant_message_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 

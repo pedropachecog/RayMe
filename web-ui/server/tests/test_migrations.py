@@ -232,6 +232,8 @@ def test_call_turn_lifecycle_reservation_is_durably_unique(tmp_path: Path) -> No
             "thread_id",
             "request_sha256",
             "state",
+            "owner_token",
+            "lease_expires_at",
             "user_message_id",
             "assistant_message_id",
         }.issubset(column_names(connection, "call_turns"))
@@ -252,6 +254,45 @@ def test_call_turn_lifecycle_reservation_is_durably_unique(tmp_path: Path) -> No
                 """,
                 ("a" * 64,),
             )
+
+
+def test_call_turn_ownership_upgrade_preserves_existing_lifecycle_rows(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "call-turn-ownership.sqlite3"
+    config = migration_config(db_path)
+    command.upgrade(config, "0006_call_turn_lifecycle")
+
+    with connect(db_path) as connection:
+        insert_thread(connection)
+        connection.execute(
+            """
+            INSERT INTO call_turns
+                (id, call_id, turn_id, thread_id, request_sha256, state)
+            VALUES ('legacy-turn', 'legacy-call', 'turn-1', 'thread-1', ?, 'running')
+            """,
+            ("b" * 64,),
+        )
+        connection.commit()
+
+    command.upgrade(config, "head")
+
+    with connect(db_path) as connection:
+        assert {"owner_token", "lease_expires_at"}.issubset(
+            column_names(connection, "call_turns")
+        )
+        row = connection.execute(
+            """
+            SELECT state, owner_token, lease_expires_at
+            FROM call_turns
+            WHERE id = 'legacy-turn'
+            """
+        ).fetchone()
+        assert dict(row) == {
+            "state": "running",
+            "owner_token": None,
+            "lease_expires_at": None,
+        }
 
 
 def test_message_alternates_accept_only_supported_source_actions(tmp_path: Path) -> None:

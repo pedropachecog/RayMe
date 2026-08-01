@@ -7,14 +7,14 @@ import base64
 import hashlib
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 from uuid import uuid4
 
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.domain.ai_backend_client import SpeechTurnTerminal
 from app.domain.thread_service import (
@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 CALL_VOICE_REQUIRED = "call_voice_required"
 CALL_VOICE_UNAVAILABLE = "call_voice_unavailable"
 CALL_SESSION_NOT_FOUND = "call_session_not_found"
+CALL_TURN_LEASE_SECONDS = 300
 
 CallEventType = Literal["user_speech", "ai_speech"]
 
@@ -106,6 +107,8 @@ class ActiveCall:
     persistence_lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
     active_turn_tasks: set[Any] = field(default_factory=set, repr=False)
     turn_states: dict[str, str] = field(default_factory=dict, repr=False)
+    turn_owners: dict[str, str] = field(default_factory=dict, repr=False)
+    turn_owner_tasks: dict[str, Any] = field(default_factory=dict, repr=False)
     end_message_recorded: bool = field(default=False, repr=False)
 
     def to_public_dict(self) -> dict[str, Any]:
@@ -135,6 +138,7 @@ class CallTurnReservation:
     state: str
     request_matches: bool
     assistant_message: dict[str, Any] | None = None
+    owner_token: str | None = None
 
 
 _ACTIVE_CALLS: dict[str, ActiveCall] = {}
@@ -161,6 +165,7 @@ class CallService:
         character_id: str | None = None,
         preflight: CallVoicePreparation,
     ) -> dict[str, Any]:
+        await self.reconcile_stale_call_turns()
         if not thread_id and not character_id:
             raise ThreadNotFoundError("thread_id or character_id is required")
 
@@ -262,6 +267,7 @@ class CallService:
         """Durably own a turn before user history, prompt, LLM, or TTS work."""
         call = self._active_call(call_id)
         request_sha256 = self.call_turn_request_sha256(text)
+        owner_token = f"call_turn_owner_{uuid4().hex}"
         async with call.lifecycle_lock:
             if call.ended_at is not None:
                 raise CallSessionNotFoundError()
@@ -276,7 +282,8 @@ class CallService:
                 if existing is None:
                     call.turn_states.pop(turn_id, None)
                 else:
-                    return await self._turn_reservation(
+                    return await self._existing_turn_reservation(
+                        call,
                         existing,
                         request_sha256=request_sha256,
                     )
@@ -288,8 +295,8 @@ class CallService:
                 )
             )
             if existing is not None:
-                call.turn_states[turn_id] = existing.state
-                return await self._turn_reservation(
+                return await self._existing_turn_reservation(
+                    call,
                     existing,
                     request_sha256=request_sha256,
                 )
@@ -302,13 +309,21 @@ class CallService:
                 thread_id=call.thread_id,
                 request_sha256=request_sha256,
                 state="reserved",
+                owner_token=owner_token,
+                lease_expires_at=now + timedelta(seconds=CALL_TURN_LEASE_SECONDS),
                 created_at=now,
                 updated_at=now,
             )
             self.session.add(turn)
+            call.turn_states[turn_id] = "reserved"
+            call.turn_owners[turn_id] = owner_token
+            if task is not None:
+                call.active_turn_tasks.add(task)
+                call.turn_owner_tasks[turn_id] = task
             try:
                 await self.session.commit()
             except IntegrityError:
+                self._discard_turn_owner(call, turn_id, owner_token, task)
                 await self.session.rollback()
                 existing = await self.session.scalar(
                     select(CallTurn).where(
@@ -318,18 +333,44 @@ class CallService:
                 )
                 if existing is None:
                     raise
-                call.turn_states[turn_id] = existing.state
-                return await self._turn_reservation(
+                return await self._existing_turn_reservation(
+                    call,
                     existing,
                     request_sha256=request_sha256,
                 )
-            call.turn_states[turn_id] = "reserved"
-            if task is not None:
-                call.active_turn_tasks.add(task)
+            except BaseException as exc:
+                self._discard_turn_owner(call, turn_id, owner_token, task)
+                try:
+                    await self.session.rollback()
+                except BaseException:
+                    pass
+                failure_state: Literal["failed", "cancelled"] = (
+                    "cancelled" if isinstance(exc, asyncio.CancelledError) else "failed"
+                )
+                try:
+                    recovered = await asyncio.shield(
+                        self._terminalize_committed_reservation_owner(
+                            call_id=call_id,
+                            turn_id=turn_id,
+                            owner_token=owner_token,
+                            state=failure_state,
+                        )
+                    )
+                except Exception:
+                    logger.exception(
+                        "[call-turn] reservation.recovery_failed call=%s turn=%s",
+                        call_id,
+                        turn_id,
+                    )
+                else:
+                    if recovered:
+                        call.turn_states[turn_id] = failure_state
+                raise
             return CallTurnReservation(
                 created=True,
                 state="reserved",
                 request_matches=True,
+                owner_token=owner_token,
             )
 
     @staticmethod
@@ -357,6 +398,7 @@ class CallService:
         if turn is None:
             raise CallSessionNotFoundError()
         async with call.lifecycle_lock:
+            await self._terminalize_stale_turn_if_needed(call, turn)
             call.turn_states[turn_id] = turn.state
         return await self._turn_reservation(
             turn,
@@ -396,6 +438,176 @@ class CallService:
             assistant_message=assistant_message,
         )
 
+    async def _existing_turn_reservation(
+        self,
+        call: ActiveCall,
+        turn: CallTurn,
+        *,
+        request_sha256: str,
+    ) -> CallTurnReservation:
+        await self._terminalize_stale_turn_if_needed(call, turn)
+        call.turn_states[turn.turn_id] = turn.state
+        return await self._turn_reservation(
+            turn,
+            request_sha256=request_sha256,
+        )
+
+    async def _terminalize_stale_turn_if_needed(
+        self,
+        call: ActiveCall,
+        turn: CallTurn,
+    ) -> None:
+        if turn.state not in {"reserved", "running"}:
+            return
+        if self._turn_owner_is_live(call, turn):
+            return
+        owner_known_dead = (
+            turn.owner_token is not None
+            and call.turn_owners.get(turn.turn_id) == turn.owner_token
+        )
+        expires_at = turn.lease_expires_at
+        if expires_at is not None and not owner_known_dead:
+            if expires_at.tzinfo is None:
+                expires_at = expires_at.replace(tzinfo=timezone.utc)
+            if expires_at > utc_now():
+                return
+        stale_owner_token = turn.owner_token
+        stale_update = update(CallTurn).where(
+            CallTurn.id == turn.id,
+            CallTurn.state.in_(("reserved", "running")),
+            CallTurn.owner_token == stale_owner_token,
+        )
+        if not owner_known_dead:
+            stale_update = stale_update.where(
+                CallTurn.lease_expires_at.is_(None)
+                | (CallTurn.lease_expires_at <= utc_now())
+            )
+        result = await self.session.execute(
+            stale_update
+            .values(
+                state="failed",
+                owner_token=None,
+                lease_expires_at=None,
+                updated_at=utc_now(),
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await self.session.commit()
+        if result.rowcount != 1:
+            await self.session.refresh(turn)
+            return
+        turn.state = "failed"
+        turn.owner_token = None
+        turn.lease_expires_at = None
+        call.turn_states[turn.turn_id] = "failed"
+        call.turn_owners.pop(turn.turn_id, None)
+        call.turn_owner_tasks.pop(turn.turn_id, None)
+
+    async def reconcile_stale_call_turns(self) -> int:
+        """Fail expired orphan owners when a web process starts serving calls."""
+        now = utc_now()
+        turns = (
+            await self.session.execute(
+                select(CallTurn).where(
+                    CallTurn.state.in_(("reserved", "running")),
+                    (
+                        CallTurn.lease_expires_at.is_(None)
+                        | (CallTurn.lease_expires_at <= now)
+                    ),
+                )
+            )
+        ).scalars().all()
+        reconciled = 0
+        for turn in turns:
+            call = _ACTIVE_CALLS.get(turn.call_id)
+            if call is not None:
+                async with call.lifecycle_lock:
+                    before = turn.state
+                    await self._terminalize_stale_turn_if_needed(call, turn)
+                    if before != turn.state:
+                        reconciled += 1
+                continue
+            result = await self.session.execute(
+                update(CallTurn)
+                .where(
+                    CallTurn.id == turn.id,
+                    CallTurn.state.in_(("reserved", "running")),
+                    (
+                        CallTurn.lease_expires_at.is_(None)
+                        | (CallTurn.lease_expires_at <= now)
+                    ),
+                )
+                .values(
+                    state="failed",
+                    owner_token=None,
+                    lease_expires_at=None,
+                    updated_at=now,
+                )
+                .execution_options(synchronize_session=False)
+            )
+            await self.session.commit()
+            if result.rowcount == 1:
+                reconciled += 1
+        return reconciled
+
+    @staticmethod
+    def _turn_owner_is_live(call: ActiveCall, turn: CallTurn) -> bool:
+        if (
+            turn.owner_token is None
+            or call.turn_owners.get(turn.turn_id) != turn.owner_token
+        ):
+            return False
+        task = call.turn_owner_tasks.get(turn.turn_id)
+        if task is None:
+            return True
+        done = getattr(task, "done", None)
+        return not callable(done) or not bool(done())
+
+    async def _terminalize_committed_reservation_owner(
+        self,
+        *,
+        call_id: str,
+        turn_id: str,
+        owner_token: str,
+        state: Literal["failed", "cancelled"],
+    ) -> bool:
+        bind = self.session.bind
+        if bind is None:
+            return False
+        recovery_sessions = async_sessionmaker(bind, expire_on_commit=False)
+        async with recovery_sessions() as recovery_session:
+            result = await recovery_session.execute(
+                update(CallTurn)
+                .where(
+                    CallTurn.call_id == call_id,
+                    CallTurn.turn_id == turn_id,
+                    CallTurn.owner_token == owner_token,
+                    CallTurn.state.in_(("reserved", "running")),
+                )
+                .values(
+                    state=state,
+                    owner_token=None,
+                    lease_expires_at=None,
+                    updated_at=utc_now(),
+                )
+            )
+            await recovery_session.commit()
+            return result.rowcount == 1
+
+    @staticmethod
+    def _discard_turn_owner(
+        call: ActiveCall,
+        turn_id: str,
+        owner_token: str,
+        task: Any | None,
+    ) -> None:
+        if call.turn_owners.get(turn_id) == owner_token:
+            call.turn_owners.pop(turn_id, None)
+            call.turn_owner_tasks.pop(turn_id, None)
+            call.turn_states.pop(turn_id, None)
+        if task is not None:
+            call.active_turn_tasks.discard(task)
+
     async def register_active_turn(self, call_id: str, task: Any) -> bool:
         call = self._active_call(call_id)
         async with call.lifecycle_lock:
@@ -404,10 +616,24 @@ class CallService:
             call.active_turn_tasks.add(task)
             return True
 
-    async def unregister_active_turn(self, call_id: str, task: Any) -> None:
+    async def unregister_active_turn(
+        self,
+        call_id: str,
+        task: Any,
+        *,
+        turn_id: str | None = None,
+        owner_token: str | None = None,
+    ) -> None:
         call = self._active_call(call_id)
         async with call.lifecycle_lock:
             call.active_turn_tasks.discard(task)
+            if (
+                turn_id is not None
+                and owner_token is not None
+                and call.turn_owners.get(turn_id) == owner_token
+            ):
+                call.turn_owners.pop(turn_id, None)
+                call.turn_owner_tasks.pop(turn_id, None)
 
     async def cancel_active_turns(self, call_id: str) -> None:
         call = self._active_call(call_id)
@@ -436,13 +662,17 @@ class CallService:
         *,
         turn_id: str,
         text: str,
+        owner_token: str | None = None,
     ) -> dict[str, Any] | None:
         call = self._active_call(call_id)
+        resolved_owner = owner_token or call.turn_owners.get(turn_id)
         async with call.persistence_lock:
             async with call.lifecycle_lock:
                 if (
                     call.ended_at is not None
                     or call.turn_states.get(turn_id) != "reserved"
+                    or resolved_owner is None
+                    or call.turn_owners.get(turn_id) != resolved_owner
                 ):
                     return None
                 message = await self._stage_message(
@@ -457,11 +687,18 @@ class CallService:
                         CallTurn.turn_id == turn_id,
                     )
                 )
-                if turn is None or turn.state != "reserved":
+                if (
+                    turn is None
+                    or turn.state != "reserved"
+                    or turn.owner_token != resolved_owner
+                ):
                     await self.session.rollback()
                     return None
                 turn.user_message_id = str(message["id"])
                 turn.state = "running"
+                turn.lease_expires_at = utc_now() + timedelta(
+                    seconds=CALL_TURN_LEASE_SECONDS
+                )
                 turn.updated_at = utc_now()
                 await self.session.commit()
                 call.turn_states[turn_id] = "running"
@@ -483,15 +720,19 @@ class CallService:
         turn_id: str,
         text: str,
         terminal: SpeechTurnTerminal,
+        owner_token: str | None = None,
     ) -> dict[str, Any] | None:
         """Persist one exact assistant row only after normal completed playout."""
         call = self._active_call(call_id)
+        resolved_owner = owner_token or call.turn_owners.get(turn_id)
         if terminal.status != "normal" or not terminal.playout_completed:
             return None
         async with call.lifecycle_lock:
             if (
                 call.ended_at is not None
                 or call.turn_states.get(turn_id) != "running"
+                or resolved_owner is None
+                or call.turn_owners.get(turn_id) != resolved_owner
                 or turn_id in call.completed_ai_turn_ids
                 or turn_id in call.pending_ai_turn_ids
             ):
@@ -504,7 +745,10 @@ class CallService:
             # therefore publish its terminal state before this commit gate.
             async with call.persistence_lock:
                 async with call.lifecycle_lock:
-                    if call.ended_at is not None:
+                    if (
+                        call.ended_at is not None
+                        or call.turn_owners.get(turn_id) != resolved_owner
+                    ):
                         call.pending_ai_turn_ids.discard(turn_id)
                         return None
 
@@ -528,12 +772,18 @@ class CallService:
                             CallTurn.turn_id == turn_id,
                         )
                     )
-                    if turn is None or turn.state != "running":
+                    if (
+                        turn is None
+                        or turn.state != "running"
+                        or turn.owner_token != resolved_owner
+                    ):
                         await self.session.rollback()
                         call.pending_ai_turn_ids.discard(turn_id)
                         return None
                     turn.assistant_message_id = str(message["id"])
                     turn.state = "completed"
+                    turn.owner_token = None
+                    turn.lease_expires_at = None
                     turn.updated_at = utc_now()
                     try:
                         await self.session.commit()
@@ -585,12 +835,18 @@ class CallService:
         *,
         turn_id: str,
         state: Literal["completed", "failed", "cancelled"],
+        owner_token: str | None = None,
     ) -> None:
         call = self._active_call(call_id)
+        resolved_owner = owner_token or call.turn_owners.get(turn_id)
         async with call.persistence_lock:
             async with call.lifecycle_lock:
                 current = call.turn_states.get(turn_id)
-                if current not in {"reserved", "running"}:
+                if (
+                    current not in {"reserved", "running"}
+                    or resolved_owner is None
+                    or call.turn_owners.get(turn_id) != resolved_owner
+                ):
                     return
                 turn = await self.session.scalar(
                     select(CallTurn).where(
@@ -598,9 +854,15 @@ class CallService:
                         CallTurn.turn_id == turn_id,
                     )
                 )
-                if turn is None or turn.state not in {"reserved", "running"}:
+                if (
+                    turn is None
+                    or turn.state not in {"reserved", "running"}
+                    or turn.owner_token != resolved_owner
+                ):
                     return
                 turn.state = state
+                turn.owner_token = None
+                turn.lease_expires_at = None
                 turn.updated_at = utc_now()
                 await self.session.commit()
                 call.turn_states[turn_id] = state
@@ -660,6 +922,8 @@ class CallService:
             }
             for turn_id in active_turn_ids:
                 call.turn_states[turn_id] = "cancelled"
+                call.turn_owners.pop(turn_id, None)
+                call.turn_owner_tasks.pop(turn_id, None)
         return call.to_public_dict()
 
     async def end_call(self, call_id: str, reason: str = "hangup") -> dict[str, Any]:
@@ -672,7 +936,12 @@ class CallService:
                     CallTurn.call_id == call_id,
                     CallTurn.state.in_(("reserved", "running")),
                 )
-                .values(state="cancelled", updated_at=utc_now())
+                .values(
+                    state="cancelled",
+                    owner_token=None,
+                    lease_expires_at=None,
+                    updated_at=utc_now(),
+                )
             )
             async with call.lifecycle_lock:
                 if not call.end_message_recorded:
