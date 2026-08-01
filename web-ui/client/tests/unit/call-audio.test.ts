@@ -2,10 +2,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   createCallRmsMeter,
+  DEFAULT_REMOTE_CALL_INTERRUPT_DRAIN_MS,
   ensureRemoteCallAudioAudible,
   getOutputPickerUnavailableCopy,
   keepCallMicrophoneTracksLive,
+  MAX_REMOTE_CALL_INTERRUPT_DRAIN_MS,
+  normalizeRemoteCallInterruptDrainMs,
   requestCallMicrophone,
+  syncRemoteCallAudioAudibility,
   unlockCallAudioContext
 } from '../../src/lib/call/audio';
 
@@ -68,6 +72,37 @@ describe('call audio helpers', () => {
     expect(audio.muted).toBe(false);
     expect(ensureRemoteCallAudioAudible(audio)).toBe(false);
     expect(audio.muted).toBe(false);
+  });
+
+  it('mutes remote WebRTC audio only while the bounded interrupt drain is active', () => {
+    const audio = { muted: false };
+
+    expect(syncRemoteCallAudioAudibility(audio, true)).toBe(true);
+    expect(audio.muted).toBe(true);
+    expect(syncRemoteCallAudioAudibility(audio, true)).toBe(false);
+    expect(syncRemoteCallAudioAudibility(audio, false)).toBe(true);
+    expect(audio.muted).toBe(false);
+  });
+
+  it('normalizes receiver drain values at the specified default and hard boundary', () => {
+    expect(normalizeRemoteCallInterruptDrainMs(1)).toBe(1);
+    expect(normalizeRemoteCallInterruptDrainMs(MAX_REMOTE_CALL_INTERRUPT_DRAIN_MS)).toBe(
+      MAX_REMOTE_CALL_INTERRUPT_DRAIN_MS
+    );
+    for (const invalid of [
+      undefined,
+      null,
+      0,
+      -1,
+      0.1,
+      MAX_REMOTE_CALL_INTERRUPT_DRAIN_MS + 1,
+      true,
+      '250'
+    ]) {
+      expect(normalizeRemoteCallInterruptDrainMs(invalid as number | null | undefined)).toBe(
+        DEFAULT_REMOTE_CALL_INTERRUPT_DRAIN_MS
+      );
+    }
   });
 
   it('keeps WebRTC microphone tracks enabled across call state transitions', () => {

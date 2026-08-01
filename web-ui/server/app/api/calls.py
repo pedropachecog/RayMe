@@ -39,6 +39,21 @@ from app.storage.session import SERVER_ROOT, get_session
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/calls", tags=["calls"])
+
+CALL_INTERRUPT_RECEIVER_DRAIN_MS = 250
+MAX_CALL_INTERRUPT_RECEIVER_DRAIN_MS = 500
+
+
+def _safe_receiver_drain_ms(value: Any) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not 1 <= value <= MAX_CALL_INTERRUPT_RECEIVER_DRAIN_MS
+    ):
+        return CALL_INTERRUPT_RECEIVER_DRAIN_MS
+    return value
+
+
 DEFAULT_CALL_VOICE_BLOB_DIR = SERVER_ROOT / "data" / "blobs" / "voices"
 
 CALL_BACKEND_NOT_READY = "call_backend_not_ready"
@@ -341,7 +356,9 @@ async def interrupt_call(
             "session_id": session_id,
             "interrupted": True,
             "cancelled_turn_id": interrupt_result.get("cancelled_turn_id"),
-            "receiver_drain_ms": interrupt_result.get("receiver_drain_ms"),
+            "receiver_drain_ms": _safe_receiver_drain_ms(
+                interrupt_result.get("receiver_drain_ms")
+            ),
         }
     except CallServiceError as exc:
         raise _call_error(exc) from exc

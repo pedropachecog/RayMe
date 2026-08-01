@@ -89,6 +89,7 @@ class ScriptedCallBackend:
         self.drained_events: list[dict[str, Any]] = []
         self.speak_calls: list[dict[str, Any]] = []
         self.interrupt_calls: list[dict[str, Any]] = []
+        self.interrupt_result: dict[str, Any] | None = None
 
     async def readiness(self) -> dict[str, Any]:
         self.readiness_calls += 1
@@ -185,12 +186,15 @@ class ScriptedCallBackend:
 
     async def interrupt_call(self, base_url: str, session_id: str) -> dict[str, Any]:
         self.interrupt_calls.append({"base_url": base_url, "session_id": session_id})
-        return {
-            "session_id": session_id,
-            "interrupted": True,
-            "cancelled_turn_id": "turn-interrupted-01",
-            "receiver_drain_ms": 250,
-        }
+        return dict(
+            self.interrupt_result
+            or {
+                "session_id": session_id,
+                "interrupted": True,
+                "cancelled_turn_id": "turn-interrupted-01",
+                "receiver_drain_ms": 250,
+            }
+        )
 
     async def end_call(self, base_url: str, session_id: str, reason: str) -> dict[str, Any]:
         if self.fail_end:
@@ -2386,6 +2390,43 @@ def test_interrupt_cancels_server_generation_and_ai_backend_session(
     ]
     assert response.json()["receiver_drain_ms"] == 250
     assert response.json()["cancelled_turn_id"] == "turn-interrupted-01"
+
+
+@pytest.mark.parametrize(
+    "backend_payload",
+    [
+        {"receiver_drain_ms": 0.1},
+        {"receiver_drain_ms": True},
+        {"receiver_drain_ms": "250"},
+        {"receiver_drain_ms": -1},
+        {},
+        {"receiver_drain_ms": 501},
+    ],
+)
+def test_interrupt_uses_safe_default_for_invalid_backend_drain_contract(
+    call_fixture: CallFixture,
+    backend_payload: dict[str, Any],
+) -> None:
+    thread_id = asyncio.run(
+        _insert_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post(
+        "/api/calls/start",
+        json={"thread_id": thread_id},
+    ).json()
+    call_fixture.backend.interrupt_result = {
+        "session_id": started["session_id"],
+        "interrupted": True,
+        **backend_payload,
+    }
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/interrupt",
+        json={"session_id": started["session_id"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["receiver_drain_ms"] == 250
 
 
 def test_call_control_cancels_and_awaits_every_active_turn_task(

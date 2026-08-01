@@ -4,6 +4,9 @@ export const INPUT_PICKER_UNAVAILABLE_COPY =
 export const OUTPUT_PICKER_UNAVAILABLE_COPY =
   'Output selection is not available in this browser. RayMe will use the browser default output.';
 
+export const DEFAULT_REMOTE_CALL_INTERRUPT_DRAIN_MS = 250;
+export const MAX_REMOTE_CALL_INTERRUPT_DRAIN_MS = 500;
+
 interface UnlockableAudioContext {
   state: AudioContextState;
   sampleRate?: number;
@@ -85,10 +88,30 @@ export async function requestCallMicrophone(): Promise<MediaStream> {
 }
 
 export function ensureRemoteCallAudioAudible(audio: Pick<HTMLMediaElement, 'muted'>): boolean {
-  if (!audio.muted) {
+  return syncRemoteCallAudioAudibility(audio, false);
+}
+
+export function normalizeRemoteCallInterruptDrainMs(value: number | null | undefined): number {
+  if (
+    typeof value !== 'number' ||
+    !Number.isInteger(value) ||
+    value < 1 ||
+    value > MAX_REMOTE_CALL_INTERRUPT_DRAIN_MS
+  ) {
+    return DEFAULT_REMOTE_CALL_INTERRUPT_DRAIN_MS;
+  }
+  return value;
+}
+
+export function syncRemoteCallAudioAudibility(
+  audio: Pick<HTMLMediaElement, 'muted'>,
+  interruptDrainActive: boolean
+): boolean {
+  const shouldMute = interruptDrainActive;
+  if (audio.muted === shouldMute) {
     return false;
   }
-  audio.muted = false;
+  audio.muted = shouldMute;
   return true;
 }
 
