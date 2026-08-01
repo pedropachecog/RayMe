@@ -1,27 +1,24 @@
 ---
 phase: 09-integrate-faster-qwen3-tts-1-7b-into-live-calls
-reviewed: 2026-08-01T15:23:32Z
+reviewed: 2026-08-01T17:06:11Z
 depth: deep
-files_reviewed: 18
+files_reviewed: 15
 files_reviewed_list:
-  - ai-backend/app/models/model_manager.py
-  - ai-backend/tests/test_model_manager.py
-  - web-ui/client/src/lib/api/types.ts
-  - web-ui/client/src/routes/call/[threadId]/+page.svelte
-  - web-ui/client/src/routes/voice-lab/+page.svelte
-  - web-ui/client/tests/e2e/live-call.spec.ts
-  - web-ui/client/tests/e2e/qwen3-readiness.spec.ts
-  - web-ui/client/tests/unit/voice-lab.test.ts
-  - web-ui/server/app/api/voices.py
-  - web-ui/server/app/domain/call_service.py
-  - web-ui/server/app/domain/voice_service.py
-  - web-ui/server/alembic/versions/0008_remove_qwen3_authorization.py
-  - web-ui/server/tests/test_calls.py
-  - web-ui/server/tests/test_migrations.py
-  - web-ui/server/tests/test_voices.py
   - .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-run-hardware-tracer.py
-  - .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-run-omen-evidence.py
   - .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/test_phase09_evidence.py
+  - ai-backend/app/api/webrtc.py
+  - ai-backend/app/call/session.py
+  - ai-backend/tests/test_call_session.py
+  - ai-backend/tests/test_webrtc_signaling.py
+  - web-ui/client/src/lib/api/calls.ts
+  - web-ui/client/src/lib/api/types.ts
+  - web-ui/client/src/lib/call/audio.ts
+  - web-ui/client/src/routes/call/[threadId]/+page.svelte
+  - web-ui/client/tests/e2e/call-toolbar.spec.ts
+  - web-ui/client/tests/e2e/helpers/acceptance.ts
+  - web-ui/client/tests/unit/call-audio.test.ts
+  - web-ui/server/app/api/calls.py
+  - web-ui/server/tests/test_calls.py
 findings:
   critical: 0
   warning: 0
@@ -32,54 +29,44 @@ status: clean
 
 # Phase 09: Code Review Report
 
-**Reviewed:** 2026-08-01T15:23:32Z
+**Reviewed:** 2026-08-01T17:06:11Z
 **Depth:** deep
-**Files Reviewed:** 18
+**Files Reviewed:** 15
 **Status:** clean
 
 ## Summary
 
-The final focused re-review of continuation commit `50d2313` is clean. The exception boundary in `09-run-omen-evidence.py` now emits full messages only for the runner's curated `EvidenceRunnerError` domain failures. Every other `Exception` is reduced to its class name, so paths, transcripts, and other private exception details do not reach the canonical deployment output. `KeyboardInterrupt` and `SystemExit` continue to propagate, successful runs still emit `PASS` and return zero, and unexpected failures return nonzero.
+The complete `3bc3100..345fe33` receiver-drain implementation is clean under deep adversarial review. All four prior findings are closed:
 
-The stale saved-voice helper call is also closed: both the evidence runner and hardware tracer call `_create_saved_voice(api, *, reference_audio, transcript)` without the removed `selection` argument. Authorization remains enforced by hash-bound preflight and retained in permitted evidence rather than being written into saved-voice metadata. The canonical deployment captures the runner status, republishes only `PASS*`/`FAIL:*` lines, aborts on nonzero status, and requires independent same-commit core-ready verification before evidence copyback.
+- CR-01: one session/turn-scoped generation owns the immediate mute and visual-state timers; matching HTTP/data-channel acknowledgements cannot restart them, newer turns supersede them, teardown invalidates them, reconnect attachment preserves the active mute, and automatic VAD remains functional.
+- CR-02: the hardware tracer observes through the later interrupted-event receive boundary while classifying audible frames against the declared HTTP-acknowledgement drain boundary.
+- CR-03: cancellation captures the exact request's metrics callback before speech-task teardown, samples it immediately after outbound playout is drained, and only then waits for worker acknowledgement. The event retains measured exact-zero telemetry even when the speech task has already cleared its active fields.
+- WR-01: the Web and browser boundaries accept only integer drain values from 1 through 500 and use the safe 250 ms default for missing, fractional, boolean, string, negative, and oversized values.
 
-The earlier 17-file deep review remains clean through `d9d2a46`: transcript alignment, Qwen-scoped metadata cleanup, migration behavior, API compatibility, and live-call streaming invariants remain closed.
+The bounded receiver mute remains separate from TTS startup behavior. Qwen and VoxCPM2 still begin live playback before slow stream completion, automatic barge-in still silences queued playout and preserves the microphone turn, cancelled turns reject late audio/normal completion, and the VoxCPM2 streaming path still rejects whole-synthesis fallback.
 
 All reviewed files meet quality standards. No issues found.
 
 ## Narrative Findings (AI reviewer)
 
-No Critical, Warning, or Info findings.
+No findings.
 
 ## Verification
 
-### Final continuation `50d2313`
-
-- Audited every `EvidenceRunnerError` construction in the runner. Dynamic values are bounded runner labels, manifest scenario IDs, turn numbers, artifact keys, and stream names; private paths, transcript contents, and underlying exception messages are not interpolated.
-- Confirmed the handler order is `EvidenceRunnerError` first, followed by class-name-only `Exception`; the previous raw `OSError`/`RuntimeError`/`ValueError` leak is closed.
-- Confirmed `KeyboardInterrupt` and `SystemExit` remain outside the handler because they inherit from `BaseException`.
-- Confirmed success returns `0` with `PASS`; domain and unexpected failures return `1` with a sanitized `FAIL:` line.
-- Traced `_create_saved_voice(api, *, reference_audio, transcript)` from both call sites to the current hardware-tracer signature. No stale `selection` argument remains at the saved-voice boundary.
-- Confirmed the saved-voice payload contains only `metadata.source=phase09_hardware_tracer`; retired authorization fields remain absent.
-- Confirmed deployment aborts on a nonzero runner status and independently verifies the commit-bound core-ready bundle before copyback.
-- `ai-backend/.venv/bin/pytest -q .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/test_phase09_evidence.py`: 59 passed.
-- Runner `--dry-run` at `50d23136a7d88efab8cc48696a2461f1941e04c8`: passed.
-- `bash -n scripts/deploy-omen.sh`: passed.
-- `git diff --check f999d33..50d2313`: passed.
-- Conflict-marker scan across the continuation files and deployment script: none found.
-
-### Earlier clean gate through `d9d2a46`
-
-- Model-manager tests: 32 passed.
-- Server voice/call/migration tests: 128 passed.
-- Client type/Svelte check: passed.
-- Voice Lab unit tests: 17 passed.
-- Qwen readiness Playwright tests: 8 passed.
-- Phase 09 evidence tests at that gate: 50 passed.
-- Focused live-call streaming, cancellation, VoxCPM2 no-fallback, and WebRTC Qwen-carrier invariants: 7 passed.
+- Independent production-class delayed-ack reproduction: passed. The speech task completed and cleared `_active_tts_metrics_snapshot` before acknowledgement; the eventual interrupted event still reported `track_metrics_present=True`, positive admission capacity, exact `track_pending_samples=0`, and `track_pending_audio_ms=0.0`.
+- Focused early-playback, exact-request cancellation, all control causes, automatic VAD/barge-in, signaling, and VoxCPM2 no-whole-synthesis-fallback gate: 15 passed.
+- Phase 09 evidence contracts, including delayed-event capture and stored exact-zero validation: 68 passed.
+- Focused Web interrupt propagation/defaulting contracts: 7 passed.
+- Client call-audio unit tests: 9 passed.
+- Desktop/mobile delayed-response call-toolbar acceptance: 2 passed.
+- SvelteKit sync check: passed.
+- Python AST parsing for all 8 reviewed Python files: passed.
+- `git diff --check`: passed.
+- Conflict-marker scan across all 15 reviewed files: none found.
+- Reviewed diff fingerprint: `239765f71a397302a7c2128b90d88a32259df72f626c1c1ab2c062723fdc8c44`.
 
 ---
 
-_Reviewed: 2026-08-01T15:23:32Z_
+_Reviewed: 2026-08-01T17:06:11Z_
 _Reviewer: the agent (gsd-code-reviewer)_
 _Depth: deep_
