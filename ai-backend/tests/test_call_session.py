@@ -3337,6 +3337,76 @@ def test_connected_replacement_keeps_prompt_lease_owned_through_reconnect() -> N
     assert released_owners == ["call-session-reconnect-lease"]
 
 
+@pytest.mark.parametrize("acceptance_wins", [True, False])
+def test_reconnect_acceptance_and_grace_expiry_make_one_atomic_decision(
+    acceptance_wins: bool,
+) -> None:
+    session, active_peer = _new_session(
+        session_id=f"reconnect-decision-{acceptance_wins}"
+    )
+    candidate = ScriptedPeerConnection()
+
+    async def scenario() -> tuple[bool, bool]:
+        generation = await session.mark_peer_connection_pending(
+            candidate,
+            timeout_seconds=60.0,
+        )
+        active_peer.connectionState = "closed"
+        await session.handle_connection_state_change()
+        reconnect_epoch = session._peer_lifecycle.epoch
+
+        await session._lifecycle_lock.acquire()
+        try:
+            if acceptance_wins:
+                accept_task = asyncio.create_task(
+                    session.accept_pending_peer_connection(
+                        candidate,
+                        generation=generation,
+                    )
+                )
+                await asyncio.sleep(0)
+                resolve_task = asyncio.create_task(
+                    session.resolve_deferred_connection_state(
+                        epoch=reconnect_epoch,
+                        peer_connection=active_peer,
+                    )
+                )
+            else:
+                resolve_task = asyncio.create_task(
+                    session.resolve_deferred_connection_state(
+                        epoch=reconnect_epoch,
+                        peer_connection=active_peer,
+                    )
+                )
+                await asyncio.sleep(0)
+                accept_task = asyncio.create_task(
+                    session.accept_pending_peer_connection(
+                        candidate,
+                        generation=generation,
+                    )
+                )
+        finally:
+            session._lifecycle_lock.release()
+
+        accepted, _ = await accept_task
+        resolved = await resolve_task
+        return accepted, resolved
+
+    accepted, resolved = _run(scenario())
+
+    assert (accepted, resolved) == (
+        (True, False) if acceptance_wins else (False, True)
+    )
+    if acceptance_wins:
+        assert session.peer_connection is candidate
+        assert session.state == "listening"
+        assert candidate.close_calls == 0
+    else:
+        assert session.state == "ended"
+        assert session.end_reason == "connection_closed"
+        assert candidate.close_calls == 1
+
+
 def test_reconnect_candidate_supersession_is_ordered_and_closes_stale_peer() -> None:
     session, active_peer = _new_session(session_id="call-session-reconnect-order")
     first_candidate = ScriptedPeerConnection()
