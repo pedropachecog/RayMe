@@ -17,6 +17,7 @@ MANIFEST_PATH = PHASE_DIR / "09-evidence-manifest.json"
 SPEAKER_PATH = PHASE_DIR / "09-speaker-score.py"
 VERIFIER_PATH = PHASE_DIR / "09-verify-evidence.py"
 RUNNER_PATH = PHASE_DIR / "09-run-omen-evidence.py"
+FIDELITY_SWEEP_PATH = PHASE_DIR / "09-qwen-fidelity-sweep.py"
 
 EXPECTED_SCENARIOS = {
     "clone-valid-short",
@@ -459,6 +460,28 @@ def test_hardware_tracer_consumer_records_and_detects_int16_audio() -> None:
     assert first_nonzero is not None
     assert len(frames) == 1
     assert frames[0][1].tolist() == [0, 64, 256, -512]
+
+
+def test_fidelity_sweep_compares_upstream_and_bounded_fidelity_profiles() -> None:
+    sweep = _load_module(FIDELITY_SWEEP_PATH, "phase09_fidelity_sweep_contract")
+
+    assert sweep.REPO_ROOT == PHASE_DIR.parents[2]
+    assert sweep.PROFILES["upstream-default"] == {
+        "temperature": 0.9,
+        "top_k": 50,
+        "top_p": 1.0,
+        "do_sample": True,
+        "repetition_penalty": 1.05,
+    }
+    assert sweep.PROFILES["fidelity-060"]["temperature"] == 0.60
+    assert sweep.PROFILES["fidelity-060"]["repetition_penalty"] == 1.10
+    assert sweep.PROFILES["greedy"]["do_sample"] is False
+    assert set(sweep.TARGETS) == {
+        "names-numbers",
+        "negation-abbreviations",
+        "punctuation-final-word",
+    }
+    assert sweep._wer("No, version 2.4.", "No version 2.4") == 0.0
 
 
 def _hash_bytes(value: bytes) -> str:

@@ -9,6 +9,7 @@ RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON="${RAYME_OMEN_VOXCPM2_RUNTIME_SMOKE_JSON:-
 RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON="${RAYME_OMEN_VOXCPM2_VRAM_SOAK_JSON:-${RAYME_VOXCPM2_VRAM_SOAK_JSON:-}}"
 RAYME_OMEN_VERIFY_QWEN3_TRACER="${RAYME_OMEN_VERIFY_QWEN3_TRACER:-0}"
 RAYME_OMEN_VERIFY_QWEN3="${RAYME_OMEN_VERIFY_QWEN3:-0}"
+RAYME_OMEN_QWEN3_FIDELITY_SWEEP="${RAYME_OMEN_QWEN3_FIDELITY_SWEEP:-0}"
 
 SCRIPT_DIR=$(
   CDPATH= cd -- "$(dirname -- "$0")"
@@ -44,6 +45,7 @@ remote_bootstrap+="\$env:OMEN_BRANCH=$(ps_single_quote "$OMEN_BRANCH"); "
 remote_bootstrap+="\$env:RAYME_OMEN_VERIFY_VOXCPM2=$(ps_single_quote "$RAYME_OMEN_VERIFY_VOXCPM2"); "
 remote_bootstrap+="\$env:RAYME_OMEN_VERIFY_QWEN3_TRACER=$(ps_single_quote "$RAYME_OMEN_VERIFY_QWEN3_TRACER"); "
 remote_bootstrap+="\$env:RAYME_OMEN_VERIFY_QWEN3=$(ps_single_quote "$RAYME_OMEN_VERIFY_QWEN3"); "
+remote_bootstrap+="\$env:RAYME_OMEN_QWEN3_FIDELITY_SWEEP=$(ps_single_quote "$RAYME_OMEN_QWEN3_FIDELITY_SWEEP"); "
 remote_bootstrap+="Invoke-Expression ([Console]::In.ReadToEnd())"
 
 run_remote_deploy() {
@@ -57,6 +59,7 @@ $expectedHead = $env:EXPECTED_HEAD
 $verifyVoxCpm2 = $env:RAYME_OMEN_VERIFY_VOXCPM2 -eq "1"
 $verifyQwen3Tracer = $env:RAYME_OMEN_VERIFY_QWEN3_TRACER -eq "1"
 $verifyQwen3 = $env:RAYME_OMEN_VERIFY_QWEN3 -eq "1"
+$qwenFidelitySweep = $env:RAYME_OMEN_QWEN3_FIDELITY_SWEEP -eq "1"
 $qwenRuntimeCommit = "a70afc0f81f7f5f8801c3227968f1102f43f211c"
 $qwenModelId = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 $qwenModelRevision = "fd4b254389122332181a7c3db7f27e918eec64e3"
@@ -438,7 +441,7 @@ if ($verifyVoxCpm2) {
   Invoke-RayMeVoxCpm2Verification
 }
 
-if ($verifyQwen3Tracer -or $verifyQwen3) {
+if ($verifyQwen3Tracer -or $verifyQwen3 -or $qwenFidelitySweep) {
   Stop-RayMePortOwners
   Invoke-RayMeQwen3Provisioning
 }
@@ -446,6 +449,16 @@ if ($verifyQwen3Tracer -or $verifyQwen3) {
 Write-Host "== Verifying AI GPU runtime"
 $env:PATH = "$cudaRuntimeBin;$env:PATH"
 & "$repo\ai-backend\.venv\Scripts\python.exe" -c "import torch, torchaudio; assert '+cpu' not in torch.__version__.lower(), torch.__version__; assert torch.version.cuda, torch.__version__; assert torch.cuda.is_available(), torch.__version__; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'device', torch.cuda.get_device_name(0)); print('torchaudio', torchaudio.__version__)"
+
+if ($qwenFidelitySweep) {
+  Write-Host "== Running local Qwen fidelity sweep"
+  $sweepScript = Join-Path $repo ".planning\phases\09-integrate-faster-qwen3-tts-1-7b-into-live-calls\09-qwen-fidelity-sweep.py"
+  $sweepOutput = Join-Path $repo ".local\phase09-qwen3-fidelity-sweep"
+  & "$repo\ai-backend\.venv\Scripts\python.exe" $sweepScript generate --model-dir $qwenModelDir --output-dir $sweepOutput
+  if ($LASTEXITCODE -ne 0) { throw "Qwen fidelity sweep generation failed" }
+  & "$repo\ai-backend\.venv\Scripts\python.exe" $sweepScript score --output-dir $sweepOutput
+  if ($LASTEXITCODE -ne 0) { throw "Qwen fidelity sweep scoring failed" }
+}
 
 Write-Host "== Writing scheduled task launchers"
 $aiLauncher = @"
