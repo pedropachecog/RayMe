@@ -1038,6 +1038,71 @@ def test_slow_reconnect_stt_defers_transport_terminal_and_returns_usable_user_fi
     _run(scenario())
 
 
+@pytest.mark.parametrize("terminal_state", ["ended", "failed"])
+def test_explicit_terminal_suppresses_admitted_slow_backfill_user_final(
+    terminal_state: str,
+) -> None:
+    entered_stt = threading.Event()
+    release_stt = threading.Event()
+    events: list[dict[str, Any]] = []
+
+    class SlowSttAdapter:
+        def transcribe(self, **_kwargs: Any) -> dict[str, Any]:
+            entered_stt.set()
+            assert release_stt.wait(timeout=2.0)
+            return {
+                "status": "accepted",
+                "transcript": "this terminal transcript must be suppressed",
+                "language": "en",
+            }
+
+    async def scenario() -> None:
+        session, _ = _new_session(
+            vad_adapter=ScriptedVadAdapter(),
+            stt_adapter=SlowSttAdapter(),
+            event_sink=events.append,
+        )
+        pre_pcm = np.full(320, 1000, dtype=np.int16).tobytes()
+        gap_pcm = np.full(320, 2000, dtype=np.int16).tobytes()
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pre_pcm)
+        ) is None
+
+        backfill_task = asyncio.create_task(
+            session.backfill_reconnect_audio(
+                pcm=gap_pcm,
+                sample_rate=16000,
+                channels=1,
+                backfill_id=f"slow-stt-explicit-{terminal_state}",
+                final=True,
+            )
+        )
+        assert await asyncio.to_thread(entered_stt.wait, 1.0)
+        if terminal_state == "ended":
+            terminal = await session.end(reason="explicit_hangup")
+        else:
+            terminal = await session.fail(reason="explicit_failure")
+
+        release_stt.set()
+        result = await asyncio.wait_for(backfill_task, timeout=2.0)
+        assert result == {
+            "status": "terminal",
+            "frames": 0,
+            "duration_ms": 0,
+            "state": terminal_state,
+            "reason": (
+                "explicit_hangup"
+                if terminal_state == "ended"
+                else "explicit_failure"
+            ),
+        }
+        assert terminal["type"] == terminal_state
+        assert "user_final" not in [event["type"] for event in events]
+        assert session.state == terminal_state
+
+    _run(scenario())
+
+
 def test_terminal_session_rejects_late_reconnect_backfill_without_revival() -> None:
     session, _ = _new_session()
     terminal = _run(session.fail(reason="connection_failed"))

@@ -268,6 +268,12 @@ class _PeerSwitchTransaction:
 
 
 @dataclass
+class _ReconnectBackfillAdmission:
+    token: int
+    lifecycle_epoch: int
+
+
+@dataclass
 class _TtsSegmentLedgerEntry:
     segment_id: str
     ordinal: int
@@ -369,6 +375,11 @@ class CallSession:
         self._media_reconnect_grace_audio_diag_count = 0
         self._reconnect_audio_backfill_ids: set[str] = set()
         self._active_reconnect_backfills = 0
+        self._reconnect_backfill_admission_generation = 0
+        self._reconnect_backfill_admissions: dict[
+            int,
+            _ReconnectBackfillAdmission,
+        ] = {}
         self._reconnect_live_frame_hold_until = 0.0
         self._reconnect_live_frame_hold_logged = False
         self._reconnect_live_frame_hold_frames: list[PcmAudioFrame] = []
@@ -999,6 +1010,12 @@ class CallSession:
                     "reason": self.end_reason,
                 }
             self._active_reconnect_backfills += 1
+            self._reconnect_backfill_admission_generation += 1
+            admission = _ReconnectBackfillAdmission(
+                token=self._reconnect_backfill_admission_generation,
+                lifecycle_epoch=self._peer_lifecycle.epoch,
+            )
+            self._reconnect_backfill_admissions[admission.token] = admission
         try:
             return await self._backfill_reconnect_audio_admitted(
                 pcm=pcm,
@@ -1009,9 +1026,11 @@ class CallSession:
                 attempt=attempt,
                 batch_index=batch_index,
                 final=final,
+                admission=admission,
             )
         finally:
             async with self._lifecycle_lock:
+                self._reconnect_backfill_admissions.pop(admission.token, None)
                 self._active_reconnect_backfills = max(
                     self._active_reconnect_backfills - 1,
                     0,
@@ -1044,6 +1063,7 @@ class CallSession:
         attempt: int | None,
         batch_index: int | None,
         final: bool,
+        admission: _ReconnectBackfillAdmission,
     ) -> dict[str, Any]:
         if backfill_id and backfill_id in self._reconnect_audio_backfill_ids:
             logger.info(
@@ -1088,7 +1108,11 @@ class CallSession:
             if final:
                 released_end = self._release_reconnect_live_frames(reason="final_empty_backfill")
                 if self._should_finalize_after_reconnect_backfill(released_end, final=final):
-                    event = await self.finalize_user_turn()
+                    event = await self.finalize_user_turn(
+                        backfill_admission=admission
+                    )
+            if event is not None and event.get("status") in {"terminal", "superseded"}:
+                return event
             response = {
                 "status": "empty",
                 "frames": 0,
@@ -1126,7 +1150,11 @@ class CallSession:
             if final:
                 released_end = self._release_reconnect_live_frames(reason="final_overlap_backfill")
                 if self._should_finalize_after_reconnect_backfill(released_end, final=final):
-                    event = await self.finalize_user_turn()
+                    event = await self.finalize_user_turn(
+                        backfill_admission=admission
+                    )
+            if event is not None and event.get("status") in {"terminal", "superseded"}:
+                return event
             logger.info(
                 "[rayme-call] reconnect_audio.backfill.overlap_only session=%s "
                 "backfill_id=%s overlap_trimmed_frames=%d reason=%s attempt=%s "
@@ -1208,7 +1236,12 @@ class CallSession:
                 attempt if attempt is not None else "",
                 batch_index if batch_index is not None else "",
             )
-            event = await self.finalize_user_turn()
+            event = await self.finalize_user_turn(
+                backfill_admission=admission
+            )
+
+        if event is not None and event.get("status") in {"terminal", "superseded"}:
+            return event
 
         response = {
             "status": "accepted",
@@ -1527,7 +1560,11 @@ class CallSession:
             3000,
         )
 
-    async def finalize_user_turn(self) -> dict[str, Any] | None:
+    async def finalize_user_turn(
+        self,
+        *,
+        backfill_admission: _ReconnectBackfillAdmission | None = None,
+    ) -> dict[str, Any] | None:
         if not self._turn_frames:
             return None
 
@@ -1585,15 +1622,27 @@ class CallSession:
         self._speech_start_frame = None
         self._media_reconnect_grace_audio_diag_count = 0
 
+        transcription: dict[str, Any] | None = None
+        transcription_error: Exception | None = None
         try:
             transcription = await asyncio.to_thread(self._transcribe_turn, frames)
         except Exception as exc:
-            logger.exception(
+            transcription_error = exc
+
+        if backfill_admission is not None:
+            stale_response = await self._stale_reconnect_backfill_response(
+                backfill_admission
+            )
+            if stale_response is not None:
+                return stale_response
+
+        if transcription_error is not None:
+            logger.error(
                 "[rayme-call] stt.failed session=%s turn=%s elapsed_ms=%d exc=%s",
                 self.session_id,
                 turn_id,
                 int((time.perf_counter() - stt_started) * 1000),
-                exc.__class__.__name__,
+                transcription_error.__class__.__name__,
             )
             event = failed_event(
                 session_id=self.session_id,
@@ -1606,6 +1655,9 @@ class CallSession:
             if self.ended_at is None:
                 self.state = "listening"
             return event
+
+        if transcription is None:
+            raise RuntimeError("speech transcription returned no result")
 
         text = str(transcription.get("transcript") or "").strip()
         status = str(transcription.get("status") or "")
@@ -1650,6 +1702,44 @@ class CallSession:
             "turn_id": event["turn_id"],
             "text": event["text"],
         }
+
+    async def _stale_reconnect_backfill_response(
+        self,
+        admission: _ReconnectBackfillAdmission,
+    ) -> dict[str, Any] | None:
+        async with self._lifecycle_lock:
+            current = self._reconnect_backfill_admissions.get(admission.token)
+            lifecycle = self._peer_lifecycle
+            if current is not admission:
+                return {
+                    "status": "superseded",
+                    "frames": 0,
+                    "duration_ms": 0,
+                    "state": self.state,
+                }
+            if (
+                self.ended_at is not None
+                or lifecycle.phase == "terminal"
+                or self.state in {"ended", "failed"}
+            ):
+                return {
+                    "status": "terminal",
+                    "frames": 0,
+                    "duration_ms": 0,
+                    "state": self.state,
+                    "reason": self.end_reason,
+                }
+            if (
+                admission.lifecycle_epoch != lifecycle.epoch
+                or lifecycle.phase not in {"stable", "reconnecting"}
+            ):
+                return {
+                    "status": "superseded",
+                    "frames": 0,
+                    "duration_ms": 0,
+                    "state": self.state,
+                }
+        return None
 
     async def emit_event(self, event: dict[str, Any]) -> dict[str, Any]:
         event_type = event.get("type")
@@ -3433,6 +3523,8 @@ class CallSession:
                 return
             if lifecycle.phase != "reconnecting" or lifecycle.grace_peer is not peer_connection:
                 lifecycle.epoch += 1
+                for admission in self._reconnect_backfill_admissions.values():
+                    admission.lifecycle_epoch = lifecycle.epoch
                 lifecycle.phase = "reconnecting"
                 lifecycle.state_before_reconnect = self.state
                 lifecycle.grace_peer = peer_connection
