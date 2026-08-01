@@ -699,6 +699,75 @@ def test_hardware_tracer_uses_upload_implied_authorization() -> None:
     }.intersection(api.saved_payload)
 
 
+def test_core_runner_uses_current_saved_voice_helper_contract(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    runner = _runner_module("phase09_runner_saved_voice_caller_contract")
+    tracer = runner.load_hardware_tracer()
+    selection = _fallback_selection(tmp_path / "selection")
+    expected_commit = "a" * 40
+
+    class SavedVoiceHelperReached(Exception):
+        pass
+
+    async def create_saved_voice(
+        api: object,
+        *,
+        reference_audio: bytes,
+        transcript: str,
+    ) -> tuple[str, str]:
+        assert api is not None
+        assert reference_audio == selection.reference_path.read_bytes()
+        assert transcript == selection.transcript_path.read_text(encoding="utf-8").strip()
+        raise SavedVoiceHelperReached
+
+    monkeypatch.setattr(tracer, "_runtime_identity", lambda commit: {})
+    monkeypatch.setattr(tracer, "_create_saved_voice", create_saved_voice)
+    production = runner.RayMeProductionPath(
+        manifest=_manifest(),
+        tracer=tracer,
+        expected_commit=expected_commit,
+        selection=selection,
+        web_base_url="https://rayme.invalid",
+        ai_base_url="https://ai.invalid",
+        work_dir=tmp_path / "work",
+        timeout=1.0,
+    )
+
+    with pytest.raises(SavedVoiceHelperReached):
+        asyncio.run(production.open())
+
+
+def test_runner_main_sanitizes_unexpected_exceptions_without_private_detail(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    runner = _runner_module("phase09_runner_unexpected_failure")
+    private_detail = r"C:\private\voice.wav secret transcript"
+    args = SimpleNamespace(
+        expected_commit="a" * 40,
+        dry_run=True,
+        core_only=False,
+        finish_acoustic_leak=False,
+    )
+
+    def fail_manifest_load() -> dict[str, object]:
+        raise TypeError(private_detail)
+
+    monkeypatch.setattr(runner, "_parse_args", lambda argv: args)
+    monkeypatch.setattr(runner, "load_manifest", fail_manifest_load)
+
+    assert runner.main([]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "FAIL: Unexpected evidence runner failure (TypeError)\n"
+    assert private_detail not in captured.err
+    assert "Traceback" not in captured.err
+
+
 def test_runner_writes_generated_non_person_fixture_sidecar_without_private_content(
     tmp_path: Path,
 ) -> None:

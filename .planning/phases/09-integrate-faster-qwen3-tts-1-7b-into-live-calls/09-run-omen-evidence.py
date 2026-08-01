@@ -571,7 +571,6 @@ class RayMeProductionPath:
             self.api,
             reference_audio=self.reference_audio,
             transcript=self.reference_text,
-            selection=self.selection,
         )
         self.session_id = f"phase09-evidence-{uuid.uuid4().hex[:16]}"
         self.peer = self.tracer.WebRtcCapture()
@@ -1649,6 +1648,12 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except (EvidenceRunnerError, OSError, RuntimeError, ValueError) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
+        return 1
+    except Exception as exc:
+        print(
+            f"FAIL: Unexpected evidence runner failure ({exc.__class__.__name__})",
+            file=sys.stderr,
+        )
         return 1
 
 
