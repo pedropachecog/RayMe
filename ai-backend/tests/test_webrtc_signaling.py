@@ -2078,7 +2078,7 @@ def test_receive_audio_track_connection_state_reconnects_without_connection_fail
     assert close_calls == 0
 
 
-def test_receive_audio_track_closed_state_records_connection_failed() -> None:
+def test_receive_audio_track_closed_state_uses_bounded_connection_lifecycle() -> None:
     import asyncio
 
     from app.call.session import CallSession
@@ -2110,13 +2110,71 @@ def test_receive_audio_track_closed_state_records_connection_failed() -> None:
             stt_adapter=None,
         )
         await webrtc_module._receive_audio_track(session, ClosedInboundTrack(), peer)
+        assert session.state == "reconnecting"
+        assert peer.close_calls == 0
+        await session.resolve_deferred_connection_state()
         return session.state, session.end_reason, peer.close_calls
 
     state, end_reason, close_calls = asyncio.run(_run_test())
 
-    assert state == "failed"
-    assert end_reason == "connection_failed"
+    assert state == "ended"
+    assert end_reason == "connection_closed"
     assert close_calls == 1
+
+
+def test_old_track_error_preserves_call_and_prompt_lease_while_replacement_is_pending() -> None:
+    from app.call.session import CallSession
+
+    class ClosedTrackError(Exception):
+        pass
+
+    class ClosedInboundTrack:
+        kind = "audio"
+        id = "old-inbound-closed"
+
+        async def recv(self) -> Any:
+            raise ClosedTrackError("old receiver closed")
+
+    class Peer:
+        def __init__(self, *, state: str) -> None:
+            self.connectionState = state
+            self.iceConnectionState = state
+            self.close_calls = 0
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    async def scenario() -> tuple[CallSession, Peer, Peer, list[str]]:
+        active_peer = Peer(state="closed")
+        replacement_peer = Peer(state="new")
+        released_owners: list[str] = []
+        session = CallSession(
+            session_id="old-track-error-during-replacement",
+            peer_connection=active_peer,
+        )
+        await session.install_or_release_tts_prompt_lease(
+            lambda owner: released_owners.append(owner)
+        )
+        await session.mark_peer_connection_pending(
+            replacement_peer,
+            timeout_seconds=60.0,
+        )
+
+        await webrtc_module._receive_audio_track(
+            session,
+            ClosedInboundTrack(),
+            active_peer,
+        )
+        return session, active_peer, replacement_peer, released_owners
+
+    session, active_peer, replacement_peer, released_owners = asyncio.run(scenario())
+
+    assert session.state == "reconnecting"
+    assert session.ended_at is None
+    assert session.is_peer_connection_pending(replacement_peer) is True
+    assert active_peer.close_calls == 0
+    assert replacement_peer.close_calls == 0
+    assert released_owners == []
 
 
 def test_receive_audio_track_exits_when_peer_connection_is_superseded() -> None:

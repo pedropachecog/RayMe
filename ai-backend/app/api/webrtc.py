@@ -1095,13 +1095,30 @@ async def _receive_audio_track(
             if session.state in {"ended", "failed"}:
                 break
             if ice_state in {"failed", "closed"} or conn_state in {"failed", "closed"}:
-                await session.fail(reason="connection_failed")
+                await _handle_receiver_peer_terminal(
+                    session,
+                    pc,
+                    pending_generation=pending_generation,
+                    terminal_state=(
+                        "failed"
+                        if "failed" in {ice_state, conn_state}
+                        else "closed"
+                    ),
+                )
                 return
             if ice_state == "disconnected" or conn_state == "disconnected":
                 reconnected = False
                 for attempt in range(10):
                     await asyncio.sleep(0.5)
                     if session.state in {"ended", "failed"}:
+                        return
+                    if not session.is_peer_connection_active_or_pending(pc):
+                        logger.info(
+                            "[rayme-call] track.recv.superseded session=%s frames=%d "
+                            "during_reconnect=True",
+                            session.session_id,
+                            frame_count,
+                        )
                         return
                     ice_state = getattr(pc, "iceConnectionState", "?")
                     conn_state = getattr(pc, "connectionState", "?")
@@ -1124,7 +1141,12 @@ async def _receive_audio_track(
                         "[rayme-call] track.recv.reconnect_timeout session=%s",
                         session.session_id,
                     )
-                    await session.fail(reason="connection_failed")
+                    await _handle_receiver_peer_terminal(
+                        session,
+                        pc,
+                        pending_generation=pending_generation,
+                        terminal_state="failed",
+                    )
                     return
                 continue
             # The inbound read can raise while ICE/connection are still alive
@@ -1193,6 +1215,30 @@ async def _receive_audio_track(
         frame_count,
         session.state,
     )
+
+
+async def _handle_receiver_peer_terminal(
+    session: CallSession,
+    peer_connection: Any,
+    *,
+    pending_generation: int | None,
+    terminal_state: str,
+) -> None:
+    if peer_connection is session.peer_connection:
+        await session.handle_connection_state_change(
+            peer_connection,
+            terminal_state=terminal_state,
+        )
+        return
+    if session.is_peer_connection_pending(
+        peer_connection,
+        pending_generation,
+    ):
+        await session.reject_pending_peer_connection(
+            peer_connection,
+            generation=pending_generation,
+            resolve_deferred=True,
+        )
 
 
 async def _data_channel_keepalive(session: CallSession, channel: Any) -> None:

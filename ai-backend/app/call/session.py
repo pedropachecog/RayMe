@@ -2292,8 +2292,16 @@ class CallSession:
         if inspect.isawaitable(result):
             await result
 
-    async def handle_connection_state_change(self) -> None:
-        connection_state = getattr(self.peer_connection, "connectionState", None)
+    async def handle_connection_state_change(
+        self,
+        peer_connection: Any | None = None,
+        *,
+        terminal_state: str | None = None,
+    ) -> None:
+        peer = peer_connection or self.peer_connection
+        if peer is not self.peer_connection:
+            return
+        connection_state = terminal_state or getattr(peer, "connectionState", None)
         if connection_state in {"failed", "closed"}:
             await self._begin_transport_reconnect(connection_state)
 
