@@ -1717,7 +1717,12 @@ class CallSession:
                 self._active_tts_cancel_requested = False
                 self._active_tts_metrics_snapshot = None
 
-    async def _cancel_active_tts_generation(self, turn_id: str | None) -> bool | None:
+    async def _cancel_active_tts_generation(
+        self,
+        turn_id: str | None,
+        *,
+        cancel_started: asyncio.Event | None = None,
+    ) -> bool | None:
         request_id = self._active_tts_request_id
         active_turn_id = self._active_tts_turn_id
         adapter = self._active_tts_adapter
@@ -1727,17 +1732,28 @@ class CallSession:
             or self._active_tts_cancel_requested
             or (turn_id is not None and active_turn_id != turn_id)
         ):
+            if cancel_started is not None:
+                cancel_started.set()
             return None
 
         cancel = getattr(adapter, "cancel", None)
         if not callable(cancel):
+            if cancel_started is not None:
+                cancel_started.set()
             return None
 
         self._active_tts_cancel_requested = True
+        loop = asyncio.get_running_loop()
+
+        def cancel_exact_request() -> Any:
+            if cancel_started is not None:
+                loop.call_soon_threadsafe(cancel_started.set)
+            return cancel(request_id)
+
         try:
             return bool(
                 await asyncio.wait_for(
-                    asyncio.to_thread(cancel, request_id),
+                    asyncio.to_thread(cancel_exact_request),
                     timeout=CALL_TTS_CANCEL_DRAIN_TIMEOUT_SECONDS,
                 )
             )
@@ -1759,6 +1775,14 @@ class CallSession:
             )
             return False
 
+    async def _stop_and_drain_outbound_playout(self) -> None:
+        stop = getattr(self.outbound_audio_track, "stop_current", None)
+        if callable(stop):
+            result = stop()
+            if inspect.isawaitable(result):
+                await result
+        self.outbound_audio_buffer.drain()
+
     async def cancel_ai_turn(
         self,
         turn_id: str | None = None,
@@ -1775,22 +1799,26 @@ class CallSession:
         request_id = self._active_tts_request_id
         if resolved_turn_id is not None:
             self._cancelling_ai_turns.add(resolved_turn_id)
-        try:
-            # Preserve adapter ownership until the worker has accepted and the
-            # stream reader has consumed the matching cancellation terminal.
-            cancel_acknowledged = await self._cancel_active_tts_generation(
-                resolved_turn_id
+        cancel_started = asyncio.Event()
+        cancel_task = asyncio.create_task(
+            self._cancel_active_tts_generation(
+                resolved_turn_id,
+                cancel_started=cancel_started,
             )
+        )
+        try:
+            # Start exact-request cancellation first, but silence paced playout
+            # before waiting for the worker terminal. Adapter ownership and the
+            # cancelling guard remain live until that terminal is drained.
+            await cancel_started.wait()
+            try:
+                await self._stop_and_drain_outbound_playout()
+            finally:
+                cancel_acknowledged = await cancel_task
         finally:
             if resolved_turn_id is not None:
                 self._cancelled_ai_turns.add(resolved_turn_id)
                 self._cancelling_ai_turns.discard(resolved_turn_id)
-        stop = getattr(self.outbound_audio_track, "stop_current", None)
-        if callable(stop):
-            result = stop()
-            if inspect.isawaitable(result):
-                await result
-        self.outbound_audio_buffer.drain()
         metrics_snapshot = self._active_tts_metrics_snapshot
         playback_final = metrics_snapshot() if callable(metrics_snapshot) else None
         if playback_final is None and self._pending_speech_playback_final is not None:

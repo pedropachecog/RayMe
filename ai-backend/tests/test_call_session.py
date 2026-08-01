@@ -1985,6 +1985,159 @@ def test_qwen_cancel_preserves_adapter_ownership_until_terminal_then_recovers(
     )
 
 
+def test_qwen_barge_in_silences_real_paced_playout_before_delayed_cancel_ack(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
+    monkeypatch.setattr(session_module, "CALL_QWEN3_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
+    monkeypatch.setattr(session_module, "CALL_TTS_AUDIO_PREROLL_SECONDS", 0.0)
+    events: list[dict[str, Any]] = []
+
+    class DelayedCancelAckAdapter:
+        engine_id = "qwen3_1_7b"
+
+        def __init__(self, track: QueuedAudioOutputTrack) -> None:
+            self.track = track
+            self.requests = 0
+            self.active_request_id: str | None = None
+            self.cancel_started = threading.Event()
+            self.release_cancel_ack = threading.Event()
+            self.release_first_stream = threading.Event()
+            self.first_stream_drained = threading.Event()
+            self.cancel_calls: list[str] = []
+            self.pending_samples_at_cancel: list[int] = []
+            self.synthesize_calls = 0
+
+        def synthesize(self, _payload: Any) -> dict[str, Any]:
+            self.synthesize_calls += 1
+            raise AssertionError("whole synthesis fallback was used")
+
+        def stream(
+            self,
+            request: Any,
+            *,
+            request_id: str,
+            voice_key: str,
+        ) -> Any:
+            del request, voice_key
+            self.requests += 1
+            self.active_request_id = request_id
+            try:
+                yield TtsAudioChunk(
+                    engine_id=self.engine_id,
+                    chunk_index=0,
+                    wav_bytes=QWEN_STREAM_CHUNK_WAV_BYTES,
+                    sample_rate=24000,
+                    duration_ms=320,
+                    generated_at_ms=25.0,
+                )
+                if self.requests == 1:
+                    self.release_first_stream.wait()
+            finally:
+                self.active_request_id = None
+                if self.requests == 1:
+                    self.first_stream_drained.set()
+
+        def cancel(self, request_id: str) -> bool:
+            self.cancel_calls.append(request_id)
+            self.pending_samples_at_cancel.append(self.track.pending_samples)
+            assert self.active_request_id == request_id
+            self.cancel_started.set()
+            self.release_first_stream.set()
+            assert self.release_cancel_ack.wait(timeout=1.0)
+            return self.first_stream_drained.wait(timeout=1.0)
+
+    async def scenario() -> tuple[DelayedCancelAckAdapter, dict[str, Any], np.ndarray]:
+        track = QueuedAudioOutputTrack(
+            sample_rate=16000,
+            frame_ms=20,
+            max_pending_audio_seconds=0.5,
+        )
+        adapter = DelayedCancelAckAdapter(track)
+        session, _ = _new_session(
+            tts_adapter=adapter,
+            outbound_audio_track=track,
+            event_sink=events.append,
+        )
+        interrupted_turn = "turn-qwen-delayed-cancel"
+        speech = asyncio.create_task(
+            session.speak_text(
+                interrupted_turn,
+                "Queued speech must become silent before cancellation acknowledgement.",
+                "voice-qwen",
+                "qwen3_1_7b",
+                final_chunk=True,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="The exact reference transcript.",
+            )
+        )
+        try:
+            while track.pending_samples == 0:
+                if speech.done():
+                    await speech
+                await asyncio.sleep(0)
+            first_frame = await track.recv()
+            assert np.max(np.abs(first_frame.to_ndarray())) > 0
+            assert track.pending_samples > 0
+
+            interruption = asyncio.create_task(
+                session.interrupt(cause="vad_barge_in")
+            )
+            assert await asyncio.to_thread(adapter.cancel_started.wait, 1.0)
+            while track.pending_samples > 0:
+                await asyncio.sleep(0)
+            assert not interruption.done()
+            silent_during_ack_delay = await track.recv()
+            assert np.max(np.abs(silent_during_ack_delay.to_ndarray())) == 0
+            assert track.pending_samples == 0
+
+            adapter.release_cancel_ack.set()
+            interrupted = await asyncio.wait_for(interruption, timeout=1.0)
+            await asyncio.wait_for(speech, timeout=1.0)
+            assert interrupted["type"] == "interrupted"
+            assert adapter.first_stream_drained.is_set()
+            assert session._active_tts_adapter is None
+            assert session._active_tts_request_id is None
+
+            recovery_speech = asyncio.create_task(
+                session.speak_text(
+                    "turn-qwen-after-delayed-cancel",
+                    "The next native streaming turn recovers normally.",
+                    "voice-qwen",
+                    "qwen3_1_7b",
+                    final_chunk=True,
+                    reference_audio_b64="cmVhbC1zYW1wbGU=",
+                    reference_transcript="The exact reference transcript.",
+                )
+            )
+            recovery_peaks: list[int] = []
+            while not recovery_speech.done() or track.pending_samples > 0:
+                frame = await track.recv()
+                recovery_peaks.append(int(np.max(np.abs(frame.to_ndarray()))))
+            recovery = await recovery_speech
+            assert any(peak > 0 for peak in recovery_peaks)
+            return adapter, recovery, silent_during_ack_delay.to_ndarray()
+        finally:
+            adapter.release_cancel_ack.set()
+            adapter.release_first_stream.set()
+            if not speech.done():
+                speech.cancel()
+
+    adapter, recovery, silence = _run(scenario())
+
+    assert adapter.cancel_calls == ["turn-qwen-delayed-cancel"]
+    assert adapter.pending_samples_at_cancel[0] > 0
+    assert adapter.synthesize_calls == 0
+    assert recovery["type"] == "ai_done"
+    assert np.max(np.abs(silence)) == 0
+    assert not any(
+        event.get("type") == "ai_done"
+        and event.get("turn_id") == "turn-qwen-delayed-cancel"
+        for event in events
+    )
+
+
 @pytest.mark.parametrize(
     ("control_cause", "expected_state", "expected_terminal"),
     [
