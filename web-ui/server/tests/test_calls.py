@@ -88,6 +88,7 @@ class ScriptedCallBackend:
         self.backfill_calls: list[dict[str, Any]] = []
         self.drained_events: list[dict[str, Any]] = []
         self.speak_calls: list[dict[str, Any]] = []
+        self.cancel_turn_calls: list[dict[str, Any]] = []
         self.interrupt_calls: list[dict[str, Any]] = []
         self.interrupt_result: dict[str, Any] | None = None
 
@@ -180,6 +181,22 @@ class ScriptedCallBackend:
             {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
         )
         return {"session_id": session_id, "status": "accepted", "frames": 2}
+
+    async def cancel_call_turn(
+        self,
+        base_url: str,
+        session_id: str,
+        turn_id: str,
+    ) -> dict[str, Any]:
+        self.cancel_turn_calls.append(
+            {"base_url": base_url, "session_id": session_id, "turn_id": turn_id}
+        )
+        return {
+            "session_id": session_id,
+            "turn_id": turn_id,
+            "state": "listening",
+            "status": "cancelled",
+        }
 
     async def drain_call_events(self, base_url: str, session_id: str) -> dict[str, Any]:
         return {"session_id": session_id, "events": list(self.drained_events)}
@@ -1884,6 +1901,139 @@ def test_qwen_worker_error_is_sanitized_and_does_not_persist_or_emit_normal_done
     assert r"C:\\Users" not in response.text
     rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
     assert not any(row[0] == "ai_speech" for row in rows)
+
+
+def test_llm_failure_after_first_speech_admission_cancels_backend_turn_once(
+    call_fixture: CallFixture,
+) -> None:
+    speech_admitted = asyncio.Event()
+
+    class FailsAfterSpeechAdmission:
+        async def stream_chat_completion_tokens(
+            self,
+            settings: Any,
+            messages: Any,
+        ) -> AsyncIterator[str]:
+            del settings, messages
+            yield "The first spoken sentence is already live."
+            while not speech_admitted.is_set():
+                await asyncio.sleep(0)
+            raise RuntimeError("LLM stream failed after speech admission")
+
+    class AdmissionBackend(ScriptedCallBackend):
+        async def speak_call(
+            self,
+            base_url: str,
+            session_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            self.speak_calls.append(
+                {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
+            )
+            speech_admitted.set()
+            return {
+                "session_id": session_id,
+                "event": {
+                    "status": "queued",
+                    "turn_id": payload["turn_id"],
+                    "ai_audio_started_event": {
+                        "type": "ai_audio_started",
+                        "turn_id": payload["turn_id"],
+                    },
+                },
+            }
+
+    thread_id, _ = asyncio.run(
+        _insert_qwen_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    calls_module = importlib.import_module("app.api.calls")
+    backend = AdmissionBackend()
+    call_fixture.app.dependency_overrides[calls_module.get_call_backend_client] = lambda: backend
+    call_fixture.app.dependency_overrides[calls_module.get_call_completion_client] = (
+        FailsAfterSpeechAdmission
+    )
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-llm-fails-after-audio",
+            "text": "Start speaking, then fail generation.",
+            "source": "user_final",
+        },
+    )
+
+    events = _sse_events(response.text)
+    assert any(event.get("type") == "error" for event in events)
+    assert not any(event.get("type") == "ai_done" for event in events)
+    assert backend.cancel_turn_calls == [
+        {
+            "base_url": "https://127.0.0.1:9443",
+            "session_id": started["session_id"],
+            "turn_id": "turn-llm-fails-after-audio",
+        }
+    ]
+
+
+def test_sse_cancellation_after_audio_keeps_one_backend_cancel_alive() -> None:
+    class CancelAwareBackend:
+        def __init__(self) -> None:
+            self.speak_started = asyncio.Event()
+            self.cancel_started = asyncio.Event()
+            self.release_cancel = asyncio.Event()
+            self.cancel_calls: list[str] = []
+
+        async def speak_call(
+            self,
+            base_url: str,
+            session_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            del base_url, session_id, payload
+            self.speak_started.set()
+            await asyncio.Future()
+            raise AssertionError("unreachable")
+
+        async def cancel_call_turn(
+            self,
+            base_url: str,
+            session_id: str,
+            turn_id: str,
+        ) -> dict[str, Any]:
+            del base_url, session_id
+            self.cancel_calls.append(turn_id)
+            self.cancel_started.set()
+            await self.release_cancel.wait()
+            return {"status": "cancelled", "turn_id": turn_id}
+
+    async def scenario() -> None:
+        backend = CancelAwareBackend()
+        turn = SpeechTurn(
+            backend=backend,
+            base_url="https://127.0.0.1:9443",
+            session_id="session-sse-cancel",
+            turn_id="turn-sse-cancel",
+            voice_id="voice-qwen",
+            engine_id="qwen3_1_7b",
+            voice_reference={},
+        )
+        await turn.submit("Audio began before the SSE connection closed.")
+        await backend.speak_started.wait()
+
+        cancelled_request = asyncio.create_task(turn.cancel())
+        await backend.cancel_started.wait()
+        cancelled_request.cancel()
+        terminal = await cancelled_request
+        assert terminal.status == "cancelled"
+        assert backend.cancel_calls == ["turn-sse-cancel"]
+
+        backend.release_cancel.set()
+        retry = await turn.cancel()
+        assert retry.status == "cancelled"
+        assert backend.cancel_calls == ["turn-sse-cancel"]
+
+    asyncio.run(scenario())
 
 
 def test_blank_assistant_output_creates_no_speech_request_state_or_persistence(

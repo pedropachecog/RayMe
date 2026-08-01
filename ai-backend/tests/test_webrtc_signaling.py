@@ -1651,7 +1651,7 @@ def test_webrtc_qwen_empty_final_marker_terminalizes_without_repeating_synthesis
     segment_payload = segment.json()
     assert segment_payload["state"] == "speaking"
     assert segment_payload["event"]["status"] == "queued"
-    assert segment_payload["event"]["tts_playback_final"]["playout_wait_completed"] is True
+    assert segment_payload["event"]["tts_playback_final"]["playout_wait_completed"] is None
     assert adapter.stream_identities == [
         ("ai-turn-qwen-empty-terminal", "voice-qwen")
     ]
@@ -1665,9 +1665,10 @@ def test_webrtc_qwen_empty_final_marker_terminalizes_without_repeating_synthesis
     assert terminal_payload["state"] == "listening"
     terminal_event = terminal_payload["event"]
     assert terminal_event["type"] == "ai_done"
-    assert terminal_event["tts_playback_final"] == segment_payload["event"][
-        "tts_playback_final"
-    ]
+    assert terminal_event["tts_playback_final"]["playout_wait_completed"] is True
+    assert terminal_event["tts_playback_final"]["chunk_count"] == segment_payload[
+        "event"
+    ]["tts_playback_final"]["chunk_count"]
     assert adapter.stream_identities == [
         ("ai-turn-qwen-empty-terminal", "voice-qwen")
     ]
@@ -1726,6 +1727,63 @@ def test_webrtc_qwen_interrupt_cancels_pending_empty_terminal(
     assert adapter.stream_identities == [
         ("ai-turn-qwen-interrupt-pending-terminal", "voice-qwen")
     ]
+
+
+def test_webrtc_turn_cancel_endpoint_is_idempotent_and_tombstones_turn(
+    stub_webrtc: None,
+) -> None:
+    adapter = ScriptedQwenStreamingTtsAdapter()
+    manager = ScriptedPreparingModelManager(adapter, ready=True)
+    client = _client(model_manager=manager)
+    session_id = "call-session-turn-cancel"
+    client.post(
+        "/webrtc/offer",
+        json={
+            **_offer_payload(session_id=session_id),
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+        },
+    )
+    common = {
+        "turn_id": "ai-turn-web-cancel",
+        "voice_id": "voice-qwen",
+        "engine_id": "qwen3_1_7b",
+        "reference_audio_b64": "cmVhbC1zYW1wbGU=",
+        "reference_transcript": "The exact reference transcript.",
+    }
+    segment = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={
+            **common,
+            "text": "This admitted segment is owned by the cancelled web turn.",
+            "final_chunk": False,
+            "segment_id": "ai-turn-web-cancel:0",
+            "segment_ordinal": 0,
+        },
+    )
+    assert segment.status_code == 200
+
+    cancel_path = (
+        f"/webrtc/sessions/{session_id}/turns/ai-turn-web-cancel/cancel"
+    )
+    first = client.post(cancel_path)
+    retry = client.post(cancel_path)
+    assert first.status_code == 200
+    assert retry.json() == first.json()
+    assert first.json()["state"] == "listening"
+
+    late = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={
+            **common,
+            "text": "",
+            "final_chunk": True,
+            "segment_id": "ai-turn-web-cancel:1",
+            "segment_ordinal": 1,
+        },
+    )
+    assert late.status_code == 409
+    assert late.json()["detail"]["code"] == "call_speech_turn_terminal"
 
 
 def test_webrtc_qwen_release_evidence_seed_requires_explicit_evidence_session_and_propagates(

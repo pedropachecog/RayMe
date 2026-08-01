@@ -471,6 +471,26 @@ async def interrupt_session(request: Request, session_id: str) -> CallControlRes
         raise _control_error() from exc
 
 
+@router.post("/sessions/{session_id}/turns/{turn_id}/cancel")
+async def cancel_session_speech_turn(
+    request: Request,
+    session_id: str,
+    turn_id: str,
+) -> dict[str, Any]:
+    session = _session_or_404(request, session_id)
+    try:
+        cancellation = await session.cancel_speech_turn(turn_id)
+        return {
+            "session_id": session.session_id,
+            "turn_id": turn_id,
+            "state": session.state,
+            "status": "cancelled",
+            **cancellation,
+        }
+    except Exception as exc:
+        raise _control_error() from exc
+
+
 @router.post("/sessions/{session_id}/speak")
 async def speak_session(
     request: Request,

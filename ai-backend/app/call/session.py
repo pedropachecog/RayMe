@@ -288,6 +288,7 @@ class CallSession:
         self._turn_index = 0
         self._tts_turn_ledgers: dict[str, _TtsTurnLedger] = {}
         self._tts_turn_playback_seconds: dict[str, float] = {}
+        self._speech_turn_cancel_tasks: dict[str, asyncio.Task[dict[str, Any]]] = {}
         self._speech_seen = False
         self._silence_ms = 0
         self._speech_start_frame: int | None = None
@@ -1469,6 +1470,40 @@ class CallSession:
         )
         self.state = "listening"
         return event
+
+    async def cancel_speech_turn(self, turn_id: str) -> dict[str, Any]:
+        """Cancel one web-owned speech turn exactly once, even across retries."""
+        async with self._lifecycle_lock:
+            cancel_task = self._speech_turn_cancel_tasks.get(turn_id)
+            if cancel_task is None:
+                cancel_task = asyncio.create_task(
+                    self._cancel_speech_turn_once(turn_id)
+                )
+                self._speech_turn_cancel_tasks[turn_id] = cancel_task
+        return await asyncio.shield(cancel_task)
+
+    async def _cancel_speech_turn_once(self, turn_id: str) -> dict[str, Any]:
+        async with self._lifecycle_lock:
+            owns_active_speech = (
+                self._active_tts_turn_id == turn_id
+                or self._pending_speech_terminal_turn_id == turn_id
+            )
+            if not owns_active_speech:
+                self._cancel_tts_turn_locked(turn_id)
+
+        if owns_active_speech:
+            cancel_context = await self.cancel_ai_turn(
+                turn_id,
+                cause="web_turn_cancel",
+            )
+        else:
+            cancel_context = {
+                "control_cause": "web_turn_cancel",
+                "cancelled_turn_id": turn_id,
+            }
+        if self.state not in {"ended", "failed"}:
+            self.state = "listening"
+        return cancel_context
 
     async def update_call_selection(
         self,

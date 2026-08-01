@@ -1681,6 +1681,63 @@ def test_qwen_final_marker_is_only_waiter_after_nonfinal_admission() -> None:
     _run(scenario())
 
 
+def test_web_turn_cancel_is_idempotent_and_does_not_poison_the_next_turn() -> None:
+    adapter = SlowQwenStreamingTtsAdapter(chunk_count=2)
+    adapter.release_completion.set()
+    track = ScriptedOutboundAudioTrack()
+    session, _ = _new_session(
+        tts_adapter=adapter,
+        outbound_audio_track=track,
+    )
+
+    async def scenario() -> None:
+        queued = await session.speak_text(
+            "turn-web-cancel",
+            "This audio is cancelled by its owning web turn.",
+            "voice-qwen",
+            "qwen3_1_7b",
+            final_chunk=False,
+            segment_id="turn-web-cancel:0",
+            segment_ordinal=0,
+            reference_audio_b64="cmVhbC1zYW1wbGU=",
+            reference_transcript="The exact reference transcript.",
+        )
+        assert queued["status"] == "queued"
+
+        first, retry = await asyncio.gather(
+            session.cancel_speech_turn("turn-web-cancel"),
+            session.cancel_speech_turn("turn-web-cancel"),
+        )
+        assert first == retry
+        assert first["cancelled_turn_id"] == "turn-web-cancel"
+        assert track.stop_calls == 1
+        assert session.state == "listening"
+
+        with pytest.raises(SpeechTurnTerminalError):
+            await session.complete_speech_turn(
+                turn_id="turn-web-cancel",
+                voice_id="voice-qwen",
+                engine_id="qwen3_1_7b",
+                segment_id="turn-web-cancel:1",
+                segment_ordinal=1,
+            )
+
+        recovered = await session.speak_text(
+            "turn-after-web-cancel",
+            "A subsequent turn still completes normally.",
+            "voice-qwen",
+            "qwen3_1_7b",
+            final_chunk=True,
+            segment_id="turn-after-web-cancel:0",
+            segment_ordinal=0,
+            reference_audio_b64="cmVhbC1zYW1wbGU=",
+            reference_transcript="The exact reference transcript.",
+        )
+        assert recovered["type"] == "ai_done"
+
+    _run(scenario())
+
+
 def test_qwen_failed_segment_retries_keep_reserved_ordinal_until_success() -> None:
     class RetryQwenAdapter:
         engine_id = "qwen3_1_7b"

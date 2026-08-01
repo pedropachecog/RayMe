@@ -23,6 +23,7 @@ SYNTHESIS_FAILED_MESSAGE = "Synthesis failed"
 WEBRTC_FAILED_MESSAGE = "Call control request failed"
 WEBRTC_OFFER_FAILED_MESSAGE = "WebRTC offer could not be accepted"
 SPEECH_TURN_QUEUE_CAPACITY = 2
+SPEECH_TURN_CANCEL_TIMEOUT_SECONDS = 5.0
 SAFE_PROCESSING_MESSAGES = {
     "qwen3_reference_audio_required": "Reference audio is required",
     "qwen3_reference_audio_invalid": "Reference audio is invalid",
@@ -185,6 +186,7 @@ class SpeechTurn:
         self._closed = False
         self._terminal: SpeechTurnTerminal | None = None
         self._next_segment_ordinal = 0
+        self._cancel_task: asyncio.Task[None] | None = None
 
     @property
     def terminal(self) -> SpeechTurnTerminal | None:
@@ -221,6 +223,17 @@ class SpeechTurn:
         if self._worker is not None and not self._worker.done():
             self._worker.cancel()
             await asyncio.gather(self._worker, return_exceptions=True)
+        if self._cancel_task is None:
+            self._cancel_task = asyncio.create_task(self._cancel_backend_turn())
+        try:
+            await asyncio.wait_for(
+                asyncio.shield(self._cancel_task),
+                timeout=SPEECH_TURN_CANCEL_TIMEOUT_SECONDS,
+            )
+        except (AiBackendClientError, asyncio.TimeoutError, asyncio.CancelledError):
+            # Cancellation is cleanup: it must remain bounded and the backend
+            # task must survive cancellation of the SSE request that spawned it.
+            pass
         if self._terminal is None or self._terminal.status == "normal":
             self._terminal = SpeechTurnTerminal(
                 status="cancelled",
@@ -228,6 +241,19 @@ class SpeechTurn:
             )
         self._discard_pending()
         return self._terminal
+
+    async def _cancel_backend_turn(self) -> None:
+        cancel_call_turn = getattr(self._backend, "cancel_call_turn", None)
+        if not callable(cancel_call_turn):
+            raise AiBackendUnavailable(
+                code="call_backend_client_misconfigured",
+                message="AI backend unreachable",
+            )
+        await cancel_call_turn(
+            self._base_url,
+            self._session_id,
+            self._turn_id,
+        )
 
     def _require_open(self) -> None:
         if self._closed or self._terminal is not None:
@@ -483,6 +509,27 @@ class AiBackendClient:
         response = await self._request(
             "POST",
             _join_endpoint(base_url, f"/webrtc/sessions/{session_id}/interrupt"),
+            processing_message=WEBRTC_FAILED_MESSAGE,
+            processing_code="call_control_failed",
+            timeout=self._timeout,
+        )
+        payload = _json_payload(response)
+        if not isinstance(payload, dict):
+            raise _invalid_response()
+        return dict(payload)
+
+    async def cancel_call_turn(
+        self,
+        base_url: str,
+        session_id: str,
+        turn_id: str,
+    ) -> dict[str, Any]:
+        response = await self._request(
+            "POST",
+            _join_endpoint(
+                base_url,
+                f"/webrtc/sessions/{session_id}/turns/{turn_id}/cancel",
+            ),
             processing_message=WEBRTC_FAILED_MESSAGE,
             processing_code="call_control_failed",
             timeout=self._timeout,
