@@ -506,15 +506,12 @@ class CallSession:
         peer_connection: Any,
         *,
         generation: int | None = None,
-        resolve_deferred: bool = False,
     ) -> bool:
         async with self._lifecycle_lock:
             if not self.is_peer_connection_pending(peer_connection, generation):
                 return False
             self._clear_pending_peer_locked(peer_connection)
         await self._close_peer(peer_connection)
-        if resolve_deferred:
-            await self.resolve_deferred_connection_state()
         return True
 
     def _clear_pending_peer_locked(self, peer_connection: Any) -> None:
@@ -543,7 +540,6 @@ class CallSession:
             expired = await self.reject_pending_peer_connection(
                 peer_connection,
                 generation=generation,
-                resolve_deferred=True,
             )
             if expired:
                 logger.info(

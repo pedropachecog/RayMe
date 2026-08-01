@@ -3242,7 +3242,7 @@ def test_reconnect_candidate_supersession_is_ordered_and_closes_stale_peer() -> 
     _run(scenario())
 
 
-def test_reconnect_candidate_timeout_closes_candidate_and_resolves_transport_loss() -> None:
+def test_reconnect_candidate_timeout_leaves_terminalization_to_reconnect_grace() -> None:
     session, active_peer = _new_session(session_id="call-session-reconnect-timeout")
     candidate = ScriptedPeerConnection()
     released_owners: list[str] = []
@@ -3263,6 +3263,14 @@ def test_reconnect_candidate_timeout_closes_candidate_and_resolves_transport_los
 
         await asyncio.sleep(0.03)
 
+        assert candidate.close_calls == 1
+        assert session._pending_peer_connections == []
+        assert session.state == "reconnecting"
+        assert session.end_reason is None
+        assert released_owners == []
+
+        await session.resolve_deferred_connection_state()
+
     _run(scenario())
 
     assert candidate.close_calls == 1
@@ -3270,6 +3278,53 @@ def test_reconnect_candidate_timeout_closes_candidate_and_resolves_transport_los
     assert session.state == "ended"
     assert session.end_reason == "connection_closed"
     assert released_owners == ["call-session-reconnect-timeout"]
+
+
+def test_old_candidate_rejection_cannot_terminalize_newer_generation() -> None:
+    session, active_peer = _new_session(session_id="candidate-reject-generation-race")
+    close_started = asyncio.Event()
+    allow_close = asyncio.Event()
+
+    class SlowClosingPeer(ScriptedPeerConnection):
+        async def close(self) -> None:
+            self.close_calls += 1
+            close_started.set()
+            await allow_close.wait()
+
+    first_candidate = SlowClosingPeer()
+    second_candidate = ScriptedPeerConnection()
+
+    async def scenario() -> None:
+        first_generation = await session.mark_peer_connection_pending(
+            first_candidate,
+            timeout_seconds=60.0,
+        )
+        active_peer.connectionState = "closed"
+        await session.handle_connection_state_change()
+
+        rejecting = asyncio.create_task(
+            session.reject_pending_peer_connection(
+                first_candidate,
+                generation=first_generation,
+            )
+        )
+        await close_started.wait()
+        second_generation = await session.mark_peer_connection_pending(
+            second_candidate,
+            timeout_seconds=60.0,
+        )
+        allow_close.set()
+        assert await rejecting is True
+
+        assert session.state == "reconnecting"
+        assert session.ended_at is None
+        assert session.is_peer_connection_pending(
+            second_candidate,
+            second_generation,
+        )
+        assert second_candidate.close_calls == 0
+
+    _run(scenario())
 
 
 def test_stats_returns_session_state_and_audio_counters() -> None:

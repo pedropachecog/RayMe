@@ -895,7 +895,6 @@ def _attach_peer_handlers(
         discarded = await session.reject_pending_peer_connection(
             peer_connection,
             generation=pending_generation,
-            resolve_deferred=True,
         )
         if not discarded:
             return False
@@ -1237,7 +1236,6 @@ async def _handle_receiver_peer_terminal(
         await session.reject_pending_peer_connection(
             peer_connection,
             generation=pending_generation,
-            resolve_deferred=True,
         )
 
 
