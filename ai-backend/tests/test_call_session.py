@@ -1555,6 +1555,261 @@ def test_qwen_incremental_turn_carries_monotonic_segment_ordinals() -> None:
     assert "turn-segment-entropy" not in session._tts_turn_segment_ordinals
 
 
+def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call() -> None:
+    import app.api.webrtc as webrtc_module
+
+    events: list[dict[str, Any]] = []
+    released_prompt_leases: list[str] = []
+
+    class CallbackPeer:
+        def __init__(self) -> None:
+            self.connectionState = "new"
+            self.iceConnectionState = "new"
+            self.handlers: dict[str, Any] = {}
+            self.close_calls = 0
+
+        def on(self, event_name: str) -> Any:
+            def decorator(handler: Any) -> Any:
+                self.handlers[event_name] = handler
+                return handler
+
+            return decorator
+
+        async def close(self) -> None:
+            self.close_calls += 1
+
+    class IncidentQwenAdapter:
+        engine_id = "qwen3_1_7b"
+
+        def __init__(self) -> None:
+            self.stream_count = 0
+            self.active_request_id: str | None = None
+            self.reconnect_pause = threading.Event()
+            self.resume_after_reconnect = threading.Event()
+            self.ready_for_barge_in = threading.Event()
+            self.release_for_cancel = threading.Event()
+            self.first_stream_drained = threading.Event()
+            self.first_stream_completed = threading.Event()
+            self.cancel_calls: list[str] = []
+            self.logical_audio_ms = 0.0
+            self.synthesize_calls = 0
+
+        def synthesize(self, _request: Any) -> Any:
+            self.synthesize_calls += 1
+            raise AssertionError("whole synthesis fallback was used")
+
+        def stream(
+            self,
+            _request: Any,
+            *,
+            request_id: str,
+            voice_key: str,
+        ) -> Any:
+            assert voice_key == "voice-qwen"
+            stream_index = self.stream_count
+            self.stream_count += 1
+            self.active_request_id = request_id
+            try:
+                if stream_index == 0:
+                    for chunk_index in range(12):
+                        if chunk_index == 4:
+                            self.reconnect_pause.set()
+                            self.resume_after_reconnect.wait()
+                        if chunk_index == 10:
+                            self.ready_for_barge_in.set()
+                            self.release_for_cancel.wait()
+                        if self.release_for_cancel.is_set():
+                            break
+                        self.logical_audio_ms += 4_000.0
+                        yield TtsAudioChunk(
+                            engine_id=self.engine_id,
+                            chunk_index=chunk_index,
+                            wav_bytes=QWEN_STREAM_CHUNK_WAV_BYTES,
+                            sample_rate=24_000,
+                            duration_ms=4_000.0,
+                            generated_at_ms=25.0 + chunk_index * 50.0,
+                        )
+                    if not self.release_for_cancel.is_set():
+                        self.first_stream_completed.set()
+                    return
+
+                for chunk_index in range(2):
+                    yield TtsAudioChunk(
+                        engine_id=self.engine_id,
+                        chunk_index=chunk_index,
+                        wav_bytes=QWEN_STREAM_CHUNK_WAV_BYTES,
+                        sample_rate=24_000,
+                        duration_ms=500.0,
+                        generated_at_ms=20.0 + chunk_index * 40.0,
+                    )
+            finally:
+                self.active_request_id = None
+                if stream_index == 0:
+                    self.first_stream_drained.set()
+
+        def cancel(self, request_id: str) -> bool:
+            assert request_id == self.active_request_id
+            self.cancel_calls.append(request_id)
+            self.release_for_cancel.set()
+            return self.first_stream_drained.wait(timeout=1.0)
+
+    async def wait_thread_event(
+        event: threading.Event,
+        *,
+        label: str,
+    ) -> None:
+        ready = await asyncio.to_thread(event.wait, 1.0)
+        assert ready, f"timed out waiting for {label}"
+
+    async def scenario() -> tuple[
+        IncidentQwenAdapter,
+        CallbackPeer,
+        CallbackPeer,
+        ScriptedOutboundAudioTrack,
+        ScriptedOutboundAudioTrack,
+        CallSession,
+    ]:
+        active_peer = CallbackPeer()
+        replacement_peer = CallbackPeer()
+        active_track = ScriptedOutboundAudioTrack()
+        replacement_track = ScriptedOutboundAudioTrack()
+        adapter = IncidentQwenAdapter()
+        session = CallSession(
+            session_id="qwen-long-turn-reconnect-incident",
+            peer_connection=active_peer,
+            tts_adapter=adapter,
+            outbound_audio_track=active_track,
+            event_sink=events.append,
+        )
+        await session.install_or_release_tts_prompt_lease(
+            lambda owner: released_prompt_leases.append(owner)
+        )
+        webrtc_module._attach_peer_handlers(active_peer, session)
+
+        first_audio = asyncio.Event()
+
+        def observe_first_audio(event: dict[str, Any]) -> None:
+            events.append(event)
+            if event.get("type") == "ai_audio_started":
+                first_audio.set()
+
+        session.event_sink = observe_first_audio
+        long_speech = asyncio.create_task(
+            session.speak_text(
+                "turn-qwen-48s-logical",
+                "A long streamed turn survives a media replacement before barge in.",
+                "voice-qwen",
+                "qwen3_1_7b",
+                final_chunk=True,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="The exact reference transcript.",
+            )
+        )
+        await asyncio.wait_for(first_audio.wait(), timeout=1.0)
+        assert adapter.first_stream_completed.is_set() is False
+        await wait_thread_event(adapter.reconnect_pause, label="reconnect pause")
+        assert active_track.chunks
+
+        generation = await session.mark_peer_connection_pending(
+            replacement_peer,
+            outbound_audio_track=replacement_track,
+            timeout_seconds=60.0,
+        )
+        webrtc_module._attach_peer_handlers(
+            replacement_peer,
+            session,
+            pending_generation=generation,
+        )
+        active_peer.connectionState = "closed"
+        await active_peer.handlers["connectionstatechange"]()
+
+        assert session.state == "reconnecting"
+        assert session.ended_at is None
+        assert released_prompt_leases == []
+
+        replacement_peer.connectionState = "connected"
+        replacement_peer.iceConnectionState = "connected"
+        await replacement_peer.handlers["connectionstatechange"]()
+
+        assert session.peer_connection is replacement_peer
+        assert session.state == "speaking"
+        assert active_peer.close_calls == 1
+        assert replacement_peer.close_calls == 0
+        assert released_prompt_leases == []
+
+        adapter.resume_after_reconnect.set()
+        await wait_thread_event(adapter.ready_for_barge_in, label="post-reconnect audio")
+        assert adapter.logical_audio_ms == 40_000.0
+        assert replacement_track.chunks
+
+        user_pcm = np.full(320, 4_000, dtype=np.int16).tobytes()
+        onset_frames = (session_module.CALL_BARGE_IN_MIN_SPEECH_MS + 19) // 20
+        interrupted = None
+        for _ in range(onset_frames):
+            interrupted = await session.handle_inbound_audio_frame(
+                ScriptedInboundAudioFrame(user_pcm)
+            )
+
+        assert interrupted is not None
+        assert interrupted["type"] == "interrupted"
+        assert interrupted["control_cause"] == "vad_barge_in"
+        try:
+            await long_speech
+        except asyncio.CancelledError:
+            pass
+
+        assert adapter.first_stream_completed.is_set() is False
+        assert adapter.first_stream_drained.is_set()
+        assert session.state == "listening"
+        assert released_prompt_leases == []
+
+        recovery = await session.speak_text(
+            "turn-qwen-after-reconnect-barge",
+            "The recovered live call completes exactly once.",
+            "voice-qwen",
+            "qwen3_1_7b",
+            final_chunk=True,
+            reference_audio_b64="cmVhbC1zYW1wbGU=",
+            reference_transcript="The exact reference transcript.",
+        )
+        assert recovery["type"] == "ai_done"
+        assert session.state == "listening"
+        assert released_prompt_leases == []
+
+        await session.end(reason="hangup")
+        return (
+            adapter,
+            active_peer,
+            replacement_peer,
+            active_track,
+            replacement_track,
+            session,
+        )
+
+    (
+        adapter,
+        active_peer,
+        replacement_peer,
+        active_track,
+        replacement_track,
+        session,
+    ) = _run(scenario())
+
+    event_types = [event["type"] for event in events]
+    assert event_types.count("ai_audio_started") == 2
+    assert event_types.count("interrupted") == 1
+    assert event_types.count("ai_done") == 1
+    assert "failed" not in event_types
+    assert adapter.cancel_calls == ["turn-qwen-48s-logical"]
+    assert adapter.synthesize_calls == 0
+    assert active_track.chunks
+    assert replacement_track.chunks
+    assert active_peer.close_calls == 1
+    assert replacement_peer.close_calls == 1
+    assert session.end_reason == "hangup"
+    assert released_prompt_leases == ["qwen-long-turn-reconnect-incident"]
+
+
 def test_voxcpm2_slow_stream_starts_playback_before_stream_completion(monkeypatch: Any) -> None:
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.2)
     events: list[dict[str, Any]] = []
