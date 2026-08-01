@@ -308,7 +308,9 @@ def _speech_terminal_from_response(
     if response is None:
         return _speech_error_terminal("call_tts_failed")
     raw_event = response.get("event")
-    event = raw_event if isinstance(raw_event, Mapping) else response
+    if not isinstance(raw_event, Mapping):
+        return _speech_error_terminal("call_tts_failed", response=response)
+    event = raw_event
     event_type = event.get("type")
     event_status = event.get("status")
     if event_status == "cancelled" or event_type == "cancelled":
@@ -320,13 +322,19 @@ def _speech_terminal_from_response(
     if event_type in {"failed", "error"} or event_status == "error":
         return _speech_error_terminal("call_tts_failed", response=response)
 
-    raw_playout = event.get("tts_playback_final")
-    playout = raw_playout if isinstance(raw_playout, Mapping) else {}
-    playout_completed = playout.get("playout_wait_completed") is not False
     normal_shape = event_type == "ai_done" or (
         not require_final and event_status in {"queued", "normal"}
     )
-    if not normal_shape or not playout_completed:
+    if not normal_shape:
+        return _speech_error_terminal("call_tts_failed", response=response)
+
+    # A final call response is persistence authority. Accept only an explicit
+    # backend playout proof; absence, null, integers, strings, and other
+    # truthy-looking values must all fail closed.
+    raw_playout = event.get("tts_playback_final")
+    if not isinstance(raw_playout, Mapping):
+        return _speech_error_terminal("call_tts_failed", response=response)
+    if raw_playout.get("playout_wait_completed") is not True:
         return _speech_error_terminal("call_tts_failed", response=response)
     return SpeechTurnTerminal(
         status="normal",

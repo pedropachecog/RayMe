@@ -148,7 +148,13 @@ class ScriptedCallBackend:
         self.speak_calls.append(
             {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
         )
-        return {"session_id": session_id, "event": {"type": "ai_done"}}
+        return {
+            "session_id": session_id,
+            "event": {
+                "type": "ai_done",
+                "tts_playback_final": {"playout_wait_completed": True},
+            },
+        }
 
     async def backfill_call_audio(
         self,
@@ -1097,6 +1103,86 @@ def test_qwen_normal_multi_segment_turn_persists_once_after_one_normal_terminal(
     ]
 
 
+@pytest.mark.parametrize(
+    ("terminal_event", "expected_status"),
+    [
+        pytest.param({"type": "ai_done"}, "error", id="absent"),
+        pytest.param(
+            {"type": "ai_done", "tts_playback_final": {}},
+            "error",
+            id="empty",
+        ),
+        pytest.param(
+            {"type": "ai_done", "tts_playback_final": None},
+            "error",
+            id="null",
+        ),
+        pytest.param(
+            {
+                "type": "ai_done",
+                "tts_playback_final": {"playout_wait_completed": False},
+            },
+            "error",
+            id="false",
+        ),
+        pytest.param(
+            {
+                "type": "ai_done",
+                "tts_playback_final": {"playout_wait_completed": 1},
+            },
+            "error",
+            id="integer",
+        ),
+        pytest.param(
+            {
+                "type": "ai_done",
+                "tts_playback_final": {"playout_wait_completed": "true"},
+            },
+            "error",
+            id="string",
+        ),
+        pytest.param(
+            {
+                "type": "ai_done",
+                "tts_playback_final": {"playout_wait_completed": True},
+            },
+            "normal",
+            id="literal-true",
+        ),
+    ],
+)
+def test_speech_turn_accepts_only_literal_true_final_playout_proof(
+    terminal_event: dict[str, Any],
+    expected_status: str,
+) -> None:
+    class TerminalBackend:
+        async def speak_call(
+            self,
+            base_url: str,
+            session_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            del base_url, payload
+            return {"session_id": session_id, "event": terminal_event}
+
+    async def run_turn() -> Any:
+        turn = SpeechTurn(
+            backend=TerminalBackend(),
+            base_url="https://127.0.0.1:9443",
+            session_id="session-playout-proof",
+            turn_id="turn-playout-proof",
+            voice_id="voice-playout-proof",
+            engine_id="qwen3_1_7b",
+            voice_reference={},
+        )
+        return await turn.finalize("Audible only with proof.")
+
+    terminal = asyncio.run(run_turn())
+
+    assert terminal.status == expected_status
+    assert terminal.playout_completed is (expected_status == "normal")
+
+
 def test_qwen_boundary_terminated_turn_still_submits_one_backend_terminal(
     call_fixture: CallFixture,
 ) -> None:
@@ -1705,6 +1791,7 @@ def test_turn_forwards_streaming_audio_started_metrics_without_extra_speech_rows
                         "streaming_used": True,
                         "fallback_used": False,
                         "whole_wav_fallback_used": False,
+                        "playout_wait_completed": True,
                         "chunk_count": 3,
                         "total_generation_ms": 1800.0,
                         "total_playback_ms": 1700.0,
