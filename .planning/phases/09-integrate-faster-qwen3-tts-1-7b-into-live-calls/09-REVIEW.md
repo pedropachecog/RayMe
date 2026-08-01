@@ -1,8 +1,8 @@
 ---
 phase: 09-integrate-faster-qwen3-tts-1-7b-into-live-calls
-reviewed: 2026-08-01T14:55:41Z
+reviewed: 2026-08-01T15:23:32Z
 depth: deep
-files_reviewed: 17
+files_reviewed: 18
 files_reviewed_list:
   - ai-backend/app/models/model_manager.py
   - ai-backend/tests/test_model_manager.py
@@ -20,6 +20,7 @@ files_reviewed_list:
   - web-ui/server/tests/test_migrations.py
   - web-ui/server/tests/test_voices.py
   - .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-run-hardware-tracer.py
+  - .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-run-omen-evidence.py
   - .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/test_phase09_evidence.py
 findings:
   critical: 0
@@ -31,23 +32,18 @@ status: clean
 
 # Phase 09: Code Review Report
 
-**Reviewed:** 2026-08-01T14:55:41Z
+**Reviewed:** 2026-08-01T15:23:32Z
 **Depth:** deep
-**Files Reviewed:** 17
+**Files Reviewed:** 18
 **Status:** clean
 
 ## Summary
 
-The exact integrated tree at `d9d2a46` was reviewed across the same 17-file Phase 09 scope. The final fix sanitizes stale stored Qwen metadata before applying a mutable source patch, closing the last disclosure path without deleting newly supplied generic Qwen metadata or unrelated non-Qwen metadata.
+The final focused re-review of continuation commit `50d2313` is clean. The exception boundary in `09-run-omen-evidence.py` now emits full messages only for the runner's curated `EvidenceRunnerError` domain failures. Every other `Exception` is reduced to its class name, so paths, transcripts, and other private exception details do not reach the canonical deployment output. `KeyboardInterrupt` and `SystemExit` continue to propagate, successful runs still emit `PASS` and return zero, and unexpected failures return nonzero.
 
-All earlier review findings remain closed:
+The stale saved-voice helper call is also closed: both the evidence runner and hardware tracer call `_create_saved_voice(api, *, reference_audio, transcript)` without the removed `selection` argument. Authorization remains enforced by hash-bound preflight and retained in permitted evidence rather than being written into saved-voice metadata. The canonical deployment captures the runner status, republishes only `PASS*`/`FAIL:*` lines, aborts on nonzero status, and requires independent same-commit core-ready verification before evidence copyback.
 
-- Exact short transcripts and bounded one-token edge variants pass alignment, while gross mismatches, long unrelated tails, one-word collisions, and reordered transcripts fail.
-- Retired Qwen authorization cleanup is engine-aware and legacy-source-aware across save, patch, read/list, and migration paths.
-- Generic authorization metadata remains available for non-tracer Qwen voices and non-Qwen engines.
-- Migration 0008 removes both known historical Qwen authorization shapes, preserves unrelated rows and metadata, and rejects its irreversible downgrade explicitly.
-- Client/API upload-implies-authorization contracts remain aligned.
-- Live playback still begins before slow stream completion, cancellation/interrupt behavior remains contained, and VoxCPM2 does not fall back to whole synthesis.
+The earlier 17-file deep review remains clean through `d9d2a46`: transcript alignment, Qwen-scoped metadata cleanup, migration behavior, API compatibility, and live-call streaming invariants remain closed.
 
 All reviewed files meet quality standards. No issues found.
 
@@ -57,20 +53,33 @@ No Critical, Warning, or Info findings.
 
 ## Verification
 
-- Direct metadata state-transition reproduction: stale tracer authorization removed before a source-only patch; newly supplied generic Qwen authorization preserved; non-Qwen metadata preserved.
-- Direct alignment reproductions: exact short and one-token edge variants accepted; known gross mismatch and long unrelated tail rejected.
-- `ai-backend/.venv/bin/pytest -q tests/test_model_manager.py`: 32 passed.
-- `web-ui/server/.venv/bin/pytest -q tests/test_voices.py tests/test_calls.py tests/test_migrations.py`: 128 passed.
-- `npm run check`: passed.
-- `npm run test:unit -- --run tests/unit/voice-lab.test.ts`: 17 passed.
-- `npx playwright test tests/e2e/qwen3-readiness.spec.ts --reporter=line`: 8 passed.
-- `ai-backend/.venv/bin/pytest -q .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/test_phase09_evidence.py`: 50 passed.
+### Final continuation `50d2313`
+
+- Audited every `EvidenceRunnerError` construction in the runner. Dynamic values are bounded runner labels, manifest scenario IDs, turn numbers, artifact keys, and stream names; private paths, transcript contents, and underlying exception messages are not interpolated.
+- Confirmed the handler order is `EvidenceRunnerError` first, followed by class-name-only `Exception`; the previous raw `OSError`/`RuntimeError`/`ValueError` leak is closed.
+- Confirmed `KeyboardInterrupt` and `SystemExit` remain outside the handler because they inherit from `BaseException`.
+- Confirmed success returns `0` with `PASS`; domain and unexpected failures return `1` with a sanitized `FAIL:` line.
+- Traced `_create_saved_voice(api, *, reference_audio, transcript)` from both call sites to the current hardware-tracer signature. No stale `selection` argument remains at the saved-voice boundary.
+- Confirmed the saved-voice payload contains only `metadata.source=phase09_hardware_tracer`; retired authorization fields remain absent.
+- Confirmed deployment aborts on a nonzero runner status and independently verifies the commit-bound core-ready bundle before copyback.
+- `ai-backend/.venv/bin/pytest -q .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/test_phase09_evidence.py`: 59 passed.
+- Runner `--dry-run` at `50d23136a7d88efab8cc48696a2461f1941e04c8`: passed.
+- `bash -n scripts/deploy-omen.sh`: passed.
+- `git diff --check f999d33..50d2313`: passed.
+- Conflict-marker scan across the continuation files and deployment script: none found.
+
+### Earlier clean gate through `d9d2a46`
+
+- Model-manager tests: 32 passed.
+- Server voice/call/migration tests: 128 passed.
+- Client type/Svelte check: passed.
+- Voice Lab unit tests: 17 passed.
+- Qwen readiness Playwright tests: 8 passed.
+- Phase 09 evidence tests at that gate: 50 passed.
 - Focused live-call streaming, cancellation, VoxCPM2 no-fallback, and WebRTC Qwen-carrier invariants: 7 passed.
-- `git diff --check`: passed.
-- Conflict-marker scan across all 17 reviewed files: none found.
 
 ---
 
-_Reviewed: 2026-08-01T14:55:41Z_
+_Reviewed: 2026-08-01T15:23:32Z_
 _Reviewer: the agent (gsd-code-reviewer)_
 _Depth: deep_
