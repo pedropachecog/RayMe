@@ -538,6 +538,143 @@ def test_hardware_tracer_consumer_records_and_detects_int16_audio() -> None:
     assert frames[0][1].tolist() == [0, 64, 256, -512]
 
 
+def test_hardware_tracer_distinguishes_bounded_transport_drain_from_late_audio() -> None:
+    import numpy as np
+
+    tracer = _runner_module("phase09_runner_cancel_drain").load_hardware_tracer()
+    acknowledged_at = 100.0
+    audible = np.asarray([0, 256, -256], dtype=np.int16)
+    silent = np.asarray([0, 0, 0], dtype=np.int16)
+    frames = [
+        (acknowledged_at - 0.001, audible),
+        (acknowledged_at + 0.001, audible),
+        (acknowledged_at + 0.250, audible),
+        (acknowledged_at + 0.251, audible),
+        (acknowledged_at + 0.300, silent),
+    ]
+
+    assert tracer._partition_interrupt_audio_frames(
+        frames,
+        acknowledged_at=acknowledged_at,
+        receiver_drain_ms=250,
+    ) == (2, 1)
+
+
+def test_hardware_tracer_requires_explicit_zero_pending_audio_metric() -> None:
+    tracer = _runner_module("phase09_runner_cancel_pending_metric").load_hardware_tracer()
+
+    assert tracer._require_zero_track_pending_audio_ms(
+        {"track_pending_audio_ms": 0.0}
+    ) == 0.0
+    for invalid in ({}, {"track_pending_audio_ms": None}, {"track_pending_audio_ms": "0"}):
+        with pytest.raises(tracer.TracerFailure, match="pending audio metric"):
+            tracer._require_zero_track_pending_audio_ms(invalid)
+    with pytest.raises(tracer.TracerFailure, match="retained pending audio"):
+        tracer._require_zero_track_pending_audio_ms({"track_pending_audio_ms": 0.1})
+
+
+def test_hardware_tracer_observes_past_delayed_interrupt_event_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+    import numpy as np
+
+    tracer = _runner_module("phase09_runner_delayed_interrupt_event").load_hardware_tracer()
+    acknowledged_at = 100.01
+    event_received_at = 100.60
+    sleep_delays: list[float] = []
+
+    class RecordingApi:
+        ai_base_url = "https://ai.invalid"
+
+        def post_json(
+            self,
+            _base_url: str,
+            path: str,
+            _payload: dict[str, object],
+        ) -> object:
+            if path.endswith("/interrupt"):
+                return tracer.ApiResponse(
+                    status=200,
+                    payload={"receiver_drain_ms": 250},
+                )
+            return tracer.ApiResponse(status=409, payload={})
+
+    class DelayedEventPeer:
+        def __init__(self) -> None:
+            self.events: list[dict[str, object]] = []
+            self.wait_count = 0
+            self.capture_stopped = False
+
+        def start_capture(self, captured_turn_id: str) -> None:
+            assert captured_turn_id.startswith("trace-cancel-")
+            self.events = [
+                {"type": "ai_audio_started", "turn_id": captured_turn_id},
+                {
+                    "type": "interrupted",
+                    "cancelled_turn_id": captured_turn_id,
+                    "receiver_drain_ms": 250,
+                    "_received_monotonic": event_received_at,
+                    "tts_playback_final": {"track_pending_audio_ms": 0.0},
+                },
+            ]
+
+        async def wait_for_event(self, *_args: object, **_kwargs: object) -> tuple[int, dict[str, object]]:
+            event = self.events[self.wait_count]
+            self.wait_count += 1
+            return self.wait_count - 1, event
+
+        async def wait_for_nonzero_audio(self, *, timeout: float) -> float:
+            assert timeout == 30.0
+            return 99.9
+
+        def stop_capture(self) -> tuple[list[tuple[float, object]], None]:
+            self.capture_stopped = True
+            audible = np.asarray([0, 256, -256], dtype=np.int16)
+            return [(event_received_at + 0.01, audible)], None
+
+    clock = iter((100.0, acknowledged_at, event_received_at + 0.01))
+    monkeypatch.setattr(tracer.time, "perf_counter", lambda: next(clock))
+
+    async def record_sleep(delay: float) -> None:
+        sleep_delays.append(delay)
+
+    monkeypatch.setattr(tracer.asyncio, "sleep", record_sleep)
+    peer = DelayedEventPeer()
+
+    with pytest.raises(
+        tracer.TracerFailure,
+        match="Audible Qwen frames arrived after the bounded receiver drain",
+    ):
+        asyncio.run(
+            tracer._run_cancel_sample(
+                RecordingApi(),
+                peer,
+                session_id="session-delayed-event",
+                voice_id="voice-qwen",
+                reference_audio=b"reference",
+                transcript="authorized transcript",
+            )
+        )
+
+    assert peer.capture_stopped is True
+    assert sleep_delays == [pytest.approx(0.44)]
+
+
+@pytest.mark.parametrize("received_at", [None, True, "100.0", math.nan, math.inf])
+def test_hardware_tracer_rejects_invalid_interrupted_event_timestamp(
+    received_at: object,
+) -> None:
+    tracer = _runner_module("phase09_runner_invalid_interrupt_timestamp").load_hardware_tracer()
+
+    with pytest.raises(tracer.TracerFailure, match="event timestamp is invalid"):
+        tracer._interrupt_capture_deadline(
+            interrupt_acknowledged=100.0,
+            interrupted_event={"_received_monotonic": received_at},
+            receiver_drain_ms=250,
+        )
+
+
 def test_fidelity_sweep_compares_upstream_and_bounded_fidelity_profiles() -> None:
     sweep = _load_module(FIDELITY_SWEEP_PATH, "phase09_fidelity_sweep_contract")
 

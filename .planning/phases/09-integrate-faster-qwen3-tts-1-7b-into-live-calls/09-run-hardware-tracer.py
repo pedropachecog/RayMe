@@ -35,6 +35,7 @@ MODEL_REVISION = "fd4b254389122332181a7c3db7f27e918eec64e3"
 EXPECTED_TORCH = "2.10.0+cu126"
 EXPECTED_CUDA = "12.6"
 EXPECTED_GPU = "NVIDIA GeForce RTX 3060"
+MAX_INTERRUPT_RECEIVER_DRAIN_MS = 500
 DEFAULT_WEB_BASE_URL = "https://192.168.1.199:8443"
 DEFAULT_AI_BASE_URL = "https://192.168.1.199:9443"
 REFERENCE_TRANSCRIPT = (
@@ -941,6 +942,60 @@ async def _run_normal_sample(
     }
 
 
+def _partition_interrupt_audio_frames(
+    frames: list[tuple[float, Any]],
+    *,
+    acknowledged_at: float,
+    receiver_drain_ms: int,
+) -> tuple[int, int]:
+    import numpy as np
+
+    transport_drain_nonzero = 0
+    post_drain_nonzero = 0
+    for received_at, samples in frames:
+        if received_at <= acknowledged_at or not samples.size:
+            continue
+        if int(np.max(np.abs(samples.astype(np.int32)))) < 128:
+            continue
+        elapsed_ms = (received_at - acknowledged_at) * 1000.0
+        if elapsed_ms <= receiver_drain_ms + 1e-6:
+            transport_drain_nonzero += 1
+        else:
+            post_drain_nonzero += 1
+    return transport_drain_nonzero, post_drain_nonzero
+
+
+def _require_zero_track_pending_audio_ms(playback_final: dict[str, Any]) -> float:
+    raw_pending_audio_ms = playback_final.get("track_pending_audio_ms")
+    if (
+        isinstance(raw_pending_audio_ms, bool)
+        or not isinstance(raw_pending_audio_ms, (int, float))
+        or not math.isfinite(float(raw_pending_audio_ms))
+    ):
+        raise TracerFailure("Qwen interrupted event has an invalid pending audio metric")
+    pending_audio_ms = float(raw_pending_audio_ms)
+    if pending_audio_ms != 0.0:
+        raise TracerFailure("Qwen server retained pending audio after cancellation")
+    return pending_audio_ms
+
+
+def _interrupt_capture_deadline(
+    *,
+    interrupt_acknowledged: float,
+    interrupted_event: dict[str, Any],
+    receiver_drain_ms: int,
+) -> float:
+    event_received_at = interrupted_event.get("_received_monotonic")
+    if (
+        isinstance(event_received_at, bool)
+        or not isinstance(event_received_at, (int, float))
+        or not math.isfinite(float(event_received_at))
+    ):
+        raise TracerFailure("Qwen interrupted event timestamp is invalid")
+    capture_anchor = max(interrupt_acknowledged, float(event_received_at))
+    return capture_anchor + receiver_drain_ms / 1000.0 + 0.2
+
+
 async def _run_cancel_sample(
     api: RayMeApi,
     peer: WebRtcCapture,
@@ -950,8 +1005,6 @@ async def _run_cancel_sample(
     reference_audio: bytes,
     transcript: str,
 ) -> dict[str, Any]:
-    import numpy as np
-
     turn_id = f"trace-cancel-{uuid.uuid4().hex[:16]}"
     event_start = len(peer.events)
     peer.start_capture(turn_id)
@@ -984,19 +1037,44 @@ async def _run_cancel_sample(
         {},
     )
     interrupt_acknowledged = time.perf_counter()
-    _require_ok(interrupt_response, "Qwen interrupt")
+    interrupt_payload = _require_ok(interrupt_response, "Qwen interrupt")
+    raw_receiver_drain_ms = interrupt_payload.get("receiver_drain_ms")
+    if (
+        isinstance(raw_receiver_drain_ms, bool)
+        or not isinstance(raw_receiver_drain_ms, int)
+        or not 1 <= raw_receiver_drain_ms <= MAX_INTERRUPT_RECEIVER_DRAIN_MS
+    ):
+        raise TracerFailure("Qwen interrupt receiver drain contract is invalid")
+    receiver_drain_ms = raw_receiver_drain_ms
     acknowledgement_ms = round((interrupt_acknowledged - interrupt_started) * 1000.0, 1)
     if acknowledgement_ms >= 2000.0:
         raise TracerFailure("Qwen worker cancellation acknowledgement exceeded two seconds")
+    _, interrupted_event = await peer.wait_for_event(
+        "interrupted",
+        after_index=event_start,
+        timeout=5.0,
+    )
+    if interrupted_event.get("cancelled_turn_id") != turn_id:
+        raise TracerFailure("Qwen interrupted event did not identify the cancelled turn")
+    if interrupted_event.get("receiver_drain_ms") != receiver_drain_ms:
+        raise TracerFailure("Qwen interrupt receiver drain contract disagrees across channels")
+    playback_final = interrupted_event.get("tts_playback_final")
+    if not isinstance(playback_final, dict):
+        raise TracerFailure("Qwen interrupted event omitted final playout metrics")
+    track_pending_audio_ms = _require_zero_track_pending_audio_ms(playback_final)
     speak_response = await speak_task
-    await asyncio.sleep(0.4)
+    capture_until = _interrupt_capture_deadline(
+        interrupt_acknowledged=interrupt_acknowledged,
+        interrupted_event=interrupted_event,
+        receiver_drain_ms=receiver_drain_ms,
+    )
+    await asyncio.sleep(max(capture_until - time.perf_counter(), 0.0))
     frames, _ = peer.stop_capture()
-    post_ack_nonzero = 0
-    for received_at, samples in frames:
-        if received_at <= interrupt_acknowledged + 0.1 or not samples.size:
-            continue
-        if int(np.max(np.abs(samples.astype(np.int32)))) >= 128:
-            post_ack_nonzero += 1
+    transport_drain_nonzero, post_drain_nonzero = _partition_interrupt_audio_frames(
+        frames,
+        acknowledged_at=interrupt_acknowledged,
+        receiver_drain_ms=receiver_drain_ms,
+    )
     turn_events = [
         event
         for event in peer.events[event_start:]
@@ -1010,15 +1088,18 @@ async def _run_cancel_sample(
         raise TracerFailure("Cancelled Qwen speak returned normal success")
     if ai_done_count != 0 or audio_started_count != 1:
         raise TracerFailure("Cancelled Qwen turn emitted a false normal completion")
-    if post_ack_nonzero != 0:
-        raise TracerFailure("Audible Qwen frames arrived after cancellation acknowledgement")
+    if post_drain_nonzero != 0:
+        raise TracerFailure("Audible Qwen frames arrived after the bounded receiver drain")
     return {
         "turn_id": turn_id,
         "audio_started_count": audio_started_count,
         "normal_ai_done_count": ai_done_count,
         "speak_http_status": speak_response.status,
         "worker_ack_upper_bound_ms": acknowledgement_ms,
-        "post_cancel_nonzero_frames": post_ack_nonzero,
+        "receiver_drain_ms": receiver_drain_ms,
+        "transport_drain_nonzero_frames": transport_drain_nonzero,
+        "track_pending_audio_ms": track_pending_audio_ms,
+        "post_cancel_nonzero_frames": post_drain_nonzero,
         "forced_termination_detected": False,
     }
 
