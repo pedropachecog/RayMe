@@ -2484,8 +2484,10 @@ class CallSession:
                             close()
                         except Exception as exc:
                             terminal_item = exc
-                    if turn_id not in self._cancelled_ai_turns:
-                        put_threadsafe(terminal_item)
+                    # Always wake the async bridge. The consumer owns the
+                    # cancelled/cancelling decision; suppressing this sentinel
+                    # can strand an acknowledged engine-switch request forever.
+                    put_threadsafe(terminal_item)
 
             producer_task = asyncio.create_task(asyncio.to_thread(produce))
 
@@ -2848,9 +2850,28 @@ class CallSession:
         if self._pending_speech_terminal_turn_id == captured.pending_terminal_turn_id:
             self._clear_pending_speech_terminal()
 
+        graceful_engine_switch = (
+            cause == "engine_switch"
+            and cancel_acknowledged is True
+            and isinstance(active, asyncio.Future)
+        )
+        if graceful_engine_switch:
+            # An acknowledged exact worker cancel will make the captured speech
+            # task return its stable {status: cancelled} result. Give that task
+            # the remainder of the existing bounded drain window before using
+            # task cancellation, so HTTP outcome does not depend on scheduler
+            # timing around the worker terminal.
+            deadline = cancel_started_at + CALL_TTS_CANCEL_DRAIN_TIMEOUT_SECONDS
+            while not active.done() and time.perf_counter() < deadline:
+                await asyncio.sleep(0.005)
+
         if active is not None and active is not asyncio.current_task():
             cancel = getattr(active, "cancel", None)
-            if callable(cancel):
+            if (
+                callable(cancel)
+                and not graceful_engine_switch
+                and not (isinstance(active, asyncio.Future) and active.done())
+            ):
                 active_loop_getter = getattr(active, "get_loop", None)
                 active_loop = active_loop_getter() if callable(active_loop_getter) else None
                 current_loop = asyncio.get_running_loop()

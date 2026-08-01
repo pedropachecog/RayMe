@@ -1596,12 +1596,8 @@ def test_webrtc_reoffer_engine_switch_cancels_exact_active_qwen_request(
     assert adapter.stream_identities == [
         (adapter.cancel_calls[0], "voice-qwen")
     ]
-    assert responses and responses[0].status_code == 502
-    assert responses[0].json()["detail"] == {
-        "code": "call_tts_failed",
-        "message": "Speech playback cancelled",
-        "engine_id": "qwen3_1_7b",
-    }
+    assert responses and responses[0].status_code == 200
+    assert responses[0].json()["event"]["status"] == "cancelled"
 
 
 def test_webrtc_speak_synthesizes_with_exact_engine_and_emits_done(stub_webrtc: None) -> None:
