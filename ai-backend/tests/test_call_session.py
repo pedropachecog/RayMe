@@ -972,6 +972,95 @@ def test_final_reconnect_backfill_can_finalize_turn_without_replacement_frame() 
     assert session.state == "thinking"
 
 
+def test_slow_reconnect_stt_defers_transport_terminal_and_returns_usable_user_final() -> None:
+    import threading
+
+    entered_stt = threading.Event()
+    release_stt = threading.Event()
+
+    class SlowSttAdapter:
+        def transcribe(self, **_kwargs: Any) -> dict[str, Any]:
+            entered_stt.set()
+            assert release_stt.wait(timeout=2.0)
+            return {
+                "status": "accepted",
+                "transcript": "recovered after slow transcription",
+                "language": "en",
+            }
+
+    async def scenario() -> None:
+        session, _ = _new_session(
+            vad_adapter=ScriptedVadAdapter(),
+            stt_adapter=SlowSttAdapter(),
+        )
+        session.voice_id = "voice-1"
+        session.engine_id = "f5"
+        peer = ScriptedPeerConnection()
+        session.peer_connection = peer
+        pre_pcm = np.full(320, 1000, dtype=np.int16).tobytes()
+        gap_pcm = np.full(320, 2000, dtype=np.int16).tobytes()
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pre_pcm)
+        ) is None
+
+        backfill_task = asyncio.create_task(
+            session.backfill_reconnect_audio(
+                pcm=gap_pcm,
+                sample_rate=16000,
+                channels=1,
+                backfill_id="slow-stt-grace-expiry",
+                final=True,
+            )
+        )
+        assert await asyncio.to_thread(entered_stt.wait, 1.0)
+        await session._begin_transport_reconnect(peer, "failed")
+        epoch = session._peer_lifecycle.epoch
+        assert await session.resolve_deferred_connection_state(
+            epoch=epoch,
+            peer_connection=peer,
+        ) is False
+        assert session.ended_at is None
+
+        release_stt.set()
+        result = await asyncio.wait_for(backfill_task, timeout=2.0)
+        assert result["event"]["type"] == "user_final"
+        assert result["event"]["text"] == "recovered after slow transcription"
+        assert session._peer_lifecycle.phase == "reconnecting"
+        await session.complete_transport_reconnect()
+        reservation = await session.reserve_accepted_speech_configuration(
+            voice_id="voice-1",
+            engine_id="f5",
+        )
+        assert reservation.epoch == session._peer_lifecycle.epoch
+        assert session.state == "thinking"
+
+    _run(scenario())
+
+
+def test_terminal_session_rejects_late_reconnect_backfill_without_revival() -> None:
+    session, _ = _new_session()
+    terminal = _run(session.fail(reason="connection_failed"))
+
+    result = _run(
+        session.backfill_reconnect_audio(
+            pcm=np.full(320, 2000, dtype=np.int16).tobytes(),
+            backfill_id="late-terminal-backfill",
+            final=True,
+        )
+    )
+
+    assert terminal["type"] == "failed"
+    assert result == {
+        "status": "terminal",
+        "frames": 0,
+        "duration_ms": 0,
+        "state": "failed",
+        "reason": "connection_failed",
+    }
+    assert session._peer_lifecycle.phase == "terminal"
+    assert session.ended_at is not None
+
+
 def test_nonfinal_reconnect_backfill_with_extended_silence_finalizes_turn(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

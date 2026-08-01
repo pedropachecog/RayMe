@@ -321,6 +321,7 @@ class CallSession:
         self._media_reconnect_grace_logged = False
         self._media_reconnect_grace_audio_diag_count = 0
         self._reconnect_audio_backfill_ids: set[str] = set()
+        self._active_reconnect_backfills = 0
         self._reconnect_live_frame_hold_until = 0.0
         self._reconnect_live_frame_hold_logged = False
         self._reconnect_live_frame_hold_frames: list[PcmAudioFrame] = []
@@ -749,6 +750,66 @@ class CallSession:
         batch_index: int | None = None,
         final: bool = True,
     ) -> dict[str, Any]:
+        async with self._lifecycle_lock:
+            if (
+                self.ended_at is not None
+                or self._peer_lifecycle.phase == "terminal"
+                or self.state in {"ended", "failed"}
+            ):
+                return {
+                    "status": "terminal",
+                    "frames": 0,
+                    "duration_ms": 0,
+                    "state": self.state,
+                    "reason": self.end_reason,
+                }
+            self._active_reconnect_backfills += 1
+        try:
+            return await self._backfill_reconnect_audio_admitted(
+                pcm=pcm,
+                sample_rate=sample_rate,
+                channels=channels,
+                backfill_id=backfill_id,
+                reason=reason,
+                attempt=attempt,
+                batch_index=batch_index,
+                final=final,
+            )
+        finally:
+            async with self._lifecycle_lock:
+                self._active_reconnect_backfills = max(
+                    self._active_reconnect_backfills - 1,
+                    0,
+                )
+                lifecycle = self._peer_lifecycle
+                if (
+                    self._active_reconnect_backfills == 0
+                    and lifecycle.phase == "reconnecting"
+                    and lifecycle.grace_peer is not None
+                    and (
+                        lifecycle.grace_task is None
+                        or lifecycle.grace_task.done()
+                    )
+                ):
+                    lifecycle.grace_task = asyncio.create_task(
+                        self._expire_peer_reconnect_grace(
+                            lifecycle.epoch,
+                            lifecycle.grace_peer,
+                        )
+                    )
+
+    async def _backfill_reconnect_audio_admitted(
+        self,
+        *,
+        pcm: bytes,
+        sample_rate: int,
+        channels: int,
+        backfill_id: str | None,
+        reason: str | None,
+        attempt: int | None,
+        batch_index: int | None,
+        final: bool,
+    ) -> dict[str, Any]:
         if backfill_id and backfill_id in self._reconnect_audio_backfill_ids:
             logger.info(
                 "[rayme-call] reconnect_audio.backfill.duplicate session=%s "
@@ -782,15 +843,6 @@ class CallSession:
                 "duration_ms": 0,
                 "state": self.state,
             }
-        if (
-            self.state == "failed"
-            and self.end_reason == "connection_failed"
-            and (self._turn_frames or pcm)
-        ):
-            self.state = "listening"
-            self.end_reason = None
-            self.ended_at = None
-
         frames = self._pcm_backfill_frames(
             pcm,
             sample_rate=sample_rate,
@@ -3022,6 +3074,13 @@ class CallSession:
                     and peer_connection is not lifecycle.grace_peer
                 )
             ):
+                return False
+            if self._active_reconnect_backfills > 0:
+                # An admitted backfill owns the missing audio and may be inside
+                # slow STT. Do not terminalize underneath that user turn. The
+                # finalizer rearms a full grace window if transport is still
+                # reconnecting after the backfill completes.
+                lifecycle.grace_task = None
                 return False
             target_state = "failed" if terminal_state == "failed" else "ended"
             reason = (
