@@ -347,12 +347,17 @@ class AiBackendClient:
         transcription_timeout: float = 120.0,
         synthesis_timeout: float = 120.0,
         webrtc_timeout: float = 30.0,
+        backfill_timeout: float | None = None,
     ) -> None:
         self._http_client = http_client
         self._timeout = timeout
         self._transcription_timeout = transcription_timeout
         self._synthesis_timeout = synthesis_timeout
         self._webrtc_timeout = webrtc_timeout
+        self._backfill_timeout = max(
+            transcription_timeout,
+            backfill_timeout or transcription_timeout,
+        )
 
     async def get_status(self, base_url: str) -> AiBackendStatus:
         response = await self._request("GET", _join_endpoint(base_url, "/health"))
@@ -570,7 +575,7 @@ class AiBackendClient:
             json=dict(payload),
             processing_message=WEBRTC_FAILED_MESSAGE,
             processing_code="call_reconnect_audio_failed",
-            timeout=self._webrtc_timeout,
+            timeout=self._backfill_timeout,
         )
         response_payload = _json_payload(response)
         if not isinstance(response_payload, dict):

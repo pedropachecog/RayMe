@@ -561,7 +561,7 @@ def test_debug_event_truncates_detail_and_is_behavior_neutral(
     assert long_debug_value not in str(detail_logs[-1])
 
 
-async def test_ai_backend_client_backfill_uses_webrtc_timeout_path() -> None:
+async def test_ai_backend_client_backfill_uses_stt_sized_timeout_path() -> None:
     from app.domain.ai_backend_client import AiBackendClient
 
     class CapturingHttpClient:
@@ -579,6 +579,7 @@ async def test_ai_backend_client_backfill_uses_webrtc_timeout_path() -> None:
     ai_client = AiBackendClient(
         http_client=http_client,  # type: ignore[arg-type]
         timeout=5.0,
+        transcription_timeout=120.0,
         webrtc_timeout=30.0,
     )
 
@@ -589,7 +590,64 @@ async def test_ai_backend_client_backfill_uses_webrtc_timeout_path() -> None:
     )
 
     assert result["status"] == "accepted"
-    assert http_client.requests[0]["timeout"] == 30.0
+    assert http_client.requests[0]["timeout"] == 120.0
+
+
+async def test_ordinary_and_reconnect_stt_survive_simulated_delay_over_thirty_seconds() -> None:
+    from app.domain.ai_backend_client import AiBackendClient
+
+    class SimulatedDelayedSttClient:
+        def __init__(self) -> None:
+            self.timeouts: list[float] = []
+
+        async def request(self, method: str, url: str, **kwargs: object) -> httpx.Response:
+            del method
+            timeout = float(kwargs["timeout"])
+            self.timeouts.append(timeout)
+            simulated_elapsed_seconds = 45.0
+            if timeout <= simulated_elapsed_seconds:
+                raise httpx.ReadTimeout("simulated STT exceeded caller timeout")
+            if url.endswith("/stt/transcribe"):
+                return httpx.Response(
+                    200,
+                    json={"status": "ok", "transcript": "ordinary delayed speech"},
+                )
+            return httpx.Response(
+                200,
+                json={
+                    "session_id": "rtc-delayed-stt",
+                    "status": "accepted",
+                    "event": {
+                        "type": "user_final",
+                        "turn_id": "user-turn-delayed",
+                        "text": "reconnected delayed speech",
+                    },
+                },
+            )
+
+    http_client = SimulatedDelayedSttClient()
+    ai_client = AiBackendClient(
+        http_client=http_client,  # type: ignore[arg-type]
+        webrtc_timeout=30.0,
+        transcription_timeout=120.0,
+    )
+
+    ordinary = await ai_client.transcribe_sample(
+        "https://ai.local:9443",
+        b"wav",
+        "turn.wav",
+        "audio/wav",
+    )
+    reconnect = await ai_client.backfill_call_audio(
+        "https://ai.local:9443",
+        "rtc-delayed-stt",
+        {"pcm_b64": "AA==", "sample_rate": 16000, "channels": 1, "final": True},
+    )
+
+    assert ordinary.transcript == "ordinary delayed speech"
+    assert reconnect["event"]["type"] == "user_final"
+    assert [reconnect["event"]["type"]].count("user_final") == 1
+    assert http_client.timeouts == [120.0, 120.0]
 
 
 def test_offer_failure_returns_backend_public_detail(call_fixture: CallFixture) -> None:

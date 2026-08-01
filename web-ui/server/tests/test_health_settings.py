@@ -760,7 +760,7 @@ async def test_ai_backend_client_preserves_sanitized_webrtc_offer_failure_detail
     }
 
 
-async def test_ai_backend_client_uses_webrtc_timeout_for_reconnect_audio_backfill() -> None:
+async def test_ai_backend_client_uses_stt_timeout_for_reconnect_audio_backfill() -> None:
     from app.domain.ai_backend_client import AiBackendClient
 
     class CapturingHttpClient:
@@ -778,6 +778,7 @@ async def test_ai_backend_client_uses_webrtc_timeout_for_reconnect_audio_backfil
     ai_client = AiBackendClient(
         http_client=http_client,  # type: ignore[arg-type]
         timeout=5.0,
+        transcription_timeout=120.0,
         webrtc_timeout=30.0,
     )
 
@@ -788,7 +789,7 @@ async def test_ai_backend_client_uses_webrtc_timeout_for_reconnect_audio_backfil
     )
 
     assert result["status"] == "accepted"
-    assert http_client.requests[0]["timeout"] == 30.0
+    assert http_client.requests[0]["timeout"] == 120.0
 
 
 def _ai_backend_client(status: ConnectionStatus):
