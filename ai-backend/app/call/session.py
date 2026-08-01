@@ -9,7 +9,7 @@ import json
 import logging
 import time
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 
@@ -178,13 +178,20 @@ class _PeerLifecycle:
     grace_task: asyncio.Task[None] | None = None
 
 
-@dataclass(frozen=True)
+@dataclass
 class _TerminalCleanup:
     target_state: str
     reason: str
+    cancel_cause: str
     active_peer: Any
     candidate_peer: Any | None
     prompt_lease_releaser: PromptLeaseReleaser | None
+    cancel_pending: bool
+    active_peer_pending: bool = True
+    candidate_peer_pending: bool = True
+    prompt_lease_pending: bool = True
+    cancel_context: dict[str, Any] = field(default_factory=dict)
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class CallSession:
@@ -270,6 +277,7 @@ class CallSession:
         self._lifecycle_lock = asyncio.Lock()
         self._peer_lifecycle = _PeerLifecycle()
         self._tts_prompt_lease_releaser: PromptLeaseReleaser | None = None
+        self._terminal_cleanup: _TerminalCleanup | None = None
 
     @property
     def _pending_peer_connections(self) -> list[Any]:
@@ -2376,9 +2384,9 @@ class CallSession:
             )
             if cleanup is None and self.end_reason is None:
                 self.end_reason = reason
+            cleanup = cleanup or self._terminal_cleanup
         if cleanup is not None:
-            cause = "session_close" if reason == "removed" else reason
-            cancel_context = await self._run_terminal_cleanup(cleanup, cause=cause)
+            cancel_context = await self._run_terminal_cleanup(cleanup)
 
         return await self.emit_event(
             simple_event(
@@ -2402,11 +2410,9 @@ class CallSession:
                 target_state="failed",
                 reason=reason,
             )
+            cleanup = cleanup or self._terminal_cleanup
         if cleanup is not None:
-            cancel_context = await self._run_terminal_cleanup(
-                cleanup,
-                cause="connection_failure",
-            )
+            cancel_context = await self._run_terminal_cleanup(cleanup)
         return await self.emit_event(
             simple_event(
                 FAILED_EVENT,
@@ -2444,38 +2450,90 @@ class CallSession:
         self.state = target_state
         self._tts_turn_segment_ordinals.clear()
         self._tts_segment_reservations.clear()
-        return _TerminalCleanup(
+        cleanup = _TerminalCleanup(
             target_state=target_state,
             reason=reason,
+            cancel_cause=(
+                "connection_failure"
+                if target_state == "failed"
+                else ("session_close" if reason == "removed" else reason)
+            ),
             active_peer=self.peer_connection,
             candidate_peer=candidate_peer,
             prompt_lease_releaser=releaser,
+            cancel_pending=(
+                self.active_turn_task is not None
+                or self._active_tts_turn_id is not None
+                or self._pending_speech_terminal_turn_id is not None
+            ),
+            candidate_peer_pending=(
+                candidate_peer is not None
+                and candidate_peer is not self.peer_connection
+            ),
+            prompt_lease_pending=releaser is not None,
         )
+        self._terminal_cleanup = cleanup
+        return cleanup
 
     async def _run_terminal_cleanup(
         self,
         cleanup: _TerminalCleanup,
-        *,
-        cause: str,
     ) -> dict[str, Any]:
-        cancel_context: dict[str, Any] = {}
-        if (
-            self.active_turn_task is not None
-            or self._active_tts_turn_id is not None
-            or self._pending_speech_terminal_turn_id is not None
-        ):
-            cancel_context = await self.cancel_ai_turn(cause=cause)
-        await self._close_peer(cleanup.active_peer)
-        if (
-            cleanup.candidate_peer is not None
-            and cleanup.candidate_peer is not cleanup.active_peer
-        ):
-            await self._close_peer(cleanup.candidate_peer)
-        if cleanup.prompt_lease_releaser is not None:
-            await self._invoke_tts_prompt_lease_releaser(
-                cleanup.prompt_lease_releaser
-            )
-        return cancel_context
+        async with cleanup.lock:
+            if cleanup.cancel_pending:
+                try:
+                    cleanup.cancel_context = await self.cancel_ai_turn(
+                        cause=cleanup.cancel_cause
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "[rayme-call] terminal.cleanup_failed session=%s step=cancel exc=%s",
+                        self.session_id,
+                        exc.__class__.__name__,
+                    )
+                else:
+                    cleanup.cancel_pending = False
+            if cleanup.active_peer_pending:
+                try:
+                    await self._close_peer(cleanup.active_peer)
+                except Exception as exc:
+                    logger.exception(
+                        "[rayme-call] terminal.cleanup_failed session=%s step=active_peer exc=%s",
+                        self.session_id,
+                        exc.__class__.__name__,
+                    )
+                else:
+                    cleanup.active_peer_pending = False
+            try:
+                if cleanup.candidate_peer_pending and cleanup.candidate_peer is not None:
+                    try:
+                        await self._close_peer(cleanup.candidate_peer)
+                    except Exception as exc:
+                        logger.exception(
+                            "[rayme-call] terminal.cleanup_failed session=%s step=candidate_peer exc=%s",
+                            self.session_id,
+                            exc.__class__.__name__,
+                        )
+                    else:
+                        cleanup.candidate_peer_pending = False
+            finally:
+                if (
+                    cleanup.prompt_lease_pending
+                    and cleanup.prompt_lease_releaser is not None
+                ):
+                    try:
+                        await self._invoke_tts_prompt_lease_releaser(
+                            cleanup.prompt_lease_releaser
+                        )
+                    except Exception as exc:
+                        logger.exception(
+                            "[rayme-call] terminal.cleanup_failed session=%s step=prompt_lease exc=%s",
+                            self.session_id,
+                            exc.__class__.__name__,
+                        )
+                    else:
+                        cleanup.prompt_lease_pending = False
+        return dict(cleanup.cancel_context)
 
     async def _release_tts_prompt_lease(self) -> None:
         async with self._lifecycle_lock:
@@ -2596,10 +2654,7 @@ class CallSession:
             )
         if cleanup is None:
             return False
-        cancel_context = await self._run_terminal_cleanup(
-            cleanup,
-            cause="connection_failure" if target_state == "failed" else reason,
-        )
+        cancel_context = await self._run_terminal_cleanup(cleanup)
         if target_state == "failed":
             await self.emit_event(
                 simple_event(

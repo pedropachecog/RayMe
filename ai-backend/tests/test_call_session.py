@@ -3257,6 +3257,93 @@ def test_end_closes_peer_once() -> None:
     assert session.end_reason == "hangup"
 
 
+@pytest.mark.parametrize(
+    "failed_step",
+    ["cancel", "active_peer", "candidate_peer", "prompt_lease"],
+)
+def test_terminal_cleanup_ledger_retries_only_failed_resources(
+    failed_step: str,
+) -> None:
+    class FailOncePeer(ScriptedPeerConnection):
+        def __init__(self, step: str) -> None:
+            super().__init__()
+            self.step = step
+            self.successful_closes = 0
+
+        async def close(self) -> None:
+            self.close_calls += 1
+            if failed_step == self.step and self.close_calls == 1:
+                raise RuntimeError(f"injected {self.step} close failure")
+            self.successful_closes += 1
+
+    class CleanupSession(CallSession):
+        def __init__(self, **kwargs: Any) -> None:
+            super().__init__(**kwargs)
+            self.cancel_attempts = 0
+            self.cancel_successes = 0
+
+        async def cancel_ai_turn(
+            self,
+            turn_id: str | None = None,
+            *,
+            cause: str = "interrupt",
+        ) -> dict[str, Any]:
+            del turn_id
+            self.cancel_attempts += 1
+            if failed_step == "cancel" and self.cancel_attempts == 1:
+                raise RuntimeError("injected cancellation failure")
+            self.cancel_successes += 1
+            self.active_turn_task = None
+            return {"control_cause": cause}
+
+    active_peer = FailOncePeer("active_peer")
+    candidate_peer = FailOncePeer("candidate_peer")
+    prompt_attempts = 0
+    prompt_successes = 0
+
+    async def release_prompt(_owner: str) -> bool:
+        nonlocal prompt_attempts, prompt_successes
+        prompt_attempts += 1
+        if failed_step == "prompt_lease" and prompt_attempts == 1:
+            raise RuntimeError("injected prompt release failure")
+        prompt_successes += 1
+        return True
+
+    async def scenario() -> CleanupSession:
+        session = CleanupSession(
+            session_id=f"terminal-cleanup-{failed_step}",
+            peer_connection=active_peer,
+        )
+        session.active_turn_task = object()
+        await session.install_or_release_tts_prompt_lease(release_prompt)
+        await session.mark_peer_connection_pending(
+            candidate_peer,
+            timeout_seconds=60.0,
+        )
+
+        await session.end(reason="hangup")
+
+        # Later cleanup steps still run even when an earlier owner raises.
+        if failed_step != "candidate_peer":
+            assert candidate_peer.successful_closes == 1
+        if failed_step != "prompt_lease":
+            assert prompt_successes == 1
+
+        await session.end(reason="hangup")
+        return session
+
+    session = _run(scenario())
+
+    assert session.cancel_successes == 1
+    assert active_peer.successful_closes == 1
+    assert candidate_peer.successful_closes == 1
+    assert prompt_successes == 1
+    assert session.cancel_attempts == (2 if failed_step == "cancel" else 1)
+    assert active_peer.close_calls == (2 if failed_step == "active_peer" else 1)
+    assert candidate_peer.close_calls == (2 if failed_step == "candidate_peer" else 1)
+    assert prompt_attempts == (2 if failed_step == "prompt_lease" else 1)
+
+
 def test_failed_connection_records_connection_failed_reason() -> None:
     session, peer = _new_session()
     peer.connectionState = "failed"
