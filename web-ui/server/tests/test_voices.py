@@ -981,7 +981,7 @@ def test_voice_id_is_stable_across_rename_and_character_reference(
     assert character_after_rename.json()["default_voice"]["name"] == "Renamed display name"
 
 
-def test_preview_failure_preserves_unsaved_voice_payload_state(
+def test_preview_failure_does_not_echo_private_voice_state(
     voice_fixture: VoiceFixture,
 ) -> None:
     client = voice_fixture.client
@@ -991,12 +991,15 @@ def test_preview_failure_preserves_unsaved_voice_payload_state(
     asset_id = uploaded.json()["asset_id"]
     payload = {
         "asset_id": asset_id,
-        "name": "Preview can fail but state survives",
-        "default_engine": "F5-TTS",
-        "reference_transcript": "Preview failure keeps this transcript editable.",
-        "preview_text": "This preview text should still be visible after failure.",
-        "use_default_engine": False,
-        "engine": "LuxTTS",
+        "name": "SENTINEL_PRIVATE_VOICE_NAME",
+        "default_engine": "qwen3_1_7b",
+        "reference_transcript": "SENTINEL_PRIVATE_TRANSCRIPT",
+        "voice_data_steward": "SENTINEL_PRIVATE_STEWARD",
+        "authorization_basis": "SENTINEL_PRIVATE_AUTHORIZATION",
+        "use_scope": "rayme_lan_call_testing",
+        "preview_text": "SENTINEL_PRIVATE_PREVIEW_TEXT",
+        "metadata": {"private_note": "SENTINEL_PRIVATE_METADATA"},
+        "use_default_engine": True,
         "speech_speed": 1.0,
     }
 
@@ -1004,9 +1007,14 @@ def test_preview_failure_preserves_unsaved_voice_payload_state(
 
     assert response.status_code == 502
     body = response.json()
-    assert body["error"]["code"] == "preview_failed"
-    assert body["payload_state"] == payload
-    assert "preview_url" not in body
+    assert body == {
+        "error": {"code": "preview_failed", "message": "Preview synthesis failed"}
+    }
+    serialized = json.dumps(body)
+    for private_value in payload.values():
+        if isinstance(private_value, str):
+            assert private_value not in serialized
+    assert "SENTINEL_PRIVATE_METADATA" not in serialized
 
 
 def test_force_delete_tombstones_voice_and_characters_show_unavailable_state(

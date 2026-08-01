@@ -228,8 +228,7 @@ async def preview_voice(
         return JSONResponse(
             status_code=502,
             content={
-                "error": {"code": "preview_failed", "message": "Preview synthesis failed"},
-                "payload_state": payload_state,
+                "error": {"code": "preview_failed", "message": "Preview synthesis failed"}
             },
         )
 
