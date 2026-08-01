@@ -71,6 +71,9 @@ DECISION_FILENAMES = {
     "leak_scan": "qwen3-log-leak-scan.json",
 }
 WAVLM_REVISION = "feb593a6c23c1cc3d9510425c29b0a14d2b07b1e"
+PUBLIC_SCORER_SWITCH_TRANSCRIPT = (
+    "This non-person fixture releases the Qwen GPU for local scoring."
+)
 HEX40 = re.compile(r"^[0-9a-f]{40}$")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 SOAK_TARGET_TEXTS = (
@@ -1361,7 +1364,7 @@ class OmenFinishLifecycle:
             raise EvidenceRunnerError("Private selected reference state is unavailable") from exc
 
     async def unload_qwen(self) -> None:
-        reference_audio, transcript = self._reference()
+        reference_audio, _ = self._reference()
         response = await asyncio.to_thread(
             self.api.post_json,
             self.api.ai_base_url,
@@ -1373,7 +1376,10 @@ class OmenFinishLifecycle:
                 "voice_id": "phase09-scorer-switch",
                 "reference_audio_b64": base64.b64encode(reference_audio).decode("ascii"),
                 "reference_audio_content_type": "audio/wav",
-                "reference_transcript": transcript,
+                # F5 1.1.9 writes its reference text to stdout even when its
+                # show_info callback is disabled. Never send the selected
+                # private transcript through this model-switch-only request.
+                "reference_transcript": PUBLIC_SCORER_SWITCH_TRANSCRIPT,
             },
         )
         self.tracer._require_ok(response, "Qwen manager unload through one-hot switch")

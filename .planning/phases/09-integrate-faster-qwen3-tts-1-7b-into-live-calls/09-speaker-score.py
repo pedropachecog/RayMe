@@ -178,6 +178,7 @@ def build_score_payload(
         "artifact": "speaker",
         "generated_at": generated_at or _utc_now(),
         "deployed_commit": deployed_commit,
+        "critical_gates": ["speaker_stability"],
         "baseline_commit": baseline_commit,
         "reference_sha256": reference_sha256,
         "scorer": {

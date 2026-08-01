@@ -6,3 +6,7 @@
 !qwen3-call-flow.json
 !qwen3-soak.json
 !qwen3-stt.json
+!qwen3-speaker.json
+!qwen3-browser.json
+!qwen3-log-leak-scan.json
+!qwen3-operational-handoff.json

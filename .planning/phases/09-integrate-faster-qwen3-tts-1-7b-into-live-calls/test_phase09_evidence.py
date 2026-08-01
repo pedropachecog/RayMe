@@ -174,6 +174,7 @@ def test_speaker_payload_recomputes_baseline_early_middle_late_gates() -> None:
     assert payload["late_median"] == pytest.approx(0.7852)
     assert payload["late_minus_early"] == pytest.approx(-0.0318)
     assert payload["late_minus_integrated_baseline"] == pytest.approx(-0.0348)
+    assert payload["critical_gates"] == ["speaker_stability"]
     assert payload["speaker_stability_gate"] is True
     assert payload["absolute_cosine_is_human_likeness_judgment"] is False
     assert payload["integrated_human_listening_status"] == "pending"
@@ -1063,6 +1064,7 @@ def test_runner_finish_source_pins_local_cuda_scorer_and_never_self_certifies() 
     assert '\"device\": \"cpu\"' not in source
     assert "remote_audio_judge" not in source
     assert "overall_status" not in source
+    assert '\"reference_transcript\": PUBLIC_SCORER_SWITCH_TRANSCRIPT' in source
 
 
 def test_runner_accepts_only_positive_numeric_worker_allocator_memory() -> None:
@@ -1102,6 +1104,11 @@ def test_canonical_deploy_owns_final_qwen_core_evidence_and_copyback() -> None:
     assert "Qwen worker Torch reserved memory exceeds the 5888 MiB release limit" in source
     assert "--query-compute-apps=used_memory" not in source
     assert "RAYME_QWEN3_TORCH_RESERVED_MIB" not in source
+    assert "Protect-Phase09QwenLogs" in source
+    assert "<redacted:phase09-private-reference>" in source
+    assert source.index("Protect-Phase09QwenLogs") < source.index(
+        "Start-ScheduledTask -TaskName RayMePhase1AI"
+    )
 
     for filename in (
         "qwen3-runtime.json",

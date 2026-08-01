@@ -522,6 +522,52 @@ Set-Location $repo
 
 Stop-RayMePortOwners
 
+function Protect-Phase09QwenLogs {
+  if (-not $verifyQwen3) { return }
+
+  $priorLocalDir = Join-Path $qwenEvidenceDir ".local"
+  $priorStatePath = Join-Path $priorLocalDir "qwen3-runner-state.json"
+  $priorTranscriptPath = Join-Path $priorLocalDir "qwen3-permitted-reference.txt"
+  if (-not (Test-Path $priorStatePath) -or -not (Test-Path $priorTranscriptPath)) {
+    return
+  }
+
+  $priorState = Get-Content -Raw $priorStatePath | ConvertFrom-Json
+  $privateValues = @(
+    [string](Get-Content -Raw $priorTranscriptPath).Trim(),
+    [string]$priorState.reference_path
+  ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+  $logPaths = @(
+    [string]$priorState.ai_log_path,
+    [string]$priorState.web_log_path
+  ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+  foreach ($logPath in $logPaths) {
+    if (-not (Test-Path $logPath)) { continue }
+    $content = [System.IO.File]::ReadAllText($logPath)
+    $redactionCount = 0
+    foreach ($privateValue in $privateValues) {
+      $redactionCount += [regex]::Matches(
+        $content,
+        [regex]::Escape($privateValue)
+      ).Count
+      $content = $content.Replace(
+        $privateValue,
+        "<redacted:phase09-private-reference>"
+      )
+    }
+    if ($redactionCount -gt 0) {
+      [System.IO.File]::WriteAllText($logPath, $content, $utf8NoBom)
+    }
+    Write-Host "== Phase 09 private log redactions: $redactionCount in $([System.IO.Path]::GetFileName($logPath))"
+  }
+}
+
+# Service handles must be closed before the exact private values can be removed
+# from retained logs. This remains inside the one canonical OMEN deploy path.
+Protect-Phase09QwenLogs
+
 Write-Host "== Asserting canonical scheduled tasks"
 schtasks /Delete /TN RayMePhase1AI /F 2>&1 | Out-Null
 schtasks /Delete /TN RayMePhase1Web /F 2>&1 | Out-Null
