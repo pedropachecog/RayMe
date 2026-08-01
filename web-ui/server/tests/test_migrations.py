@@ -559,33 +559,88 @@ def test_upload_implies_authorization_migration_removes_legacy_qwen_metadata(
     command.upgrade(config, "0007_call_turn_ownership")
 
     with connect(db_path) as connection:
-        connection.execute(
+        connection.executemany(
             """
             INSERT INTO voices
                 (id, name, default_engine, reference_transcript, metadata_json)
             VALUES (?, ?, ?, ?, ?)
             """,
             (
-                "voice-legacy-authorization",
-                "Uploaded Qwen voice",
-                "qwen3_1_7b",
-                "Exact uploaded transcript.",
-                json.dumps(
-                    {
-                        "keep": {"unrelated": True},
-                        "qwen3_authorization": {
-                            "authorization_status": "needs_confirmation",
-                            "voice_data_steward": "remove-me",
+                (
+                    "voice-legacy-authorization",
+                    "Uploaded Qwen voice",
+                    "qwen3_1_7b",
+                    "Exact uploaded transcript.",
+                    json.dumps(
+                        {
+                            "keep": {"unrelated": True},
+                            "source": "phase09_hardware_tracer",
+                            "qwen3_authorization": {
+                                "authorization_status": "needs_confirmation",
+                                "voice_data_steward": "remove-me",
+                            },
+                            "authorization": {
+                                "authorization_status": "recorded",
+                                "voice_data_steward": "remove-legacy-steward",
+                                "authorization_basis": "remove-legacy-basis",
+                                "use_scope": "remove-legacy-scope",
+                                "reference_sha256": "c" * 64,
+                                "transcript_sha256": "d" * 64,
+                            },
                         },
-                        "authorization": {
-                            "authorization_status": "recorded",
-                            "voice_data_steward": "remove-legacy-steward",
-                            "authorization_basis": "remove-legacy-basis",
-                            "use_scope": "remove-legacy-scope",
-                            "reference_sha256": "c" * 64,
-                            "transcript_sha256": "d" * 64,
-                        },
-                    }
+                    )
+                ),
+                (
+                    "voice-legacy-engine-authorization",
+                    "Legacy engine Qwen voice",
+                    "qwen3_0_6b",
+                    "Exact legacy transcript.",
+                    json.dumps(
+                        {
+                            "keep": "legacy-engine",
+                            "source": "phase09_hardware_tracer",
+                            "authorization": {"voice_data_steward": "remove-legacy"},
+                        }
+                    ),
+                ),
+                (
+                    "voice-qwen-generic-authorization",
+                    "Qwen generic authorization",
+                    "qwen3_1_7b",
+                    "Exact generic transcript.",
+                    json.dumps(
+                        {
+                            "source": "voice_lab",
+                            "authorization": {"owner": "legal", "license": "CC-BY"},
+                            "qwen3_authorization": {"authorization_status": "retired"},
+                        }
+                    ),
+                ),
+                (
+                    "voice-f5-authorization",
+                    "F5 authorized metadata",
+                    "F5-TTS",
+                    "F5 transcript.",
+                    json.dumps(
+                        {
+                            "source": "phase09_hardware_tracer",
+                            "authorization": {"owner": "legal", "license": "CC-BY"},
+                            "qwen3_authorization": {"note": "non-Qwen metadata"},
+                        }
+                    ),
+                ),
+                (
+                    "voice-voxcpm2-authorization",
+                    "VoxCPM2 authorized metadata",
+                    "voxcpm2",
+                    "VoxCPM2 transcript.",
+                    json.dumps(
+                        {
+                            "source": "phase09_hardware_tracer",
+                            "authorization": {"owner": "legal", "license": "CC-BY-SA"},
+                            "qwen3_authorization": {"note": "non-Qwen metadata"},
+                        }
+                    ),
                 ),
             ),
         )
@@ -595,17 +650,40 @@ def test_upload_implies_authorization_migration_removes_legacy_qwen_metadata(
     command.upgrade(config, "head")
 
     with connect(db_path) as connection:
-        row = connection.execute(
-            "SELECT metadata_json FROM voices WHERE id = ?",
-            ("voice-legacy-authorization",),
-        ).fetchone()
+        metadata_by_id = {
+            row["id"]: json.loads(row["metadata_json"])
+            for row in connection.execute(
+                "SELECT id, metadata_json FROM voices ORDER BY id"
+            )
+        }
 
-    metadata = json.loads(row["metadata_json"])
-    assert metadata == {"keep": {"unrelated": True}}
+    metadata = metadata_by_id["voice-legacy-authorization"]
+    assert metadata == {
+        "keep": {"unrelated": True},
+        "source": "phase09_hardware_tracer",
+    }
     serialized = json.dumps(metadata)
     assert "remove-legacy-steward" not in serialized
     assert "remove-legacy-basis" not in serialized
     assert "remove-legacy-scope" not in serialized
+    assert metadata_by_id["voice-legacy-engine-authorization"] == {
+        "keep": "legacy-engine",
+        "source": "phase09_hardware_tracer",
+    }
+    assert metadata_by_id["voice-qwen-generic-authorization"] == {
+        "source": "voice_lab",
+        "authorization": {"owner": "legal", "license": "CC-BY"},
+    }
+    assert metadata_by_id["voice-f5-authorization"] == {
+        "source": "phase09_hardware_tracer",
+        "authorization": {"owner": "legal", "license": "CC-BY"},
+        "qwen3_authorization": {"note": "non-Qwen metadata"},
+    }
+    assert metadata_by_id["voice-voxcpm2-authorization"] == {
+        "source": "phase09_hardware_tracer",
+        "authorization": {"owner": "legal", "license": "CC-BY-SA"},
+        "qwen3_authorization": {"note": "non-Qwen metadata"},
+    }
 
 
 def test_upload_implies_authorization_migration_rejects_downgrade(

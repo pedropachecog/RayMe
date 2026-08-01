@@ -400,6 +400,7 @@ def test_qwen_voice_metadata_strips_retired_authorization_on_save_patch_and_read
         _wav_audio("qwen-retired-metadata.wav"),
     )
     retired_metadata = {
+        "source": "phase09_hardware_tracer",
         "qwen3_authorization": {
             "voice_data_steward": "private-current-steward",
             "authorization_basis": "private-current-basis",
@@ -427,6 +428,7 @@ def test_qwen_voice_metadata_strips_retired_authorization_on_save_patch_and_read
     voice_id = saved.json()["voice_id"]
     assert saved.json()["metadata"] == {
         "keep": {"unrelated": True},
+        "source": "phase09_hardware_tracer",
         "sample_asset_id": uploaded.json()["asset_id"],
     }
 
@@ -465,6 +467,7 @@ def test_qwen_voice_metadata_strips_retired_authorization_on_save_patch_and_read
         assert "private-legacy-steward" not in serialized
     assert patched.json()["metadata"] == {
         "keep": {"unrelated": True},
+        "source": "phase09_hardware_tracer",
         "sample_asset_id": uploaded.json()["asset_id"],
         "safe_patch": True,
     }
@@ -476,6 +479,93 @@ def test_qwen_voice_metadata_strips_retired_authorization_on_save_patch_and_read
             return dict(voice.metadata_json or {})
 
     assert asyncio.run(read_stored_metadata()) == patched.json()["metadata"]
+
+
+@pytest.mark.parametrize("engine_id", ("F5-TTS", "voxcpm2"))
+def test_non_qwen_voice_metadata_preserves_authorization_on_save_patch_and_read(
+    voice_fixture: VoiceFixture,
+    engine_id: str,
+) -> None:
+    uploaded = _upload_voice_asset(
+        voice_fixture.client,
+        _wav_audio(f"{engine_id}-authorization-metadata.wav"),
+    )
+    saved = voice_fixture.client.post(
+        "/api/voices",
+        json={
+            **_voice_payload(
+                asset_id=uploaded.json()["asset_id"],
+                name=f"{engine_id} licensed voice",
+                default_engine=engine_id,
+                reference_transcript="Unrelated licensing metadata must survive.",
+            ),
+            "metadata": {
+                "source": "phase09_hardware_tracer",
+                "authorization": {"owner": "legal", "license": "CC-BY"},
+                "qwen3_authorization": {"note": "non-Qwen application metadata"},
+            },
+        },
+    )
+
+    assert saved.status_code == 201, saved.text
+    voice_id = saved.json()["voice_id"]
+    expected_metadata = {
+        "source": "phase09_hardware_tracer",
+        "authorization": {"owner": "legal", "license": "CC-BY"},
+        "qwen3_authorization": {"note": "non-Qwen application metadata"},
+        "sample_asset_id": uploaded.json()["asset_id"],
+    }
+    assert saved.json()["metadata"] == expected_metadata
+
+    patched = voice_fixture.client.patch(
+        f"/api/voices/{voice_id}",
+        json={
+            "metadata": {
+                "authorization": {"owner": "legal", "license": "CC-BY-SA"},
+                "qwen3_authorization": {"note": "still non-Qwen metadata"},
+            }
+        },
+    )
+    read_back = voice_fixture.client.get(f"/api/voices/{voice_id}")
+
+    assert patched.status_code == 200
+    assert read_back.status_code == 200
+    expected_metadata["authorization"] = {"owner": "legal", "license": "CC-BY-SA"}
+    expected_metadata["qwen3_authorization"] = {"note": "still non-Qwen metadata"}
+    assert patched.json()["metadata"] == expected_metadata
+    assert read_back.json()["metadata"] == expected_metadata
+
+
+def test_qwen_non_tracer_generic_authorization_is_preserved(
+    voice_fixture: VoiceFixture,
+) -> None:
+    uploaded = _upload_voice_asset(
+        voice_fixture.client,
+        _wav_audio("qwen-generic-authorization.wav"),
+    )
+    saved = voice_fixture.client.post(
+        "/api/voices",
+        json={
+            **_voice_payload(
+                asset_id=uploaded.json()["asset_id"],
+                name="Qwen generic authorization",
+                default_engine="qwen3_1_7b",
+                reference_transcript="The uploaded reference itself grants authorization.",
+            ),
+            "metadata": {
+                "source": "voice_lab",
+                "authorization": {"owner": "legal", "license": "CC-BY"},
+                "qwen3_authorization": {"authorization_status": "retired"},
+            },
+        },
+    )
+
+    assert saved.status_code == 201, saved.text
+    assert saved.json()["metadata"] == {
+        "source": "voice_lab",
+        "authorization": {"owner": "legal", "license": "CC-BY"},
+        "sample_asset_id": uploaded.json()["asset_id"],
+    }
 
 
 def test_qwen_voice_save_still_requires_nonblank_transcript(

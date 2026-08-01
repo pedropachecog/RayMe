@@ -18,7 +18,10 @@ down_revision: str | None = "0007_call_turn_ownership"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-AUTHORIZATION_METADATA_KEYS = frozenset({"qwen3_authorization", "authorization"})
+QWEN_ENGINE_IDS = frozenset({"qwen3_1_7b", "qwen3_0_6b"})
+QWEN_AUTHORIZATION_METADATA_KEY = "qwen3_authorization"
+LEGACY_AUTHORIZATION_METADATA_KEY = "authorization"
+LEGACY_AUTHORIZATION_SOURCE = "phase09_hardware_tracer"
 
 
 def upgrade() -> None:
@@ -26,17 +29,26 @@ def upgrade() -> None:
     voices = sa.table(
         "voices",
         sa.column("id", sa.String()),
+        sa.column("default_engine", sa.String()),
         sa.column("metadata_json", sa.JSON()),
     )
     rows = connection.execute(
-        sa.select(voices.c.id, voices.c.metadata_json)
+        sa.select(voices.c.id, voices.c.default_engine, voices.c.metadata_json)
     ).mappings()
     for row in rows:
-        metadata = _metadata_object(row["metadata_json"])
-        if not AUTHORIZATION_METADATA_KEYS.intersection(metadata):
+        if row["default_engine"] not in QWEN_ENGINE_IDS:
             continue
-        for key in AUTHORIZATION_METADATA_KEYS:
-            metadata.pop(key, None)
+        metadata = _metadata_object(row["metadata_json"])
+        changed = QWEN_AUTHORIZATION_METADATA_KEY in metadata
+        metadata.pop(QWEN_AUTHORIZATION_METADATA_KEY, None)
+        if (
+            metadata.get("source") == LEGACY_AUTHORIZATION_SOURCE
+            and LEGACY_AUTHORIZATION_METADATA_KEY in metadata
+        ):
+            metadata.pop(LEGACY_AUTHORIZATION_METADATA_KEY, None)
+            changed = True
+        if not changed:
+            continue
         connection.execute(
             sa.update(voices)
             .where(voices.c.id == row["id"])
