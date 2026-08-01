@@ -34,6 +34,7 @@ def _scripted_wav_bytes(*, sample_count: int = 2880) -> bytes:
 
 SCRIPTED_WAV_BYTES = _scripted_wav_bytes()
 QWEN_STREAM_CHUNK_WAV_BYTES = _scripted_wav_bytes(sample_count=7680)
+LONG_QWEN_STREAM_CHUNK_WAV_BYTES = _scripted_wav_bytes(sample_count=96_000)
 
 
 def _run(value: Any) -> Any:
@@ -1646,11 +1647,45 @@ def test_qwen_failed_segment_retries_keep_reserved_ordinal_until_success() -> No
     )
 
 
-def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call() -> None:
+def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
+    monkeypatch: Any,
+) -> None:
     import app.api.webrtc as webrtc_module
 
+    monkeypatch.setattr(session_module, "CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS", 0.0)
     events: list[dict[str, Any]] = []
     released_prompt_leases: list[str] = []
+
+    class FakeAudioClock:
+        def __init__(self) -> None:
+            self.elapsed_seconds = 0.0
+            self.advances: list[float] = []
+
+        async def advance(self, seconds: float) -> None:
+            self.elapsed_seconds += seconds
+            self.advances.append(seconds)
+            await asyncio.sleep(0)
+
+    class FakeClockPacedOutboundAudioTrack(ScriptedOutboundAudioTrack):
+        def __init__(self, clock: FakeAudioClock) -> None:
+            super().__init__()
+            self.clock = clock
+            self.actual_audio_seconds = 0.0
+
+        async def enqueue(
+            self,
+            chunk: bytes,
+            *,
+            preroll_seconds: float = 0.0,
+        ) -> float:
+            with sf.SoundFile(BytesIO(chunk)) as audio:
+                duration_seconds = audio.frames / float(audio.samplerate)
+            self.chunks.append(chunk)
+            self.preroll_seconds.append(preroll_seconds)
+            paced_seconds = duration_seconds + preroll_seconds
+            self.actual_audio_seconds += duration_seconds
+            await self.clock.advance(paced_seconds)
+            return paced_seconds
 
     class CallbackPeer:
         def __init__(self) -> None:
@@ -1682,7 +1717,6 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call() -> 
             self.first_stream_drained = threading.Event()
             self.first_stream_completed = threading.Event()
             self.cancel_calls: list[str] = []
-            self.logical_audio_ms = 0.0
             self.synthesize_calls = 0
 
         def synthesize(self, _request: Any) -> Any:
@@ -1711,11 +1745,10 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call() -> 
                             self.release_for_cancel.wait()
                         if self.release_for_cancel.is_set():
                             break
-                        self.logical_audio_ms += 4_000.0
                         yield TtsAudioChunk(
                             engine_id=self.engine_id,
                             chunk_index=chunk_index,
-                            wav_bytes=QWEN_STREAM_CHUNK_WAV_BYTES,
+                            wav_bytes=LONG_QWEN_STREAM_CHUNK_WAV_BYTES,
                             sample_rate=24_000,
                             duration_ms=4_000.0,
                             generated_at_ms=25.0 + chunk_index * 50.0,
@@ -1730,7 +1763,7 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call() -> 
                         chunk_index=chunk_index,
                         wav_bytes=QWEN_STREAM_CHUNK_WAV_BYTES,
                         sample_rate=24_000,
-                        duration_ms=500.0,
+                        duration_ms=320.0,
                         generated_at_ms=20.0 + chunk_index * 40.0,
                     )
             finally:
@@ -1762,8 +1795,9 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call() -> 
     ]:
         active_peer = CallbackPeer()
         replacement_peer = CallbackPeer()
-        active_track = ScriptedOutboundAudioTrack()
-        replacement_track = ScriptedOutboundAudioTrack()
+        audio_clock = FakeAudioClock()
+        active_track = FakeClockPacedOutboundAudioTrack(audio_clock)
+        replacement_track = FakeClockPacedOutboundAudioTrack(audio_clock)
         adapter = IncidentQwenAdapter()
         session = CallSession(
             session_id="qwen-long-turn-reconnect-incident",
@@ -1787,7 +1821,7 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call() -> 
         session.event_sink = observe_first_audio
         long_speech = asyncio.create_task(
             session.speak_text(
-                "turn-qwen-48s-logical",
+                "turn-qwen-40s-paced",
                 "A long streamed turn survives a media replacement before barge in.",
                 "voice-qwen",
                 "qwen3_1_7b",
@@ -1830,7 +1864,13 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call() -> 
 
         adapter.resume_after_reconnect.set()
         await wait_thread_event(adapter.ready_for_barge_in, label="post-reconnect audio")
-        assert adapter.logical_audio_ms == 40_000.0
+        for _ in range(100):
+            if audio_clock.elapsed_seconds >= 40.0:
+                break
+            await asyncio.sleep(0)
+        assert audio_clock.elapsed_seconds == pytest.approx(40.0)
+        assert len(audio_clock.advances) == 10
+        assert all(seconds == pytest.approx(4.0) for seconds in audio_clock.advances)
         assert replacement_track.chunks
 
         user_pcm = np.full(320, 4_000, dtype=np.int16).tobytes()
@@ -1891,10 +1931,14 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call() -> 
     assert event_types.count("interrupted") == 1
     assert event_types.count("ai_done") == 1
     assert "failed" not in event_types
-    assert adapter.cancel_calls == ["turn-qwen-48s-logical"]
+    assert adapter.cancel_calls == ["turn-qwen-40s-paced"]
     assert adapter.synthesize_calls == 0
     assert active_track.chunks
     assert replacement_track.chunks
+    total_actual_audio_seconds = (
+        active_track.actual_audio_seconds + replacement_track.actual_audio_seconds
+    )
+    assert 40.0 <= total_actual_audio_seconds < 60.0
     assert active_peer.close_calls == 1
     assert replacement_peer.close_calls == 1
     assert session.end_reason == "hangup"
