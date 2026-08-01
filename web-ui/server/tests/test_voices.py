@@ -450,8 +450,8 @@ def test_qwen_voice_metadata_strips_retired_authorization_on_save_patch_and_read
         f"/api/voices/{voice_id}",
         json={
             "metadata": {
+                "source": "voice_lab",
                 "safe_patch": True,
-                **retired_metadata,
             },
         },
     )
@@ -467,7 +467,7 @@ def test_qwen_voice_metadata_strips_retired_authorization_on_save_patch_and_read
         assert "private-legacy-steward" not in serialized
     assert patched.json()["metadata"] == {
         "keep": {"unrelated": True},
-        "source": "phase09_hardware_tracer",
+        "source": "voice_lab",
         "sample_asset_id": uploaded.json()["asset_id"],
         "safe_patch": True,
     }
@@ -554,7 +554,6 @@ def test_qwen_non_tracer_generic_authorization_is_preserved(
             ),
             "metadata": {
                 "source": "voice_lab",
-                "authorization": {"owner": "legal", "license": "CC-BY"},
                 "qwen3_authorization": {"authorization_status": "retired"},
             },
         },
@@ -562,6 +561,21 @@ def test_qwen_non_tracer_generic_authorization_is_preserved(
 
     assert saved.status_code == 201, saved.text
     assert saved.json()["metadata"] == {
+        "source": "voice_lab",
+        "sample_asset_id": uploaded.json()["asset_id"],
+    }
+
+    patched = voice_fixture.client.patch(
+        f"/api/voices/{saved.json()['voice_id']}",
+        json={
+            "metadata": {
+                "authorization": {"owner": "legal", "license": "CC-BY"},
+            }
+        },
+    )
+
+    assert patched.status_code == 200
+    assert patched.json()["metadata"] == {
         "source": "voice_lab",
         "authorization": {"owner": "legal", "license": "CC-BY"},
         "sample_asset_id": uploaded.json()["asset_id"],

@@ -604,17 +604,21 @@ def merge_voice_metadata(
     *,
     engine_id: Any | None = None,
 ) -> dict[str, Any]:
+    sanitized_existing = strip_retired_qwen_authorization_metadata(
+        existing_metadata,
+        engine_id=engine_id,
+    )
     normalized_patch = normalize_voice_metadata(
         patch_metadata,
         engine_id=engine_id,
     )
     if "engine_settings" not in normalized_patch:
         return strip_retired_qwen_authorization_metadata(
-            {**existing_metadata, **normalized_patch},
+            {**sanitized_existing, **normalized_patch},
             engine_id=engine_id,
         )
 
-    existing_engine_settings = existing_metadata.get("engine_settings")
+    existing_engine_settings = sanitized_existing.get("engine_settings")
     if not isinstance(existing_engine_settings, dict):
         existing_engine_settings = {}
 
@@ -622,7 +626,7 @@ def merge_voice_metadata(
     if not isinstance(patch_engine_settings, dict):
         patch_engine_settings = {}
 
-    merged = {**existing_metadata, **normalized_patch}
+    merged = {**sanitized_existing, **normalized_patch}
     merged["engine_settings"] = {**existing_engine_settings, **patch_engine_settings}
     return strip_retired_qwen_authorization_metadata(
         merged,
