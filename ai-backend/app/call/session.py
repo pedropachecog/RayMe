@@ -229,6 +229,7 @@ class _TtsSegmentLedgerEntry:
     content_digest: str
     final_chunk: bool
     worker_request_id: str
+    attempt_generation: int = 1
     state: str = "reserved"
     response: dict[str, Any] | None = None
     attempt_done: asyncio.Event = field(default_factory=asyncio.Event)
@@ -1882,6 +1883,14 @@ class CallSession:
                     elif existing.state == "reserved":
                         existing.state = "in_flight"
                         existing.attempt_done = asyncio.Event()
+                        existing.attempt_generation += 1
+                        existing.worker_request_id = self._worker_request_id_for_segment(
+                            turn_id=turn_id,
+                            segment_id=identity,
+                            ordinal=existing.ordinal,
+                            content_digest=content_digest,
+                            attempt_generation=existing.attempt_generation,
+                        )
                         return existing, None
                     else:
                         raise SpeechTurnTerminalError("speech segment is cancelled")
@@ -1914,6 +1923,7 @@ class CallSession:
                             segment_id=identity,
                             ordinal=ordinal,
                             content_digest=content_digest,
+                            attempt_generation=1,
                         ),
                         state="in_flight",
                     )
@@ -1937,9 +1947,13 @@ class CallSession:
         segment_id: str,
         ordinal: int,
         content_digest: str,
+        attempt_generation: int,
     ) -> str:
         identity_digest = hashlib.sha256(
-            f"{turn_id}\0{segment_id}\0{ordinal}\0{content_digest}".encode("utf-8")
+            (
+                f"{turn_id}\0{segment_id}\0{ordinal}\0{content_digest}"
+                f"\0attempt:{attempt_generation}"
+            ).encode("utf-8")
         ).hexdigest()
         return f"tts-segment-{identity_digest[:32]}"
 

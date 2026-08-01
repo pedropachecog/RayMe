@@ -141,19 +141,22 @@ def _torch_reserved_mib() -> float:
 
 def _signal_cancel(command: QwenCancelCommand) -> None:
     with _ACTIVE_LOCK:
-        if command.request_id in _COMPLETED_REQUESTS:
-            return
         cancel_event = (
             _ACTIVE_CANCEL if _ACTIVE_REQUEST_ID == command.request_id else None
         )
-        if cancel_event is None:
+        if cancel_event is not None:
+            # An exact active attempt always wins over bounded completion
+            # history. This also makes legacy ID reuse safe while callers move
+            # to unique request IDs per attempt.
+            cancel_event.set()
+        elif command.request_id in _COMPLETED_REQUESTS:
+            return
+        else:
             # A request-scoped interrupt can beat the main thread between queueing
             # generate and installing its active event. Preserve that interrupt.
             if len(_PENDING_CANCELS) >= 8:
                 _PENDING_CANCELS.clear()
             _PENDING_CANCELS.add(command.request_id)
-        else:
-            cancel_event.set()
 
 
 def _dispatch(command: QwenWorkerCommand) -> bool:

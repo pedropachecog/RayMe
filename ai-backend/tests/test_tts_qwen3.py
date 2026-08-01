@@ -2055,6 +2055,24 @@ def test_qwen_worker_does_not_queue_cancel_for_completed_request(
     assert "segment-already-done" not in worker._PENDING_CANCELS
 
 
+def test_qwen_worker_active_attempt_wins_over_completed_history(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    cancel = _protocol_module().parse_command(
+        {"schema_version": 1, "op": "cancel", "request_id": "legacy-reused-id"}
+    )
+    active_cancel = threading.Event()
+    monkeypatch.setattr(worker, "_ACTIVE_REQUEST_ID", "legacy-reused-id")
+    monkeypatch.setattr(worker, "_ACTIVE_CANCEL", active_cancel)
+    monkeypatch.setattr(worker, "_COMPLETED_REQUESTS", {"legacy-reused-id"})
+
+    worker._signal_cancel(cancel)
+
+    assert active_cancel.is_set()
+
+
 def test_qwen_worker_loads_cuda_before_starting_cancellation_reader(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

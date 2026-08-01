@@ -149,8 +149,10 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
         self._metrics_lock = threading.Lock()
         self._active_lock = threading.Lock()
         self._active_request_id: str | None = None
-        self._cancel_acknowledgements: dict[str, threading.Event] = {}
-        self._recent_terminal_statuses: dict[str, str] = {}
+        self._active_attempt_generation: int | None = None
+        self._next_attempt_generation = 0
+        self._cancel_acknowledgements: dict[str, tuple[int, threading.Event]] = {}
+        self._recent_terminal_statuses: dict[str, tuple[int, str]] = {}
         self._last_cancel_status: str | None = None
         self._selected_voice_key: str | None = None
         self._selected_prompt_key: str | None = None
@@ -313,8 +315,17 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
             with self._active_lock:
                 if self._active_request_id is not None:
                     raise Qwen3WorkerError("Qwen3 generation is already active")
+                self._next_attempt_generation += 1
+                attempt_generation = self._next_attempt_generation
+                # A caller-supplied request ID may be reused by legacy code.
+                # Never let its prior terminal acknowledge this attempt.
+                self._recent_terminal_statuses.pop(generation_request_id, None)
                 self._active_request_id = generation_request_id
-                self._cancel_acknowledgements[generation_request_id] = cancel_ack
+                self._active_attempt_generation = attempt_generation
+                self._cancel_acknowledgements[generation_request_id] = (
+                    attempt_generation,
+                    cancel_ack,
+                )
             try:
                 self._send_command(command)
                 while validator.terminal is None:
@@ -354,9 +365,10 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                             if event.event == "cancelled"
                             else "already_done"
                         )
-                        self._recent_terminal_statuses[
-                            generation_request_id
-                        ] = terminal_status
+                        self._recent_terminal_statuses[generation_request_id] = (
+                            attempt_generation,
+                            terminal_status,
+                        )
                         while len(self._recent_terminal_statuses) > 32:
                             oldest = next(iter(self._recent_terminal_statuses))
                             self._recent_terminal_statuses.pop(oldest, None)
@@ -383,10 +395,18 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                         generation_request_id,
                         validator,
                         cancel_ack,
+                        attempt_generation,
                     )
                 with self._active_lock:
-                    self._active_request_id = None
-                    self._cancel_acknowledgements.pop(generation_request_id, None)
+                    if (
+                        self._active_request_id == generation_request_id
+                        and self._active_attempt_generation == attempt_generation
+                    ):
+                        self._active_request_id = None
+                        self._active_attempt_generation = None
+                    entry = self._cancel_acknowledgements.get(generation_request_id)
+                    if entry is not None and entry[0] == attempt_generation:
+                        self._cancel_acknowledgements.pop(generation_request_id, None)
 
     def synthesize(self, request: TtsSynthesisInput) -> TtsSynthesisOutput:
         raise TtsAdapterUnavailable(
@@ -396,17 +416,22 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
     def cancel(self, request_id: str) -> bool:
         with self._active_lock:
             if request_id != self._active_request_id:
-                terminal_status = self._recent_terminal_statuses.pop(
+                terminal_entry = self._recent_terminal_statuses.pop(
                     request_id,
                     None,
                 )
-                if terminal_status is not None:
+                if terminal_entry is not None:
+                    terminal_status = terminal_entry[1]
                     self._last_cancel_status = terminal_status
                     return True
                 self._last_cancel_status = None
                 return False
-            acknowledgement = self._cancel_acknowledgements.get(request_id)
-        if acknowledgement is None:
+            attempt_generation = self._active_attempt_generation
+            acknowledgement_entry = self._cancel_acknowledgements.get(request_id)
+        if acknowledgement_entry is None or attempt_generation is None:
+            return False
+        acknowledgement_generation, acknowledgement = acknowledgement_entry
+        if acknowledgement_generation != attempt_generation:
             return False
         try:
             self._send_command(QwenCancelCommand(op="cancel", request_id=request_id))
@@ -415,7 +440,13 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
             return False
         acknowledgement.wait(timeout=WORKER_CANCEL_TIMEOUT_SECONDS)
         with self._active_lock:
-            terminal_status = self._recent_terminal_statuses.pop(request_id, None)
+            terminal_entry = self._recent_terminal_statuses.pop(request_id, None)
+            terminal_status = (
+                terminal_entry[1]
+                if terminal_entry is not None
+                and terminal_entry[0] == attempt_generation
+                else None
+            )
             self._last_cancel_status = terminal_status
         if terminal_status in {"cancelled", "already_done"}:
             return True
@@ -427,6 +458,7 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
         request_id: str,
         validator: QwenStreamEventValidator,
         acknowledgement: threading.Event,
+        attempt_generation: int,
     ) -> None:
         """Own worker cleanup when a consumer closes a live generator early."""
         worker = self._worker
@@ -445,9 +477,12 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                 if isinstance(event, QwenTerminalEvent):
                     with self._active_lock:
                         self._recent_terminal_statuses[request_id] = (
-                            "cancelled"
-                            if event.event == "cancelled"
-                            else "already_done"
+                            attempt_generation,
+                            (
+                                "cancelled"
+                                if event.event == "cancelled"
+                                else "already_done"
+                            ),
                         )
                         acknowledgement.set()
                     return
@@ -671,7 +706,10 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
             self._torch_reserved_mib = None
         self._clear_selected_prompt()
         with self._active_lock:
-            acknowledgements = list(self._cancel_acknowledgements.values())
+            acknowledgements = [
+                acknowledgement
+                for _, acknowledgement in self._cancel_acknowledgements.values()
+            ]
         for acknowledgement in acknowledgements:
             acknowledgement.set()
         if worker is None:

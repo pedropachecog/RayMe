@@ -1827,9 +1827,8 @@ def test_qwen_failed_segment_retries_keep_reserved_ordinal_until_success() -> No
 
     assert [request.segment_ordinal for request in adapter.requests] == [0, 0, 1, 1]
     worker_request_ids = [request.request_id for request in adapter.requests]
-    assert worker_request_ids[0] == worker_request_ids[1]
-    assert worker_request_ids[2] == worker_request_ids[3]
-    assert worker_request_ids[0] != worker_request_ids[2]
+    assert len(set(worker_request_ids)) == 4
+    assert all(value.startswith("tts-segment-") for value in worker_request_ids)
     assert session._tts_turn_ledgers["turn-segment-retry"].state == "completed"
 
 
