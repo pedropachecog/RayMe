@@ -1466,7 +1466,11 @@ def test_webrtc_speak_accepts_bounded_voxcpm2_options(stub_webrtc: None) -> None
     session_id = "call-session-voxcpm2-options"
     client.post(
         "/webrtc/offer",
-        json={**_offer_payload(session_id=session_id), "engine_id": "voxcpm2"},
+        json={
+            **_offer_payload(session_id=session_id),
+            "voice_id": "voice-voxcpm2",
+            "engine_id": "voxcpm2",
+        },
     )
 
     response = client.post(
@@ -1516,7 +1520,11 @@ def test_webrtc_speak_returns_streaming_tts_playback_metrics_for_voxcpm2(
     session_id = "call-session-voxcpm2-streaming"
     client.post(
         "/webrtc/offer",
-        json={**_offer_payload(session_id=session_id), "engine_id": "voxcpm2"},
+        json={
+            **_offer_payload(session_id=session_id),
+            "voice_id": "voice-voxcpm2",
+            "engine_id": "voxcpm2",
+        },
     )
 
     response = client.post(
@@ -1712,12 +1720,8 @@ def test_webrtc_qwen_interrupt_cancels_pending_empty_terminal(
         SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
         json={**common, "text": "", "final_chunk": True},
     )
-    assert late_terminal.status_code == 200
-    assert late_terminal.json()["state"] == "listening"
-    assert late_terminal.json()["event"] == {
-        "status": "cancelled",
-        "turn_id": "ai-turn-qwen-interrupt-pending-terminal",
-    }
+    assert late_terminal.status_code == 409
+    assert late_terminal.json()["detail"]["code"] == "call_speech_turn_terminal"
     assert not any(event.get("type") == "ai_done" for event in emitted_events)
     assert adapter.stream_identities == [
         ("ai-turn-qwen-interrupt-pending-terminal", "voice-qwen")
@@ -1809,7 +1813,14 @@ def test_webrtc_speak_streaming_failure_keeps_fixed_public_error(
     manager = ScriptedModelManager(adapters={"voxcpm2": adapter})
     client = _client(model_manager=manager)
     session_id = "call-session-voxcpm2-streaming-fail"
-    client.post("/webrtc/offer", json={**_offer_payload(session_id=session_id), "engine_id": "voxcpm2"})
+    client.post(
+        "/webrtc/offer",
+        json={
+            **_offer_payload(session_id=session_id),
+            "voice_id": "voice-voxcpm2",
+            "engine_id": "voxcpm2",
+        },
+    )
 
     response = client.post(
         SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
@@ -1869,7 +1880,14 @@ def test_webrtc_speak_rejects_reference_audio_over_web_ui_limit(
     manager = ScriptedModelManager(adapters={"voxcpm2": adapter})
     client = _client(model_manager=manager)
     session_id = "call-session-reference-too-large"
-    client.post("/webrtc/offer", json={**_offer_payload(session_id=session_id), "engine_id": "voxcpm2"})
+    client.post(
+        "/webrtc/offer",
+        json={
+            **_offer_payload(session_id=session_id),
+            "voice_id": "voice-voxcpm2",
+            "engine_id": "voxcpm2",
+        },
+    )
 
     response = client.post(
         SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
@@ -1897,7 +1915,14 @@ def test_webrtc_speak_rejects_unbounded_voxcpm2_options_with_sanitized_422(
     manager = ScriptedModelManager(adapters={"voxcpm2": adapter})
     client = _client(model_manager=manager)
     session_id = "call-session-voxcpm2-invalid"
-    client.post("/webrtc/offer", json={**_offer_payload(session_id=session_id), "engine_id": "voxcpm2"})
+    client.post(
+        "/webrtc/offer",
+        json={
+            **_offer_payload(session_id=session_id),
+            "voice_id": "voice-voxcpm2",
+            "engine_id": "voxcpm2",
+        },
+    )
 
     invalid = client.post(
         SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),

@@ -22,7 +22,9 @@ from app.call.session import (
     CallSession,
     CallSessionManager,
     PeerOfferConfiguration,
+    SpeechSegmentConflictError,
     SpeechSessionSelectionError,
+    SpeechTurnTerminalError,
 )
 from app.models.tts_registry import TtsAudioChunk
 
@@ -1555,7 +1557,7 @@ def test_qwen_incremental_turn_carries_monotonic_segment_ordinals() -> None:
         "turn-segment-entropy",
     ]
     assert [request.segment_ordinal for request in requests] == [0, 1]
-    assert "turn-segment-entropy" not in session._tts_turn_segment_ordinals
+    assert session._tts_turn_ledgers["turn-segment-entropy"].state == "completed"
 
 
 def test_qwen_failed_segment_retries_keep_reserved_ordinal_until_success() -> None:
@@ -1642,11 +1644,204 @@ def test_qwen_failed_segment_retries_keep_reserved_ordinal_until_success() -> No
     _run(scenario())
 
     assert [request.segment_ordinal for request in adapter.requests] == [0, 0, 1, 1]
-    assert "turn-segment-retry" not in session._tts_turn_segment_ordinals
-    assert not any(
-        turn_id == "turn-segment-retry"
-        for turn_id, _ in session._tts_segment_reservations
+    assert session._tts_turn_ledgers["turn-segment-retry"].state == "completed"
+
+
+def test_segment_ledger_rejects_collisions_and_replays_committed_response() -> None:
+    class LedgerAdapter:
+        engine_id = "qwen3_1_7b"
+
+        def __init__(self) -> None:
+            self.requests: list[Any] = []
+            self.fail_next = False
+
+        def synthesize(self, _request: Any) -> Any:
+            raise AssertionError("whole synthesis fallback was used")
+
+        def stream(
+            self,
+            request: Any,
+            *,
+            request_id: str,
+            voice_key: str,
+        ) -> Any:
+            del request_id, voice_key
+            self.requests.append(request)
+            if self.fail_next:
+                self.fail_next = False
+                raise RuntimeError("retryable segment failure")
+            for chunk_index in range(2):
+                yield TtsAudioChunk(
+                    engine_id=self.engine_id,
+                    chunk_index=chunk_index,
+                    wav_bytes=QWEN_STREAM_CHUNK_WAV_BYTES,
+                    sample_rate=24_000,
+                    duration_ms=320.0,
+                    generated_at_ms=25.0 + chunk_index * 25.0,
+                )
+
+    adapter = LedgerAdapter()
+    track = ScriptedOutboundAudioTrack()
+    session, _ = _new_session(
+        tts_adapter=adapter,
+        outbound_audio_track=track,
     )
+
+    async def speak(
+        turn_id: str,
+        text: str,
+        *,
+        segment_id: str,
+        ordinal: int,
+        final_chunk: bool,
+    ) -> dict[str, Any]:
+        return await session.speak_text(
+            turn_id,
+            text,
+            "voice-qwen",
+            "qwen3_1_7b",
+            final_chunk=final_chunk,
+            segment_id=segment_id,
+            segment_ordinal=ordinal,
+            reference_audio_b64="cmVhbC1zYW1wbGU=",
+            reference_transcript="The exact reference transcript.",
+        )
+
+    async def scenario() -> None:
+        committed = await speak(
+            "turn-ledger",
+            "The first immutable segment.",
+            segment_id="segment-0",
+            ordinal=0,
+            final_chunk=False,
+        )
+        request_count = len(adapter.requests)
+        chunk_count = len(track.chunks)
+        duplicate = await speak(
+            "turn-ledger",
+            "The first immutable segment.",
+            segment_id="segment-0",
+            ordinal=0,
+            final_chunk=False,
+        )
+        assert duplicate == committed
+        assert len(adapter.requests) == request_count
+        assert len(track.chunks) == chunk_count
+
+        with pytest.raises(SpeechSegmentConflictError):
+            await speak(
+                "turn-ledger",
+                "Mutated content must be rejected.",
+                segment_id="segment-0",
+                ordinal=0,
+                final_chunk=False,
+            )
+        with pytest.raises(SpeechSegmentConflictError):
+            await speak(
+                "turn-ledger",
+                "A second identity cannot steal ordinal zero.",
+                segment_id="segment-other",
+                ordinal=0,
+                final_chunk=False,
+            )
+
+        adapter.fail_next = True
+        failed = await speak(
+            "turn-ledger",
+            "The final immutable segment.",
+            segment_id="segment-1",
+            ordinal=1,
+            final_chunk=True,
+        )
+        assert failed["type"] == "failed"
+        with pytest.raises(SpeechSegmentConflictError):
+            await speak(
+                "turn-ledger",
+                "Changed final content.",
+                segment_id="segment-1",
+                ordinal=1,
+                final_chunk=True,
+            )
+        final = await speak(
+            "turn-ledger",
+            "The final immutable segment.",
+            segment_id="segment-1",
+            ordinal=1,
+            final_chunk=True,
+        )
+        final_request_count = len(adapter.requests)
+        assert await speak(
+            "turn-ledger",
+            "The final immutable segment.",
+            segment_id="segment-1",
+            ordinal=1,
+            final_chunk=True,
+        ) == final
+        assert len(adapter.requests) == final_request_count
+        with pytest.raises(SpeechTurnTerminalError):
+            await speak(
+                "turn-ledger",
+                "Nothing may follow completion.",
+                segment_id="segment-2",
+                ordinal=2,
+                final_chunk=False,
+            )
+
+        await session._cancel_tts_turn("turn-cancelled-ledger")
+        with pytest.raises(SpeechTurnTerminalError):
+            await speak(
+                "turn-cancelled-ledger",
+                "Cancelled turns cannot revive.",
+                segment_id="cancelled-0",
+                ordinal=0,
+                final_chunk=True,
+            )
+
+    _run(scenario())
+
+
+def test_completed_final_marker_retry_returns_cached_ai_done() -> None:
+    adapter = SlowQwenStreamingTtsAdapter(chunk_count=2)
+    adapter.release_completion.set()
+    session, _ = _new_session(
+        tts_adapter=adapter,
+        outbound_audio_track=ScriptedOutboundAudioTrack(),
+    )
+
+    async def scenario() -> tuple[dict[str, Any], dict[str, Any]]:
+        queued = await session.speak_text(
+            "turn-final-marker-idempotent",
+            "A non-final segment is admitted once.",
+            "voice-qwen",
+            "qwen3_1_7b",
+            final_chunk=False,
+            segment_id="turn-final-marker-idempotent:0",
+            segment_ordinal=0,
+            reference_audio_b64="cmVhbC1zYW1wbGU=",
+            reference_transcript="The exact reference transcript.",
+        )
+        assert queued["status"] == "queued"
+        first = await session.complete_speech_turn(
+            turn_id="turn-final-marker-idempotent",
+            voice_id="voice-qwen",
+            engine_id="qwen3_1_7b",
+            segment_id="turn-final-marker-idempotent:1",
+            segment_ordinal=1,
+        )
+        retry = await session.complete_speech_turn(
+            turn_id="turn-final-marker-idempotent",
+            voice_id="voice-qwen",
+            engine_id="qwen3_1_7b",
+            segment_id="turn-final-marker-idempotent:1",
+            segment_ordinal=1,
+        )
+        return first, retry
+
+    first, retry = _run(scenario())
+
+    assert first == retry
+    assert first["type"] == "ai_done"
+    assert len(adapter.requests) == 1
 
 
 def test_engine_switch_silences_old_and_new_tracks_before_cancel_ack() -> None:

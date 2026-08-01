@@ -19,7 +19,9 @@ from app.call.session import (
     CallSession,
     CallSessionManager,
     PeerOfferConfiguration,
+    SpeechSegmentConflictError,
     SpeechSessionSelectionError,
+    SpeechTurnTerminalError,
     TerminalCallSessionError,
 )
 from app.call.tracks import QueuedAudioOutputTrack
@@ -518,6 +520,8 @@ async def speak_session(
                 turn_id=payload.turn_id,
                 voice_id=payload.voice_id,
                 engine_id=payload.engine_id,
+                segment_id=payload.segment_id,
+                segment_ordinal=payload.segment_ordinal,
                 accepted_configuration=accepted_configuration,
             )
         else:
@@ -555,12 +559,25 @@ async def speak_session(
                 qwen3_release_evidence_mode=payload.release_evidence_mode,
                 qwen3_release_evidence_seed=payload.release_evidence_seed,
             )
-    except SpeechSessionSelectionError as exc:
+    except (
+        SpeechSegmentConflictError,
+        SpeechSessionSelectionError,
+        SpeechTurnTerminalError,
+    ) as exc:
+        code = (
+            "call_speech_segment_conflict"
+            if isinstance(exc, SpeechSegmentConflictError)
+            else (
+                "call_speech_turn_terminal"
+                if isinstance(exc, SpeechTurnTerminalError)
+                else "call_speech_selection_mismatch"
+            )
+        )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
-                "code": "call_speech_selection_mismatch",
-                "message": "Speech selection does not match the active call",
+                "code": code,
+                "message": "Speech request conflicts with the active call",
             },
         ) from exc
     except asyncio.CancelledError:
