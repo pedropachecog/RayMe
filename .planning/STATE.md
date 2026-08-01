@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: ready_to_execute
-stopped_at: Completed 09-14-PLAN.md
-last_updated: "2026-08-01T02:30:09.466Z"
+status: ready_to_verify
+stopped_at: Completed 09-15-PLAN.md
+last_updated: "2026-08-01T06:42:45.393Z"
 last_activity: 2026-08-01
 progress:
   total_phases: 11
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 112
-  completed_plans: 107
+  completed_plans: 109
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
-last_activity_desc: "Completed Phase 09 Plan 14: exact-commit OMEN Qwen deployment with verified 20-scenario and 50-turn core evidence"
+last_activity_desc: "Completed Phase 09 Plan 15: same-commit acoustic, privacy, real browser, decision-ready, and operational handoff evidence"
 ---
 
 ## Phase Status
@@ -84,6 +84,7 @@ last_activity_desc: "Completed Phase 09 Plan 14: exact-commit OMEN Qwen deployme
 - Phase 08.1 planned on 2026-05-16: urgent incident repair now covers removal of the invalid full-response live-call TTS buffering fix, bounded live-stream startup buffering only, executable tests that reject generate-then-play call fixes, and durable GSD/live-call invariant guardrails.
 - Phase 08.1 plan 08.1-02 added on 2026-05-16 after deployed retest exposed a native VoxCPM2/PyTorch crash: production VoxCPM2 must run behind a CUDA-only supervised worker process so worker death or hang becomes a recoverable `call_tts_failed` instead of killing the AI backend or blocking future call startup.
 - Phase 08.1 plan 08.1-03 added on 2026-05-16 after deployed retest showed bounded startup buffering only delays VoxCPM2 stutter: live VoxCPM2 must be measurement-gated by generated playable audio per wall-clock second, and sustained under-realtime streams must not be allowed to masquerade as smooth live-call playback.
+- Phase 09 plan 09-15 completed on 2026-08-01: exact deployed commit `3501a1a1e2b4371a46d6d65322975134b0d35a5f` passed pinned acoustic/privacy gates, real desktop/mobile Qwen browser E2E, decision-ready verification, and the operational handoff gate; integrated human listening and the physical-call workflow remain explicitly pending acceptance.
 
 ## Current Decisions
 
@@ -260,8 +261,8 @@ last_activity_desc: "Completed Phase 09 Plan 14: exact-commit OMEN Qwen deployme
 ## Session Continuity
 
 Last activity: 2026-08-01
-Last session: 2026-08-01T02:30:09.127Z
-Stopped at: Completed 09-14-PLAN.md
+Last session: 2026-08-01T06:42:44.609Z
+Stopped at: Completed 09-15-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -284,6 +285,7 @@ Resume file: None
 | Phase 09 P12 | 17min | 2 tasks | 4 files |
 | Phase 09 P13 | 30min | 2 tasks | 11 files |
 | Phase 09 P14 | 4h 19m | 2 tasks | 36 files |
+| Phase 09 P15 | 4h08m | 2 tasks | 26 files |
 
 ## Decisions
 
@@ -337,3 +339,6 @@ Resume file: None
 - [Phase 09]: Four-step native Qwen streaming with a 1536-position static cache is the verified RTX 3060 balance for caller latency, sustained RTFx, zero underflows, and VRAM headroom.
 - [Phase 09]: Live caller playback and sustained supply remain authoritative: retain the 1.25 second playback and RTFx gates while using 600 ms as the native median hard bound.
 - [Phase 09]: Physical-call and integrated human listening acceptance remain explicit Plan 09-15 work and cannot be inferred from automated core evidence.
+- [Phase 09]: Plan 09-15: autonomous Qwen readiness requires semantic decision-ready verification before the exact operational handoff gate.
+- [Phase 09]: Plan 09-15: OMEN WebRTC UDP ingress is LocalSubnet-only and bound to the base Python executable verified as live port 9443 owner.
+- [Phase 09]: Plan 09-15: autonomous readiness passes separately from pending integrated listening and physical-call acceptance.
