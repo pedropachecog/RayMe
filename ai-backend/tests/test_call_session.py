@@ -2795,6 +2795,26 @@ def test_failed_connection_records_connection_failed_reason() -> None:
     assert peer.close_calls == 1
 
 
+def test_closed_connection_ends_session_and_releases_prompt_lease() -> None:
+    session, peer = _new_session(session_id="call-session-remote-closed")
+    released_owners: list[str] = []
+
+    async def scenario() -> None:
+        installed = await session.install_or_release_tts_prompt_lease(
+            lambda owner: released_owners.append(owner)
+        )
+        assert installed is True
+        peer.connectionState = "closed"
+        await session.handle_connection_state_change()
+
+    _run(scenario())
+
+    assert session.state == "ended"
+    assert session.end_reason == "connection_closed"
+    assert peer.close_calls == 1
+    assert released_owners == ["call-session-remote-closed"]
+
+
 def test_stats_returns_session_state_and_audio_counters() -> None:
     session, _ = _new_session(session_id="call-session-stats")
 

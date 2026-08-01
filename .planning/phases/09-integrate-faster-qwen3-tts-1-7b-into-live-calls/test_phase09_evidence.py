@@ -410,7 +410,7 @@ def _runner_module(name: str = "phase09_omen_runner") -> ModuleType:
     return _load_module(RUNNER_PATH, name)
 
 
-def test_hardware_tracer_fake_microphone_has_vad_closing_silence(tmp_path: Path) -> None:
+def test_hardware_tracer_fake_microphone_has_loop_safe_response_window(tmp_path: Path) -> None:
     tracer = _runner_module("phase09_runner_fake_microphone_silence").load_hardware_tracer()
     fixture = tmp_path / "fake-microphone.wav"
     sample_rate = 16_000
@@ -433,7 +433,10 @@ def test_hardware_tracer_fake_microphone_has_vad_closing_silence(tmp_path: Path)
         )
         assert source.getnframes() == voiced_frames + trailing_frames
     assert frames[-trailing_frames * 2 :] == b"\x00" * trailing_frames * 2
-    assert tracer.FAKE_MICROPHONE_TRAILING_SILENCE_MS > 1800
+    # Chromium loops the finite fake-microphone WAV. The closing silence must
+    # cover VAD turn close plus STT, LLM, early streaming, and short playout so
+    # the next synthetic utterance cannot barge into every assistant reply.
+    assert tracer.FAKE_MICROPHONE_TRAILING_SILENCE_MS >= 12_000
 
 
 def test_hardware_tracer_preserves_planar_int16_pcm_scale() -> None:

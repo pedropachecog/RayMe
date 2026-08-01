@@ -2182,8 +2182,11 @@ class CallSession:
             await result
 
     async def handle_connection_state_change(self) -> None:
-        if getattr(self.peer_connection, "connectionState", None) == "failed":
+        connection_state = getattr(self.peer_connection, "connectionState", None)
+        if connection_state == "failed":
             await self.fail(reason="connection_failed")
+        elif connection_state == "closed" and self.ended_at is None:
+            await self.end(reason="connection_closed")
 
     def stats(self) -> dict[str, Any]:
         return {

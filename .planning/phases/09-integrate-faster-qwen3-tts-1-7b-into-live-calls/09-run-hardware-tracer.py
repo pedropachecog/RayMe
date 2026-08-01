@@ -44,7 +44,7 @@ REFERENCE_TRANSCRIPT = (
 FAKE_MICROPHONE_TRANSCRIPT = (
     "This is the separate deterministic RayMe microphone fixture for local browser call testing."
 )
-FAKE_MICROPHONE_TRAILING_SILENCE_MS = 2500
+FAKE_MICROPHONE_TRAILING_SILENCE_MS = 12_000
 BASELINE_TEXTS = {
     "short": "The RayMe hardware tracer is speaking now.",
     "medium": (
