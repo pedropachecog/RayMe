@@ -1024,7 +1024,7 @@ def _attach_peer_handlers(
             return
         await accept_pending_peer_if_connected("connectionstatechange")
         if peer_connection is session.peer_connection:
-            await session.handle_connection_state_change()
+            await session.handle_connection_state_change(peer_connection)
 
     @peer_connection.on("iceconnectionstatechange")
     async def on_iceconnectionstatechange() -> None:
@@ -1037,6 +1037,11 @@ def _attach_peer_handlers(
         if await discard_failed_pending_peer("iceconnectionstatechange"):
             return
         await accept_pending_peer_if_connected("iceconnectionstatechange")
+        if peer_connection is session.peer_connection:
+            await session.handle_connection_state_change(
+                peer_connection,
+                terminal_state=state,
+            )
 
     @peer_connection.on("icegatheringstatechange")
     async def on_icegatheringstatechange() -> None:
