@@ -1417,7 +1417,25 @@ def test_qwen_worker_loads_only_exact_cuda_torch_runtime_settings(
         "require_torch_cuda_runtime",
         lambda component: cuda_guards.append(component),
     )
-    monkeypatch.setattr(worker.importlib.metadata, "version", lambda _name: "0.3.2")
+    direct_url = json.dumps(
+        {
+            "url": "https://github.com/andimarafioti/faster-qwen3-tts.git",
+            "vcs_info": {
+                "vcs": "git",
+                "commit_id": "a70afc0f81f7f5f8801c3227968f1102f43f211c",
+            },
+        }
+    )
+    distribution = type(
+        "Distribution",
+        (),
+        {"version": "0.3.2", "read_text": lambda self, _name: direct_url},
+    )()
+    monkeypatch.setattr(
+        worker.importlib.metadata,
+        "distribution",
+        lambda _name: distribution,
+    )
 
     runtime = worker.load_runtime(
         tmp_path,
@@ -1440,6 +1458,90 @@ def test_qwen_worker_loads_only_exact_cuda_torch_runtime_settings(
         )
     ]
     assert warmups == [100]
+
+
+def test_qwen_worker_rejects_missing_model_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    monkeypatch.setenv(worker.MODEL_DIR_ENV, str(tmp_path))
+    monkeypatch.setenv(worker.MODEL_REVISION_ENV, worker.MODEL_REVISION)
+    monkeypatch.setattr(
+        worker,
+        "load_runtime",
+        lambda _model_dir: pytest.fail("runtime loaded without model manifest"),
+    )
+
+    with pytest.raises(RuntimeError, match="model identity unavailable"):
+        worker._load_runtime_from_environment()
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    (
+        {
+            "model_id": "Untrusted/Qwen3-TTS-12Hz-1.7B-Base",
+            "model_revision": "fd4b254389122332181a7c3db7f27e918eec64e3",
+        },
+        {
+            "model_id": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+            "model_revision": "0000000000000000000000000000000000000000",
+        },
+    ),
+)
+def test_qwen_worker_rejects_wrong_model_manifest_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    manifest: dict[str, str],
+) -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    (tmp_path / "config.json").write_text("{}", encoding="utf-8")
+    (tmp_path / worker.MODEL_MANIFEST_FILENAME).write_text(
+        json.dumps(manifest),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(worker.MODEL_DIR_ENV, str(tmp_path))
+    monkeypatch.setenv(worker.MODEL_REVISION_ENV, worker.MODEL_REVISION)
+    monkeypatch.setattr(
+        worker,
+        "load_runtime",
+        lambda _model_dir: pytest.fail("runtime loaded with wrong model identity"),
+    )
+
+    with pytest.raises(RuntimeError, match="unexpected Qwen3 model identity"):
+        worker._load_runtime_from_environment()
+
+
+def test_qwen_worker_rejects_same_version_runtime_from_wrong_commit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    direct_url = json.dumps(
+        {
+            "url": "https://github.com/andimarafioti/faster-qwen3-tts.git",
+            "vcs_info": {
+                "vcs": "git",
+                "commit_id": "0000000000000000000000000000000000000000",
+            },
+        }
+    )
+    distribution = type(
+        "Distribution",
+        (),
+        {"version": "0.3.2", "read_text": lambda self, _name: direct_url},
+    )()
+    monkeypatch.setattr(
+        worker.importlib.metadata,
+        "distribution",
+        lambda _name: distribution,
+    )
+
+    with pytest.raises(RuntimeError, match="unexpected Faster Qwen3-TTS runtime"):
+        worker._verify_runtime_distribution()
 
 
 def test_qwen_worker_accepts_cuda_parameters_at_pinned_wrapper_model_depth() -> None:

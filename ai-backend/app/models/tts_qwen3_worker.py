@@ -38,8 +38,11 @@ from app.models.tts_qwen3_protocol import (
 
 WORKER_EVENT_PREFIX = "__RAYME_QWEN3__"
 RUNTIME_VERSION = "0.3.2"
+RUNTIME_REPOSITORY = "https://github.com/andimarafioti/faster-qwen3-tts"
+RUNTIME_COMMIT = "a70afc0f81f7f5f8801c3227968f1102f43f211c"
 MODEL_ID = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 MODEL_REVISION = "fd4b254389122332181a7c3db7f27e918eec64e3"
+MODEL_MANIFEST_FILENAME = "rayme-model-revision.json"
 MODEL_DIR_ENV = "RAYME_QWEN3_MODEL_DIR"
 MODEL_REVISION_ENV = "RAYME_QWEN3_MODEL_REVISION"
 WARMUP_PREFILL = 100
@@ -298,7 +301,47 @@ def _load_runtime_from_environment() -> Any:
     model_dir = Path(raw_model_dir).resolve(strict=True)
     if not model_dir.is_dir():
         raise RuntimeError("exact Qwen3 model snapshot unavailable")
+    _verify_model_manifest(model_dir)
     return load_runtime(model_dir)
+
+
+def _verify_model_manifest(model_dir: Path) -> None:
+    manifest_path = model_dir / MODEL_MANIFEST_FILENAME
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("exact Qwen3 model identity unavailable") from exc
+    if not isinstance(manifest, dict) or (
+        manifest.get("model_id") != MODEL_ID
+        or manifest.get("model_revision") != MODEL_REVISION
+        or not (model_dir / "config.json").is_file()
+    ):
+        raise RuntimeError("unexpected Qwen3 model identity")
+
+
+def _verify_runtime_distribution() -> None:
+    try:
+        distribution = importlib.metadata.distribution("faster-qwen3-tts")
+        installed_version = distribution.version
+        direct_url = json.loads(distribution.read_text("direct_url.json") or "{}")
+    except (
+        importlib.metadata.PackageNotFoundError,
+        AttributeError,
+        TypeError,
+        json.JSONDecodeError,
+    ) as exc:
+        raise RuntimeError("unexpected Faster Qwen3-TTS runtime") from exc
+    vcs_info = direct_url.get("vcs_info") if isinstance(direct_url, dict) else None
+    source_url = str(direct_url.get("url", "")).rstrip("/")
+    normalized_source = source_url.removesuffix(".git").lower()
+    if (
+        installed_version != RUNTIME_VERSION
+        or normalized_source != RUNTIME_REPOSITORY.lower()
+        or not isinstance(vcs_info, dict)
+        or vcs_info.get("vcs") != "git"
+        or vcs_info.get("commit_id") != RUNTIME_COMMIT
+    ):
+        raise RuntimeError("unexpected Faster Qwen3-TTS runtime")
 
 
 def load_runtime(
@@ -316,9 +359,7 @@ def load_runtime(
     if runtime_class is None:
         from faster_qwen3_tts import FasterQwen3TTS as runtime_class
 
-    installed_version = importlib.metadata.version("faster-qwen3-tts")
-    if installed_version != RUNTIME_VERSION:
-        raise RuntimeError("unexpected Faster Qwen3-TTS runtime")
+    _verify_runtime_distribution()
     runtime = runtime_class.from_pretrained(
         str(model_dir),
         device="cuda",
