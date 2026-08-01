@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import builtins
+import contextlib
 import importlib.machinery
 import importlib.util
 import json
@@ -499,23 +500,28 @@ class ScriptedQwenWorkerProcess:
         acknowledge_cancel: bool = True,
         generate_mutation: str | None = None,
         first_chunk_then_hang: bool = False,
+        block_done_read: bool = False,
     ) -> None:
         self.returncode: int | None = None
         self.ops: list[dict[str, Any]] = []
-        self.stdout = self.ScriptedStdout()
+        self.stdout = self.ScriptedStdout(self)
         self.stdin = self.ScriptedStdin(self)
         self.hang_generate = hang_generate
         self.acknowledge_cancel = acknowledge_cancel
         self.generate_mutation = generate_mutation
         self.first_chunk_then_hang = first_chunk_then_hang
         self.first_chunk_hang_used = False
+        self.block_done_read = block_done_read
+        self.done_read_blocked = threading.Event()
+        self.release_done_read = threading.Event()
         self.generated_chunk_counts: dict[str, int] = {}
         self.prepared_prompt_key: str | None = None
         self.terminated = False
         self.killed = False
 
     class ScriptedStdout:
-        def __init__(self) -> None:
+        def __init__(self, process: "ScriptedQwenWorkerProcess") -> None:
+            self.process = process
             self.lines: queue.Queue[str | None] = queue.Queue()
 
         def __iter__(self):
@@ -525,6 +531,12 @@ class ScriptedQwenWorkerProcess:
             line = self.lines.get()
             if line is None:
                 raise StopIteration
+            if self.process.block_done_read:
+                qwen = _qwen_module()
+                payload = json.loads(line[len(qwen.WORKER_EVENT_PREFIX) :])
+                if payload.get("event") == "done":
+                    self.process.done_read_blocked.set()
+                    self.process.release_done_read.wait(timeout=1.0)
             return line
 
     class ScriptedStdin:
@@ -1383,6 +1395,59 @@ def test_qwen_adapter_cancel_is_request_scoped_and_stream_drains_cancelled_termi
     assert process.terminated is False
 
 
+def test_qwen_adapter_cancel_accepts_done_already_emitted_before_consumption(
+    qwen_runtime_available: None,
+) -> None:
+    qwen = _qwen_module()
+    process = ScriptedQwenWorkerProcess(
+        acknowledge_cancel=False,
+        block_done_read=True,
+    )
+    adapter = qwen.Qwen3TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
+    adapter.load()
+    adapter.prewarm(
+        voice_key="voice_0123456789abcdef",
+        reference_audio=b"RIFF-reference",
+        reference_transcript="The exact spoken reference.",
+    )
+    chunks: list[Any] = []
+    producer = threading.Thread(
+        target=lambda: chunks.extend(
+            adapter.stream(_request(), request_id="segment-done-race")
+        ),
+        daemon=True,
+    )
+    producer.start()
+    assert process.done_read_blocked.wait(timeout=1.0)
+
+    cancel_results: list[bool] = []
+    canceller = threading.Thread(
+        target=lambda: cancel_results.append(adapter.cancel("segment-done-race")),
+        daemon=True,
+    )
+    canceller.start()
+    deadline = time.monotonic() + 1.0
+    while not any(payload["op"] == "cancel" for payload in process.ops):
+        assert time.monotonic() < deadline
+        time.sleep(0.001)
+
+    process.release_done_read.set()
+    producer.join(timeout=1.0)
+    canceller.join(timeout=1.0)
+
+    assert producer.is_alive() is False
+    assert canceller.is_alive() is False
+    assert cancel_results == [True]
+    assert adapter.last_cancel_status == "already_done"
+    assert process.terminated is False
+    assert [chunk.chunk_index for chunk in chunks] == [0, 1]
+
+    process.block_done_read = False
+    recovered = list(adapter.stream(_request(), request_id="segment-after-race"))
+    assert [chunk.chunk_index for chunk in recovered] == [0, 1]
+    assert process.terminated is False
+
+
 def test_qwen_adapter_generator_close_cancels_drains_and_allows_next_request(
     qwen_runtime_available: None,
 ) -> None:
@@ -1909,6 +1974,59 @@ def test_qwen_worker_preserves_cancel_that_arrives_before_generate_dispatch(
 
     assert [event.event for event in emitted] == ["cancelled"]
     assert runtime.streaming_calls == []
+
+
+def test_qwen_worker_does_not_queue_cancel_for_completed_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from collections import deque
+    from app.models import tts_qwen3_worker as worker
+
+    runtime = ScriptedNativeRuntime()
+    prompt = worker.PreparedVoicePrompt(
+        voice_key="voice_0123456789abcdef",
+        reference_transcript="The exact spoken reference.",
+        prompt_items=[object()],
+    )
+    command = _protocol_module().parse_command(
+        {
+            "schema_version": 1,
+            "op": "generate",
+            "request_id": "segment-already-done",
+            "voice_key": prompt.voice_key,
+            "text": "Complete before cancellation is dispatched.",
+            "max_new_tokens": 48,
+            "hard_audio_seconds": 6.0,
+        }
+    )
+    cancel = _protocol_module().parse_command(
+        {
+            "schema_version": 1,
+            "op": "cancel",
+            "request_id": "segment-already-done",
+        }
+    )
+    emitted: list[Any] = []
+    monkeypatch.setattr(worker, "_RUNTIME", runtime)
+    monkeypatch.setattr(worker, "_PREPARED_PROMPT", prompt)
+    monkeypatch.setattr(worker, "_PENDING_CANCELS", set())
+    monkeypatch.setattr(worker, "_COMPLETED_REQUESTS", set())
+    monkeypatch.setattr(worker, "_COMPLETED_REQUEST_ORDER", deque())
+    monkeypatch.setattr(worker, "_emit_event", emitted.append)
+    monkeypatch.setattr(
+        worker,
+        "_generation_rng_scope",
+        lambda _seed: contextlib.nullcontext(),
+    )
+    monkeypatch.setattr(worker, "_wav_bytes", lambda _audio, _rate: b"RIFF-chunk")
+    monkeypatch.setattr(worker, "_torch_reserved_mib", lambda: 5604.0)
+
+    worker._dispatch(command)
+    worker._signal_cancel(cancel)
+
+    assert emitted[-1].event == "done"
+    assert "segment-already-done" in worker._COMPLETED_REQUESTS
+    assert "segment-already-done" not in worker._PENDING_CANCELS
 
 
 def test_qwen_worker_loads_cuda_before_starting_cancellation_reader(

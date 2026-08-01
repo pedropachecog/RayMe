@@ -11,6 +11,7 @@ import random
 import sys
 import threading
 import time
+from collections import deque
 from dataclasses import dataclass
 from io import BytesIO
 from pathlib import Path
@@ -64,6 +65,8 @@ _ACTIVE_REQUEST_ID: str | None = None
 _ACTIVE_CANCEL: threading.Event | None = None
 _ACTIVE_LOCK = threading.Lock()
 _PENDING_CANCELS: set[str] = set()
+_COMPLETED_REQUESTS: set[str] = set()
+_COMPLETED_REQUEST_ORDER: deque[str] = deque()
 _EMIT_LOCK = threading.Lock()
 _COMMANDS: queue.Queue[QwenWorkerCommand | None] = queue.Queue(maxsize=8)
 
@@ -138,6 +141,8 @@ def _torch_reserved_mib() -> float:
 
 def _signal_cancel(command: QwenCancelCommand) -> None:
     with _ACTIVE_LOCK:
+        if command.request_id in _COMPLETED_REQUESTS:
+            return
         cancel_event = (
             _ACTIVE_CANCEL if _ACTIVE_REQUEST_ID == command.request_id else None
         )
@@ -230,6 +235,7 @@ def _dispatch(command: QwenWorkerCommand) -> bool:
             with _ACTIVE_LOCK:
                 _ACTIVE_REQUEST_ID = None
                 _ACTIVE_CANCEL = None
+                _remember_completed_request_locked(command.request_id)
         return True
 
     if isinstance(command, QwenInvalidateCommand):
@@ -263,6 +269,16 @@ def _dispatch(command: QwenWorkerCommand) -> bool:
         return False
 
     return True
+
+
+def _remember_completed_request_locked(request_id: str) -> None:
+    if request_id in _COMPLETED_REQUESTS:
+        return
+    if len(_COMPLETED_REQUEST_ORDER) >= 32:
+        expired = _COMPLETED_REQUEST_ORDER.popleft()
+        _COMPLETED_REQUESTS.discard(expired)
+    _COMPLETED_REQUEST_ORDER.append(request_id)
+    _COMPLETED_REQUESTS.add(request_id)
 
 
 def _generation_seed_for_command(command: QwenGenerateCommand) -> int:

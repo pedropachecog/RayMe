@@ -228,6 +228,7 @@ class _TtsSegmentLedgerEntry:
     ordinal: int
     content_digest: str
     final_chunk: bool
+    worker_request_id: str
     state: str = "reserved"
     response: dict[str, Any] | None = None
     attempt_done: asyncio.Event = field(default_factory=asyncio.Event)
@@ -1671,6 +1672,7 @@ class CallSession:
                     qwen3_release_evidence_mode=qwen3_release_evidence_mode,
                     qwen3_release_evidence_seed=qwen3_release_evidence_seed,
                     segment_ordinal=reserved_segment_ordinal,
+                    worker_request_id=segment.worker_request_id,
                 )
                 if self._tts_segment_result_succeeded(result):
                     await self._commit_tts_segment(turn_id, segment, result)
@@ -1907,6 +1909,12 @@ class CallSession:
                         ordinal=ordinal,
                         content_digest=content_digest,
                         final_chunk=final_chunk,
+                        worker_request_id=self._worker_request_id_for_segment(
+                            turn_id=turn_id,
+                            segment_id=identity,
+                            ordinal=ordinal,
+                            content_digest=content_digest,
+                        ),
                         state="in_flight",
                     )
                     ledger.segments[identity] = entry
@@ -1921,6 +1929,19 @@ class CallSession:
             result.get("status") == "queued"
             or result.get("type") == AI_DONE_EVENT
         )
+
+    @staticmethod
+    def _worker_request_id_for_segment(
+        *,
+        turn_id: str,
+        segment_id: str,
+        ordinal: int,
+        content_digest: str,
+    ) -> str:
+        identity_digest = hashlib.sha256(
+            f"{turn_id}\0{segment_id}\0{ordinal}\0{content_digest}".encode("utf-8")
+        ).hexdigest()
+        return f"tts-segment-{identity_digest[:32]}"
 
     async def _commit_tts_segment(
         self,
@@ -1999,6 +2020,7 @@ class CallSession:
         qwen3_release_evidence_mode: str | None,
         qwen3_release_evidence_seed: int | None,
         segment_ordinal: int,
+        worker_request_id: str,
     ) -> dict[str, Any]:
         started_at = time.perf_counter()
         queue: asyncio.Queue[Any] = asyncio.Queue(
@@ -2231,11 +2253,12 @@ class CallSession:
                 qwen3_release_evidence_mode=qwen3_release_evidence_mode,
                 qwen3_release_evidence_seed=qwen3_release_evidence_seed,
                 segment_ordinal=segment_ordinal,
+                request_id=worker_request_id,
             )
             loop = asyncio.get_running_loop()
 
             self._active_tts_adapter = adapter
-            self._active_tts_request_id = turn_id
+            self._active_tts_request_id = worker_request_id
             self._active_tts_turn_id = turn_id
             self._active_tts_cancel_requested = False
             self._last_tts_cancel_context = None
@@ -2297,7 +2320,7 @@ class CallSession:
                     if engine_id == "qwen3_1_7b":
                         stream = adapter.stream(
                             request,
-                            request_id=turn_id,
+                            request_id=worker_request_id,
                             voice_key=voice_id,
                         )
                     else:
@@ -3545,6 +3568,7 @@ class CallSession:
         qwen3_release_evidence_mode: str | None = None,
         qwen3_release_evidence_seed: int | None = None,
         segment_ordinal: int = 0,
+        request_id: str | None = None,
     ) -> TtsSynthesisInput:
         if not reference_audio_b64:
             raise ValueError("call TTS reference audio is required")
@@ -3553,7 +3577,7 @@ class CallSession:
             reference_audio=_decode_reference_audio_b64(reference_audio_b64),
             reference_transcript=reference_transcript,
             reference_audio_content_type=reference_audio_content_type,
-            request_id=turn_id,
+            request_id=request_id or turn_id,
             turn_id=turn_id,
             segment_ordinal=segment_ordinal,
             voice_key=voice_id,

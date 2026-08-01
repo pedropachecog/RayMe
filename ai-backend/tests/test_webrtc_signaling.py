@@ -1414,9 +1414,10 @@ def test_webrtc_reoffer_engine_switch_cancels_exact_active_qwen_request(
         thread.join(2.0)
 
     assert not thread.is_alive()
-    assert adapter.cancel_calls == ["turn-qwen-engine-switch"]
+    assert len(adapter.cancel_calls) == 1
+    assert adapter.cancel_calls[0].startswith("tts-segment-")
     assert adapter.stream_identities == [
-        ("turn-qwen-engine-switch", "voice-qwen")
+        (adapter.cancel_calls[0], "voice-qwen")
     ]
     assert responses and responses[0].status_code == 502
     assert responses[0].json()["detail"] == {
@@ -1594,9 +1595,9 @@ def test_webrtc_prepared_qwen_speak_uses_native_stream_and_truthful_carriers(
 
     assert response.status_code == 200
     payload = response.json()
-    assert adapter.stream_identities == [
-        ("ai-turn-qwen-streaming", "voice-qwen")
-    ]
+    assert len(adapter.stream_identities) == 1
+    assert adapter.stream_identities[0][0].startswith("tts-segment-")
+    assert adapter.stream_identities[0][1] == "voice-qwen"
     assert payload["event"]["type"] == "ai_done"
     immediate = payload["event"]["ai_audio_started_event"]["tts_playback"]
     assert immediate["streaming_used"] is True
@@ -1652,9 +1653,9 @@ def test_webrtc_qwen_empty_final_marker_terminalizes_without_repeating_synthesis
     assert segment_payload["state"] == "speaking"
     assert segment_payload["event"]["status"] == "queued"
     assert segment_payload["event"]["tts_playback_final"]["playout_wait_completed"] is None
-    assert adapter.stream_identities == [
-        ("ai-turn-qwen-empty-terminal", "voice-qwen")
-    ]
+    assert len(adapter.stream_identities) == 1
+    assert adapter.stream_identities[0][0].startswith("tts-segment-")
+    assert adapter.stream_identities[0][1] == "voice-qwen"
 
     terminal = client.post(
         SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
@@ -1669,9 +1670,9 @@ def test_webrtc_qwen_empty_final_marker_terminalizes_without_repeating_synthesis
     assert terminal_event["tts_playback_final"]["chunk_count"] == segment_payload[
         "event"
     ]["tts_playback_final"]["chunk_count"]
-    assert adapter.stream_identities == [
-        ("ai-turn-qwen-empty-terminal", "voice-qwen")
-    ]
+    assert len(adapter.stream_identities) == 1
+    assert adapter.stream_identities[0][0].startswith("tts-segment-")
+    assert adapter.stream_identities[0][1] == "voice-qwen"
 
 
 def test_webrtc_qwen_interrupt_cancels_pending_empty_terminal(
@@ -1724,9 +1725,9 @@ def test_webrtc_qwen_interrupt_cancels_pending_empty_terminal(
     assert late_terminal.status_code == 409
     assert late_terminal.json()["detail"]["code"] == "call_speech_turn_terminal"
     assert not any(event.get("type") == "ai_done" for event in emitted_events)
-    assert adapter.stream_identities == [
-        ("ai-turn-qwen-interrupt-pending-terminal", "voice-qwen")
-    ]
+    assert len(adapter.stream_identities) == 1
+    assert adapter.stream_identities[0][0].startswith("tts-segment-")
+    assert adapter.stream_identities[0][1] == "voice-qwen"
 
 
 def test_webrtc_turn_cancel_endpoint_is_idempotent_and_tombstones_turn(

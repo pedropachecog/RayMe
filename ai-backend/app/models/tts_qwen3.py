@@ -167,7 +167,8 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
         self._active_lock = threading.Lock()
         self._active_request_id: str | None = None
         self._cancel_acknowledgements: dict[str, threading.Event] = {}
-        self._cancelled_terminals: set[str] = set()
+        self._recent_terminal_statuses: dict[str, str] = {}
+        self._last_cancel_status: str | None = None
         self._selected_voice_key: str | None = None
         self._selected_prompt_key: str | None = None
         self._torch_reserved_mib: float | None = None
@@ -181,6 +182,11 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
     def active_request_id(self) -> str | None:
         with self._active_lock:
             return self._active_request_id
+
+    @property
+    def last_cancel_status(self) -> str | None:
+        with self._active_lock:
+            return self._last_cancel_status
 
     @property
     def torch_reserved_mib(self) -> float | None:
@@ -358,10 +364,23 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                         continue
                     if not isinstance(event, QwenTerminalEvent):
                         self._fail_protocol("unexpected Qwen3 stream event")
+                    with self._active_lock:
+                        terminal_status = (
+                            "cancelled"
+                            if event.event == "cancelled"
+                            else "already_done"
+                        )
+                        self._recent_terminal_statuses[
+                            generation_request_id
+                        ] = terminal_status
+                        while len(self._recent_terminal_statuses) > 32:
+                            oldest = next(iter(self._recent_terminal_statuses))
+                            self._recent_terminal_statuses.pop(oldest, None)
+                        # Every matching terminal resolves a concurrent cancel.
+                        # A normal done/error is an acknowledged already-finished
+                        # request, not evidence that the worker is wedged.
+                        cancel_ack.set()
                     if event.event == "cancelled":
-                        with self._active_lock:
-                            self._cancelled_terminals.add(generation_request_id)
-                            cancel_ack.set()
                         return
                     if event.event == "error":
                         error = _generation_terminal_error(event.error_code)
@@ -393,6 +412,14 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
     def cancel(self, request_id: str) -> bool:
         with self._active_lock:
             if request_id != self._active_request_id:
+                terminal_status = self._recent_terminal_statuses.pop(
+                    request_id,
+                    None,
+                )
+                if terminal_status is not None:
+                    self._last_cancel_status = terminal_status
+                    return True
+                self._last_cancel_status = None
                 return False
             acknowledgement = self._cancel_acknowledgements.get(request_id)
         if acknowledgement is None:
@@ -404,9 +431,9 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
             return False
         acknowledgement.wait(timeout=WORKER_CANCEL_TIMEOUT_SECONDS)
         with self._active_lock:
-            acknowledged = request_id in self._cancelled_terminals
-            self._cancelled_terminals.discard(request_id)
-        if acknowledged:
+            terminal_status = self._recent_terminal_statuses.pop(request_id, None)
+            self._last_cancel_status = terminal_status
+        if terminal_status in {"cancelled", "already_done"}:
             return True
         self._stop_worker()
         return False
@@ -432,10 +459,13 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                 )
                 validator.accept(event)
                 if isinstance(event, QwenTerminalEvent):
-                    if event.event == "cancelled":
-                        with self._active_lock:
-                            self._cancelled_terminals.add(request_id)
-                            acknowledgement.set()
+                    with self._active_lock:
+                        self._recent_terminal_statuses[request_id] = (
+                            "cancelled"
+                            if event.event == "cancelled"
+                            else "already_done"
+                        )
+                        acknowledgement.set()
                     return
         except Exception:
             # A missing/malformed terminal cannot be allowed to outlive its

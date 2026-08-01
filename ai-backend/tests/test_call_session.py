@@ -1574,6 +1574,10 @@ def test_qwen_incremental_turn_carries_monotonic_segment_ordinals() -> None:
         "turn-segment-entropy",
     ]
     assert [request.segment_ordinal for request in requests] == [0, 1]
+    worker_request_ids = [item["request_id"] for item in adapter.requests]
+    assert worker_request_ids[0] != worker_request_ids[1]
+    assert all(value.startswith("tts-segment-") for value in worker_request_ids)
+    assert [request.request_id for request in requests] == worker_request_ids
     assert session._tts_turn_ledgers["turn-segment-entropy"].state == "completed"
 
 
@@ -1822,6 +1826,10 @@ def test_qwen_failed_segment_retries_keep_reserved_ordinal_until_success() -> No
     _run(scenario())
 
     assert [request.segment_ordinal for request in adapter.requests] == [0, 0, 1, 1]
+    worker_request_ids = [request.request_id for request in adapter.requests]
+    assert worker_request_ids[0] == worker_request_ids[1]
+    assert worker_request_ids[2] == worker_request_ids[3]
+    assert worker_request_ids[0] != worker_request_ids[2]
     assert session._tts_turn_ledgers["turn-segment-retry"].state == "completed"
 
 
@@ -2137,7 +2145,8 @@ def test_engine_switch_silences_old_and_new_tracks_before_cancel_ack() -> None:
 
     adapter, active_peer, old_track, new_track = _run(scenario())
 
-    assert adapter.cancel_calls == ["turn-engine-switch-order"]
+    assert len(adapter.cancel_calls) == 1
+    assert adapter.cancel_calls[0].startswith("tts-segment-")
     assert active_peer.close_calls == 1
     assert old_track.stop_calls == 1
     assert new_track.stop_calls == 1
@@ -2428,7 +2437,8 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
     assert event_types.count("interrupted") == 1
     assert event_types.count("ai_done") == 1
     assert "failed" not in event_types
-    assert adapter.cancel_calls == ["turn-qwen-40s-paced"]
+    assert len(adapter.cancel_calls) == 1
+    assert adapter.cancel_calls[0].startswith("tts-segment-")
     assert adapter.synthesize_calls == 0
     assert active_track.chunks
     assert replacement_track.chunks
@@ -2572,7 +2582,8 @@ def test_qwen_slow_stream_starts_playback_before_stream_completion() -> None:
     assert event["ai_audio_started_event"]["tts_playback"]["startup_buffered_audio_ms"] == 640.0
     assert event["ai_audio_started_event"]["tts_playback"]["startup_buffer_target_ms"] == 600.0
     assert track.preroll_seconds == [0.0, 0.0, 0.0]
-    assert adapter.requests[0]["request_id"] == "ai-turn-qwen-slow-stream"
+    assert adapter.requests[0]["request_id"].startswith("tts-segment-")
+    assert adapter.requests[0]["request"].turn_id == "ai-turn-qwen-slow-stream"
     assert adapter.requests[0]["voice_key"] == "voice-qwen"
 
 
@@ -2800,7 +2811,8 @@ def test_qwen_termination_cancels_exact_request_and_rejects_normal_completion(
                 await speech
             except asyncio.CancelledError:
                 pass
-            assert adapter.cancel_calls == [turn_id]
+                assert len(adapter.cancel_calls) == 1
+                assert adapter.cancel_calls[0].startswith("tts-segment-")
             assert adapter.synthesize_calls == 0
             assert session.state == (
                 "listening" if termination == "interrupt" else "ended"
@@ -2929,7 +2941,8 @@ def test_qwen_cancel_preserves_adapter_ownership_until_terminal_then_recovers(
 
     adapter, recovery = _run(scenario())
 
-    assert adapter.cancel_calls == ["turn-qwen-ownership-race"]
+    assert len(adapter.cancel_calls) == 1
+    assert adapter.cancel_calls[0].startswith("tts-segment-")
     assert adapter.cancel_observed_published_flag is False
     assert adapter.matching_terminal_consumed.is_set()
     assert adapter.active_request_id is None
@@ -3188,7 +3201,8 @@ def test_qwen_spoken_vad_barge_in_preserves_mic_turn_and_silences_real_playout(
 
     adapter, recovery, silence, user_final, stt = _run(scenario())
 
-    assert adapter.cancel_calls == ["turn-qwen-delayed-cancel"]
+    assert len(adapter.cancel_calls) == 1
+    assert adapter.cancel_calls[0].startswith("tts-segment-")
     assert adapter.synthesize_calls == 0
     assert recovery["type"] == "ai_done"
     assert user_final["type"] == "user_final"
@@ -3308,7 +3322,8 @@ def test_qwen_control_causes_are_request_scoped_terminal_safe_and_recoverable(
     adapter, track, session, terminal, recovery = _run(scenario())
 
     turn_id = f"turn-{control_cause}"
-    assert adapter.cancel_calls == [turn_id]
+    assert len(adapter.cancel_calls) == 1
+    assert adapter.cancel_calls[0].startswith("tts-segment-")
     assert adapter.synthesize_calls == 0
     assert track.stop_calls == 1
     assert session.state == expected_state
@@ -3319,7 +3334,7 @@ def test_qwen_control_causes_are_request_scoped_terminal_safe_and_recoverable(
         assert terminal["type"] == expected_terminal
         assert terminal["control_cause"] == control_cause
         assert terminal["cancelled_turn_id"] == turn_id
-        assert terminal["cancelled_request_id"] == turn_id
+        assert terminal["cancelled_request_id"] == adapter.cancel_calls[0]
         final = terminal["tts_playback_final"]
         assert final["natural_eos"] is False
         assert final["track_metrics_present"] is False
