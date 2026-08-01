@@ -332,8 +332,9 @@ def _verify_runtime_distribution() -> None:
     ) as exc:
         raise RuntimeError("unexpected Faster Qwen3-TTS runtime") from exc
     vcs_info = direct_url.get("vcs_info") if isinstance(direct_url, dict) else None
-    source_url = str(direct_url.get("url", "")).rstrip("/")
-    normalized_source = source_url.removesuffix(".git").lower()
+    normalized_source = _normalize_runtime_repository_url(
+        str(direct_url.get("url", ""))
+    )
     if (
         installed_version != RUNTIME_VERSION
         or normalized_source != RUNTIME_REPOSITORY.lower()
@@ -342,6 +343,13 @@ def _verify_runtime_distribution() -> None:
         or vcs_info.get("commit_id") != RUNTIME_COMMIT
     ):
         raise RuntimeError("unexpected Faster Qwen3-TTS runtime")
+
+
+def _normalize_runtime_repository_url(value: str) -> str:
+    normalized = value.strip().lower()
+    if normalized.startswith("git+"):
+        normalized = normalized[4:]
+    return normalized.rstrip("/").removesuffix(".git")
 
 
 def load_runtime(
@@ -353,13 +361,15 @@ def load_runtime(
     """Load the immutable CUDA runtime; imports stay worker-local for Windows spawn."""
     from app.models.gpu_runtime import require_torch_cuda_runtime
 
+    # Distribution metadata is data-only. Verify its immutable source identity
+    # before any module-level code from the installed runtime can execute.
+    _verify_runtime_distribution()
     require_torch_cuda_runtime("Qwen3-TTS 1.7B")
     if torch_module is None:
         import torch as torch_module
     if runtime_class is None:
         from faster_qwen3_tts import FasterQwen3TTS as runtime_class
 
-    _verify_runtime_distribution()
     runtime = runtime_class.from_pretrained(
         str(model_dir),
         device="cuda",

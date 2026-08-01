@@ -43,6 +43,8 @@ def test_default_omen_deploy_provisions_and_attests_qwen_before_launch() -> None
     health_gate = source[source.index('Write-Host "== Verifying health"') :]
     assert 'Join-Path $qwenModelDir "rayme-model-revision.json"' in health_gate
     assert "$script:QwenRuntimeIdentity.runtime_source_commit" in health_gate
+    assert "$script:QwenRuntimeIdentity.runtime_source_repository" in health_gate
+    assert "$script:QwenRuntimeIdentity.runtime_source_vcs" in health_gate
     assert "$script:QwenRuntimeIdentity.model_revision" in health_gate
     assert "$qwenManifest.model_id" in health_gate
     assert "$qwenManifest.model_revision" in health_gate
@@ -51,3 +53,19 @@ def test_default_omen_deploy_provisions_and_attests_qwen_before_launch() -> None
     assert 'https://192.168.1.199:9443/webrtc/status' in health_gate
     assert "$webrtcStatus.live_call_ready" in health_gate
     assert "$webrtcStatus.deployed_commit -ne $actualHead" in health_gate
+
+
+def test_omen_qwen_probe_validates_actual_pep610_source_identity_after_install() -> None:
+    source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    probe_start = source.index("EXPECTED_RUNTIME_VERSION = \"0.3.2\"")
+    probe_end = source.index("import torch", probe_start)
+    probe = source[probe_start:probe_end]
+
+    assert source.index("uv sync --project ai-backend --extra tts") < probe_start
+    assert 'importlib.metadata.distribution("faster-qwen3-tts")' in probe
+    assert 'runtime_distribution.read_text("direct_url.json")' in probe
+    assert 'EXPECTED_RUNTIME_REPOSITORY = os.environ["RAYME_QWEN3_RUNTIME_REPOSITORY"]' in probe
+    assert 'runtime_source.startswith("git+")' in probe
+    assert '.rstrip("/").removesuffix(".git")' in probe
+    assert 'runtime_vcs != "git"' in probe
+    assert "runtime_commit != EXPECTED_RUNTIME_COMMIT" in probe

@@ -61,6 +61,7 @@ $verifyQwen3Tracer = $env:RAYME_OMEN_VERIFY_QWEN3_TRACER -eq "1"
 $verifyQwen3 = $env:RAYME_OMEN_VERIFY_QWEN3 -eq "1"
 $qwenFidelitySweep = $env:RAYME_OMEN_QWEN3_FIDELITY_SWEEP -eq "1"
 $qwenRuntimeCommit = "a70afc0f81f7f5f8801c3227968f1102f43f211c"
+$qwenRuntimeRepository = "https://github.com/andimarafioti/faster-qwen3-tts"
 $qwenModelId = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
 $qwenModelRevision = "fd4b254389122332181a7c3db7f27e918eec64e3"
 $qwenModelDir = "C:\Users\pmpg\rayme\models\qwen3-tts-1.7b-$qwenModelRevision"
@@ -344,6 +345,7 @@ function Invoke-RayMeQwen3Provisioning {
   $env:RAYME_QWEN3_MODEL_REVISION = $qwenModelRevision
   $env:RAYME_DEPLOYED_COMMIT = $actualHead
   $env:RAYME_QWEN3_RUNTIME_COMMIT = $qwenRuntimeCommit
+  $env:RAYME_QWEN3_RUNTIME_REPOSITORY = $qwenRuntimeRepository
   $env:RAYME_QWEN3_MODEL_ID = $qwenModelId
   $env:RAYME_WAVLM_MODEL_ID = $wavlmModelId
   $env:RAYME_WAVLM_MODEL_REVISION = $wavlmModelRevision
@@ -359,6 +361,7 @@ from huggingface_hub import snapshot_download
 
 EXPECTED_RUNTIME_VERSION = "0.3.2"
 EXPECTED_RUNTIME_COMMIT = os.environ["RAYME_QWEN3_RUNTIME_COMMIT"]
+EXPECTED_RUNTIME_REPOSITORY = os.environ["RAYME_QWEN3_RUNTIME_REPOSITORY"]
 EXPECTED_MODEL_ID = os.environ["RAYME_QWEN3_MODEL_ID"]
 EXPECTED_MODEL_REVISION = os.environ["RAYME_QWEN3_MODEL_REVISION"]
 MODEL_DIR = Path(os.environ["RAYME_QWEN3_MODEL_DIR"])
@@ -395,15 +398,26 @@ manifest = {
     encoding="utf-8",
 )
 
-runtime_version = importlib.metadata.version("faster-qwen3-tts")
+runtime_distribution = importlib.metadata.distribution("faster-qwen3-tts")
+runtime_version = runtime_distribution.version
 if runtime_version != EXPECTED_RUNTIME_VERSION:
     raise RuntimeError("Unexpected Faster Qwen3-TTS version")
 direct_url = json.loads(
-    importlib.metadata.distribution("faster-qwen3-tts").read_text("direct_url.json") or "{}"
+    runtime_distribution.read_text("direct_url.json") or "{}"
 )
-runtime_commit = (direct_url.get("vcs_info") or {}).get("commit_id")
-if runtime_commit != EXPECTED_RUNTIME_COMMIT:
-    raise RuntimeError("Unexpected Faster Qwen3-TTS source commit")
+vcs_info = direct_url.get("vcs_info") if isinstance(direct_url, dict) else None
+runtime_source = str(direct_url.get("url", "")).strip().lower()
+if runtime_source.startswith("git+"):
+    runtime_source = runtime_source[4:]
+runtime_source = runtime_source.rstrip("/").removesuffix(".git")
+runtime_commit = vcs_info.get("commit_id") if isinstance(vcs_info, dict) else None
+runtime_vcs = vcs_info.get("vcs") if isinstance(vcs_info, dict) else None
+if (
+    runtime_source != EXPECTED_RUNTIME_REPOSITORY.lower()
+    or runtime_vcs != "git"
+    or runtime_commit != EXPECTED_RUNTIME_COMMIT
+):
+    raise RuntimeError("Unexpected Faster Qwen3-TTS source identity")
 
 import torch
 
@@ -418,6 +432,8 @@ if gpu_name != "NVIDIA GeForce RTX 3060":
 print("__RAYME_QWEN3_RUNTIME_JSON__" + json.dumps({
     "runtime_version": runtime_version,
     "runtime_source_commit": runtime_commit,
+    "runtime_source_repository": runtime_source,
+    "runtime_source_vcs": runtime_vcs,
     "model_id": EXPECTED_MODEL_ID,
     "model_revision": EXPECTED_MODEL_REVISION,
     "torch_version": torch.__version__,
@@ -734,6 +750,8 @@ $qwenEngineStatus = @($aiStatus.available_engines) |
 if (
   -not $script:QwenRuntimeIdentity -or
   [string]$script:QwenRuntimeIdentity.runtime_source_commit -ne $qwenRuntimeCommit -or
+  [string]$script:QwenRuntimeIdentity.runtime_source_repository -ne $qwenRuntimeRepository -or
+  [string]$script:QwenRuntimeIdentity.runtime_source_vcs -ne "git" -or
   [string]$script:QwenRuntimeIdentity.model_id -ne $qwenModelId -or
   [string]$script:QwenRuntimeIdentity.model_revision -ne $qwenModelRevision -or
   [string]$qwenManifest.model_id -ne $qwenModelId -or

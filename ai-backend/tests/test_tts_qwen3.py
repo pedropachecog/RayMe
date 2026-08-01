@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import builtins
 import importlib.machinery
 import importlib.util
 import json
@@ -1542,6 +1543,59 @@ def test_qwen_worker_rejects_same_version_runtime_from_wrong_commit(
 
     with pytest.raises(RuntimeError, match="unexpected Faster Qwen3-TTS runtime"):
         worker._verify_runtime_distribution()
+
+
+def test_qwen_worker_rejects_wrong_source_before_runtime_initializer_import(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    direct_url = json.dumps(
+        {
+            "url": "git+https://example.invalid/replaced/faster-qwen3-tts.git/",
+            "vcs_info": {
+                "vcs": "git",
+                "requested_revision": worker.RUNTIME_COMMIT,
+                "commit_id": worker.RUNTIME_COMMIT,
+            },
+        }
+    )
+    distribution = type(
+        "Distribution",
+        (),
+        {"version": worker.RUNTIME_VERSION, "read_text": lambda self, _name: direct_url},
+    )()
+    monkeypatch.setattr(
+        worker.importlib.metadata,
+        "distribution",
+        lambda _name: distribution,
+    )
+    runtime_imports: list[str] = []
+    original_import = builtins.__import__
+
+    def guarded_import(name: str, *args: Any, **kwargs: Any) -> Any:
+        if name == "faster_qwen3_tts":
+            runtime_imports.append(name)
+            raise AssertionError("untrusted runtime initializer executed")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", guarded_import)
+
+    with pytest.raises(RuntimeError, match="unexpected Faster Qwen3-TTS runtime"):
+        worker.load_runtime(
+            tmp_path,
+            torch_module=type("FakeTorch", (), {"bfloat16": object()})(),
+        )
+    assert runtime_imports == []
+
+
+def test_qwen_runtime_repository_normalizes_realistic_pep610_git_url() -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    assert worker._normalize_runtime_repository_url(
+        "git+https://github.com/andimarafioti/faster-qwen3-tts.git/"
+    ) == worker.RUNTIME_REPOSITORY
 
 
 def test_qwen_worker_accepts_cuda_parameters_at_pinned_wrapper_model_depth() -> None:
