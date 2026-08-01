@@ -891,6 +891,88 @@ def test_failed_reconnect_offer_preserves_existing_session_media(
     ]
 
 
+def test_speak_uses_only_configuration_of_accepted_reoffer(
+    stub_webrtc: None,
+) -> None:
+    manager = ScriptedModelManager(
+        adapters={
+            "f5": ScriptedTtsAdapter(),
+            "voxcpm2": ScriptedStreamingTtsAdapter(),
+        }
+    )
+    client = _client(model_manager=manager)
+    session_id = "speak-accepted-config-only"
+    assert client.post(
+        "/webrtc/offer",
+        json=_offer_payload(session_id=session_id),
+    ).status_code == 200
+    session = client.app.state.call_session_manager.get_session(session_id)
+
+    def reoffer(voice_id: str) -> Any:
+        return client.post(
+            "/webrtc/offer",
+            json={
+                **_offer_payload(session_id=session_id),
+                "voice_id": voice_id,
+                "engine_id": "voxcpm2",
+            },
+        )
+
+    def speak(turn_id: str, voice_id: str, engine_id: str) -> Any:
+        payload = {
+            "turn_id": turn_id,
+            "text": "Only the accepted configuration may speak.",
+            "voice_id": voice_id,
+            "engine_id": engine_id,
+            "final_chunk": True,
+        }
+        if engine_id == "voxcpm2":
+            payload.update(
+                {
+                    "reference_audio_b64": "cmVhbC1zYW1wbGU=",
+                    "reference_transcript": "The exact reference transcript.",
+                }
+            )
+        return client.post(
+            SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+            json=payload,
+        )
+
+    assert reoffer("pending-voice").status_code == 200
+    pending = session._peer_lifecycle.candidate
+    assert pending is not None
+    pending_mismatch = speak("turn-pending", "pending-voice", "voxcpm2")
+    assert pending_mismatch.status_code == 409
+    assert pending_mismatch.json()["detail"]["code"] == "call_speech_selection_mismatch"
+
+    asyncio.run(
+        session.reject_pending_peer_connection(
+            pending.peer_connection,
+            generation=pending.generation,
+        )
+    )
+    assert speak("turn-failed", "pending-voice", "voxcpm2").status_code == 409
+
+    assert reoffer("superseded-voice").status_code == 200
+    superseded = session._peer_lifecycle.candidate
+    assert superseded is not None
+    assert reoffer("accepted-voice").status_code == 200
+    accepted = session._peer_lifecycle.candidate
+    assert accepted is not None and accepted is not superseded
+    assert speak("turn-superseded", "superseded-voice", "voxcpm2").status_code == 409
+    assert speak("turn-unaccepted", "accepted-voice", "voxcpm2").status_code == 409
+
+    accepted_result, _ = asyncio.run(
+        session.accept_pending_peer_connection(
+            accepted.peer_connection,
+            generation=accepted.generation,
+        )
+    )
+    assert accepted_result is True
+    assert speak("turn-old-after-accept", "voice-1", "f5").status_code == 409
+    assert speak("turn-accepted", "accepted-voice", "voxcpm2").status_code == 200
+
+
 def test_cancelled_reconnect_offer_preserves_existing_session_media(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -143,6 +143,17 @@ class TerminalCallSessionError(RuntimeError):
     """Raised when a peer candidate cannot be registered on a terminal call."""
 
 
+class SpeechSessionSelectionError(RuntimeError):
+    """Raised when speech does not match the accepted call configuration."""
+
+
+@dataclass(frozen=True)
+class AcceptedSpeechConfiguration:
+    epoch: int
+    voice_id: str
+    engine_id: str
+
+
 @dataclass(frozen=True)
 class PeerOfferConfiguration:
     thread_id: str
@@ -316,6 +327,47 @@ class CallSession:
                 return True
         await self._invoke_tts_prompt_lease_releaser(releaser)
         return False
+
+    async def reserve_accepted_speech_configuration(
+        self,
+        *,
+        voice_id: str,
+        engine_id: str,
+    ) -> AcceptedSpeechConfiguration:
+        async with self._lifecycle_lock:
+            lifecycle = self._peer_lifecycle
+            if (
+                self.ended_at is not None
+                or lifecycle.phase == "terminal"
+                or self.state in {"ended", "failed"}
+            ):
+                raise SpeechSessionSelectionError("call session is terminal")
+            if voice_id != self.voice_id or engine_id != self.engine_id:
+                raise SpeechSessionSelectionError(
+                    "speech selection does not match the accepted call"
+                )
+            return AcceptedSpeechConfiguration(
+                epoch=lifecycle.epoch,
+                voice_id=voice_id,
+                engine_id=engine_id,
+            )
+
+    async def _validate_accepted_speech_configuration(
+        self,
+        reservation: AcceptedSpeechConfiguration,
+    ) -> None:
+        async with self._lifecycle_lock:
+            lifecycle = self._peer_lifecycle
+            if (
+                self.ended_at is not None
+                or lifecycle.phase == "terminal"
+                or reservation.epoch != lifecycle.epoch
+                or reservation.voice_id != self.voice_id
+                or reservation.engine_id != self.engine_id
+            ):
+                raise SpeechSessionSelectionError(
+                    "accepted call configuration changed before speech"
+                )
 
     async def handle_inbound_audio_frame(self, frame: Any) -> dict[str, Any] | bool | None:
         self.incoming_audio_frames += 1
@@ -1384,8 +1436,13 @@ class CallSession:
         turn_id: str,
         voice_id: str,
         engine_id: str,
+        accepted_configuration: AcceptedSpeechConfiguration | None = None,
     ) -> dict[str, Any]:
         """Terminalize a fully played incremental turn without synthesizing again."""
+        if accepted_configuration is not None:
+            await self._validate_accepted_speech_configuration(
+                accepted_configuration
+            )
         if (
             turn_id in self._cancelled_ai_turns
             or turn_id in self._cancelling_ai_turns
@@ -1435,6 +1492,7 @@ class CallSession:
         *,
         segment_id: str | None = None,
         segment_ordinal: int | None = None,
+        accepted_configuration: AcceptedSpeechConfiguration | None = None,
         tts_adapter: Any | None = None,
         reference_audio_b64: str | None = None,
         reference_transcript: str | None = None,
@@ -1448,6 +1506,10 @@ class CallSession:
         qwen3_release_evidence_mode: str | None = None,
         qwen3_release_evidence_seed: int | None = None,
     ) -> dict[str, Any]:
+        if accepted_configuration is not None:
+            await self._validate_accepted_speech_configuration(
+                accepted_configuration
+            )
         self._cancelled_ai_turns.discard(turn_id)
         self._cancelling_ai_turns.discard(turn_id)
         reserved_segment_ordinal, segment_reservation_key = (

@@ -21,6 +21,8 @@ from app.call.session import (
     CALL_TTS_REMOTE_PLAYOUT_HOLD_SECONDS,
     CallSession,
     CallSessionManager,
+    PeerOfferConfiguration,
+    SpeechSessionSelectionError,
 )
 from app.models.tts_registry import TtsAudioChunk
 
@@ -3458,6 +3460,48 @@ def test_connected_replacement_keeps_prompt_lease_owned_through_reconnect() -> N
     _run(scenario())
 
     assert released_owners == ["call-session-reconnect-lease"]
+
+
+def test_speech_reservation_rejects_configuration_epoch_changed_by_acceptance() -> None:
+    session, _ = _new_session()
+    session.voice_id = "voice-before"
+    session.engine_id = "f5"
+    candidate = ScriptedPeerConnection()
+
+    async def scenario() -> None:
+        reservation = await session.reserve_accepted_speech_configuration(
+            voice_id="voice-before",
+            engine_id="f5",
+        )
+        generation = await session.mark_peer_connection_pending(
+            candidate,
+            configuration=PeerOfferConfiguration(
+                thread_id="thread-after",
+                voice_id="voice-after",
+                engine_id="voxcpm2",
+                prompt_messages=(),
+                vad_adapter=None,
+                stt_adapter=None,
+            ),
+            timeout_seconds=60.0,
+        )
+        accepted, _ = await session.accept_pending_peer_connection(
+            candidate,
+            generation=generation,
+        )
+        assert accepted is True
+
+        with pytest.raises(SpeechSessionSelectionError):
+            await session.speak_text(
+                "turn-stale-selection",
+                "This stale selection must never synthesize.",
+                "voice-before",
+                "f5",
+                final_chunk=True,
+                accepted_configuration=reservation,
+            )
+
+    _run(scenario())
 
 
 @pytest.mark.parametrize("acceptance_wins", [True, False])

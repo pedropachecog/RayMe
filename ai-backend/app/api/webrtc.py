@@ -15,9 +15,11 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator
 from app.api.stt import _settings_from_app, _stt_adapter_from_app, _vad_adapter_from_app
 from app.api.tts import _qwen_error_detail, _qwen_http_status
 from app.call.session import (
+    AcceptedSpeechConfiguration,
     CallSession,
     CallSessionManager,
     PeerOfferConfiguration,
+    SpeechSessionSelectionError,
     TerminalCallSessionError,
 )
 from app.call.tracks import QueuedAudioOutputTrack
@@ -475,6 +477,12 @@ async def speak_session(
 ) -> dict[str, Any]:
     session = _session_or_404(request, session_id)
     try:
+        accepted_configuration: AcceptedSpeechConfiguration = (
+            await session.reserve_accepted_speech_configuration(
+                voice_id=payload.voice_id,
+                engine_id=payload.engine_id,
+            )
+        )
         if payload.release_evidence_mode is not None and (
             payload.engine_id != "qwen3_1_7b"
             or not session_id.startswith("phase09-evidence-")
@@ -510,6 +518,7 @@ async def speak_session(
                 turn_id=payload.turn_id,
                 voice_id=payload.voice_id,
                 engine_id=payload.engine_id,
+                accepted_configuration=accepted_configuration,
             )
         else:
             qwen_reference_audio = None
@@ -532,6 +541,7 @@ async def speak_session(
                 final_chunk=payload.final_chunk,
                 segment_id=payload.segment_id,
                 segment_ordinal=payload.segment_ordinal,
+                accepted_configuration=accepted_configuration,
                 tts_adapter=adapter,
                 reference_audio_b64=payload.reference_audio_b64,
                 reference_transcript=payload.reference_transcript,
@@ -545,6 +555,14 @@ async def speak_session(
                 qwen3_release_evidence_mode=payload.release_evidence_mode,
                 qwen3_release_evidence_seed=payload.release_evidence_seed,
             )
+    except SpeechSessionSelectionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "call_speech_selection_mismatch",
+                "message": "Speech selection does not match the active call",
+            },
+        ) from exc
     except asyncio.CancelledError:
         # The SSE generator on the web-ui side was cancelled (e.g., HTTP
         # connection closed). Return 502 so the web-ui client sees a
