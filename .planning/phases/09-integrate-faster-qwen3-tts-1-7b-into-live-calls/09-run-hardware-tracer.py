@@ -529,16 +529,26 @@ class WebRtcCapture:
 
 
 def _decoded_audio_frame_to_int16(frame: Any) -> Any:
-    """Preserve integer PCM scale while collapsing PyAV's channel axis."""
+    """Preserve PCM scale and collapse planar or packed PyAV channels."""
     import numpy as np
 
     raw = np.asarray(frame.to_ndarray())
     floating_pcm = np.issubdtype(raw.dtype, np.floating)
-    if raw.ndim > 1:
-        if raw.shape[0] == 1:
-            raw = raw[0]
-        else:
+    layout = getattr(frame, "layout", None)
+    channels = getattr(layout, "channels", None)
+    try:
+        channel_count = max(len(channels), 1) if channels is not None else 1
+    except TypeError:
+        channel_count = max(int(getattr(frame, "channels", 1) or 1), 1)
+    is_planar = bool(getattr(getattr(frame, "format", None), "is_planar", False))
+    if channel_count > 1:
+        if is_planar and raw.ndim > 1 and raw.shape[0] == channel_count:
             raw = raw.astype(np.float64).mean(axis=0)
+        else:
+            packed = raw.reshape(-1)
+            if packed.size % channel_count:
+                raise ValueError("packed WebRTC audio is not channel aligned")
+            raw = packed.reshape(-1, channel_count).astype(np.float64).mean(axis=1)
     raw = raw.reshape(-1)
     if floating_pcm:
         normalized = np.clip(raw, -1.0, 1.0)

@@ -429,6 +429,31 @@ def test_hardware_tracer_scales_normalized_float_pcm_once() -> None:
     assert actual.tolist() == [-32767, -16384, 0, 16384, 32767]
 
 
+def test_hardware_tracer_collapses_packed_stereo_without_stretching_audio() -> None:
+    import numpy as np
+
+    tracer = _runner_module("phase09_runner_packed_stereo_capture").load_hardware_tracer()
+
+    class Layout:
+        channels = (object(), object())
+
+    class Format:
+        is_planar = False
+
+    class Frame:
+        layout = Layout()
+        format = Format()
+
+        def to_ndarray(self) -> object:
+            # PyAV exposes packed stereo as one row of interleaved L/R samples.
+            return np.asarray([[100, 300, -200, 200, 1000, 1000]], dtype=np.int16)
+
+    actual = tracer._decoded_audio_frame_to_int16(Frame())
+
+    assert actual.dtype == np.int16
+    assert actual.tolist() == [200, 0, 1000]
+
+
 def test_hardware_tracer_consumer_records_and_detects_int16_audio() -> None:
     import asyncio
     import numpy as np
