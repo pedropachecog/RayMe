@@ -8,7 +8,7 @@ import subprocess
 import sys
 import wave
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -961,10 +961,15 @@ class _FinishLifecycle:
 
     async def prewarm_selected_voice(self) -> None:
         self.events.append("prewarm_selected_voice")
+        if self.fail_at == "prewarm":
+            raise RuntimeError("prewarm failed")
 
     async def assert_qwen_ready(self) -> dict[str, object]:
         self.events.append("assert_qwen_ready")
         return {"model_state": "resident", "prompt_state": "ready"}
+
+    async def close(self) -> None:
+        self.events.append("close")
 
 
 def _prepare_core_state(tmp_path: Path, commit: str) -> tuple[Path, Path, dict[str, dict[str, object]]]:
@@ -1022,6 +1027,7 @@ def test_runner_finish_unloads_scores_on_cuda_restores_and_leaves_browser_placeh
         "reload_qwen",
         "prewarm_selected_voice",
         "assert_qwen_ready",
+        "close",
     ]
     assert json.loads((output_dir / "qwen3-speaker.json").read_text(encoding="utf-8")) == speaker
     assert json.loads((output_dir / "qwen3-log-leak-scan.json").read_text(encoding="utf-8")) == leak_scan
@@ -1041,7 +1047,7 @@ def test_runner_finish_unloads_scores_on_cuda_restores_and_leaves_browser_placeh
     assert state["qwen_ready"] is True
 
 
-@pytest.mark.parametrize("fail_at", ["scorer", "reload"])
+@pytest.mark.parametrize("fail_at", ["scorer", "reload", "prewarm"])
 def test_runner_finish_failure_never_claims_qwen_ready_or_uses_fallback(
     tmp_path: Path,
     fail_at: str,
@@ -1078,8 +1084,45 @@ def test_runner_finish_failure_never_claims_qwen_ready_or_uses_fallback(
     assert state["mode"] == "finish_failed"
     assert state["qwen_ready"] is False
     assert state["failure_stage"] == fail_at
+    assert lifecycle.events[-1] == "close"
     assert "cpu" not in " ".join(lifecycle.events).lower()
     assert "remote" not in " ".join(lifecycle.events).lower()
+
+
+def test_omen_finish_cleanup_ends_ai_session_before_closing_peer() -> None:
+    import asyncio
+
+    runner = _runner_module("phase09_runner_finish_cleanup")
+    events: list[str] = []
+
+    class RecordingApi:
+        ai_base_url = "https://ai.invalid"
+
+        def post_json(self, base_url: str, path: str, payload: dict[str, object]) -> object:
+            events.append(f"end:{base_url}{path}:{payload['reason']}")
+            return SimpleNamespace(status=200, payload={"state": "ended"})
+
+    class RecordingPeer:
+        async def close(self) -> None:
+            events.append("peer.close")
+
+    lifecycle = runner.OmenFinishLifecycle.__new__(runner.OmenFinishLifecycle)
+    lifecycle.api = RecordingApi()
+    lifecycle.tracer = SimpleNamespace(
+        _require_ok=lambda response, label: events.append(f"ok:{label}") or response.payload
+    )
+    lifecycle.session_id = "phase09-finish-regression"
+    lifecycle.peer = RecordingPeer()
+
+    asyncio.run(lifecycle.close())
+
+    assert events == [
+        "end:https://ai.invalid/webrtc/sessions/phase09-finish-regression/end:phase09_finish_complete",
+        "ok:finish Qwen session end",
+        "peer.close",
+    ]
+    assert lifecycle.session_id == ""
+    assert lifecycle.peer is None
 
 
 def test_runner_finish_source_pins_local_cuda_scorer_and_never_self_certifies() -> None:

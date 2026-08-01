@@ -1092,6 +1092,7 @@ async def run_finish_acoustic_leak(
             raise EvidenceRunnerError("Restored Qwen readiness is invalid")
         if readiness.get("model_state") != "resident" or readiness.get("prompt_state") != "ready":
             raise EvidenceRunnerError("Finish mode did not restore Qwen call readiness")
+        await lifecycle.close()
         if not isinstance(speaker, dict) or not isinstance(leak_scan, dict):
             raise EvidenceRunnerError("Finish evidence payload is invalid")
         _validate_artifact(speaker, artifact="speaker", expected_commit=commit)
@@ -1119,11 +1120,17 @@ async def run_finish_acoustic_leak(
         _write_json(state_path, state)
         return state
     except Exception:
+        cleanup_error: str | None = None
+        try:
+            await lifecycle.close()
+        except Exception as exc:
+            cleanup_error = exc.__class__.__name__
         state.update(
             {
                 "mode": "finish_failed",
                 "qwen_ready": False,
                 "failure_stage": stage,
+                "cleanup_error": cleanup_error,
             }
         )
         _write_json(state_path, state)
@@ -1505,10 +1512,31 @@ class OmenFinishLifecycle:
             "prompt_state": prompt.get("state"),
             "resident_engine": health.get("resident_tts_engine"),
         }
-        if self.peer is not None:
-            await self.peer.close()
-            self.peer = None
         return result
+
+    async def close(self) -> None:
+        end_error: Exception | None = None
+        if self.session_id:
+            try:
+                response = await asyncio.to_thread(
+                    self.api.post_json,
+                    self.api.ai_base_url,
+                    f"{WEBRTC_SESSION_ROUTE}{self.session_id}/end",
+                    {"reason": "phase09_finish_complete"},
+                )
+                self.tracer._require_ok(response, "finish Qwen session end")
+                self.session_id = ""
+            except Exception as exc:
+                end_error = exc
+        if self.peer is not None:
+            peer = self.peer
+            try:
+                await peer.close()
+            finally:
+                if self.peer is peer:
+                    self.peer = None
+        if end_error is not None:
+            raise end_error
 
 
 async def _run_core_cli(args: argparse.Namespace) -> None:
