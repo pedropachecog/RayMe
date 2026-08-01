@@ -3980,6 +3980,62 @@ def test_terminal_race_emits_only_the_winning_outcome(first_terminal: str) -> No
     assert session.state == expected_type
 
 
+@pytest.mark.parametrize("blocked_step", ["active_peer", "prompt_lease", "event_sink"])
+def test_cancelled_terminal_caller_does_not_cancel_shared_transaction(
+    blocked_step: str,
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    events: list[dict[str, Any]] = []
+
+    class BlockingPeer(ScriptedPeerConnection):
+        async def close(self) -> None:
+            self.close_calls += 1
+            if blocked_step == "active_peer":
+                entered.set()
+                await release.wait()
+
+    async def release_prompt(_owner: str) -> bool:
+        if blocked_step == "prompt_lease":
+            entered.set()
+            await release.wait()
+        return True
+
+    async def event_sink(event: dict[str, Any]) -> None:
+        if blocked_step == "event_sink":
+            entered.set()
+            await release.wait()
+        events.append(event)
+
+    async def scenario() -> tuple[dict[str, Any], CallSession, BlockingPeer]:
+        peer = BlockingPeer()
+        session = CallSession(
+            session_id=f"cancelled-terminal-{blocked_step}",
+            peer_connection=peer,
+            event_sink=event_sink,
+        )
+        assert await session.install_or_release_tts_prompt_lease(release_prompt)
+        first = asyncio.create_task(session.end(reason="hangup"))
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+        first.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first
+
+        follower = asyncio.create_task(session.fail(reason="connection_failed"))
+        release.set()
+        result = await asyncio.wait_for(follower, timeout=1.0)
+        assert session._terminal_outcome is not None
+        assert session._terminal_outcome.ready.is_set()
+        return result, session, peer
+
+    result, session, peer = _run(scenario())
+
+    assert result["type"] == "ended"
+    assert [event["type"] for event in events] == ["ended"]
+    assert peer.close_calls == 1
+    assert session.state == "ended"
+
+
 def test_failed_connection_records_connection_failed_reason() -> None:
     session, peer = _new_session()
     peer.connectionState = "failed"

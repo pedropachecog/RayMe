@@ -218,8 +218,10 @@ class _TerminalOutcome:
     target_state: str
     reason: str
     event: dict[str, Any] | None = None
+    error: BaseException | None = None
     ready: asyncio.Event = field(default_factory=asyncio.Event)
     emission_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    transaction_task: asyncio.Task[dict[str, Any]] | None = None
 
 
 @dataclass
@@ -2772,26 +2774,18 @@ class CallSession:
         return cancel_context
 
     async def end(self, *, reason: str = "ended") -> dict[str, Any]:
-        cancel_context: dict[str, Any] = {}
         async with self._lifecycle_lock:
-            cleanup = self._transition_terminal_locked(
+            self._transition_terminal_locked(
                 target_state="ended",
                 reason=reason,
             )
-            owns_emission = cleanup is not None
-            if cleanup is None and self.end_reason is None:
+            if self._terminal_outcome is None and self.end_reason is None:
                 self.end_reason = reason
-            cleanup = cleanup or self._terminal_cleanup
             outcome = self._terminal_outcome
-        if cleanup is not None:
-            cancel_context = await self._run_terminal_cleanup(cleanup)
-        if outcome is None:
+            transaction = outcome.transaction_task if outcome is not None else None
+        if outcome is None or transaction is None:
             raise RuntimeError("terminal outcome was not recorded")
-        return await self._publish_terminal_outcome(
-            outcome,
-            cancel_context=cancel_context,
-            owns_emission=owns_emission,
-        )
+        return await asyncio.shield(transaction)
 
     def _clear_pending_speech_terminal(self) -> None:
         self._pending_speech_terminal_turn_id = None
@@ -2800,24 +2794,16 @@ class CallSession:
         self._pending_speech_playback_final = None
 
     async def fail(self, *, reason: str = "connection_failed") -> dict[str, Any]:
-        cancel_context: dict[str, Any] = {}
         async with self._lifecycle_lock:
-            cleanup = self._transition_terminal_locked(
+            self._transition_terminal_locked(
                 target_state="failed",
                 reason=reason,
             )
-            owns_emission = cleanup is not None
-            cleanup = cleanup or self._terminal_cleanup
             outcome = self._terminal_outcome
-        if cleanup is not None:
-            cancel_context = await self._run_terminal_cleanup(cleanup)
-        if outcome is None:
+            transaction = outcome.transaction_task if outcome is not None else None
+        if outcome is None or transaction is None:
             raise RuntimeError("terminal outcome was not recorded")
-        return await self._publish_terminal_outcome(
-            outcome,
-            cancel_context=cancel_context,
-            owns_emission=owns_emission,
-        )
+        return await asyncio.shield(transaction)
 
     def _transition_terminal_locked(
         self,
@@ -2868,24 +2854,61 @@ class CallSession:
             prompt_lease_pending=releaser is not None,
         )
         self._terminal_cleanup = cleanup
-        self._terminal_outcome = _TerminalOutcome(
+        outcome = _TerminalOutcome(
             target_state=target_state,
             reason=reason,
         )
+        self._terminal_outcome = outcome
+        outcome.transaction_task = asyncio.create_task(
+            self._run_terminal_transaction(cleanup, outcome)
+        )
         return cleanup
+
+    async def _run_terminal_transaction(
+        self,
+        cleanup: _TerminalCleanup,
+        outcome: _TerminalOutcome,
+    ) -> dict[str, Any]:
+        """Finish one terminal transition independently of request cancellation."""
+
+        try:
+            cancel_context: dict[str, Any] = {}
+            # Individual cleanup steps retain their ledger bit on failure. A
+            # bounded retry inside the persistent task handles transient close,
+            # cancellation, and lease errors without replaying successful work.
+            for attempt in range(3):
+                cancel_context = await self._run_terminal_cleanup(cleanup)
+                if not self._terminal_cleanup_pending(cleanup):
+                    break
+                if attempt < 2:
+                    await asyncio.sleep(0)
+            return await self._publish_terminal_outcome(
+                outcome,
+                cancel_context=cancel_context,
+            )
+        except BaseException as exc:
+            outcome.error = exc
+            raise
+        finally:
+            outcome.ready.set()
+
+    @staticmethod
+    def _terminal_cleanup_pending(cleanup: _TerminalCleanup) -> bool:
+        return any(
+            (
+                cleanup.cancel_pending,
+                cleanup.active_peer_pending,
+                cleanup.candidate_peer_pending,
+                cleanup.prompt_lease_pending,
+            )
+        )
 
     async def _publish_terminal_outcome(
         self,
         outcome: _TerminalOutcome,
         *,
         cancel_context: dict[str, Any],
-        owns_emission: bool,
     ) -> dict[str, Any]:
-        if not owns_emission:
-            await outcome.ready.wait()
-            if outcome.event is None:
-                raise RuntimeError("terminal outcome emission did not complete")
-            return dict(outcome.event)
         async with outcome.emission_lock:
             if outcome.event is None:
                 if outcome.target_state == "failed":
@@ -2905,7 +2928,6 @@ class CallSession:
                         **cancel_context,
                     )
                 outcome.event = dict(await self.emit_event(event))
-                outcome.ready.set()
         return dict(outcome.event)
 
     async def _run_terminal_cleanup(
@@ -3094,15 +3116,11 @@ class CallSession:
             )
         if cleanup is None:
             return False
-        cancel_context = await self._run_terminal_cleanup(cleanup)
         outcome = self._terminal_outcome
-        if outcome is None:
+        transaction = outcome.transaction_task if outcome is not None else None
+        if outcome is None or transaction is None:
             raise RuntimeError("terminal outcome was not recorded")
-        await self._publish_terminal_outcome(
-            outcome,
-            cancel_context=cancel_context,
-            owns_emission=True,
-        )
+        await asyncio.shield(transaction)
         return True
 
     async def complete_transport_reconnect(self) -> None:
