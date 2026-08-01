@@ -212,7 +212,7 @@ def load_runtime(model_dir: Path) -> FasterQwen3TTS:
         device="cuda",
         dtype=torch.bfloat16,
         attn_implementation="sdpa",
-        max_seq_len=2048,
+        max_seq_len=1536,
         backend="torch",
     )
     model.warmup(prefill_len=100)  # captures the CUDA graphs once
@@ -359,7 +359,7 @@ scripts/
 | Runtime | `faster-qwen3-tts==0.3.2`, commit `a70afc...` | Exact runtime that passed OMEN gates. |
 | Model | immutable local snapshot of `Qwen/Qwen3-TTS-12Hz-1.7B-Base`, revision `fd4b254...` | Prevent a mutable Hub update from changing quality or VRAM. |
 | Backend/device | `backend="torch"`, `device="cuda"`, `dtype=torch.bfloat16`, `attn_implementation="sdpa"` | Accepted RTX 3060 CUDA-graph path; no FlashAttention dependency or CPU fallback. |
-| Static cache | `max_seq_len=2048` | Accepted upstream/spike setting; validate prompt plus target text before generation. |
+| Static cache | `max_seq_len=1536` | Preserves ample headroom above RayMe's bounded ICL prompt plus 384 generated codec steps while keeping the worker below the RTX 3060 allocator budget. |
 | Clone mode | `xvec_only=False`, exact `ref_text`, precomputed ICL prompt, `append_silence=True` | Highest-fidelity selected voice-cloning path and clean reference ending. |
 | Text/audio streaming | `language="English"`, `non_streaming_mode=True`, `chunk_size=3`, `parity_mode=False` | Approximately 240 ms native chunks target hot native TTFA inside the 500 ms gate without the extra allocator pressure observed at two steps; RayMe independently accumulates at least 600 ms before playout for smoothness. |
 | Sampling | `temperature=0.9`, `top_k=50`, `top_p=1.0`, `do_sample=True`, `repetition_penalty=1.05`, `min_new_tokens=2` | Upstream defaults used by the accepted runtime. Use a different recorded random seed per segment, not one repeated production seed. |
@@ -463,7 +463,7 @@ codes, not RayMe's whole conversation. Conversation history remains with the
 assistant LLM. Feed TTS only a punctuation-safe bounded current segment and
 reuse the selected voice prompt. Do not concatenate prior turns, earlier audio,
 or multiple assistant chunks into the clone prompt. Validate target text and
-prompt size against `max_seq_len=2048`; split before synthesis rather than
+prompt size against `max_seq_len=1536`; split before synthesis rather than
 allowing the static cache to terminate generation. Keep adjacent text in
 natural sentence/phrase segments to reduce the pitch/style discontinuity
 reported for unrelated independent chunks, while never waiting for the full

@@ -1376,7 +1376,7 @@ def test_qwen_worker_loads_only_exact_cuda_torch_runtime_settings(
                 "device": "cuda",
                 "dtype": fake_torch.bfloat16,
                 "attn_implementation": "sdpa",
-                "max_seq_len": 2048,
+                "max_seq_len": 1536,
                 "backend": "torch",
             },
         )
