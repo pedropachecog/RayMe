@@ -180,6 +180,7 @@ class CallSession:
         self._silence_ms = 0
         self._speech_start_frame: int | None = None
         self._cancelled_ai_turns: set[str] = set()
+        self._cancelling_ai_turns: set[str] = set()
         self._active_tts_adapter: Any | None = None
         self._active_tts_request_id: str | None = None
         self._active_tts_turn_id: str | None = None
@@ -823,6 +824,7 @@ class CallSession:
             and isinstance(event_turn_id, str)
             and (
                 event_turn_id in self._cancelled_ai_turns
+                or event_turn_id in self._cancelling_ai_turns
                 or self.state in {"ended", "failed"}
             )
         ):
@@ -948,7 +950,10 @@ class CallSession:
         engine_id: str,
     ) -> dict[str, Any]:
         """Terminalize a fully played incremental turn without synthesizing again."""
-        if turn_id in self._cancelled_ai_turns:
+        if (
+            turn_id in self._cancelled_ai_turns
+            or turn_id in self._cancelling_ai_turns
+        ):
             return {"status": "cancelled", "turn_id": turn_id}
 
         matches_pending = (
@@ -1005,6 +1010,7 @@ class CallSession:
         qwen3_release_evidence_seed: int | None = None,
     ) -> dict[str, Any]:
         self._cancelled_ai_turns.discard(turn_id)
+        self._cancelling_ai_turns.discard(turn_id)
         self.state = "rehearsing"
         current_task = asyncio.current_task()
         if current_task is not None:
@@ -1350,7 +1356,10 @@ class CallSession:
             )
             for index, chunk in enumerate(startup_chunks):
                 await enqueue_stream_chunk(chunk, first=index == 0)
-                if turn_id in self._cancelled_ai_turns:
+                if (
+                    turn_id in self._cancelled_ai_turns
+                    or turn_id in self._cancelling_ai_turns
+                ):
                     pending_chunks.clear()
                     return
 
@@ -1517,11 +1526,19 @@ class CallSession:
             while True:
                 item = await next_stream_item()
                 if item is sentinel:
+                    if (
+                        turn_id in self._cancelled_ai_turns
+                        or turn_id in self._cancelling_ai_turns
+                    ):
+                        break
                     stream_completed_normally = True
                     break
                 if isinstance(item, Exception):
                     raise item
-                if turn_id in self._cancelled_ai_turns:
+                if (
+                    turn_id in self._cancelled_ai_turns
+                    or turn_id in self._cancelling_ai_turns
+                ):
                     break
 
                 if isinstance(item, TtsAudioChunk):
@@ -1588,7 +1605,10 @@ class CallSession:
                 if callable(mark_track_input_complete):
                     mark_track_input_complete()
 
-            if turn_id in self._cancelled_ai_turns:
+            if (
+                turn_id in self._cancelled_ai_turns
+                or turn_id in self._cancelling_ai_turns
+            ):
                 self.state = "listening"
                 cancelled_event = {"status": "cancelled", "turn_id": turn_id}
                 if audio_started_event is not None:
@@ -1601,7 +1621,10 @@ class CallSession:
             playout_complete_ms = elapsed_ms()
             playback_final = final_metrics()
 
-            if turn_id in self._cancelled_ai_turns:
+            if (
+                turn_id in self._cancelled_ai_turns
+                or turn_id in self._cancelling_ai_turns
+            ):
                 self.state = "listening"
                 cancelled_event = {"status": "cancelled", "turn_id": turn_id}
                 if audio_started_event is not None:
@@ -1645,7 +1668,10 @@ class CallSession:
             await self._cancel_active_tts_generation(turn_id)
             raise
         except Exception:
-            if turn_id in self._cancelled_ai_turns:
+            if (
+                turn_id in self._cancelled_ai_turns
+                or turn_id in self._cancelling_ai_turns
+            ):
                 if self.state not in {"ended", "failed"}:
                     self.state = "listening"
                 cancelled_event: dict[str, Any] = {
@@ -1736,14 +1762,23 @@ class CallSession:
         )
         request_id = self._active_tts_request_id
         if resolved_turn_id is not None:
-            self._cancelled_ai_turns.add(resolved_turn_id)
+            self._cancelling_ai_turns.add(resolved_turn_id)
+        try:
+            # Preserve adapter ownership until the worker has accepted and the
+            # stream reader has consumed the matching cancellation terminal.
+            cancel_acknowledged = await self._cancel_active_tts_generation(
+                resolved_turn_id
+            )
+        finally:
+            if resolved_turn_id is not None:
+                self._cancelled_ai_turns.add(resolved_turn_id)
+                self._cancelling_ai_turns.discard(resolved_turn_id)
         stop = getattr(self.outbound_audio_track, "stop_current", None)
         if callable(stop):
             result = stop()
             if inspect.isawaitable(result):
                 await result
         self.outbound_audio_buffer.drain()
-        cancel_acknowledged = await self._cancel_active_tts_generation(resolved_turn_id)
         metrics_snapshot = self._active_tts_metrics_snapshot
         playback_final = metrics_snapshot() if callable(metrics_snapshot) else None
         if playback_final is None and self._pending_speech_playback_final is not None:

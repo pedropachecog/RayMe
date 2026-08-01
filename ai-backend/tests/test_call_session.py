@@ -1787,6 +1787,127 @@ def test_qwen_termination_cancels_exact_request_and_rejects_normal_completion(
     )
 
 
+def test_qwen_cancel_preserves_adapter_ownership_until_terminal_then_recovers(
+    monkeypatch: Any,
+) -> None:
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
+    monkeypatch.setattr(session_module, "CALL_QWEN3_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
+    events: list[dict[str, Any]] = []
+
+    class OwnershipRaceAdapter:
+        engine_id = "qwen3_1_7b"
+
+        def __init__(self) -> None:
+            self.session: CallSession | None = None
+            self.requests = 0
+            self.active_request_id: str | None = None
+            self.first_chunk_yielded = threading.Event()
+            self.release_generation = threading.Event()
+            self.matching_terminal_consumed = threading.Event()
+            self.cancel_calls: list[str] = []
+            self.cancel_observed_published_flag: bool | None = None
+            self.synthesize_calls = 0
+
+        def synthesize(self, _payload: Any) -> dict[str, Any]:
+            self.synthesize_calls += 1
+            raise AssertionError("whole synthesis fallback was used")
+
+        def stream(
+            self,
+            request: Any,
+            *,
+            request_id: str,
+            voice_key: str,
+        ) -> Any:
+            del request, voice_key
+            self.requests += 1
+            self.active_request_id = request_id
+            try:
+                yield TtsAudioChunk(
+                    engine_id=self.engine_id,
+                    chunk_index=0,
+                    wav_bytes=SCRIPTED_WAV_BYTES,
+                    sample_rate=24000,
+                    duration_ms=120,
+                    generated_at_ms=25.0,
+                )
+                self.first_chunk_yielded.set()
+                if self.requests == 1:
+                    self.release_generation.wait()
+            finally:
+                self.active_request_id = None
+                self.matching_terminal_consumed.set()
+
+        def cancel(self, request_id: str) -> bool:
+            assert self.session is not None
+            self.cancel_calls.append(request_id)
+            self.cancel_observed_published_flag = (
+                request_id in self.session._cancelled_ai_turns
+            )
+            if self.active_request_id != request_id:
+                return False
+            self.release_generation.set()
+            return self.matching_terminal_consumed.wait(timeout=1.0)
+
+    async def scenario() -> tuple[OwnershipRaceAdapter, dict[str, Any]]:
+        track = ObservableStreamingOutboundAudioTrack()
+        adapter = OwnershipRaceAdapter()
+        session, _ = _new_session(
+            tts_adapter=adapter,
+            outbound_audio_track=track,
+            event_sink=events.append,
+        )
+        adapter.session = session
+        interrupted_turn = "turn-qwen-ownership-race"
+        speech = asyncio.create_task(
+            session.speak_text(
+                interrupted_turn,
+                "Start early, then cancel the owned worker request.",
+                "voice-qwen",
+                "qwen3_1_7b",
+                final_chunk=True,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="The exact reference transcript.",
+            )
+        )
+        await _wait_for_async_event_or_task(
+            track.first_chunk_enqueued,
+            speech,
+            label="Qwen first playback before ownership cancellation",
+        )
+        await session.interrupt()
+        try:
+            await speech
+        except asyncio.CancelledError:
+            pass
+
+        recovery = await session.speak_text(
+            "turn-qwen-ownership-recovery",
+            "A subsequent native stream succeeds.",
+            "voice-qwen",
+            "qwen3_1_7b",
+            final_chunk=True,
+            reference_audio_b64="cmVhbC1zYW1wbGU=",
+            reference_transcript="The exact reference transcript.",
+        )
+        return adapter, recovery
+
+    adapter, recovery = _run(scenario())
+
+    assert adapter.cancel_calls == ["turn-qwen-ownership-race"]
+    assert adapter.cancel_observed_published_flag is False
+    assert adapter.matching_terminal_consumed.is_set()
+    assert adapter.active_request_id is None
+    assert adapter.synthesize_calls == 0
+    assert recovery["type"] == "ai_done"
+    assert not any(
+        event.get("type") == "ai_done"
+        and event.get("turn_id") == "turn-qwen-ownership-race"
+        for event in events
+    )
+
+
 @pytest.mark.parametrize(
     ("control_cause", "expected_state", "expected_terminal"),
     [

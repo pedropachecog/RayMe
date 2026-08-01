@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 from app.models.tts_qwen3_protocol import (
+    QwenCancelCommand,
     QwenChunkEvent,
     QwenGenerateCommand,
     QwenInvalidatedEvent,
@@ -328,6 +329,12 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
                         )
                     return
             finally:
+                if validator.terminal is None:
+                    self._cancel_and_drain_abandoned_stream(
+                        generation_request_id,
+                        validator,
+                        cancel_ack,
+                    )
                 with self._active_lock:
                     self._active_request_id = None
                     self._cancel_acknowledgements.pop(generation_request_id, None)
@@ -344,8 +351,6 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
             acknowledgement = self._cancel_acknowledgements.get(request_id)
         if acknowledgement is None:
             return False
-        from app.models.tts_qwen3_protocol import QwenCancelCommand
-
         try:
             self._send_command(QwenCancelCommand(op="cancel", request_id=request_id))
         except Qwen3WorkerError:
@@ -359,6 +364,37 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
             return True
         self._stop_worker()
         return False
+
+    def _cancel_and_drain_abandoned_stream(
+        self,
+        request_id: str,
+        validator: QwenStreamEventValidator,
+        acknowledgement: threading.Event,
+    ) -> None:
+        """Own worker cleanup when a consumer closes a live generator early."""
+        worker = self._worker
+        if worker is None or worker.poll() is not None:
+            return
+        with self._active_lock:
+            if self._active_request_id != request_id:
+                return
+        try:
+            self._send_command(QwenCancelCommand(op="cancel", request_id=request_id))
+            while validator.terminal is None:
+                event = self._read_event(
+                    timeout_seconds=WORKER_CANCEL_TIMEOUT_SECONDS
+                )
+                validator.accept(event)
+                if isinstance(event, QwenTerminalEvent):
+                    if event.event == "cancelled":
+                        with self._active_lock:
+                            self._cancelled_terminals.add(request_id)
+                            acknowledgement.set()
+                    return
+        except Exception:
+            # A missing/malformed terminal cannot be allowed to outlive its
+            # request and contaminate the next generation.
+            self._stop_worker()
 
     def invalidate(self, voice_key: str) -> QwenPromptInvalidationResult:
         with self._prompt_lock:

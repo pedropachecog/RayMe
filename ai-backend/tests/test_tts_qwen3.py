@@ -436,6 +436,7 @@ class ScriptedQwenWorkerProcess:
         hang_generate: bool = False,
         acknowledge_cancel: bool = True,
         generate_mutation: str | None = None,
+        first_chunk_then_hang: bool = False,
     ) -> None:
         self.returncode: int | None = None
         self.ops: list[dict[str, Any]] = []
@@ -444,6 +445,9 @@ class ScriptedQwenWorkerProcess:
         self.hang_generate = hang_generate
         self.acknowledge_cancel = acknowledge_cancel
         self.generate_mutation = generate_mutation
+        self.first_chunk_then_hang = first_chunk_then_hang
+        self.first_chunk_hang_used = False
+        self.generated_chunk_counts: dict[str, int] = {}
         self.prepared_prompt_key: str | None = None
         self.terminated = False
         self.killed = False
@@ -513,6 +517,26 @@ class ScriptedQwenWorkerProcess:
                             "torch_reserved_mib": 5604.0,
                         }
                     )
+                elif (
+                    self.process.first_chunk_then_hang
+                    and not self.process.first_chunk_hang_used
+                ):
+                    self.process.first_chunk_hang_used = True
+                    self.process.emit(
+                        {
+                            "schema_version": 1,
+                            "event": "chunk",
+                            "request_id": request_id,
+                            "chunk_index": 0,
+                            "wav_b64": _audio_b64(_valid_wav_bytes()),
+                            "sample_rate": 24000,
+                            "duration_ms": 320.0,
+                            "generated_at_ms": 370.0,
+                            "total_steps_so_far": 4,
+                            "torch_reserved_mib": 5604.0,
+                        }
+                    )
+                    self.process.generated_chunk_counts[request_id] = 1
                 elif not self.process.hang_generate:
                     for index in range(2):
                         wav_bytes = _valid_wav_bytes()
@@ -538,6 +562,7 @@ class ScriptedQwenWorkerProcess:
                                 "torch_reserved_mib": 5604.0 + index,
                             }
                         )
+                        self.process.generated_chunk_counts[request_id] = index + 1
                     self.process.emit(
                         {
                             "schema_version": 1,
@@ -562,7 +587,10 @@ class ScriptedQwenWorkerProcess:
                         "schema_version": 1,
                         "event": "cancelled",
                         "request_id": request_id,
-                        "chunk_count": 0,
+                        "chunk_count": self.process.generated_chunk_counts.get(
+                            request_id,
+                            0,
+                        ),
                         "natural_eos": False,
                     }
                 )
@@ -1277,6 +1305,36 @@ def test_qwen_adapter_cancel_is_request_scoped_and_stream_drains_cancelled_termi
         "request_id": "turn-1",
     }
     assert process.terminated is False
+
+
+def test_qwen_adapter_generator_close_cancels_drains_and_allows_next_request(
+    qwen_runtime_available: None,
+) -> None:
+    qwen = _qwen_module()
+    process = ScriptedQwenWorkerProcess(first_chunk_then_hang=True)
+    adapter = qwen.Qwen3TtsAdapter(process_factory=lambda *_args, **_kwargs: process)
+    adapter.load()
+    adapter.prewarm(
+        voice_key="voice_0123456789abcdef",
+        reference_audio=b"RIFF-reference",
+        reference_transcript="The exact spoken reference.",
+    )
+
+    abandoned = iter(adapter.stream(_request(), request_id="turn-abandoned"))
+    first_chunk = next(abandoned)
+    abandoned.close()
+
+    assert first_chunk.chunk_index == 0
+    assert adapter.active_request_id is None
+    assert [payload["op"] for payload in process.ops][-2:] == ["generate", "cancel"]
+    assert process.ops[-1]["request_id"] == "turn-abandoned"
+    assert process.terminated is False
+
+    recovery = list(adapter.stream(_request(), request_id="turn-recovery"))
+
+    assert [chunk.chunk_index for chunk in recovery] == [0, 1]
+    assert process.ops[-1]["op"] == "generate"
+    assert process.ops[-1]["request_id"] == "turn-recovery"
 
 
 def test_qwen_adapter_cancel_timeout_terminates_stuck_worker(
