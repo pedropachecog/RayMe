@@ -1985,7 +1985,7 @@ def test_qwen_cancel_preserves_adapter_ownership_until_terminal_then_recovers(
     )
 
 
-def test_qwen_barge_in_silences_real_paced_playout_before_delayed_cancel_ack(
+def test_qwen_spoken_vad_barge_in_preserves_mic_turn_and_silences_real_playout(
     monkeypatch: Any,
 ) -> None:
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
@@ -1993,6 +1993,20 @@ def test_qwen_barge_in_silences_real_paced_playout_before_delayed_cancel_ack(
     monkeypatch.setattr(session_module, "CALL_QWEN3_STREAM_START_MIN_AUDIO_SECONDS", 0.0)
     monkeypatch.setattr(session_module, "CALL_TTS_AUDIO_PREROLL_SECONDS", 0.0)
     events: list[dict[str, Any]] = []
+
+    class EnergySileroVadAdapter:
+        def __init__(self) -> None:
+            self.sampling_rate = 16000
+            self.threshold = 0.5
+            self.calls: list[int] = []
+
+        def speech_timestamps(self, audio: Any) -> list[dict[str, int]]:
+            samples = np.asarray(audio, dtype=np.float32)
+            self.calls.append(len(samples))
+            speech = np.flatnonzero(np.abs(samples) >= (1000 / np.iinfo(np.int16).max))
+            if not speech.size:
+                return []
+            return [{"start": int(speech[0]), "end": int(speech[-1]) + 1}]
 
     class DelayedCancelAckAdapter:
         engine_id = "qwen3_1_7b"
@@ -2006,7 +2020,6 @@ def test_qwen_barge_in_silences_real_paced_playout_before_delayed_cancel_ack(
             self.release_first_stream = threading.Event()
             self.first_stream_drained = threading.Event()
             self.cancel_calls: list[str] = []
-            self.pending_samples_at_cancel: list[int] = []
             self.synthesize_calls = 0
 
         def synthesize(self, _payload: Any) -> dict[str, Any]:
@@ -2041,24 +2054,34 @@ def test_qwen_barge_in_silences_real_paced_playout_before_delayed_cancel_ack(
 
         def cancel(self, request_id: str) -> bool:
             self.cancel_calls.append(request_id)
-            self.pending_samples_at_cancel.append(self.track.pending_samples)
             assert self.active_request_id == request_id
             self.cancel_started.set()
             self.release_first_stream.set()
             assert self.release_cancel_ack.wait(timeout=1.0)
             return self.first_stream_drained.wait(timeout=1.0)
 
-    async def scenario() -> tuple[DelayedCancelAckAdapter, dict[str, Any], np.ndarray]:
+    async def scenario() -> tuple[
+        DelayedCancelAckAdapter,
+        dict[str, Any],
+        np.ndarray,
+        dict[str, Any],
+        ScriptedSttAdapter,
+    ]:
         track = QueuedAudioOutputTrack(
             sample_rate=16000,
             frame_ms=20,
             max_pending_audio_seconds=0.5,
         )
         adapter = DelayedCancelAckAdapter(track)
+        vad = EnergySileroVadAdapter()
+        stt = ScriptedSttAdapter()
         session, _ = _new_session(
+            vad_adapter=vad,
+            stt_adapter=stt,
             tts_adapter=adapter,
             outbound_audio_track=track,
             event_sink=events.append,
+            settings=AiBackendSettings(call_vad_end_silence_ms=500),
         )
         interrupted_turn = "turn-qwen-delayed-cancel"
         speech = asyncio.create_task(
@@ -2072,6 +2095,7 @@ def test_qwen_barge_in_silences_real_paced_playout_before_delayed_cancel_ack(
                 reference_transcript="The exact reference transcript.",
             )
         )
+        barge_in: asyncio.Task[Any] | None = None
         try:
             while track.pending_samples == 0:
                 if speech.done():
@@ -2081,24 +2105,85 @@ def test_qwen_barge_in_silences_real_paced_playout_before_delayed_cancel_ack(
             assert np.max(np.abs(first_frame.to_ndarray())) > 0
             assert track.pending_samples > 0
 
-            interruption = asyncio.create_task(
-                session.interrupt(cause="vad_barge_in")
+            low_pcm = np.full(320, 80, dtype=np.int16).tobytes()
+            transient_pcm = np.full(320, 8000, dtype=np.int16).tobytes()
+            user_pcm = np.full(320, 4000, dtype=np.int16).tobytes()
+            silence_pcm = np.zeros(320, dtype=np.int16).tobytes()
+
+            # Residual room noise stays bounded, and one loud transient cannot
+            # self-barge or leak into the confirmed user onset.
+            noise_frame_count = (
+                session_module.CALL_BARGE_IN_MAX_ONSET_BUFFER_MS // 20
+            ) + 5
+            for _ in range(noise_frame_count):
+                assert await session.handle_inbound_audio_frame(
+                    ScriptedInboundAudioFrame(low_pcm)
+                ) is None
+            assert (
+                session._barge_in_buffered_ms
+                <= session_module.CALL_BARGE_IN_MAX_ONSET_BUFFER_MS
+            )
+            assert await session.handle_inbound_audio_frame(
+                ScriptedInboundAudioFrame(transient_pcm)
+            ) is None
+            assert await session.handle_inbound_audio_frame(
+                ScriptedInboundAudioFrame(low_pcm)
+            ) is None
+            assert adapter.cancel_calls == []
+            assert session.state == "speaking"
+
+            onset_frame_count = (
+                session_module.CALL_BARGE_IN_MIN_SPEECH_MS + 19
+            ) // 20
+            for _ in range(onset_frame_count - 1):
+                assert await session.handle_inbound_audio_frame(
+                    ScriptedInboundAudioFrame(user_pcm)
+                ) is None
+                assert adapter.cancel_calls == []
+
+            # The final real PCM frame confirms the production VAD onset. The
+            # handler itself invokes interrupt; the test never does so directly.
+            assert track.pending_samples > 0
+            barge_in = asyncio.create_task(
+                session.handle_inbound_audio_frame(
+                    ScriptedInboundAudioFrame(user_pcm)
+                )
             )
             assert await asyncio.to_thread(adapter.cancel_started.wait, 1.0)
             while track.pending_samples > 0:
                 await asyncio.sleep(0)
-            assert not interruption.done()
+            assert not barge_in.done()
+
+            # Mic frames delivered while the worker acknowledgement is delayed
+            # remain part of the interrupted user's utterance.
+            assert await session.handle_inbound_audio_frame(
+                ScriptedInboundAudioFrame(user_pcm)
+            ) is None
             silent_during_ack_delay = await track.recv()
             assert np.max(np.abs(silent_during_ack_delay.to_ndarray())) == 0
             assert track.pending_samples == 0
 
             adapter.release_cancel_ack.set()
-            interrupted = await asyncio.wait_for(interruption, timeout=1.0)
+            interrupted = await asyncio.wait_for(barge_in, timeout=1.0)
             await asyncio.wait_for(speech, timeout=1.0)
             assert interrupted["type"] == "interrupted"
+            assert interrupted["control_cause"] == "vad_barge_in"
             assert adapter.first_stream_drained.is_set()
             assert session._active_tts_adapter is None
             assert session._active_tts_request_id is None
+            assert session.state == "listening"
+
+            user_final = None
+            for _ in range(25):
+                user_final = await session.handle_inbound_audio_frame(
+                    ScriptedInboundAudioFrame(silence_pcm)
+                )
+            assert user_final is not None
+            assert user_final["type"] == "user_final"
+            assert user_final["text"] == "hello from mic"
+            assert stt.calls
+            assert transient_pcm not in stt.calls[0]
+            assert stt.calls[0].count(user_pcm) >= onset_frame_count + 1
 
             recovery_speech = asyncio.create_task(
                 session.speak_text(
@@ -2117,19 +2202,28 @@ def test_qwen_barge_in_silences_real_paced_playout_before_delayed_cancel_ack(
                 recovery_peaks.append(int(np.max(np.abs(frame.to_ndarray()))))
             recovery = await recovery_speech
             assert any(peak > 0 for peak in recovery_peaks)
-            return adapter, recovery, silent_during_ack_delay.to_ndarray()
+            return (
+                adapter,
+                recovery,
+                silent_during_ack_delay.to_ndarray(),
+                user_final,
+                stt,
+            )
         finally:
             adapter.release_cancel_ack.set()
             adapter.release_first_stream.set()
+            if barge_in is not None and not barge_in.done():
+                barge_in.cancel()
             if not speech.done():
                 speech.cancel()
 
-    adapter, recovery, silence = _run(scenario())
+    adapter, recovery, silence, user_final, stt = _run(scenario())
 
     assert adapter.cancel_calls == ["turn-qwen-delayed-cancel"]
-    assert adapter.pending_samples_at_cancel[0] > 0
     assert adapter.synthesize_calls == 0
     assert recovery["type"] == "ai_done"
+    assert user_final["type"] == "user_final"
+    assert stt.calls
     assert np.max(np.abs(silence)) == 0
     assert not any(
         event.get("type") == "ai_done"
