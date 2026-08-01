@@ -64,23 +64,6 @@ def _voice_generation_seed(prompt_key: str) -> int:
     return int.from_bytes(digest[:4], byteorder="big", signed=False)
 
 
-def _segment_generation_seed(
-    speaker_seed: int,
-    *,
-    turn_id: str,
-    segment_ordinal: int,
-) -> int:
-    """Keep speaker identity stable while varying deterministic segment entropy."""
-
-    digest = hashlib.sha256(
-        (
-            "rayme-qwen3-segment-v1:"
-            f"{speaker_seed}:{turn_id}:{segment_ordinal}"
-        ).encode("utf-8")
-    ).digest()
-    return int.from_bytes(digest[:4], byteorder="big", signed=False)
-
-
 QWEN_CLONE_MODE = "full_icl"
 QWEN_APPEND_SILENCE = True
 QWEN_MIN_AUDIO_PEAK = 1e-5
@@ -300,14 +283,15 @@ class Qwen3TtsAdapter(ImportGatedTtsAdapter):
             generation_request_id = request_id or _new_request_id("generate")
             max_new_tokens, hard_audio_seconds = _generation_limits(request.text)
             speaker_seed = _voice_generation_seed(selected_prompt_key)
+            # faster-qwen3-tts 0.3.2 exposes one process-global RNG surface.
+            # Until CUDA speaker-embedding evidence proves a split trajectory is
+            # safe, every ordinary segment for the prepared prompt must run from
+            # the same speaker-derived seed. Named release evidence retains its
+            # explicitly requested deterministic seed.
             generation_seed = (
                 request.qwen3_release_evidence_seed
                 if request.qwen3_release_evidence_seed is not None
-                else _segment_generation_seed(
-                    speaker_seed,
-                    turn_id=request.turn_id or generation_request_id,
-                    segment_ordinal=request.segment_ordinal,
-                )
+                else speaker_seed
             )
             command = QwenGenerateCommand(
                 op="generate",

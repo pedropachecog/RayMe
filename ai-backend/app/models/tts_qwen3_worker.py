@@ -282,10 +282,15 @@ def _remember_completed_request_locked(request_id: str) -> None:
 
 
 def _generation_seed_for_command(command: QwenGenerateCommand) -> int:
-    if command.generation_seed is not None:
-        return command.generation_seed
     if command.release_evidence_seed is not None:
         return command.release_evidence_seed
+    # The pinned faster-qwen3 runtime samples through global Python, NumPy,
+    # Torch and CUDA RNGs. Give the stable prompt-derived speaker seed the real
+    # runtime role; a changing segment seed would also move speaker identity.
+    if command.speaker_seed is not None:
+        return command.speaker_seed
+    if command.generation_seed is not None:
+        return command.generation_seed
     digest = hashlib.sha256(
         (
             "rayme-qwen3-legacy-generation-v1:"

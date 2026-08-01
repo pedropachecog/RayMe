@@ -821,7 +821,7 @@ def test_qwen_worker_reads_reserved_memory_from_its_own_torch_allocator(
     assert worker._torch_reserved_mib() == 5604.0
 
 
-def test_qwen_adapter_keeps_speaker_seed_and_varies_deterministic_segment_entropy(
+def test_qwen_adapter_uses_one_speaker_seed_across_segments_turns_and_retries(
     qwen_runtime_available: None,
 ) -> None:
     from app.models.tts_registry import TtsSynthesisInput
@@ -858,8 +858,9 @@ def test_qwen_adapter_keeps_speaker_seed_and_varies_deterministic_segment_entrop
     generated = [payload for payload in process.ops if payload["op"] == "generate"]
     assert generated[0]["schema_version"] == 2
     assert generated[0]["speaker_seed"] == generated[1]["speaker_seed"]
-    assert generated[0]["generation_seed"] != generated[1]["generation_seed"]
-    assert generated[1]["generation_seed"] == generated[2]["generation_seed"]
+    assert generated[0]["generation_seed"] == generated[0]["speaker_seed"]
+    assert generated[1]["generation_seed"] == generated[0]["speaker_seed"]
+    assert generated[2]["generation_seed"] == generated[0]["speaker_seed"]
     assert generated[0]["release_evidence_mode"] is None
     assert generated[0]["release_evidence_seed"] is None
     assert generated[3]["schema_version"] == 2
@@ -867,6 +868,31 @@ def test_qwen_adapter_keeps_speaker_seed_and_varies_deterministic_segment_entrop
     assert generated[3]["generation_seed"] == 91_001
     assert generated[3]["release_evidence_mode"] == "phase09_release_evidence"
     assert generated[3]["release_evidence_seed"] == 91_001
+
+
+def test_qwen_worker_prefers_speaker_seed_on_the_global_rng_surface() -> None:
+    from app.models import tts_qwen3_worker as worker
+
+    protocol = _protocol_module()
+    first = protocol.parse_command(
+        {
+            "schema_version": 2,
+            "op": "generate",
+            "request_id": "speaker-seed-first",
+            "voice_key": "voice_0123456789abcdef",
+            "text": "The first sentence.",
+            "max_new_tokens": 48,
+            "hard_audio_seconds": 6.0,
+            "speaker_seed": 71_001,
+            "generation_seed": 80_001,
+        }
+    )
+    later = first.model_copy(
+        update={"request_id": "speaker-seed-later", "generation_seed": 80_002}
+    )
+
+    assert worker._generation_seed_for_command(first) == 71_001
+    assert worker._generation_seed_for_command(later) == 71_001
 
 
 def test_qwen_worker_generation_rng_is_repeatable_and_restores_all_rng_states(
