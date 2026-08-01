@@ -11,6 +11,7 @@ from typing import Any
 import numpy as np
 import pytest
 import soundfile as sf
+import httpx
 from fastapi.testclient import TestClient
 
 import app.api.webrtc as webrtc_module
@@ -385,6 +386,155 @@ def test_webrtc_prepare_qwen_uses_only_contained_reference_and_exact_transcript(
     )
     assert rejected.status_code == 422
     assert "private" not in rejected.text
+
+
+@pytest.mark.parametrize("termination", ["hangup", "failure"])
+def test_webrtc_slow_prepare_releases_lease_when_session_termination_wins(
+    stub_webrtc: None,
+    termination: str,
+) -> None:
+    class SlowLeaseManager(ScriptedPreparingModelManager):
+        def __init__(self) -> None:
+            super().__init__(ScriptedQwenStreamingTtsAdapter())
+            self.prepare_started = asyncio.Event()
+            self.release_prepare = asyncio.Event()
+            self.owners: set[str] = set()
+
+        async def prepare_tts_engine(
+            self,
+            engine_id: str,
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            self.prepare_calls.append({"engine_id": engine_id, **kwargs})
+            self.prepare_started.set()
+            await self.release_prepare.wait()
+            self.owners.add(kwargs["prompt_lease_owner"])
+            self.ready = True
+            return {
+                "engine_id": engine_id,
+                "model_state": "resident",
+                "prompt_state": "ready",
+                "voice_key": kwargs["voice_key"],
+            }
+
+        async def release_tts_prompt_lease(self, owner: str) -> bool:
+            self.released_prompt_leases.append(owner)
+            self.owners.discard(owner)
+            return True
+
+    async def scenario() -> tuple[int, set[str], list[str], int]:
+        manager = SlowLeaseManager()
+        app = create_app()
+        app.state.model_manager = manager
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+        ) as client:
+            session_id = f"call-slow-prepare-{termination}"
+            offered = await client.post(
+                "/webrtc/offer",
+                json={
+                    **_offer_payload(session_id=session_id),
+                    "voice_id": "voice-qwen",
+                    "engine_id": "qwen3_1_7b",
+                },
+            )
+            assert offered.status_code == 200
+            prepare = asyncio.create_task(
+                client.post(
+                    f"/webrtc/sessions/{session_id}/prepare",
+                    json={
+                        "voice_id": "voice-qwen",
+                        "engine_id": "qwen3_1_7b",
+                        "reference_audio_b64": "cmVhbC1zYW1wbGU=",
+                        "reference_transcript": "The exact reference transcript.",
+                    },
+                )
+            )
+            await manager.prepare_started.wait()
+            if termination == "hangup":
+                terminal = await client.post(
+                    END_ROUTE_TEMPLATE.format(session_id=session_id),
+                    json={"reason": "hangup"},
+                )
+                assert terminal.status_code == 200
+            else:
+                session = app.state.call_session_manager.get_session(session_id)
+                assert session is not None
+                await session.fail(reason="connection_failed")
+            manager.release_prepare.set()
+            prepared = await prepare
+            assert manager.owners == set()
+
+            recovery_id = f"call-prepare-recovery-{termination}"
+            recovered_offer = await client.post(
+                "/webrtc/offer",
+                json={
+                    **_offer_payload(session_id=recovery_id),
+                    "voice_id": "voice-other",
+                    "engine_id": "qwen3_1_7b",
+                },
+            )
+            assert recovered_offer.status_code == 200
+            recovered = await client.post(
+                f"/webrtc/sessions/{recovery_id}/prepare",
+                json={
+                    "voice_id": "voice-other",
+                    "engine_id": "qwen3_1_7b",
+                    "reference_audio_b64": "cmVhbC1zYW1wbGU=",
+                    "reference_transcript": "Another exact transcript.",
+                },
+            )
+            return (
+                prepared.status_code,
+                set(manager.owners),
+                list(manager.released_prompt_leases),
+                recovered.status_code,
+            )
+
+    prepare_status, owners, released, recovery_status = asyncio.run(scenario())
+
+    assert prepare_status == 409
+    assert owners == {f"call-prepare-recovery-{termination}"}
+    assert released == [f"call-slow-prepare-{termination}"]
+    assert recovery_status == 200
+
+
+def test_webrtc_prepare_rejects_terminal_session_before_model_acquires_lease(
+    stub_webrtc: None,
+) -> None:
+    manager = ScriptedPreparingModelManager(ScriptedQwenStreamingTtsAdapter())
+    client = _client(model_manager=manager)
+    session_id = "call-prepare-after-end"
+    offered = client.post(
+        "/webrtc/offer",
+        json={
+            **_offer_payload(session_id=session_id),
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+        },
+    )
+    assert offered.status_code == 200
+    assert client.post(
+        END_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={"reason": "hangup"},
+    ).status_code == 200
+
+    response = client.post(
+        f"/webrtc/sessions/{session_id}/prepare",
+        json={
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+            "reference_audio_b64": "cmVhbC1zYW1wbGU=",
+            "reference_transcript": "The exact reference transcript.",
+        },
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"]["code"] == "call_session_terminal"
+    assert manager.prepare_calls == []
+    assert manager.released_prompt_leases == []
 
 
 def test_webrtc_prepare_qwen_maps_alignment_failure_to_actionable_sanitized_code(

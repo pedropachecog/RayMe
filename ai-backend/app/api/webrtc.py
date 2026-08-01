@@ -192,6 +192,8 @@ async def prepare_session_speech(
     payload: PrepareSpeechRequest,
 ) -> dict[str, Any]:
     session = _session_or_404(request, session_id)
+    if not await session.can_prepare_tts_prompt():
+        raise _terminal_session_prepare_error()
     if payload.voice_id != session.voice_id or payload.engine_id != session.engine_id:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
@@ -221,7 +223,11 @@ async def prepare_session_speech(
         )
         release_lease = getattr(model_manager, "release_tts_prompt_lease", None)
         if callable(release_lease):
-            session.set_tts_prompt_lease_releaser(release_lease)
+            installed = await session.install_or_release_tts_prompt_lease(
+                release_lease
+            )
+            if not installed:
+                raise _terminal_session_prepare_error()
     except HTTPException:
         raise
     except Qwen3WorkerError as exc:
@@ -705,6 +711,16 @@ def _control_error() -> HTTPException:
         detail={
             "code": "call_control_failed",
             "message": "Call control request failed",
+        },
+    )
+
+
+def _terminal_session_prepare_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "call_session_terminal",
+            "message": "Ended call sessions cannot prepare speech",
         },
     )
 

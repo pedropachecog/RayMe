@@ -205,6 +205,7 @@ class CallSession:
         self._pending_peer_connections: list[Any] = []
         self._pending_data_channels: list[tuple[Any, Any]] = []
         self._pending_outbound_audio_tracks: list[tuple[Any, Any]] = []
+        self._lifecycle_lock = asyncio.Lock()
         self._tts_prompt_lease_releaser: PromptLeaseReleaser | None = None
 
     @property
@@ -215,11 +216,20 @@ class CallSession:
     def active_ai_turn(self, value: Any | None) -> None:
         self.active_turn_task = value
 
-    def set_tts_prompt_lease_releaser(
+    async def can_prepare_tts_prompt(self) -> bool:
+        async with self._lifecycle_lock:
+            return self.ended_at is None and self.state not in {"ended", "failed"}
+
+    async def install_or_release_tts_prompt_lease(
         self,
         releaser: PromptLeaseReleaser,
-    ) -> None:
-        self._tts_prompt_lease_releaser = releaser
+    ) -> bool:
+        async with self._lifecycle_lock:
+            if self.ended_at is None and self.state not in {"ended", "failed"}:
+                self._tts_prompt_lease_releaser = releaser
+                return True
+        await self._invoke_tts_prompt_lease_releaser(releaser)
+        return False
 
     async def handle_inbound_audio_frame(self, frame: Any) -> dict[str, Any] | bool | None:
         self.incoming_audio_frames += 1
@@ -1867,7 +1877,15 @@ class CallSession:
 
     async def end(self, *, reason: str = "ended") -> dict[str, Any]:
         cancel_context: dict[str, Any] = {}
-        if self.ended_at is None:
+        async with self._lifecycle_lock:
+            first_end = self.ended_at is None
+            if first_end:
+                self.ended_at = datetime.now(timezone.utc)
+                self.end_reason = reason
+                self.state = "ended"
+            elif self.end_reason is None:
+                self.end_reason = reason
+        if first_end:
             if (
                 self.active_turn_task is not None
                 or self._active_tts_turn_id is not None
@@ -1875,17 +1893,12 @@ class CallSession:
             ):
                 cause = "session_close" if reason == "removed" else reason
                 cancel_context = await self.cancel_ai_turn(cause=cause)
-            self.ended_at = datetime.now(timezone.utc)
-            self.end_reason = reason
-            self.state = "ended"
             close = getattr(self.peer_connection, "close", None)
             if callable(close):
                 result = close()
                 if inspect.isawaitable(result):
                     await result
             await self._release_tts_prompt_lease()
-        elif self.end_reason is None:
-            self.end_reason = reason
 
         return await self.emit_event(
             simple_event(
@@ -1904,16 +1917,17 @@ class CallSession:
 
     async def fail(self, *, reason: str = "connection_failed") -> dict[str, Any]:
         cancel_context: dict[str, Any] = {}
+        async with self._lifecycle_lock:
+            if self.ended_at is None:
+                self.state = "failed"
+                self.end_reason = reason
+                self.ended_at = datetime.now(timezone.utc)
         if (
             self.active_turn_task is not None
             or self._active_tts_turn_id is not None
             or self._pending_speech_terminal_turn_id is not None
         ):
             cancel_context = await self.cancel_ai_turn(cause="connection_failure")
-        self.state = "failed"
-        self.end_reason = reason
-        if self.ended_at is None:
-            self.ended_at = datetime.now(timezone.utc)
         close = getattr(self.peer_connection, "close", None)
         if callable(close):
             result = close()
@@ -1932,10 +1946,17 @@ class CallSession:
         )
 
     async def _release_tts_prompt_lease(self) -> None:
-        releaser = self._tts_prompt_lease_releaser
+        async with self._lifecycle_lock:
+            releaser = self._tts_prompt_lease_releaser
+            self._tts_prompt_lease_releaser = None
         if releaser is None:
             return
-        self._tts_prompt_lease_releaser = None
+        await self._invoke_tts_prompt_lease_releaser(releaser)
+
+    async def _invoke_tts_prompt_lease_releaser(
+        self,
+        releaser: PromptLeaseReleaser,
+    ) -> None:
         result = releaser(self.session_id)
         if inspect.isawaitable(result):
             await result
