@@ -185,7 +185,12 @@ class ScriptedCallBackend:
 
     async def interrupt_call(self, base_url: str, session_id: str) -> dict[str, Any]:
         self.interrupt_calls.append({"base_url": base_url, "session_id": session_id})
-        return {"session_id": session_id, "interrupted": True}
+        return {
+            "session_id": session_id,
+            "interrupted": True,
+            "cancelled_turn_id": "turn-interrupted-01",
+            "receiver_drain_ms": 250,
+        }
 
     async def end_call(self, base_url: str, session_id: str, reason: str) -> dict[str, Any]:
         if self.fail_end:
@@ -2379,6 +2384,8 @@ def test_interrupt_cancels_server_generation_and_ai_backend_session(
     assert call_fixture.backend.interrupt_calls == [
         {"base_url": "https://127.0.0.1:9443", "session_id": started["session_id"]}
     ]
+    assert response.json()["receiver_drain_ms"] == 250
+    assert response.json()["cancelled_turn_id"] == "turn-interrupted-01"
 
 
 def test_call_control_cancels_and_awaits_every_active_turn_task(

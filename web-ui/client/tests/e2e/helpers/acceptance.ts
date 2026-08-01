@@ -68,8 +68,14 @@ export async function fulfillSse(route: Route, events: unknown[]) {
   });
 }
 
-export async function installCallDebugEventRoute(page: Page) {
+export async function installCallDebugEventRoute(
+  page: Page,
+  onEvent?: (payload: { event?: string; detail?: Record<string, unknown> }) => void
+) {
   await page.route('**/api/calls/*/_debug/event', async (route) => {
+    if (onEvent) {
+      onEvent(route.request().postDataJSON());
+    }
     await fulfillJson(route, { status: 'ok' });
   });
 }

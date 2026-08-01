@@ -330,9 +330,19 @@ async def interrupt_call(
         _reject_mismatched_session(session_id, payload.session_id if payload else None)
         await service.cancel_active_turns(call_id)
         endpoint_settings = await SettingsService(session, runtime_settings).read()
-        await _interrupt_call(backend, endpoint_settings.ai_backend_url, session_id)
+        interrupt_result = await _interrupt_call(
+            backend,
+            endpoint_settings.ai_backend_url,
+            session_id,
+        )
         service.interrupt(call_id)
-        return {"call_id": call_id, "session_id": session_id, "interrupted": True}
+        return {
+            "call_id": call_id,
+            "session_id": session_id,
+            "interrupted": True,
+            "cancelled_turn_id": interrupt_result.get("cancelled_turn_id"),
+            "receiver_drain_ms": interrupt_result.get("receiver_drain_ms"),
+        }
     except CallServiceError as exc:
         raise _call_error(exc) from exc
     except AiBackendClientError as exc:

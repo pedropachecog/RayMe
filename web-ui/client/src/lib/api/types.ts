@@ -328,6 +328,8 @@ export type CallEvent =
       type: 'interrupted';
       session_id: string;
       turn_id?: string | null;
+      cancelled_turn_id?: string | null;
+      receiver_drain_ms?: number | null;
     }
   | {
       type: 'ended';

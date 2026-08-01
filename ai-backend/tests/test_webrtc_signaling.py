@@ -992,6 +992,8 @@ def test_webrtc_interrupt_control_returns_session_state(stub_webrtc: None) -> No
     client = _client()
     session_id = "call-session-1"
     client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+    session = client.app.state.call_session_manager.get_session(session_id)
+    session._active_tts_turn_id = "turn-interrupted-01"
 
     response = client.post(INTERRUPT_ROUTE_TEMPLATE.format(session_id=session_id))
 
@@ -999,6 +1001,8 @@ def test_webrtc_interrupt_control_returns_session_state(stub_webrtc: None) -> No
     payload = response.json()
     assert payload["session_id"] == session_id
     assert payload["state"] in {"listening", "interrupted"}
+    assert payload["cancelled_turn_id"] == "turn-interrupted-01"
+    assert payload["receiver_drain_ms"] == 250
 
 
 def test_webrtc_reoffer_engine_switch_cancels_exact_active_qwen_request(

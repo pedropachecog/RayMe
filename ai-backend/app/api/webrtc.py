@@ -152,6 +152,8 @@ class CallControlResponse(BaseModel):
     state: str
     muted: bool | None = None
     interrupted: bool | None = None
+    cancelled_turn_id: str | None = None
+    receiver_drain_ms: int | None = Field(default=None, ge=1, le=500)
     reason: str | None = None
 
 
@@ -436,11 +438,13 @@ async def mute_session(
 async def interrupt_session(request: Request, session_id: str) -> CallControlResponse:
     session = _session_or_404(request, session_id)
     try:
-        await session.interrupt()
+        event = await session.interrupt()
         return CallControlResponse(
             session_id=session.session_id,
             state=session.state,
             interrupted=True,
+            cancelled_turn_id=event.get("cancelled_turn_id"),
+            receiver_drain_ms=int(event["receiver_drain_ms"]),
         )
     except Exception as exc:
         raise _control_error() from exc

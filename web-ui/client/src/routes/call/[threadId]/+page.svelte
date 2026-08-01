@@ -19,9 +19,10 @@
   import { getVoice, getVoicePreparationStatus } from '$lib/api/voices';
   import type { CallErrorCode, CallEvent, CallOfferResponse, CallStateName, CallTranscriptTurn, CallTurnAssistantMessage, CallTurnStreamEvent, ThreadDetail, VoicePreparationStatus } from '$lib/api/types';
   import {
-    ensureRemoteCallAudioAudible,
     keepCallMicrophoneTracksLive,
+    normalizeRemoteCallInterruptDrainMs,
     requestCallMicrophone,
+    syncRemoteCallAudioAudibility,
     unlockCallAudioContext
   } from '$lib/call/audio';
   import {
@@ -69,6 +70,17 @@
     settled: boolean;
     promise: Promise<ActiveTurnResponseResult>;
     resolve: (result: ActiveTurnResponseResult) => void;
+  }
+
+  interface InterruptDrainGeneration {
+    id: number;
+    lifecycle: number;
+    sessionId: string;
+    turnId: string | null;
+    startedAt: number;
+    drainMs: number;
+    completed: boolean;
+    acknowledgements: Set<'data-channel' | 'http'>;
   }
 
   type MediaReconnectReason = 'failed' | 'disconnected';
@@ -134,6 +146,14 @@
   let remoteAudioMeterFrame = 0;
   let remoteAudioMeterTicks = 0;
   let remoteAudioNonZeroLogged = false;
+  let remoteAudioInterruptDrainTimer = 0;
+  let remoteAudioInterruptDrainActive = false;
+  let interruptedStateTimer = 0;
+  let interruptDrainGeneration = 0;
+  let callMediaLifecycle = 0;
+  let activeInterruptDrain: InterruptDrainGeneration | null = null;
+  let latestAiTurnId: string | null = null;
+  const handledInterruptedTurnKeys = new Set<string>();
 
   const MEDIA_RECONNECT_DISCONNECTED_GRACE_MS = 2500;
   const MEDIA_RECONNECT_RETRY_DELAY_MS = 1000;
@@ -1800,13 +1820,155 @@
     if (!remoteAudioElement) {
       return;
     }
-    if (ensureRemoteCallAudioAudible(remoteAudioElement)) {
+    if (
+      syncRemoteCallAudioAudibility(
+        remoteAudioElement,
+        remoteAudioInterruptDrainActive
+      )
+    ) {
       emitDebugEvent(callId, 'remote_audio.audibility', {
         muted: remoteAudioElement.muted,
         callState,
-        policy: 'always-audible'
+        policy: remoteAudioInterruptDrainActive ? 'interrupt-drain' : 'audible'
       });
     }
+  }
+
+  function interruptedTurnKey(eventSessionId: string, turnId: string | null): string | null {
+    return turnId ? `${eventSessionId}:${turnId}` : null;
+  }
+
+  function interruptGenerationIsCurrent(generation: InterruptDrainGeneration): boolean {
+    return (
+      activeInterruptDrain === generation &&
+      generation.lifecycle === callMediaLifecycle &&
+      generation.sessionId === sessionId
+    );
+  }
+
+  function interruptAcknowledgementMatches(
+    generation: InterruptDrainGeneration,
+    eventSessionId: string,
+    turnId: string | null
+  ): boolean {
+    return (
+      interruptGenerationIsCurrent(generation) &&
+      eventSessionId === generation.sessionId &&
+      (!generation.turnId || !turnId || generation.turnId === turnId)
+    );
+  }
+
+  function beginRemoteAudioInterruptDrain(
+    turnId: string | null,
+    requestedDrainMs?: number | null
+  ): InterruptDrainGeneration {
+    const drainMs = normalizeRemoteCallInterruptDrainMs(requestedDrainMs);
+    if (remoteAudioInterruptDrainTimer) {
+      window.clearTimeout(remoteAudioInterruptDrainTimer);
+    }
+    if (interruptedStateTimer) {
+      window.clearTimeout(interruptedStateTimer);
+    }
+    const generation: InterruptDrainGeneration = {
+      id: ++interruptDrainGeneration,
+      lifecycle: callMediaLifecycle,
+      sessionId,
+      turnId,
+      startedAt: performance.now(),
+      drainMs,
+      completed: false,
+      acknowledgements: new Set()
+    };
+    activeInterruptDrain = generation;
+    remoteAudioInterruptDrainActive = true;
+    syncRemoteAudioAudibility();
+    emitDebugEvent(callId, 'remote_audio.interrupt_drain.started', {
+      drainMs,
+      generation: generation.id,
+      turn_id: turnId
+    });
+    remoteAudioInterruptDrainTimer = window.setTimeout(() => {
+      if (!interruptGenerationIsCurrent(generation)) {
+        return;
+      }
+      remoteAudioInterruptDrainTimer = 0;
+      remoteAudioInterruptDrainActive = false;
+      generation.completed = true;
+      syncRemoteAudioAudibility();
+      emitDebugEvent(callId, 'remote_audio.interrupt_drain.completed', {
+        drainMs,
+        generation: generation.id,
+        turn_id: generation.turnId
+      });
+    }, drainMs);
+    applyCallState('interrupted');
+    interruptedStateTimer = window.setTimeout(() => {
+      if (!interruptGenerationIsCurrent(generation)) {
+        return;
+      }
+      interruptedStateTimer = 0;
+      if (callState === 'interrupted') {
+        applyCallState('listening');
+      }
+    }, drainMs);
+    return generation;
+  }
+
+  function acknowledgeInterruptDrain(
+    generation: InterruptDrainGeneration,
+    source: 'data-channel' | 'http',
+    eventSessionId: string,
+    turnId: string | null,
+    requestedDrainMs?: number | null
+  ): boolean {
+    if (!interruptAcknowledgementMatches(generation, eventSessionId, turnId)) {
+      return false;
+    }
+    if (!generation.turnId && turnId) {
+      generation.turnId = turnId;
+    }
+    generation.acknowledgements.add(source);
+    const key = interruptedTurnKey(eventSessionId, generation.turnId);
+    if (key) {
+      handledInterruptedTurnKeys.add(key);
+    }
+    emitDebugEvent(callId, 'remote_audio.interrupt_drain.acknowledged', {
+      source,
+      generation: generation.id,
+      turn_id: generation.turnId,
+      drainMs: normalizeRemoteCallInterruptDrainMs(requestedDrainMs),
+      completed: generation.completed
+    });
+    return true;
+  }
+
+  function supersedeInterruptDrain(reason: 'new-turn' | 'teardown') {
+    const generation = activeInterruptDrain;
+    if (remoteAudioInterruptDrainTimer) {
+      window.clearTimeout(remoteAudioInterruptDrainTimer);
+      remoteAudioInterruptDrainTimer = 0;
+    }
+    if (interruptedStateTimer) {
+      window.clearTimeout(interruptedStateTimer);
+      interruptedStateTimer = 0;
+    }
+    remoteAudioInterruptDrainActive = false;
+    activeInterruptDrain = null;
+    syncRemoteAudioAudibility();
+    if (generation) {
+      emitDebugEvent(callId, 'remote_audio.interrupt_drain.superseded', {
+        generation: generation.id,
+        turn_id: generation.turnId,
+        reason
+      });
+    }
+  }
+
+  function clearInterruptDrainState() {
+    callMediaLifecycle += 1;
+    supersedeInterruptDrain('teardown');
+    latestAiTurnId = null;
+    handledInterruptedTurnKeys.clear();
   }
 
   async function handleCallDataEvent(event: CallEvent) {
@@ -1826,6 +1988,15 @@
     }
 
     if (event.type === 'ai_audio_started') {
+      const nextTurnId = event.turn_id ?? null;
+      if (
+        nextTurnId &&
+        activeInterruptDrain &&
+        activeInterruptDrain.turnId !== nextTurnId
+      ) {
+        supersedeInterruptDrain('new-turn');
+      }
+      latestAiTurnId = nextTurnId;
       markActiveTurnResponseDelivered(
         event.turn_id ?? undefined,
         event.audio?.duration_ms ?? undefined
@@ -1845,6 +2016,55 @@
 
     if (event.type === 'ai_done') {
       finishAiTurn();
+      return;
+    }
+
+    if (event.type === 'interrupted') {
+      if (event.session_id !== sessionId) {
+        return;
+      }
+      const interruptedTurnId = event.cancelled_turn_id ?? event.turn_id ?? null;
+      const key = interruptedTurnKey(event.session_id, interruptedTurnId);
+      if (key && handledInterruptedTurnKeys.has(key)) {
+        return;
+      }
+      if (
+        activeInterruptDrain &&
+        interruptAcknowledgementMatches(
+          activeInterruptDrain,
+          event.session_id,
+          interruptedTurnId
+        )
+      ) {
+        acknowledgeInterruptDrain(
+          activeInterruptDrain,
+          'data-channel',
+          event.session_id,
+          interruptedTurnId,
+          event.receiver_drain_ms
+        );
+        return;
+      }
+      if (!interruptedTurnId && latestAiTurnId) {
+        return;
+      }
+      if (interruptedTurnId && latestAiTurnId && interruptedTurnId !== latestAiTurnId) {
+        handledInterruptedTurnKeys.add(key!);
+        return;
+      }
+      cancelActiveTurnStream();
+      markLastAiTurnInterrupted();
+      const generation = beginRemoteAudioInterruptDrain(
+        interruptedTurnId,
+        event.receiver_drain_ms
+      );
+      acknowledgeInterruptDrain(
+        generation,
+        'data-channel',
+        event.session_id,
+        interruptedTurnId,
+        event.receiver_drain_ms
+      );
       return;
     }
 
@@ -2143,22 +2363,24 @@
   }
 
   async function interrupt() {
+    const interruptedTurnId = latestAiTurnId ?? activeTurnResponseGuard?.turnId ?? null;
     cancelActiveTurnStream();
     markLastAiTurnInterrupted();
+    const generation = beginRemoteAudioInterruptDrain(interruptedTurnId);
     if (callId && sessionId) {
       try {
-        await interruptCall(callId, sessionId);
+        const result = await interruptCall(callId, sessionId);
+        acknowledgeInterruptDrain(
+          generation,
+          'http',
+          result.session_id,
+          result.cancelled_turn_id ?? null,
+          result.receiver_drain_ms
+        );
       } catch {
         // The visual state still returns to listening; raw control failures stay out of UI copy.
       }
     }
-
-    callState = 'interrupted';
-    window.setTimeout(() => {
-      if (callState === 'interrupted') {
-        callState = 'listening';
-      }
-    }, 250);
   }
 
   function cancelActiveTurnStream() {
@@ -2499,6 +2721,7 @@
 
   function stopBrowserMedia() {
     clearMediaReconnectTimer();
+    clearInterruptDrainState();
     stopLocalMicReconnectDiagnostics();
     mediaReconnecting = false;
     stopLocalMicMeter();
@@ -2547,7 +2770,7 @@
     element.autoplay = true;
     element.playsInline = true;
     element.controls = false;
-    element.muted = false;
+    element.muted = remoteAudioInterruptDrainActive;
     element.srcObject = stream;
     remoteAudioElement = element;
     element.addEventListener('playing', () => {
