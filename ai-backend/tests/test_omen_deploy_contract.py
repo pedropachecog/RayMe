@@ -94,6 +94,17 @@ def test_omen_deploy_provisions_service_auth_and_verified_ai_tls() -> None:
     assert "curl.exe -k" not in source
 
 
+def test_omen_deploy_verifies_rotated_credential_through_web_and_fails_mismatch() -> None:
+    source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    readiness = "https://192.168.1.199:8443/api/ai-backend/readiness"
+
+    assert readiness in source
+    readiness_call = source[source.index(readiness) - 80 : source.index(readiness) + 180]
+    assert "curl.exe --fail --cacert $aiCaBundle" in readiness_call
+    assert "could not authenticate with the rotated AI backend credential" in source
+    assert '$webCredentialReadiness.authenticated -ne $true' in source
+
+
 def test_omen_qwen_probe_validates_actual_pep610_source_identity_after_install() -> None:
     source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
     probe_start = source.index("EXPECTED_RUNTIME_VERSION = \"0.3.2\"")

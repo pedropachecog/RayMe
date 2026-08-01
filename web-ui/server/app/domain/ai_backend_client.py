@@ -73,6 +73,14 @@ class AiBackendStatus(BaseModel):
     vram_headroom_mb: float | None = None
 
 
+class AiBackendReadiness(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    service: Literal["rayme-ai-backend"]
+    status: Literal["ready"]
+    authenticated: Literal[True]
+
+
 class TranscriptionResult(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -369,6 +377,17 @@ class AiBackendClient:
         payload = _json_payload(response)
         try:
             return AiBackendStatus.model_validate(payload)
+        except ValidationError as exc:
+            raise _invalid_response() from exc
+
+    async def get_authenticated_readiness(
+        self,
+        base_url: str,
+    ) -> AiBackendReadiness:
+        response = await self._request("GET", _join_endpoint(base_url, "/ready"))
+        payload = _json_payload(response)
+        try:
+            return AiBackendReadiness.model_validate(payload)
         except ValidationError as exc:
             raise _invalid_response() from exc
 
@@ -701,6 +720,7 @@ __all__ = [
     "AiBackendClient",
     "AiBackendClientError",
     "AiBackendProcessingError",
+    "AiBackendReadiness",
     "AiBackendStatus",
     "AiBackendUnavailable",
     "EngineStatus",

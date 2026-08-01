@@ -419,6 +419,31 @@ def test_every_non_public_ai_route_has_shared_service_auth_dependency() -> None:
             assert require_service_auth in dependency_calls, (method, path)
 
 
+def test_authenticated_readiness_is_side_effect_free_and_fails_wrong_token() -> None:
+    app = create_app(AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN))
+
+    class UntouchedManager:
+        def startup(self) -> None:
+            raise AssertionError("readiness mutated model runtime")
+
+    app.state.model_manager = UntouchedManager()
+    client = TestClient(app)
+
+    rejected = client.get(
+        "/ready",
+        headers={"Authorization": "Bearer wrong-token-0123456789abcdef012345"},
+    )
+    accepted = client.get("/ready", headers=SERVICE_AUTH_HEADERS)
+
+    assert rejected.status_code == 401
+    assert accepted.status_code == 200
+    assert accepted.json() == {
+        "service": "rayme-ai-backend",
+        "status": "ready",
+        "authenticated": True,
+    }
+
+
 @pytest.mark.parametrize(
     ("path", "request_kwargs"),
     [

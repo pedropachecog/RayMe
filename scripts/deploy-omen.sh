@@ -767,6 +767,17 @@ $aiHealth = curl.exe --cacert $aiCaBundle -sS https://192.168.1.199:9443/health
 if ($LASTEXITCODE -ne 0) { throw "AI backend health request failed" }
 $webHealth = curl.exe --cacert $aiCaBundle -sS https://192.168.1.199:8443/api/settings
 if ($LASTEXITCODE -ne 0) { throw "Web UI settings request failed" }
+$webCredentialReadiness = curl.exe --fail --cacert $aiCaBundle -sS https://192.168.1.199:8443/api/ai-backend/readiness
+if ($LASTEXITCODE -ne 0) {
+  throw "Web UI could not authenticate with the rotated AI backend credential"
+}
+$webCredentialReadiness = $webCredentialReadiness | ConvertFrom-Json
+if (
+  [string]$webCredentialReadiness.status -ne "ready" -or
+  $webCredentialReadiness.authenticated -ne $true
+) {
+  throw "Web UI AI backend credential readiness was not authenticated"
+}
 $aiStatus = $aiHealth | ConvertFrom-Json
 $aiStatus | Select-Object service,status,stt_ready,vad_ready,resident_tts_engine | Format-List
 if (-not $aiStatus.stt_ready -or -not $aiStatus.vad_ready -or $aiStatus.resident_tts_engine -ne "f5") {

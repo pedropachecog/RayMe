@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.api.settings import get_runtime_settings, get_settings_service
 from app.config import Settings
@@ -23,6 +23,29 @@ def get_ai_backend_client(
         service_auth_token=runtime_settings.ai_backend_service_token,
         ca_bundle=runtime_settings.ai_backend_ca_bundle,
     )
+
+
+@router.get("/readiness")
+async def read_authenticated_ai_backend_readiness(
+    service: SettingsService = Depends(get_settings_service),
+    client: AiBackendClient = Depends(get_ai_backend_client),
+) -> dict[str, object]:
+    settings = await service.read()
+    if not settings.ai_backend_url.strip():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "ai_backend_not_configured"},
+        )
+    try:
+        readiness = await client.get_authenticated_readiness(
+            settings.ai_backend_url
+        )
+    except AiBackendUnavailable as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": exc.code},
+        ) from exc
+    return readiness.model_dump()
 
 
 @router.get("/status")

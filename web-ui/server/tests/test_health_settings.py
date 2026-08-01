@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.api.settings import get_ai_backend_client, get_llm_probe, get_settings_session
 from app.config import Settings
 from app.domain.ai_backend_client import (
+    AiBackendReadiness,
     AiBackendStatus,
     AiBackendUnavailable,
     EngineStatus,
@@ -467,6 +468,61 @@ def test_ai_backend_status_bridge_returns_compact_backend_status(
         "loading_engine": "xtts_v2",
         "vram_used_mb": 2300,
         "vram_headroom_mb": 8700,
+    }
+
+
+def test_ai_backend_readiness_bridge_fails_closed_on_token_mismatch(
+    settings_client: TestClient,
+) -> None:
+    from app.api.ai_backend import get_ai_backend_client
+
+    class MismatchedCredentialClient:
+        async def get_authenticated_readiness(
+            self,
+            base_url: str,
+        ) -> AiBackendReadiness:
+            assert base_url == "https://127.0.0.1:9443"
+            raise AiBackendUnavailable(
+                code="unauthorized",
+                message="AI backend is unreachable",
+            )
+
+    settings_client.app.dependency_overrides[
+        get_ai_backend_client
+    ] = MismatchedCredentialClient
+
+    response = settings_client.get("/api/ai-backend/readiness")
+
+    assert response.status_code == 503
+    assert response.json()["detail"]["code"] == "unauthorized"
+
+
+def test_ai_backend_readiness_bridge_returns_authenticated_proof(
+    settings_client: TestClient,
+) -> None:
+    from app.api.ai_backend import get_ai_backend_client
+
+    class AuthenticatedClient:
+        async def get_authenticated_readiness(
+            self,
+            base_url: str,
+        ) -> AiBackendReadiness:
+            assert base_url == "https://127.0.0.1:9443"
+            return AiBackendReadiness(
+                service="rayme-ai-backend",
+                status="ready",
+                authenticated=True,
+            )
+
+    settings_client.app.dependency_overrides[get_ai_backend_client] = AuthenticatedClient
+
+    response = settings_client.get("/api/ai-backend/readiness")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "service": "rayme-ai-backend",
+        "status": "ready",
+        "authenticated": True,
     }
 
 
