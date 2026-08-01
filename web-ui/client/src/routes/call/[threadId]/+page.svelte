@@ -17,7 +17,7 @@
   } from '$lib/api/calls';
   import { loadThread } from '$lib/api/chat';
   import { getVoice, getVoicePreparationStatus } from '$lib/api/voices';
-  import type { CallErrorCode, CallEvent, CallOfferResponse, CallStateName, CallTranscriptTurn, ThreadDetail, VoicePreparationStatus } from '$lib/api/types';
+  import type { CallErrorCode, CallEvent, CallOfferResponse, CallStateName, CallTranscriptTurn, CallTurnAssistantMessage, CallTurnStreamEvent, ThreadDetail, VoicePreparationStatus } from '$lib/api/types';
   import {
     ensureRemoteCallAudioAudible,
     keepCallMicrophoneTracksLive,
@@ -29,6 +29,7 @@
     type LocalMicPcmChunk,
     type LocalMicPcmSelection
   } from '$lib/call/reconnectBackfill';
+  import { dispatchCallTurnStreamEvent, existingTurnDisposition } from '$lib/call/turnStream';
   import CallToolbar from '$lib/components/call/CallToolbar.svelte';
   import CallTranscript from '$lib/components/call/CallTranscript.svelte';
   import VoiceVisualizer from '$lib/components/call/VoiceVisualizer.svelte';
@@ -55,13 +56,6 @@
     text?: string;
   }
 
-  interface CallAudioStats {
-    duration_ms?: number;
-    samples?: number;
-    rms?: number;
-    peak?: number;
-  }
-
   interface ActiveTurnResponseResult {
     delivered: boolean;
     audioDurationMs: number;
@@ -76,13 +70,6 @@
     promise: Promise<ActiveTurnResponseResult>;
     resolve: (result: ActiveTurnResponseResult) => void;
   }
-
-  type CallTurnStreamEvent =
-    | { type: 'ai_token'; turn_id?: string; text?: string }
-    | { type: 'state'; turn_id?: string; state: string }
-    | { type: 'ai_audio_started'; turn_id?: string; session_id?: string; audio?: CallAudioStats | null }
-    | { type: 'ai_done'; turn_id?: string }
-    | { type: 'error'; turn_id?: string; code?: string; message?: string };
 
   type MediaReconnectReason = 'failed' | 'disconnected';
 
@@ -2040,43 +2027,77 @@
   }
 
   function handleTurnStreamEvent(event: CallTurnStreamEvent) {
-    if (event.type === 'ai_token' && event.text) {
-      markActiveTurnResponseDelivered(event.turn_id);
-      appendAiText(event.text, event.turn_id);
+    dispatchCallTurnStreamEvent(event, {
+      ai_token: (tokenEvent) => {
+        if (!tokenEvent.text) {
+          return;
+        }
+        markActiveTurnResponseDelivered(tokenEvent.turn_id);
+        appendAiText(tokenEvent.text, tokenEvent.turn_id);
+      },
+      state: (stateEvent) => applyCallState(stateEvent.state),
+      ai_audio_started: (audioEvent) => {
+        markActiveTurnResponseDelivered(audioEvent.turn_id, audioEvent.audio?.duration_ms);
+        emitDebugEvent(callId, 'call.ai_audio_started', {
+          turn_id: audioEvent.turn_id ?? null,
+          audio: audioEvent.audio ?? null,
+          remoteAudioContextState: remoteAudioContext?.state ?? 'none',
+          speakingRms,
+          source: 'turn-stream'
+        });
+        applyCallState('speaking');
+      },
+      ai_done: (doneEvent) => {
+        markActiveTurnResponseDelivered(doneEvent.turn_id);
+        if (doneEvent.message) {
+          restoreCompletedAiMessage(doneEvent.message, doneEvent.turn_id);
+        }
+        finishAiTurn();
+      },
+      turn_existing: (existingEvent) => {
+        markActiveTurnResponseDelivered(existingEvent.turn_id);
+        const disposition = existingTurnDisposition(existingEvent.state);
+        if (disposition.notice) {
+          appendCallNotice(disposition.notice, existingEvent.turn_id);
+        }
+        applyCallState(disposition.state);
+      },
+      error: (errorEvent) => {
+        const message = messageForCallFailure(
+          (errorEvent.code ?? 'call_generation_failed') as CallErrorCode,
+          errorEvent.message
+        );
+        appendCallNotice(message, errorEvent.turn_id);
+        applyCallState('listening');
+      }
+    });
+  }
+
+  function restoreCompletedAiMessage(message: CallTurnAssistantMessage, turnId?: string) {
+    const text = message.content_text?.trim() ?? '';
+    if (!text) {
       return;
     }
-
-    if (event.type === 'state') {
-      applyCallState(event.state);
+    const canonical: CallTranscriptTurn = {
+      id: message.id,
+      turn_id: turnId,
+      role: 'assistant',
+      type: 'ai_speech',
+      text,
+      created_at: message.created_at ?? null
+    };
+    const existingIndex = transcript.findIndex(
+      (turn) =>
+        turn.role === 'assistant' &&
+        (turn.id === message.id || (turnId !== undefined && turn.turn_id === turnId))
+    );
+    if (existingIndex < 0) {
+      transcript = [...transcript, canonical];
       return;
     }
-
-    if (event.type === 'ai_audio_started') {
-      markActiveTurnResponseDelivered(event.turn_id, event.audio?.duration_ms);
-      emitDebugEvent(callId, 'call.ai_audio_started', {
-        turn_id: event.turn_id ?? null,
-        audio: event.audio ?? null,
-        remoteAudioContextState: remoteAudioContext?.state ?? 'none',
-        speakingRms,
-        source: 'turn-stream'
-      });
-      applyCallState('speaking');
-      return;
-    }
-
-    if (event.type === 'ai_done') {
-      finishAiTurn();
-      return;
-    }
-
-    if (event.type === 'error') {
-      const message = messageForCallFailure(
-        (event.code ?? 'call_generation_failed') as CallErrorCode,
-        event.message
-      );
-      appendCallNotice(message, event.turn_id);
-      applyCallState('listening');
-    }
+    transcript = transcript.map((turn, index) =>
+      index === existingIndex ? canonical : turn
+    );
   }
 
   function appendAiText(text: string, turnId?: string) {

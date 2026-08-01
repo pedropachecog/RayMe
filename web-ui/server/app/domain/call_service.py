@@ -134,6 +134,7 @@ class CallTurnReservation:
     created: bool
     state: str
     request_matches: bool
+    assistant_message: dict[str, Any] | None = None
 
 
 _ACTIVE_CALLS: dict[str, ActiveCall] = {}
@@ -260,7 +261,7 @@ class CallService:
     ) -> CallTurnReservation:
         """Durably own a turn before user history, prompt, LLM, or TTS work."""
         call = self._active_call(call_id)
-        request_sha256 = hashlib.sha256(text.encode("utf-8")).hexdigest()
+        request_sha256 = self.call_turn_request_sha256(text)
         async with call.lifecycle_lock:
             if call.ended_at is not None:
                 raise CallSessionNotFoundError()
@@ -272,14 +273,13 @@ class CallService:
                         CallTurn.turn_id == turn_id,
                     )
                 )
-                return CallTurnReservation(
-                    created=False,
-                    state=known_state,
-                    request_matches=(
-                        existing is not None
-                        and existing.request_sha256 == request_sha256
-                    ),
-                )
+                if existing is None:
+                    call.turn_states.pop(turn_id, None)
+                else:
+                    return await self._turn_reservation(
+                        existing,
+                        request_sha256=request_sha256,
+                    )
 
             existing = await self.session.scalar(
                 select(CallTurn).where(
@@ -289,10 +289,9 @@ class CallService:
             )
             if existing is not None:
                 call.turn_states[turn_id] = existing.state
-                return CallTurnReservation(
-                    created=False,
-                    state=existing.state,
-                    request_matches=existing.request_sha256 == request_sha256,
+                return await self._turn_reservation(
+                    existing,
+                    request_sha256=request_sha256,
                 )
 
             now = utc_now()
@@ -320,10 +319,9 @@ class CallService:
                 if existing is None:
                     raise
                 call.turn_states[turn_id] = existing.state
-                return CallTurnReservation(
-                    created=False,
-                    state=existing.state,
-                    request_matches=existing.request_sha256 == request_sha256,
+                return await self._turn_reservation(
+                    existing,
+                    request_sha256=request_sha256,
                 )
             call.turn_states[turn_id] = "reserved"
             if task is not None:
@@ -333,6 +331,70 @@ class CallService:
                 state="reserved",
                 request_matches=True,
             )
+
+    @staticmethod
+    def call_turn_request_sha256(text: str) -> str:
+        return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+    async def call_turn_status(
+        self,
+        call_id: str,
+        *,
+        turn_id: str,
+        request_sha256: str,
+    ) -> CallTurnReservation:
+        """Refresh one duplicate turn until its durable terminal is visible."""
+        call = self._active_call(call_id)
+        await self.session.rollback()
+        turn = await self.session.scalar(
+            select(CallTurn)
+            .where(
+                CallTurn.call_id == call_id,
+                CallTurn.turn_id == turn_id,
+            )
+            .execution_options(populate_existing=True)
+        )
+        if turn is None:
+            raise CallSessionNotFoundError()
+        async with call.lifecycle_lock:
+            call.turn_states[turn_id] = turn.state
+        return await self._turn_reservation(
+            turn,
+            request_sha256=request_sha256,
+        )
+
+    async def _turn_reservation(
+        self,
+        turn: CallTurn,
+        *,
+        request_sha256: str,
+    ) -> CallTurnReservation:
+        assistant_message: dict[str, Any] | None = None
+        if turn.assistant_message_id is not None:
+            message = await self.session.scalar(
+                select(Message).where(Message.id == turn.assistant_message_id)
+            )
+            if message is not None:
+                assistant_message = {
+                    "id": message.id,
+                    "thread_id": message.thread_id,
+                    "message_kind": message.message_kind,
+                    "role": message.role,
+                    "sequence": message.sequence,
+                    "content_text": message.content_text,
+                    "created_at": (
+                        message.created_at.isoformat() if message.created_at else None
+                    ),
+                    "updated_at": (
+                        message.updated_at.isoformat() if message.updated_at else None
+                    ),
+                }
+        return CallTurnReservation(
+            created=False,
+            state=turn.state,
+            request_matches=turn.request_sha256 == request_sha256,
+            assistant_message=assistant_message,
+        )
 
     async def register_active_turn(self, call_id: str, task: Any) -> bool:
         call = self._active_call(call_id)

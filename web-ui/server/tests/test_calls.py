@@ -9,6 +9,7 @@ import importlib
 import json
 import logging
 import threading
+import time
 from collections.abc import AsyncIterator, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -1296,22 +1297,43 @@ def test_concurrent_duplicate_turn_endpoint_reuses_reservation_without_replay(
     }
     route = f"/api/calls/{started_call['call_id']}/turns"
 
-    with ThreadPoolExecutor(max_workers=1) as executor:
+    with ThreadPoolExecutor(max_workers=2) as executor:
         first_future = executor.submit(call_fixture.client.post, route, json=payload)
         assert completion.started.wait(2.0)
-        duplicate = call_fixture.client.post(route, json=payload)
+        duplicate_future = executor.submit(
+            call_fixture.client.post,
+            route,
+            json=payload,
+        )
+        time.sleep(0.1)
+        assert not duplicate_future.done()
         completion.release.set()
         first = first_future.result(timeout=5.0)
+        duplicate = duplicate_future.result(timeout=5.0)
+
+    completed_retry = call_fixture.client.post(route, json=payload)
 
     assert first.status_code == 200
     assert duplicate.status_code == 200
-    assert _sse_events(duplicate.text) == [
-        {
-            "type": "turn_existing",
-            "turn_id": "turn-endpoint-duplicate",
-            "state": "running",
-        }
-    ]
+    duplicate_events = _sse_events(duplicate.text)
+    assert duplicate_events[0] == {
+        "type": "turn_existing",
+        "turn_id": "turn-endpoint-duplicate",
+        "state": "running",
+        "recoverable": False,
+    }
+    assert duplicate_events[1]["type"] == "ai_done"
+    assert duplicate_events[1]["turn_id"] == "turn-endpoint-duplicate"
+    assert duplicate_events[1]["existing"] is True
+    assert duplicate_events[1]["message"]["content_text"] == (
+        "One endpoint execution only."
+    )
+    assert completed_retry.status_code == 200
+    completed_events = _sse_events(completed_retry.text)
+    assert len(completed_events) == 1
+    assert completed_events[0]["type"] == "ai_done"
+    assert completed_events[0]["existing"] is True
+    assert completed_events[0]["message"] == duplicate_events[1]["message"]
     assert len(completion.requests) == 1
     assert len(call_fixture.backend.speak_calls) == 1
 

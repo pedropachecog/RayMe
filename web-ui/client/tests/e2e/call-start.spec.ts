@@ -711,6 +711,86 @@ test('shows a call notice in the transcript when /turns returns a type=error SSE
   assertNoBrowserErrors();
 });
 
+test('rejoins a running duplicate and restores its canonical assistant transcript', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  const counters = await installDuplicateTurnCallRoutes(page, [
+    {
+      type: 'turn_existing',
+      turn_id: 'turn-existing-running',
+      state: 'running',
+      recoverable: false
+    },
+    {
+      type: 'ai_done',
+      turn_id: 'turn-existing-running',
+      existing: true,
+      message: duplicateAssistantMessage(
+        'message-existing-running',
+        'The running turn rejoined its durable answer.'
+      )
+    }
+  ], 'turn-existing-running');
+
+  await page.goto(`/chat/${threadId}`);
+  await page.getByRole('button', { name: 'Start call' }).click();
+
+  await expect(page.getByText('The running turn rejoined its durable answer.')).toBeVisible();
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  expect(counters.turnCount).toBe(1);
+  assertNoBrowserErrors();
+});
+
+test('restores a completed duplicate response and returns the call to Listening', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  const counters = await installDuplicateTurnCallRoutes(page, [
+    {
+      type: 'ai_done',
+      turn_id: 'turn-existing-completed',
+      existing: true,
+      message: duplicateAssistantMessage(
+        'message-existing-completed',
+        'The completed retry restored this exact answer.'
+      )
+    }
+  ], 'turn-existing-completed');
+
+  await page.goto(`/chat/${threadId}`);
+  await page.getByRole('button', { name: 'Start call' }).click();
+
+  await expect(page.getByText('The completed retry restored this exact answer.')).toBeVisible();
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  expect(counters.turnCount).toBe(1);
+  assertNoBrowserErrors();
+});
+
+test('shows a recoverable notice for a cancelled duplicate turn', async ({ page }) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  await installDuplicateTurnCallRoutes(page, [
+    {
+      type: 'turn_existing',
+      turn_id: 'turn-existing-cancelled',
+      state: 'cancelled',
+      recoverable: true
+    }
+  ], 'turn-existing-cancelled');
+
+  await page.goto(`/chat/${threadId}`);
+  await page.getByRole('button', { name: 'Start call' }).click();
+
+  await expect(
+    page.getByText('That turn was cancelled. RayMe is listening for you to try again.')
+  ).toBeVisible();
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  assertNoBrowserErrors();
+});
+
 async function startReconnectCall(page: Page, counters: ReconnectRouteCounters) {
   await page.goto(`/chat/${threadId}`);
   await page.getByRole('button', { name: 'Start call' }).click();
@@ -904,6 +984,78 @@ async function installTurnErrorCallRoutes(page: Page) {
   await page.route('**/api/calls/*/end', async (route) => {
     await fulfillJson(route, { state: 'ended' });
   });
+}
+
+async function installDuplicateTurnCallRoutes(
+  page: Page,
+  streamEvents: Array<Record<string, unknown>>,
+  turnId: string
+) {
+  await installCallDebugEventRoute(page);
+  const counters = { turnCount: 0 };
+  const thread = makeThreadDetail({
+    id: threadId,
+    character_id: characterId,
+    title: 'Call Start Aster',
+    character_name: 'Call Start Aster',
+    messages: []
+  });
+
+  await page.route('**/api/threads/*', async (route) => {
+    await fulfillJson(route, thread);
+  });
+  await page.route('**/api/characters/*/portrait**', async (route) => {
+    await route.fulfill({ status: 204 });
+  });
+  await page.route('**/api/calls/start', async (route) => {
+    await fulfillJson(route, {
+      call_id: 'call-existing-01',
+      session_id: 'rtc-call-existing-01',
+      thread_id: threadId,
+      state: 'listening',
+      events: [
+        {
+          type: 'user_final',
+          session_id: 'rtc-call-existing-01',
+          turn_id: turnId,
+          text: 'Retry my existing turn.'
+        }
+      ]
+    }, 201);
+  });
+  await page.route('**/api/calls/*/offer', async (route) => {
+    await fulfillJson(route, {
+      call_id: 'call-existing-01',
+      session_id: 'rtc-call-existing-01',
+      answer: { type: 'answer', sdp: 'v=0\r\n' },
+      event_channel: 'rayme-events'
+    });
+  });
+  await page.route('**/api/calls/*/turns', async (route) => {
+    counters.turnCount += 1;
+    await route.fulfill({
+      status: 200,
+      contentType: 'text/event-stream',
+      body: streamEvents.map((event) => `data: ${JSON.stringify(event)}\n\n`).join('')
+    });
+  });
+  await page.route('**/api/calls/*/end', async (route) => {
+    await fulfillJson(route, { state: 'ended' });
+  });
+  return counters;
+}
+
+function duplicateAssistantMessage(id: string, contentText: string) {
+  return {
+    id,
+    thread_id: threadId,
+    message_kind: 'ai_speech',
+    role: 'assistant',
+    sequence: 2,
+    content_text: contentText,
+    created_at: null,
+    updated_at: null
+  };
 }
 
 async function installReconnectCallRoutes(

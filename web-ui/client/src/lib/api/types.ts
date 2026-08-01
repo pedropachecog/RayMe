@@ -235,6 +235,47 @@ export interface CallTurnRequest {
   source: 'user_final';
 }
 
+export type CallTurnExistingState = 'reserved' | 'running' | 'failed' | 'cancelled';
+
+export interface CallTurnAssistantMessage {
+  id: string;
+  thread_id: string;
+  message_kind: 'ai_speech';
+  role: 'assistant';
+  sequence: number;
+  content_text: string | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+}
+
+export type CallTurnStreamEvent =
+  | { type: 'ai_token'; turn_id?: string; text?: string }
+  | { type: 'state'; turn_id?: string; state: string }
+  | {
+      type: 'ai_audio_started';
+      turn_id?: string;
+      session_id?: string;
+      audio?: {
+        duration_ms?: number;
+        samples?: number;
+        rms?: number;
+        peak?: number;
+      } | null;
+    }
+  | {
+      type: 'ai_done';
+      turn_id?: string;
+      message?: CallTurnAssistantMessage | null;
+      existing?: boolean;
+    }
+  | {
+      type: 'turn_existing';
+      turn_id: string;
+      state: CallTurnExistingState;
+      recoverable: boolean;
+    }
+  | { type: 'error'; turn_id?: string; code?: string; message?: string };
+
 export interface CallTranscriptTurn {
   id?: string;
   turn_id?: string;

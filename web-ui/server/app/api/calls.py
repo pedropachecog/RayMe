@@ -8,7 +8,7 @@ import logging
 import time
 from collections.abc import AsyncIterator, Mapping
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TypedDict
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -48,6 +48,16 @@ CALL_SESSION_NOT_FOUND_CODE = "call_session_not_found"
 CALL_GENERATION_FAILED = "call_generation_failed"
 RAYME_EVENTS_CHANNEL = "rayme-events"
 CALL_BACKEND_NOT_READY_MESSAGE = "RayMe voice backend is not ready. Check Settings, then try again."
+CALL_TURN_REJOIN_POLL_SECONDS = 0.05
+
+CallTurnExistingState = Literal["reserved", "running", "failed", "cancelled"]
+
+
+class CallTurnExistingEvent(TypedDict):
+    type: Literal["turn_existing"]
+    turn_id: str
+    state: CallTurnExistingState
+    recoverable: bool
 
 
 class CallStartRequest(BaseModel):
@@ -364,13 +374,42 @@ async def create_call_turn(
             )
             if not reservation.created:
                 if reservation.request_matches:
-                    yield _sse(
-                        {
-                            "type": "turn_existing",
-                            "turn_id": payload.turn_id,
-                            "state": reservation.state,
-                        }
-                    )
+                    request_sha256 = service.call_turn_request_sha256(payload.text)
+                    snapshot = reservation
+                    emitted_state: str | None = None
+                    while snapshot.state in {"reserved", "running"}:
+                        if snapshot.state != emitted_state:
+                            yield _sse(
+                                _turn_existing_event(
+                                    payload.turn_id,
+                                    snapshot.state,
+                                    recoverable=False,
+                                )
+                            )
+                            emitted_state = snapshot.state
+                        await asyncio.sleep(CALL_TURN_REJOIN_POLL_SECONDS)
+                        snapshot = await service.call_turn_status(
+                            call_id,
+                            turn_id=payload.turn_id,
+                            request_sha256=request_sha256,
+                        )
+                    if snapshot.state == "completed":
+                        yield _sse(
+                            {
+                                "type": "ai_done",
+                                "turn_id": payload.turn_id,
+                                "message": snapshot.assistant_message,
+                                "existing": True,
+                            }
+                        )
+                    else:
+                        yield _sse(
+                            _turn_existing_event(
+                                payload.turn_id,
+                                snapshot.state,
+                                recoverable=True,
+                            )
+                        )
                 else:
                     yield _sse(
                         {
@@ -639,6 +678,22 @@ async def create_call_turn(
                 await service.unregister_active_turn(call_id, current_task)
 
     return StreamingResponse(events(), media_type="text/event-stream")
+
+
+def _turn_existing_event(
+    turn_id: str,
+    state: str,
+    *,
+    recoverable: bool,
+) -> CallTurnExistingEvent:
+    if state not in {"reserved", "running", "failed", "cancelled"}:
+        raise ValueError(f"unsupported duplicate call turn state: {state}")
+    return {
+        "type": "turn_existing",
+        "turn_id": turn_id,
+        "state": state,
+        "recoverable": recoverable,
+    }
 
 
 @router.post("/{call_id}/reconnect-audio", dependencies=[Depends(enforce_same_origin_for_calls)])
