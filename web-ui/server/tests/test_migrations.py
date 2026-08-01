@@ -425,3 +425,60 @@ def test_qwen3_identity_upgrade_is_exact_truthful_and_idempotent(tmp_path: Path)
             "unrelated": {"qwen3_0_6b": "must-not-change"},
         }
         assert unrelated_settings == {"tts_default_engine": "qwen3_0_6b"}
+
+
+def test_forward_repair_resets_authorization_already_recorded_by_original_0003(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "rayme-qwen-forward-repair.sqlite3"
+    config = migration_config(db_path)
+    command.upgrade(config, "0003_qwen3_engine_identity")
+
+    stale_authorization = {
+        "authorization_status": "recorded",
+        "voice_data_steward": "stale-private-steward",
+        "authorization_basis": "legacy-model-grant",
+        "use_scope": "rayme_lan_call_testing",
+        "reference_sha256": "a" * 64,
+        "transcript_sha256": "b" * 64,
+    }
+    with connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO voices
+                (id, name, default_engine, reference_transcript, metadata_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                "voice-original-0003-state",
+                "Already upgraded Qwen",
+                "qwen3_1_7b",
+                "Exact stale transcript.",
+                json.dumps(
+                    {
+                        "keep": {"unrelated": True},
+                        "qwen3_authorization": stale_authorization,
+                    }
+                ),
+            ),
+        )
+        connection.commit()
+
+    command.upgrade(config, "0005_reconfirm_qwen3_authorization")
+    command.upgrade(config, "0005_reconfirm_qwen3_authorization")
+
+    with connect(db_path) as connection:
+        row = connection.execute(
+            "SELECT default_engine, metadata_json FROM voices WHERE id = ?",
+            ("voice-original-0003-state",),
+        ).fetchone()
+        metadata = json.loads(row["metadata_json"])
+
+    assert row["default_engine"] == "qwen3_1_7b"
+    assert metadata == {
+        "keep": {"unrelated": True},
+        "qwen3_authorization": {"authorization_status": "needs_confirmation"},
+    }
+    serialized = json.dumps(metadata)
+    assert "stale-private-steward" not in serialized
+    assert "legacy-model-grant" not in serialized
