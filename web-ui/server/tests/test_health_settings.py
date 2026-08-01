@@ -66,11 +66,82 @@ def test_runtime_settings_include_long_ai_synthesis_timeout() -> None:
         {
             "RAYME_AI_BACKEND_BASE_URL": "https://ai.local:9443",
             "RAYME_AI_BACKEND_SYNTHESIS_TIMEOUT_SECONDS": "180",
+            "RAYME_AI_BACKEND_SERVICE_TOKEN": "service-token-0123456789abcdef0123456789",
+            "RAYME_AI_BACKEND_CA_BUNDLE": "/etc/rayme/ai-ca.pem",
         }
     )
 
     assert settings.ai_backend_base_url == "https://ai.local:9443"
     assert settings.ai_backend_synthesis_timeout_seconds == 180
+    assert settings.ai_backend_service_token == "service-token-0123456789abcdef0123456789"
+    assert settings.ai_backend_ca_bundle == Path("/etc/rayme/ai-ca.pem")
+
+
+async def test_ai_backend_client_sends_service_identity_on_webrtc_mutation() -> None:
+    from app.domain.ai_backend_client import AiBackendClient
+
+    token = "service-token-0123456789abcdef0123456789"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.headers["Authorization"] == f"Bearer {token}"
+        return httpx.Response(
+            200,
+            json={
+                "session_id": "authorized-client",
+                "answer": {"type": "answer", "sdp": "v=0\r\n"},
+            },
+        )
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        ai_client = AiBackendClient(http_client=client, service_auth_token=token)
+        result = await ai_client.create_webrtc_offer(
+            "https://ai.local:9443",
+            {
+                "session_id": "authorized-client",
+                "thread_id": "thread-1",
+                "voice_id": "voice-1",
+                "engine_id": "f5",
+                "offer": {"type": "offer", "sdp": "v=0\r\n"},
+            },
+        )
+
+    assert result["session_id"] == "authorized-client"
+
+
+async def test_ai_backend_client_verifies_configured_ca_and_rejects_certificate_failure(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from app.domain.ai_backend_client import AiBackendClient, AiBackendUnavailable
+
+    ca_bundle = tmp_path / "rayme-ca.pem"
+    ca_bundle.write_text("test CA placeholder", encoding="utf-8")
+    observed_verify: list[object] = []
+
+    class CertificateRejectingClient:
+        def __init__(self, *, timeout: float, verify: object) -> None:
+            del timeout
+            observed_verify.append(verify)
+
+        async def __aenter__(self) -> "CertificateRejectingClient":
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+        async def request(self, method: str, url: str, **kwargs: object) -> httpx.Response:
+            del method, kwargs
+            request = httpx.Request("GET", url)
+            raise httpx.ConnectError("certificate verify failed", request=request)
+
+    monkeypatch.setattr(httpx, "AsyncClient", CertificateRejectingClient)
+    client = AiBackendClient(ca_bundle=ca_bundle)
+
+    with pytest.raises(AiBackendUnavailable) as raised:
+        await client.get_status("https://substituted-ai.local:9443")
+
+    assert raised.value.code == "unreachable"
+    assert observed_verify == [str(ca_bundle)]
 
 
 @pytest.fixture()

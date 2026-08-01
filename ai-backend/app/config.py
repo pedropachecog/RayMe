@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+import os
+from typing import Mapping
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class AiBackendSettings(BaseModel, frozen=True):
@@ -18,3 +21,21 @@ class AiBackendSettings(BaseModel, frozen=True):
     call_media_reconnect_grace_ms: int = Field(default=5000, ge=0)
     call_min_turn_rms: float = Field(default=25.0, ge=0.0)
     load_models_on_startup: bool = True
+    service_auth_token: str = ""
+
+    @field_validator("service_auth_token")
+    @classmethod
+    def validate_service_auth_token(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized and len(normalized) < 32:
+            raise ValueError("RAYME_AI_BACKEND_SERVICE_TOKEN must be at least 32 characters")
+        return normalized
+
+
+def load_ai_backend_settings(
+    environ: Mapping[str, str] | None = None,
+) -> AiBackendSettings:
+    source = os.environ if environ is None else environ
+    return AiBackendSettings(
+        service_auth_token=source.get("RAYME_AI_BACKEND_SERVICE_TOKEN", ""),
+    )

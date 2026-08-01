@@ -82,6 +82,18 @@ def test_omen_deploy_upgrades_persistent_web_schema_before_launch() -> None:
     assert source.index(migration_command) < source.index(launcher_write)
 
 
+def test_omen_deploy_provisions_service_auth_and_verified_ai_tls() -> None:
+    source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    assert "RandomNumberGenerator" in source
+    assert source.count('set "RAYME_AI_BACKEND_SERVICE_TOKEN=%%T"') == 2
+    assert "icacls.exe $serviceTokenPath /inheritance:r" in source
+    assert 'set "RAYME_AI_BACKEND_CA_BUNDLE=$aiCaBundle"' in source
+    assert 'mkcert\\rootCA.pem' in source
+    assert "curl.exe --cacert $aiCaBundle" in source
+    assert "curl.exe -k" not in source
+
+
 def test_omen_qwen_probe_validates_actual_pep610_source_identity_after_install() -> None:
     source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
     probe_start = source.index("EXPECTED_RUNTIME_VERSION = \"0.3.2\"")

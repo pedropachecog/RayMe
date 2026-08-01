@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 import app.api.webrtc as webrtc_module
 from app.main import create_app
+from app.config import AiBackendSettings
 from app.models.tts_registry import TtsAudioChunk
 
 MUTE_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/mute"
@@ -24,6 +25,8 @@ END_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/end"
 SPEAK_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/speak"
 RECONNECT_AUDIO_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/reconnect-audio"
 EVENTS_DRAIN_ROUTE_TEMPLATE = "/webrtc/sessions/{session_id}/events/drain"
+SERVICE_AUTH_TOKEN = "rayme-test-service-token-0123456789abcdef"
+SERVICE_AUTH_HEADERS = {"Authorization": f"Bearer {SERVICE_AUTH_TOKEN}"}
 
 
 def _scripted_wav_bytes() -> bytes:
@@ -266,10 +269,12 @@ def stub_webrtc(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _client(*, model_manager: Any | None = None) -> TestClient:
-    app = create_app()
+    app = create_app(
+        AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN)
+    )
     if model_manager is not None:
         app.state.model_manager = model_manager
-    return TestClient(app)
+    return TestClient(app, headers=SERVICE_AUTH_HEADERS)
 
 
 def _offer_payload(*, session_id: str = "call-session-1") -> dict[str, Any]:
@@ -328,6 +333,92 @@ def test_webrtc_status_exposes_deployed_commit_and_separate_qwen_readiness(
         "state": "ready",
         "error_code": None,
     }
+
+
+@pytest.mark.parametrize(
+    ("path", "payload"),
+    [
+        ("/webrtc/offer", _offer_payload(session_id="auth-probe")),
+        (
+            "/webrtc/sessions/auth-probe/prepare",
+            {
+                "voice_id": "voice-1",
+                "engine_id": "f5",
+                "reference_audio_b64": "cmVmZXJlbmNl",
+                "reference_transcript": "Reference transcript.",
+            },
+        ),
+        ("/webrtc/sessions/auth-probe/mute", {"muted": True}),
+        ("/webrtc/sessions/auth-probe/interrupt", None),
+        ("/webrtc/sessions/auth-probe/turns/turn-1/cancel", None),
+        (
+            "/webrtc/sessions/auth-probe/speak",
+            {
+                "turn_id": "turn-1",
+                "text": "Protected speech.",
+                "voice_id": "voice-1",
+                "engine_id": "f5",
+            },
+        ),
+        ("/webrtc/sessions/auth-probe/reconnect-audio", {}),
+        ("/webrtc/sessions/auth-probe/events/drain", None),
+        ("/webrtc/sessions/auth-probe/end", {"reason": "hangup"}),
+    ],
+)
+def test_webrtc_session_endpoints_reject_missing_service_identity(
+    path: str,
+    payload: dict[str, Any] | None,
+) -> None:
+    app = create_app(AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN))
+    client = TestClient(app)
+
+    response = client.post(path, json=payload) if payload is not None else client.post(path)
+
+    assert response.status_code == 401
+    assert response.json()["detail"]["code"] == "service_auth_invalid"
+
+
+def test_webrtc_service_identity_fails_closed_and_rejects_wrong_token() -> None:
+    unconfigured = TestClient(create_app(AiBackendSettings()))
+    unavailable = unconfigured.post(
+        "/webrtc/offer",
+        headers=SERVICE_AUTH_HEADERS,
+        json=_offer_payload(session_id="auth-unconfigured"),
+    )
+    assert unavailable.status_code == 503
+    assert unavailable.json()["detail"]["code"] == "service_auth_not_configured"
+
+    configured = TestClient(
+        create_app(AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN))
+    )
+    rejected = configured.post(
+        "/webrtc/offer",
+        headers={"Authorization": "Bearer definitely-the-wrong-service-token-000000"},
+        json=_offer_payload(session_id="auth-wrong"),
+    )
+    assert rejected.status_code == 401
+    assert rejected.json()["detail"]["code"] == "service_auth_invalid"
+    assert configured.get("/webrtc/status").status_code == 200
+
+
+def test_authorized_service_identity_completes_offer_and_end(
+    stub_webrtc: None,
+) -> None:
+    client = _client()
+    session_id = "authorized-end-to-end-call"
+
+    offered = client.post(
+        "/webrtc/offer",
+        json=_offer_payload(session_id=session_id),
+    )
+    ended = client.post(
+        END_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={"reason": "hangup"},
+    )
+
+    assert offered.status_code == 200
+    assert ended.status_code == 200
+    assert ended.json()["state"] == "ended"
 
 
 def test_webrtc_prepare_qwen_uses_only_contained_reference_and_exact_transcript(
@@ -424,12 +515,15 @@ def test_webrtc_slow_prepare_releases_lease_when_session_termination_wins(
 
     async def scenario() -> tuple[int, set[str], list[str], int]:
         manager = SlowLeaseManager()
-        app = create_app()
+        app = create_app(
+            AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN)
+        )
         app.state.model_manager = manager
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(
             transport=transport,
             base_url="http://testserver",
+            headers=SERVICE_AUTH_HEADERS,
         ) as client:
             session_id = f"call-slow-prepare-{termination}"
             offered = await client.post(

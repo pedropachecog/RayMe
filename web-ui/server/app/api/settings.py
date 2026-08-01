@@ -104,8 +104,13 @@ def get_ai_backend_probe() -> HealthProbe:
     return probe_http_health
 
 
-def get_ai_backend_client() -> AiBackendClient:
-    return AiBackendClient()
+def get_ai_backend_client(
+    runtime_settings: Settings = Depends(get_runtime_settings),
+) -> AiBackendClient:
+    return AiBackendClient(
+        service_auth_token=runtime_settings.ai_backend_service_token,
+        ca_bundle=runtime_settings.ai_backend_ca_bundle,
+    )
 
 
 def get_llm_probe() -> LlmProbe:

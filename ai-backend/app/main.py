@@ -11,7 +11,7 @@ from app.api import tts, webrtc
 from app.api.health import router as health_router
 from app.api.stt import router as stt_router
 from app.call.session import CallSessionManager
-from app.config import AiBackendSettings
+from app.config import AiBackendSettings, load_ai_backend_settings
 from app.models.model_manager import ModelManager
 
 
@@ -28,12 +28,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         manager.shutdown()
 
 
-def create_app() -> FastAPI:
+def create_app(settings: AiBackendSettings | None = None) -> FastAPI:
     app = FastAPI(title="RayMe AI Backend", version="0.2.0", lifespan=lifespan)
     app.add_exception_handler(RequestValidationError, _validation_error_response)
-    settings = AiBackendSettings()
-    app.state.model_manager = ModelManager(settings)
-    app.state.call_session_manager = CallSessionManager(settings=settings)
+    runtime_settings = settings or load_ai_backend_settings()
+    app.state.ai_backend_settings = runtime_settings
+    app.state.model_manager = ModelManager(runtime_settings)
+    app.state.call_session_manager = CallSessionManager(settings=runtime_settings)
     app.include_router(health_router)
     app.include_router(stt_router)
     app.include_router(tts.router)

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends
 
-from app.api.settings import get_settings_service
+from app.api.settings import get_runtime_settings, get_settings_service
+from app.config import Settings
 from app.domain.ai_backend_client import (
     AiBackendClient,
     AiBackendStatus,
@@ -15,8 +16,13 @@ from app.domain.settings_service import SettingsService
 router = APIRouter(prefix="/api/ai-backend", tags=["ai-backend"])
 
 
-def get_ai_backend_client() -> AiBackendClient:
-    return AiBackendClient()
+def get_ai_backend_client(
+    runtime_settings: Settings = Depends(get_runtime_settings),
+) -> AiBackendClient:
+    return AiBackendClient(
+        service_auth_token=runtime_settings.ai_backend_service_token,
+        ca_bundle=runtime_settings.ai_backend_ca_bundle,
+    )
 
 
 @router.get("/status")

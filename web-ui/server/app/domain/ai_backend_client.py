@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Literal
 
 import httpx
@@ -348,6 +349,8 @@ class AiBackendClient:
         synthesis_timeout: float = 120.0,
         webrtc_timeout: float = 30.0,
         backfill_timeout: float | None = None,
+        service_auth_token: str = "",
+        ca_bundle: Path | str | None = None,
     ) -> None:
         self._http_client = http_client
         self._timeout = timeout
@@ -358,6 +361,8 @@ class AiBackendClient:
             transcription_timeout,
             backfill_timeout or transcription_timeout,
         )
+        self._service_auth_token = service_auth_token.strip()
+        self._tls_verify: bool | str = str(ca_bundle) if ca_bundle else True
 
     async def get_status(self, base_url: str) -> AiBackendStatus:
         response = await self._request("GET", _join_endpoint(base_url, "/health"))
@@ -621,12 +626,20 @@ class AiBackendClient:
     ) -> httpx.Response:
         try:
             request_kwargs = dict(kwargs)
+            headers = dict(request_kwargs.pop("headers", {}))
+            if self._service_auth_token:
+                headers["Authorization"] = f"Bearer {self._service_auth_token}"
+            if headers:
+                request_kwargs["headers"] = headers
             if timeout is not None:
                 request_kwargs["timeout"] = timeout
             if self._http_client is not None:
                 response = await self._http_client.request(method, url, **request_kwargs)
             else:
-                async with httpx.AsyncClient(timeout=self._timeout, verify=False) as client:
+                async with httpx.AsyncClient(
+                    timeout=self._timeout,
+                    verify=self._tls_verify,
+                ) as client:
                     response = await client.request(method, url, **request_kwargs)
         except (httpx.TimeoutException, httpx.NetworkError, httpx.TransportError) as exc:
             raise AiBackendUnavailable(code="unreachable", message=UNREACHABLE_MESSAGE) from exc

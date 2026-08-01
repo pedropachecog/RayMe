@@ -6,10 +6,11 @@ import binascii
 import inspect
 import logging
 import os
+import secrets
 import time
 from typing import Any, Literal
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.api.stt import _settings_from_app, _stt_adapter_from_app, _vad_adapter_from_app
@@ -43,6 +44,34 @@ WEBRTC_AUDIO_TRACK_FAILED = "webrtc_audio_track_failed"
 WEBRTC_AUDIO_TRACK_FAILED_MESSAGE = "Backend could not create call audio output track"
 WEBRTC_RUNTIME_UNAVAILABLE = "webrtc_runtime_unavailable"
 WEBRTC_RUNTIME_UNAVAILABLE_MESSAGE = "Backend WebRTC runtime is unavailable"
+
+
+def _require_service_auth(request: Request) -> None:
+    settings = getattr(request.app.state, "ai_backend_settings", None)
+    expected = str(getattr(settings, "service_auth_token", "") or "")
+    if len(expected) < 32:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "service_auth_not_configured",
+                "message": "Service authentication is unavailable",
+            },
+        )
+    authorization = request.headers.get("authorization", "")
+    scheme, separator, supplied = authorization.partition(" ")
+    if (
+        separator != " "
+        or scheme.lower() != "bearer"
+        or not supplied
+        or not secrets.compare_digest(supplied, expected)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "code": "service_auth_invalid",
+                "message": "Service authentication failed",
+            },
+        )
 
 
 class SessionDescription(BaseModel):
@@ -198,7 +227,10 @@ def get_webrtc_status(request: Request) -> dict[str, object]:
     }
 
 
-@router.post("/sessions/{session_id}/prepare")
+@router.post(
+    "/sessions/{session_id}/prepare",
+    dependencies=[Depends(_require_service_auth)],
+)
 async def prepare_session_speech(
     request: Request,
     session_id: str,
@@ -260,7 +292,7 @@ async def prepare_session_speech(
     return {"session_id": session_id, **dict(result)}
 
 
-@router.post("/offer")
+@router.post("/offer", dependencies=[Depends(_require_service_auth)])
 async def create_webrtc_offer_answer(
     request: Request,
     payload: CallOfferRequest,
@@ -437,7 +469,11 @@ async def create_webrtc_offer_answer(
     }
 
 
-@router.post("/sessions/{session_id}/mute", response_model=CallControlResponse)
+@router.post(
+    "/sessions/{session_id}/mute",
+    response_model=CallControlResponse,
+    dependencies=[Depends(_require_service_auth)],
+)
 async def mute_session(
     request: Request,
     session_id: str,
@@ -455,7 +491,11 @@ async def mute_session(
         raise _control_error() from exc
 
 
-@router.post("/sessions/{session_id}/interrupt", response_model=CallControlResponse)
+@router.post(
+    "/sessions/{session_id}/interrupt",
+    response_model=CallControlResponse,
+    dependencies=[Depends(_require_service_auth)],
+)
 async def interrupt_session(request: Request, session_id: str) -> CallControlResponse:
     session = _session_or_404(request, session_id)
     try:
@@ -471,7 +511,10 @@ async def interrupt_session(request: Request, session_id: str) -> CallControlRes
         raise _control_error() from exc
 
 
-@router.post("/sessions/{session_id}/turns/{turn_id}/cancel")
+@router.post(
+    "/sessions/{session_id}/turns/{turn_id}/cancel",
+    dependencies=[Depends(_require_service_auth)],
+)
 async def cancel_session_speech_turn(
     request: Request,
     session_id: str,
@@ -491,7 +534,10 @@ async def cancel_session_speech_turn(
         raise _control_error() from exc
 
 
-@router.post("/sessions/{session_id}/speak")
+@router.post(
+    "/sessions/{session_id}/speak",
+    dependencies=[Depends(_require_service_auth)],
+)
 async def speak_session(
     request: Request,
     session_id: str,
@@ -646,7 +692,10 @@ async def speak_session(
     }
 
 
-@router.post("/sessions/{session_id}/reconnect-audio")
+@router.post(
+    "/sessions/{session_id}/reconnect-audio",
+    dependencies=[Depends(_require_service_auth)],
+)
 async def backfill_session_reconnect_audio(
     request: Request,
     session_id: str,
@@ -688,7 +737,10 @@ async def backfill_session_reconnect_audio(
     }
 
 
-@router.post("/sessions/{session_id}/events/drain")
+@router.post(
+    "/sessions/{session_id}/events/drain",
+    dependencies=[Depends(_require_service_auth)],
+)
 async def drain_session_events(
     request: Request,
     session_id: str,
@@ -700,7 +752,11 @@ async def drain_session_events(
     }
 
 
-@router.post("/sessions/{session_id}/end", response_model=CallControlResponse)
+@router.post(
+    "/sessions/{session_id}/end",
+    response_model=CallControlResponse,
+    dependencies=[Depends(_require_service_auth)],
+)
 async def end_session(
     request: Request,
     session_id: str,

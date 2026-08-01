@@ -180,8 +180,13 @@ def get_call_runtime_settings(request: Request) -> Settings:
     return request.app.state.settings
 
 
-def get_call_backend_client() -> AiBackendClient:
-    return AiBackendClient()
+def get_call_backend_client(
+    runtime_settings: Settings = Depends(get_call_runtime_settings),
+) -> AiBackendClient:
+    return AiBackendClient(
+        service_auth_token=runtime_settings.ai_backend_service_token,
+        ca_bundle=runtime_settings.ai_backend_ca_bundle,
+    )
 
 
 def get_call_voice_blob_dir() -> Path:

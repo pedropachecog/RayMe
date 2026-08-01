@@ -23,6 +23,8 @@ class Settings(BaseModel, frozen=True):
     allowed_origins: list[str] = Field(default_factory=lambda: list(DEFAULT_ALLOWED_ORIGINS))
     ai_backend_base_url: str = "https://127.0.0.1:9443"
     ai_backend_synthesis_timeout_seconds: float = Field(default=300.0, gt=0, le=600)
+    ai_backend_service_token: str = ""
+    ai_backend_ca_bundle: Path | None = None
     llm_base_url: str = "https://api.openai.com/v1"
     llm_api_key: str = ""
     llm_model: str = "gpt-4.1-mini"
@@ -62,6 +64,14 @@ class Settings(BaseModel, frozen=True):
             raise ValueError(msg)
         return origins
 
+    @field_validator("ai_backend_service_token")
+    @classmethod
+    def validate_ai_backend_service_token(cls, value: str) -> str:
+        normalized = value.strip()
+        if normalized and len(normalized) < 32:
+            raise ValueError("RAYME_AI_BACKEND_SERVICE_TOKEN must be at least 32 characters")
+        return normalized
+
     @property
     def host(self) -> str:
         """Compatibility alias for callers that expect a host setting."""
@@ -82,6 +92,8 @@ ENV_TO_FIELD = {
     "RAYME_ALLOWED_ORIGINS": "allowed_origins",
     "RAYME_AI_BACKEND_BASE_URL": "ai_backend_base_url",
     "RAYME_AI_BACKEND_SYNTHESIS_TIMEOUT_SECONDS": "ai_backend_synthesis_timeout_seconds",
+    "RAYME_AI_BACKEND_SERVICE_TOKEN": "ai_backend_service_token",
+    "RAYME_AI_BACKEND_CA_BUNDLE": "ai_backend_ca_bundle",
     "RAYME_LLM_BASE_URL": "llm_base_url",
     "RAYME_LLM_API_KEY": "llm_api_key",
     "RAYME_LLM_MODEL": "llm_model",

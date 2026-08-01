@@ -174,7 +174,14 @@ class RayMeApi:
         self.web_base_url = web_base_url.rstrip("/")
         self.ai_base_url = ai_base_url.rstrip("/")
         self.timeout = timeout
-        self.ssl_context = ssl._create_unverified_context()
+        ca_bundle = os.environ.get("RAYME_AI_BACKEND_CA_BUNDLE", "").strip()
+        self.service_auth_token = os.environ.get(
+            "RAYME_AI_BACKEND_SERVICE_TOKEN",
+            "",
+        ).strip()
+        self.ssl_context = ssl.create_default_context(
+            cafile=ca_bundle or None,
+        )
 
     def get_json(self, base_url: str, path: str) -> ApiResponse:
         return self._open_json(
@@ -187,11 +194,16 @@ class RayMeApi:
 
     def post_json(self, base_url: str, path: str, payload: dict[str, Any]) -> ApiResponse:
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+        headers = {"Content-Type": "application/json", "Accept": "application/json"}
+        if base_url.rstrip("/") == self.ai_base_url:
+            if len(self.service_auth_token) < 32:
+                raise TracerFailure("RayMe AI service identity is not configured")
+            headers["Authorization"] = f"Bearer {self.service_auth_token}"
         return self._open_json(
             Request(
                 f"{base_url}{path}",
                 data=body,
-                headers={"Content-Type": "application/json", "Accept": "application/json"},
+                headers=headers,
                 method="POST",
             )
         )
