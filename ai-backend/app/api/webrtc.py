@@ -86,6 +86,8 @@ class SpeakRequest(BaseModel):
     voice_id: str = Field(min_length=1, max_length=128)
     engine_id: str = Field(min_length=1, max_length=64)
     final_chunk: bool = False
+    segment_id: str | None = Field(default=None, min_length=1, max_length=160)
+    segment_ordinal: int | None = Field(default=None, ge=0, le=100_000)
     reference_audio_b64: str | None = Field(
         default=None,
         max_length=MAX_REFERENCE_AUDIO_B64_LENGTH,
@@ -528,6 +530,8 @@ async def speak_session(
                 payload.voice_id,
                 payload.engine_id,
                 final_chunk=payload.final_chunk,
+                segment_id=payload.segment_id,
+                segment_ordinal=payload.segment_ordinal,
                 tts_adapter=adapter,
                 reference_audio_b64=payload.reference_audio_b64,
                 reference_transcript=payload.reference_transcript,

@@ -233,6 +233,7 @@ class CallSession:
         self._turn_started_at: str | None = None
         self._turn_index = 0
         self._tts_turn_segment_ordinals: dict[str, int] = {}
+        self._tts_segment_reservations: dict[tuple[str, str], int] = {}
         self._speech_seen = False
         self._silence_ms = 0
         self._speech_start_frame: int | None = None
@@ -1391,7 +1392,7 @@ class CallSession:
             await self.emit_event(event)
             return event
 
-        self._tts_turn_segment_ordinals.pop(turn_id, None)
+        self._clear_tts_segment_state(turn_id)
         playback_final = dict(self._pending_speech_playback_final or {})
         self._clear_pending_speech_terminal()
         self.state = "listening"
@@ -1414,6 +1415,8 @@ class CallSession:
         engine_id: str,
         final_chunk: bool = False,
         *,
+        segment_id: str | None = None,
+        segment_ordinal: int | None = None,
         tts_adapter: Any | None = None,
         reference_audio_b64: str | None = None,
         reference_transcript: str | None = None,
@@ -1429,11 +1432,15 @@ class CallSession:
     ) -> dict[str, Any]:
         self._cancelled_ai_turns.discard(turn_id)
         self._cancelling_ai_turns.discard(turn_id)
-        segment_ordinal = self._tts_turn_segment_ordinals.get(turn_id, 0)
-        if final_chunk:
-            self._tts_turn_segment_ordinals.pop(turn_id, None)
-        else:
-            self._tts_turn_segment_ordinals[turn_id] = segment_ordinal + 1
+        reserved_segment_ordinal, segment_reservation_key = (
+            self._reserve_tts_segment_ordinal(
+                turn_id=turn_id,
+                text=text,
+                final_chunk=final_chunk,
+                segment_id=segment_id,
+                requested_ordinal=segment_ordinal,
+            )
+        )
         self.state = "rehearsing"
         current_task = asyncio.current_task()
         if current_task is not None:
@@ -1454,7 +1461,7 @@ class CallSession:
 
         try:
             if _adapter_supports_streaming(adapter, engine_id):
-                return await self._speak_streaming_speech(
+                result = await self._speak_streaming_speech(
                     turn_id=turn_id,
                     text=text,
                     voice_id=voice_id,
@@ -1467,8 +1474,18 @@ class CallSession:
                     voxcpm2_options=voxcpm2_options,
                     qwen3_release_evidence_mode=qwen3_release_evidence_mode,
                     qwen3_release_evidence_seed=qwen3_release_evidence_seed,
-                    segment_ordinal=segment_ordinal,
+                    segment_ordinal=reserved_segment_ordinal,
                 )
+                if self._tts_segment_result_succeeded(result):
+                    self._commit_tts_segment_ordinal(
+                        turn_id=turn_id,
+                        reservation_key=segment_reservation_key,
+                        segment_ordinal=reserved_segment_ordinal,
+                        final_chunk=final_chunk,
+                    )
+                elif result.get("status") == "cancelled":
+                    self._clear_tts_segment_state(turn_id)
+                return result
 
             result = await self._synthesize_speech(
                 turn_id=turn_id,
@@ -1483,6 +1500,7 @@ class CallSession:
             )
             total_generation_ms = round((time.perf_counter() - generation_started) * 1000, 1)
             if turn_id in self._cancelled_ai_turns:
+                self._clear_tts_segment_state(turn_id)
                 return {"status": "cancelled", "turn_id": turn_id}
             wav_bytes = bytes(result.get("wav_bytes") or b"")
             playback_seconds = 0.0
@@ -1545,6 +1563,7 @@ class CallSession:
                 }
         except asyncio.CancelledError:
             self._cancelled_ai_turns.add(turn_id)
+            self._clear_tts_segment_state(turn_id)
             raise
         except Exception:
             self.state = "listening"
@@ -1568,6 +1587,7 @@ class CallSession:
 
         if turn_id in self._cancelled_ai_turns:
             self.state = "listening"
+            self._clear_tts_segment_state(turn_id)
             if audio_started_event is not None:
                 return {"status": "cancelled", "turn_id": turn_id, "ai_audio_started_event": audio_started_event}
             return {"status": "cancelled", "turn_id": turn_id}
@@ -1584,6 +1604,12 @@ class CallSession:
                     tts_playback_final=final_playback,
                 )
             )
+            self._commit_tts_segment_ordinal(
+                turn_id=turn_id,
+                reservation_key=segment_reservation_key,
+                segment_ordinal=reserved_segment_ordinal,
+                final_chunk=True,
+            )
             if audio_started_event is not None:
                 return {**done_event, "ai_audio_started_event": audio_started_event}
             return done_event
@@ -1598,7 +1624,73 @@ class CallSession:
             queued_event["ai_audio_started_event"] = audio_started_event
         if final_playback is not None:
             queued_event["tts_playback_final"] = final_playback
+        self._commit_tts_segment_ordinal(
+            turn_id=turn_id,
+            reservation_key=segment_reservation_key,
+            segment_ordinal=reserved_segment_ordinal,
+            final_chunk=False,
+        )
         return queued_event
+
+    def _reserve_tts_segment_ordinal(
+        self,
+        *,
+        turn_id: str,
+        text: str,
+        final_chunk: bool,
+        segment_id: str | None,
+        requested_ordinal: int | None,
+    ) -> tuple[int, tuple[str, str]]:
+        if segment_id is not None:
+            identity = f"id:{segment_id}"
+        elif requested_ordinal is not None:
+            identity = f"ordinal:{requested_ordinal}"
+        else:
+            digest = hashlib.sha256(
+                f"{int(final_chunk)}\0{text}".encode("utf-8")
+            ).hexdigest()
+            identity = f"legacy:{digest}"
+        reservation_key = (turn_id, identity)
+        reserved = self._tts_segment_reservations.get(reservation_key)
+        if reserved is not None:
+            return reserved, reservation_key
+        ordinal = (
+            requested_ordinal
+            if requested_ordinal is not None
+            else self._tts_turn_segment_ordinals.get(turn_id, 0)
+        )
+        self._tts_segment_reservations[reservation_key] = ordinal
+        return ordinal, reservation_key
+
+    @staticmethod
+    def _tts_segment_result_succeeded(result: dict[str, Any]) -> bool:
+        return (
+            result.get("status") == "queued"
+            or result.get("type") == AI_DONE_EVENT
+        )
+
+    def _commit_tts_segment_ordinal(
+        self,
+        *,
+        turn_id: str,
+        reservation_key: tuple[str, str],
+        segment_ordinal: int,
+        final_chunk: bool,
+    ) -> None:
+        if final_chunk:
+            self._clear_tts_segment_state(turn_id)
+            return
+        self._tts_segment_reservations[reservation_key] = segment_ordinal
+        self._tts_turn_segment_ordinals[turn_id] = max(
+            self._tts_turn_segment_ordinals.get(turn_id, 0),
+            segment_ordinal + 1,
+        )
+
+    def _clear_tts_segment_state(self, turn_id: str) -> None:
+        self._tts_turn_segment_ordinals.pop(turn_id, None)
+        for reservation_key in tuple(self._tts_segment_reservations):
+            if reservation_key[0] == turn_id:
+                self._tts_segment_reservations.pop(reservation_key, None)
 
     async def _speak_streaming_speech(
         self,
@@ -2208,7 +2300,7 @@ class CallSession:
         playback_final: dict[str, Any] | None = None
         if resolved_turn_id is not None:
             self._cancelling_ai_turns.add(resolved_turn_id)
-            self._tts_turn_segment_ordinals.pop(resolved_turn_id, None)
+            self._clear_tts_segment_state(resolved_turn_id)
         cancel_started = asyncio.Event()
         cancel_task = asyncio.create_task(
             self._cancel_active_tts_generation(
@@ -2350,6 +2442,8 @@ class CallSession:
         self.ended_at = datetime.now(timezone.utc)
         self.end_reason = reason
         self.state = target_state
+        self._tts_turn_segment_ordinals.clear()
+        self._tts_segment_reservations.clear()
         return _TerminalCleanup(
             target_state=target_state,
             reason=reason,

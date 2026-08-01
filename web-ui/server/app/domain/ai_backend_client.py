@@ -145,6 +145,8 @@ class SpeechTurnClosedError(AiBackendProcessingError):
 class _SpeechSubmission:
     text: str
     final_chunk: bool
+    segment_id: str
+    segment_ordinal: int
 
 
 class SpeechTurn:
@@ -182,6 +184,7 @@ class SpeechTurn:
         self._worker: asyncio.Task[None] | None = None
         self._closed = False
         self._terminal: SpeechTurnTerminal | None = None
+        self._next_segment_ordinal = 0
 
     @property
     def terminal(self) -> SpeechTurnTerminal | None:
@@ -192,7 +195,7 @@ class SpeechTurn:
         if not segment:
             return
         self._require_open()
-        await self._queue.put(_SpeechSubmission(text=segment, final_chunk=False))
+        await self._queue.put(self._new_submission(segment, final_chunk=False))
         self._ensure_worker()
         if self._terminal is not None:
             raise SpeechTurnClosedError()
@@ -204,7 +207,7 @@ class SpeechTurn:
         # natural boundary, the AI backend still owns the call state machine.
         # Send an explicit empty terminal marker instead of completing only in
         # this web process; the marker emits ai_done without replaying TTS.
-        await self._queue.put(_SpeechSubmission(text=final_text, final_chunk=True))
+        await self._queue.put(self._new_submission(final_text, final_chunk=True))
         self._closed = True
         self._ensure_worker()
         assert self._worker is not None
@@ -233,6 +236,16 @@ class SpeechTurn:
     def _ensure_worker(self) -> None:
         if self._worker is None:
             self._worker = asyncio.create_task(self._run())
+
+    def _new_submission(self, text: str, *, final_chunk: bool) -> _SpeechSubmission:
+        ordinal = self._next_segment_ordinal
+        self._next_segment_ordinal += 1
+        return _SpeechSubmission(
+            text=text,
+            final_chunk=final_chunk,
+            segment_id=f"{self._turn_id}:{ordinal}",
+            segment_ordinal=ordinal,
+        )
 
     async def _run(self) -> None:
         try:
@@ -277,6 +290,8 @@ class SpeechTurn:
             "turn_id": self._turn_id,
             "text": item.text,
             "final_chunk": item.final_chunk,
+            "segment_id": item.segment_id,
+            "segment_ordinal": item.segment_ordinal,
             **self._common_payload,
         }
         result = await speak_call(self._base_url, self._session_id, payload)

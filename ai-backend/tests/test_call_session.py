@@ -1555,6 +1555,97 @@ def test_qwen_incremental_turn_carries_monotonic_segment_ordinals() -> None:
     assert "turn-segment-entropy" not in session._tts_turn_segment_ordinals
 
 
+def test_qwen_failed_segment_retries_keep_reserved_ordinal_until_success() -> None:
+    class RetryQwenAdapter:
+        engine_id = "qwen3_1_7b"
+
+        def __init__(self) -> None:
+            self.requests: list[Any] = []
+            self.fail_calls = {0, 2}
+            self.call_count = 0
+
+        def synthesize(self, _request: Any) -> Any:
+            raise AssertionError("whole synthesis fallback was used")
+
+        def stream(
+            self,
+            request: Any,
+            *,
+            request_id: str,
+            voice_key: str,
+        ) -> Any:
+            del request_id, voice_key
+            call_index = self.call_count
+            self.call_count += 1
+            self.requests.append(request)
+            if call_index in self.fail_calls:
+                raise RuntimeError("retryable generation failure")
+            for chunk_index in range(2):
+                yield TtsAudioChunk(
+                    engine_id=self.engine_id,
+                    chunk_index=chunk_index,
+                    wav_bytes=QWEN_STREAM_CHUNK_WAV_BYTES,
+                    sample_rate=24_000,
+                    duration_ms=100.0,
+                    generated_at_ms=25.0 + chunk_index * 25.0,
+                )
+
+    adapter = RetryQwenAdapter()
+    session, _ = _new_session(
+        tts_adapter=adapter,
+        outbound_audio_track=ScriptedOutboundAudioTrack(),
+    )
+
+    async def speak(text: str, *, final_chunk: bool, segment_ordinal: int) -> dict[str, Any]:
+        return await session.speak_text(
+            "turn-segment-retry",
+            text,
+            "voice-qwen",
+            "qwen3_1_7b",
+            final_chunk=final_chunk,
+            segment_id=f"turn-segment-retry:{segment_ordinal}",
+            segment_ordinal=segment_ordinal,
+            reference_audio_b64="cmVhbC1zYW1wbGU=",
+            reference_transcript="The exact reference transcript.",
+        )
+
+    async def scenario() -> None:
+        first_failure = await speak(
+            "The first segment is retried.",
+            final_chunk=False,
+            segment_ordinal=0,
+        )
+        first_retry = await speak(
+            "The first segment is retried.",
+            final_chunk=False,
+            segment_ordinal=0,
+        )
+        final_failure = await speak(
+            "The final segment is retried.",
+            final_chunk=True,
+            segment_ordinal=1,
+        )
+        final_retry = await speak(
+            "The final segment is retried.",
+            final_chunk=True,
+            segment_ordinal=1,
+        )
+
+        assert first_failure["type"] == "failed"
+        assert first_retry["status"] == "queued"
+        assert final_failure["type"] == "failed"
+        assert final_retry["type"] == "ai_done"
+
+    _run(scenario())
+
+    assert [request.segment_ordinal for request in adapter.requests] == [0, 0, 1, 1]
+    assert "turn-segment-retry" not in session._tts_turn_segment_ordinals
+    assert not any(
+        turn_id == "turn-segment-retry"
+        for turn_id, _ in session._tts_segment_reservations
+    )
+
+
 def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call() -> None:
     import app.api.webrtc as webrtc_module
 

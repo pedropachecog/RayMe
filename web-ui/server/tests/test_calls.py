@@ -1117,6 +1117,16 @@ def test_qwen_normal_multi_segment_turn_persists_once_after_one_normal_terminal(
         False,
         True,
     ]
+    assert [call["payload"]["segment_ordinal"] for call in backend.speak_calls] == [
+        0,
+        1,
+        2,
+    ]
+    assert [call["payload"]["segment_id"] for call in backend.speak_calls] == [
+        "turn-qwen-multi-segment:0",
+        "turn-qwen-multi-segment:1",
+        "turn-qwen-multi-segment:2",
+    ]
     events = _sse_events(response.text)
     assert sum(event.get("type") == "ai_done" for event in events) == 1
     rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
