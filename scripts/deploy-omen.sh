@@ -461,7 +461,17 @@ if ($qwenFidelitySweep) {
 }
 
 Write-Host "== Writing scheduled task launchers"
+$aiPython = Join-Path $repo "ai-backend\.venv\Scripts\python.exe"
 $aiPythonw = Join-Path $repo "ai-backend\.venv\Scripts\pythonw.exe"
+$aiProcessIdentityRaw = & $aiPython -c "import json, pathlib, sys; print(json.dumps({'base_pythonw': str(pathlib.Path(sys._base_executable).with_name('pythonw.exe'))}))"
+if ($LASTEXITCODE -ne 0) {
+  throw "Failed to resolve the RayMe AI Windows process image"
+}
+$aiProcessIdentity = $aiProcessIdentityRaw | Select-Object -Last 1 | ConvertFrom-Json
+$aiProcessImage = [string]$aiProcessIdentity.base_pythonw
+if ([string]::IsNullOrWhiteSpace($aiProcessImage) -or -not (Test-Path $aiProcessImage)) {
+  throw "RayMe AI Windows process image is missing at $aiProcessImage"
+}
 $aiLauncher = @"
 @echo off
 cd /d C:\Users\pmpg\rayme\RayMe
@@ -500,7 +510,7 @@ function Ensure-RayMeWebRtcFirewallRule {
   New-NetFirewallRule `
     -Name $firewallRule.Name `
     -DisplayName $firewallRule.DisplayName `
-    -Program $aiPythonw `
+    -Program $aiProcessImage `
     -Direction Inbound `
     -Action Allow `
     -Enabled True `
@@ -515,7 +525,7 @@ function Ensure-RayMeWebRtcFirewallRule {
   $addressFilter = Get-NetFirewallAddressFilter -AssociatedNetFirewallRule $installedRule
   $programMatches = [System.StringComparer]::OrdinalIgnoreCase.Equals(
     [string]$applicationFilter.Program,
-    [string]$aiPythonw
+    [string]$aiProcessImage
   )
   if (
     [string]$installedRule.Enabled -ne "True" -or
@@ -680,7 +690,17 @@ function Wait-RayMeListener {
 }
 
 Write-Host "== Waiting for AI listener"
-Wait-RayMeListener -Port 9443 | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize
+$aiListener = Wait-RayMeListener -Port 9443 | Select-Object -First 1
+$aiListener | Select-Object LocalAddress,LocalPort,OwningProcess | Format-Table -AutoSize
+$liveAiProcess = Get-CimInstance Win32_Process -Filter "ProcessId = $($aiListener.OwningProcess)"
+$installedMediaRule = Get-NetFirewallRule -Name RayMeAIWebRTCMediaUDP -PolicyStore ActiveStore
+$applicationFilter = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $installedMediaRule
+if (-not [System.StringComparer]::OrdinalIgnoreCase.Equals(
+  [string]$liveAiProcess.ExecutablePath,
+  [string]$applicationFilter.Program
+)) {
+  throw "RayMe AI process image does not match the WebRTC firewall rule"
+}
 
 Start-ScheduledTask -TaskName RayMePhase1Web
 
