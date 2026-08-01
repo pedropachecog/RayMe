@@ -76,6 +76,10 @@ CALL_ENDED_EVENT_RECOVERY_GRACE_SECONDS = 60.0
 CALL_PEER_RECONNECT_GRACE_SECONDS = 8.0
 CALL_PEER_REPLACEMENT_TIMEOUT_SECONDS = 8.0
 CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS = 2.0
+CALL_TERMINAL_CLEANUP_STEP_TIMEOUT_SECONDS = 2.0
+CALL_TERMINAL_CLEANUP_RETRY_LIMIT = 32
+CALL_TERMINAL_CLEANUP_RETRY_BASE_SECONDS = 0.05
+CALL_TERMINAL_CLEANUP_RETRY_MAX_SECONDS = 1.0
 
 
 def _voxcpm2_options_for_engine(engine_id: str, options: dict[str, Any]) -> dict[str, Any]:
@@ -217,6 +221,8 @@ class _TerminalCleanup:
     candidate_peer_pending: bool = True
     prompt_lease_pending: bool = True
     cancel_context: dict[str, Any] = field(default_factory=dict)
+    attempts: int = 0
+    last_attempt_timed_out: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
@@ -388,6 +394,8 @@ class CallSession:
         self._tts_prompt_lease_releaser: PromptLeaseReleaser | None = None
         self._terminal_cleanup: _TerminalCleanup | None = None
         self._terminal_outcome: _TerminalOutcome | None = None
+        self._terminal_cleanup_task: asyncio.Task[None] | None = None
+        self._terminal_cleanup_failure_state: dict[str, Any] | None = None
 
     @property
     def _pending_peer_connections(self) -> list[Any]:
@@ -3367,12 +3375,19 @@ class CallSession:
                 cancel_context = await self._run_terminal_cleanup(cleanup)
                 if not self._terminal_cleanup_pending(cleanup):
                     break
+                if cleanup.last_attempt_timed_out:
+                    break
                 if attempt < 2:
                     await asyncio.sleep(0)
-            return await self._publish_terminal_outcome(
+            event = await self._publish_terminal_outcome(
                 outcome,
                 cancel_context=cancel_context,
             )
+            if self._terminal_cleanup_pending(cleanup):
+                self._terminal_cleanup_task = asyncio.create_task(
+                    self._retry_terminal_cleanup_until_resolved(cleanup)
+                )
+            return event
         except BaseException as exc:
             outcome.error = exc
             raise
@@ -3422,12 +3437,19 @@ class CallSession:
         cleanup: _TerminalCleanup,
     ) -> dict[str, Any]:
         async with cleanup.lock:
+            cleanup.attempts += 1
+            cleanup.last_attempt_timed_out = False
             if cleanup.cancel_pending:
                 try:
-                    cleanup.cancel_context = await self.cancel_ai_turn(
-                        cause=cleanup.cancel_cause
+                    cleanup.cancel_context = await asyncio.wait_for(
+                        self.cancel_ai_turn(cause=cleanup.cancel_cause),
+                        timeout=CALL_TERMINAL_CLEANUP_STEP_TIMEOUT_SECONDS,
                     )
                 except Exception as exc:
+                    cleanup.last_attempt_timed_out = (
+                        cleanup.last_attempt_timed_out
+                        or isinstance(exc, asyncio.TimeoutError)
+                    )
                     logger.exception(
                         "[rayme-call] terminal.cleanup_failed session=%s step=cancel exc=%s",
                         self.session_id,
@@ -3437,8 +3459,15 @@ class CallSession:
                     cleanup.cancel_pending = False
             if cleanup.active_peer_pending:
                 try:
-                    await self._close_peer(cleanup.active_peer)
+                    await asyncio.wait_for(
+                        self._close_peer(cleanup.active_peer),
+                        timeout=CALL_TERMINAL_CLEANUP_STEP_TIMEOUT_SECONDS,
+                    )
                 except Exception as exc:
+                    cleanup.last_attempt_timed_out = (
+                        cleanup.last_attempt_timed_out
+                        or isinstance(exc, asyncio.TimeoutError)
+                    )
                     logger.exception(
                         "[rayme-call] terminal.cleanup_failed session=%s step=active_peer exc=%s",
                         self.session_id,
@@ -3449,8 +3478,15 @@ class CallSession:
             try:
                 if cleanup.candidate_peer_pending and cleanup.candidate_peer is not None:
                     try:
-                        await self._close_peer(cleanup.candidate_peer)
+                        await asyncio.wait_for(
+                            self._close_peer(cleanup.candidate_peer),
+                            timeout=CALL_TERMINAL_CLEANUP_STEP_TIMEOUT_SECONDS,
+                        )
                     except Exception as exc:
+                        cleanup.last_attempt_timed_out = (
+                            cleanup.last_attempt_timed_out
+                            or isinstance(exc, asyncio.TimeoutError)
+                        )
                         logger.exception(
                             "[rayme-call] terminal.cleanup_failed session=%s step=candidate_peer exc=%s",
                             self.session_id,
@@ -3464,10 +3500,17 @@ class CallSession:
                     and cleanup.prompt_lease_releaser is not None
                 ):
                     try:
-                        await self._invoke_tts_prompt_lease_releaser(
-                            cleanup.prompt_lease_releaser
+                        await asyncio.wait_for(
+                            self._invoke_tts_prompt_lease_releaser(
+                                cleanup.prompt_lease_releaser
+                            ),
+                            timeout=CALL_TERMINAL_CLEANUP_STEP_TIMEOUT_SECONDS,
                         )
                     except Exception as exc:
+                        cleanup.last_attempt_timed_out = (
+                            cleanup.last_attempt_timed_out
+                            or isinstance(exc, asyncio.TimeoutError)
+                        )
                         logger.exception(
                             "[rayme-call] terminal.cleanup_failed session=%s step=prompt_lease exc=%s",
                             self.session_id,
@@ -3476,6 +3519,71 @@ class CallSession:
                     else:
                         cleanup.prompt_lease_pending = False
         return dict(cleanup.cancel_context)
+
+    async def _retry_terminal_cleanup_until_resolved(
+        self,
+        cleanup: _TerminalCleanup,
+    ) -> None:
+        """Keep terminal resource ownership live after outcome publication."""
+
+        try:
+            while (
+                self._terminal_cleanup_pending(cleanup)
+                and cleanup.attempts < CALL_TERMINAL_CLEANUP_RETRY_LIMIT
+            ):
+                exponent = max(cleanup.attempts - 1, 0)
+                delay = min(
+                    CALL_TERMINAL_CLEANUP_RETRY_BASE_SECONDS * (2**exponent),
+                    CALL_TERMINAL_CLEANUP_RETRY_MAX_SECONDS,
+                )
+                if delay > 0:
+                    await asyncio.sleep(delay)
+                await self._run_terminal_cleanup(cleanup)
+
+            if self._terminal_cleanup_pending(cleanup):
+                self._terminal_cleanup_failure_state = {
+                    "status": "retry_exhausted",
+                    "attempts": cleanup.attempts,
+                    "pending_steps": self._terminal_cleanup_pending_steps(cleanup),
+                }
+                logger.error(
+                    "[rayme-call] terminal.cleanup_exhausted session=%s "
+                    "attempts=%d pending=%s",
+                    self.session_id,
+                    cleanup.attempts,
+                    ",".join(self._terminal_cleanup_pending_steps(cleanup)),
+                )
+            else:
+                self._terminal_cleanup_failure_state = None
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            self._terminal_cleanup_failure_state = {
+                "status": "retry_task_failed",
+                "attempts": cleanup.attempts,
+                "pending_steps": self._terminal_cleanup_pending_steps(cleanup),
+                "error": exc.__class__.__name__,
+            }
+            logger.exception(
+                "[rayme-call] terminal.cleanup_retry_failed session=%s exc=%s",
+                self.session_id,
+                exc.__class__.__name__,
+            )
+
+    @staticmethod
+    def _terminal_cleanup_pending_steps(
+        cleanup: _TerminalCleanup,
+    ) -> list[str]:
+        pending: list[str] = []
+        if cleanup.cancel_pending:
+            pending.append("cancel")
+        if cleanup.active_peer_pending:
+            pending.append("active_peer")
+        if cleanup.candidate_peer_pending:
+            pending.append("candidate_peer")
+        if cleanup.prompt_lease_pending:
+            pending.append("prompt_lease")
+        return pending
 
     async def _release_tts_prompt_lease(self) -> None:
         async with self._lifecycle_lock:

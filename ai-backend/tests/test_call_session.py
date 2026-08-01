@@ -4295,6 +4295,131 @@ def test_terminal_cleanup_ledger_retries_only_failed_resources(
     assert prompt_attempts == (2 if failed_step == "prompt_lease" else 1)
 
 
+@pytest.mark.parametrize("blocked_step", ["active_peer", "prompt_lease"])
+def test_blocking_terminal_cleanup_publishes_once_and_retries_in_background(
+    monkeypatch: pytest.MonkeyPatch,
+    blocked_step: str,
+) -> None:
+    monkeypatch.setattr(
+        session_module,
+        "CALL_TERMINAL_CLEANUP_STEP_TIMEOUT_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(
+        session_module,
+        "CALL_TERMINAL_CLEANUP_RETRY_BASE_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(
+        session_module,
+        "CALL_TERMINAL_CLEANUP_RETRY_MAX_SECONDS",
+        0.01,
+    )
+    release = asyncio.Event()
+    events: list[dict[str, Any]] = []
+    successful_closes = 0
+    successful_releases = 0
+
+    class BlockingPeer(ScriptedPeerConnection):
+        async def close(self) -> None:
+            nonlocal successful_closes
+            self.close_calls += 1
+            if blocked_step == "active_peer" and not release.is_set():
+                await release.wait()
+            successful_closes += 1
+
+    async def release_prompt(_: str) -> bool:
+        nonlocal successful_releases
+        if blocked_step == "prompt_lease" and not release.is_set():
+            await release.wait()
+        successful_releases += 1
+        return True
+
+    async def scenario() -> None:
+        peer = BlockingPeer()
+        session = CallSession(
+            session_id=f"blocking-terminal-{blocked_step}",
+            peer_connection=peer,
+            event_sink=events.append,
+        )
+        assert await session.install_or_release_tts_prompt_lease(release_prompt)
+
+        winner = asyncio.create_task(session.end(reason="hangup"))
+        follower = asyncio.create_task(session.fail(reason="connection_failed"))
+        winner_result, follower_result = await asyncio.wait_for(
+            asyncio.gather(winner, follower),
+            timeout=0.5,
+        )
+        assert winner_result == follower_result
+        assert winner_result["type"] == "ended"
+        assert [event["type"] for event in events] == ["ended"]
+        cleanup_task = session._terminal_cleanup_task
+        assert cleanup_task is not None
+        assert cleanup_task.done() is False
+
+        release.set()
+        await asyncio.wait_for(cleanup_task, timeout=0.5)
+        cleanup = session._terminal_cleanup
+        assert cleanup is not None
+        assert session._terminal_cleanup_pending(cleanup) is False
+        assert session._terminal_cleanup_failure_state is None
+
+    _run(scenario())
+    assert successful_closes == 1
+    assert successful_releases == 1
+    assert [event["type"] for event in events] == ["ended"]
+
+
+def test_terminal_cleanup_retries_beyond_three_until_qwen_lease_releases(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        session_module,
+        "CALL_TERMINAL_CLEANUP_RETRY_BASE_SECONDS",
+        0.0,
+    )
+    monkeypatch.setattr(
+        session_module,
+        "CALL_TERMINAL_CLEANUP_RETRY_MAX_SECONDS",
+        0.0,
+    )
+    release_attempts = 0
+    successful_releases = 0
+    events: list[dict[str, Any]] = []
+
+    async def release_prompt(_: str) -> bool:
+        nonlocal release_attempts, successful_releases
+        release_attempts += 1
+        if release_attempts <= 5:
+            raise RuntimeError("injected transient lease release failure")
+        successful_releases += 1
+        return True
+
+    async def scenario() -> None:
+        session, _ = _new_session(event_sink=events.append)
+        session.engine_id = "qwen3_1_7b"
+        assert await session.install_or_release_tts_prompt_lease(release_prompt)
+
+        winner, follower = await asyncio.gather(
+            session.end(reason="hangup"),
+            session.fail(reason="connection_failed"),
+        )
+        assert winner == follower
+        assert winner["type"] == "ended"
+        cleanup_task = session._terminal_cleanup_task
+        assert cleanup_task is not None
+        await asyncio.wait_for(cleanup_task, timeout=0.5)
+        cleanup = session._terminal_cleanup
+        assert cleanup is not None
+        assert cleanup.prompt_lease_pending is False
+        assert session._terminal_cleanup_failure_state is None
+
+    _run(scenario())
+    assert release_attempts == 6
+    assert successful_releases == 1
+    assert [event["type"] for event in events] == ["ended"]
+
+
 @pytest.mark.parametrize("first_terminal", ["end", "fail"])
 def test_terminal_race_emits_only_the_winning_outcome(first_terminal: str) -> None:
     events: list[dict[str, Any]] = []
