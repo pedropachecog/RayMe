@@ -1014,7 +1014,7 @@ def test_inflight_reconnect_offer_does_not_steal_active_session_media(
         ("iceconnectionstatechange", "iceConnectionState"),
     ],
 )
-def test_failed_replacement_callback_resolves_deferred_active_close(
+def test_failed_replacement_callback_leaves_active_close_to_reconnect_grace(
     candidate_event: str,
     candidate_state_attribute: str,
 ) -> None:
@@ -1062,6 +1062,11 @@ def test_failed_replacement_callback_resolves_deferred_active_close(
 
         setattr(candidate, candidate_state_attribute, "failed")
         await candidate.handlers[candidate_event]()
+        assert candidate.close_calls == 1
+        assert active_peer.close_calls == 0
+        assert session.state == "reconnecting"
+
+        await session.resolve_deferred_connection_state()
         return session, active_peer, candidate
 
     session, active_peer, candidate = asyncio.run(scenario())
