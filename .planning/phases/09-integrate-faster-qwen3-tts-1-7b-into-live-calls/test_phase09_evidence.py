@@ -428,6 +428,39 @@ def test_hardware_tracer_scales_normalized_float_pcm_once() -> None:
     assert actual.tolist() == [-32767, -16384, 0, 16384, 32767]
 
 
+def test_hardware_tracer_consumer_records_and_detects_int16_audio() -> None:
+    import asyncio
+    import numpy as np
+
+    tracer = _runner_module("phase09_runner_capture_consumer").load_hardware_tracer()
+
+    class Frame:
+        def to_ndarray(self) -> object:
+            return np.asarray([[0, 64, 256, -512]], dtype=np.int16)
+
+    class Track:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def recv(self) -> object:
+            self.calls += 1
+            if self.calls == 1:
+                return Frame()
+            raise RuntimeError("capture complete")
+
+    async def scenario() -> tuple[list[tuple[float, object]], float | None]:
+        capture = tracer.WebRtcCapture()
+        capture.start_capture("turn-int16")
+        await capture._consume_audio(Track())
+        return capture.stop_capture()
+
+    frames, first_nonzero = asyncio.run(scenario())
+
+    assert first_nonzero is not None
+    assert len(frames) == 1
+    assert frames[0][1].tolist() == [0, 64, 256, -512]
+
+
 def _hash_bytes(value: bytes) -> str:
     import hashlib
 

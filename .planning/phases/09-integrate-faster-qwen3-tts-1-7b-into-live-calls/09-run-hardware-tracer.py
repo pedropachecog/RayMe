@@ -510,6 +510,8 @@ class WebRtcCapture:
         raise TracerFailure("Timed out waiting for audible WebRTC playout")
 
     async def _consume_audio(self, track: Any) -> None:
+        import numpy as np
+
         while True:
             try:
                 frame = await track.recv()
