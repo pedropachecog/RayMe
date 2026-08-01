@@ -313,7 +313,12 @@ async def run_manifest_scenarios(
 
 
 def _normalized_words(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9]+", text.lower())
+    words = re.findall(r"[a-z0-9]+", text.lower())
+    normalized: list[str] = []
+    for word in words:
+        numeric_ordinal = re.fullmatch(r"([0-9]+)(?:st|nd|rd|th)", word)
+        normalized.append(numeric_ordinal.group(1) if numeric_ordinal else word)
+    return normalized
 
 
 def _wer(target: str, observed: str) -> float:

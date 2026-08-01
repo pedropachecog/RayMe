@@ -454,6 +454,17 @@ def test_hardware_tracer_collapses_packed_stereo_without_stretching_audio() -> N
     assert actual.tolist() == [200, 0, 1000]
 
 
+def test_evidence_normalizes_numeric_ordinal_date_suffixes() -> None:
+    runner = _runner_module("phase09_runner_numeric_ordinal_normalization")
+
+    expected = "Pedro called on October 12."
+    observed = "Pedro called on October 12th."
+
+    assert runner._normalized_words(expected)[-1] == "12"
+    assert runner._normalized_words(observed)[-1] == "12"
+    assert runner._wer(expected, observed) == 0.0
+
+
 def test_hardware_tracer_consumer_records_and_detects_int16_audio() -> None:
     import asyncio
     import numpy as np
