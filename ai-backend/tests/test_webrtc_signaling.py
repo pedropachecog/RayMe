@@ -1317,6 +1317,16 @@ def test_webrtc_reoffer_engine_switch_cancels_exact_active_qwen_request(
             },
         )
         assert switched.status_code == 200
+        session = client.app.state.call_session_manager.get_session(session_id)
+        candidate = session._peer_lifecycle.candidate
+        assert candidate is not None
+        accepted, _ = asyncio.run(
+            session.accept_pending_peer_connection(
+                candidate.peer_connection,
+                generation=candidate.generation,
+            )
+        )
+        assert accepted is True
     finally:
         adapter.release_stream.set()
         thread.join(2.0)
