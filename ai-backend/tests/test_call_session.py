@@ -112,6 +112,23 @@ class ObservableStreamingOutboundAudioTrack(ScriptedOutboundAudioTrack):
         return result
 
 
+class BlockedIdleOutboundAudioTrack(ScriptedOutboundAudioTrack):
+    def __init__(self) -> None:
+        super().__init__()
+        self.wait_started = asyncio.Event()
+        self.release_idle = asyncio.Event()
+        self.input_complete_calls = 0
+
+    def mark_playout_input_complete(self) -> None:
+        self.input_complete_calls += 1
+
+    async def wait_until_idle(self, *, timeout: float | None = None) -> bool:
+        self.wait_calls.append(timeout)
+        self.wait_started.set()
+        await self.release_idle.wait()
+        return True
+
+
 class ScriptedTtsAdapter:
     def __init__(self, *, delay: float = 0) -> None:
         self.delay = delay
@@ -1558,6 +1575,110 @@ def test_qwen_incremental_turn_carries_monotonic_segment_ordinals() -> None:
     ]
     assert [request.segment_ordinal for request in requests] == [0, 1]
     assert session._tts_turn_ledgers["turn-segment-entropy"].state == "completed"
+
+
+def test_qwen_nonfinal_segment_returns_before_playout_and_final_waits_turn_idle() -> None:
+    adapter = SlowQwenStreamingTtsAdapter(chunk_count=2)
+    adapter.release_completion.set()
+    track = BlockedIdleOutboundAudioTrack()
+    session, _ = _new_session(
+        tts_adapter=adapter,
+        outbound_audio_track=track,
+    )
+
+    async def scenario() -> None:
+        first = await asyncio.wait_for(
+            session.speak_text(
+                "turn-live-queued",
+                "The first segment starts playing immediately.",
+                "voice-qwen",
+                "qwen3_1_7b",
+                final_chunk=False,
+                segment_id="turn-live-queued:0",
+                segment_ordinal=0,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="The exact reference transcript.",
+            ),
+            timeout=1.0,
+        )
+        assert first["status"] == "queued"
+        assert track.wait_calls == []
+        assert track.input_complete_calls == 0
+        assert len(track.chunks) == 2
+
+        final_task = asyncio.create_task(
+            session.speak_text(
+                "turn-live-queued",
+                "The final segment may generate while earlier audio is pending.",
+                "voice-qwen",
+                "qwen3_1_7b",
+                final_chunk=True,
+                segment_id="turn-live-queued:1",
+                segment_ordinal=1,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="The exact reference transcript.",
+            )
+        )
+        await asyncio.wait_for(track.wait_started.wait(), timeout=1.0)
+        assert len(adapter.requests) == 2
+        assert len(track.chunks) == 4
+        assert not final_task.done()
+        assert track.input_complete_calls == 1
+
+        track.release_idle.set()
+        final = await asyncio.wait_for(final_task, timeout=1.0)
+        assert final["type"] == "ai_done"
+        assert final["tts_playback_final"]["playout_wait_completed"] is True
+
+    _run(scenario())
+
+
+def test_qwen_final_marker_is_only_waiter_after_nonfinal_admission() -> None:
+    adapter = SlowQwenStreamingTtsAdapter(chunk_count=2)
+    adapter.release_completion.set()
+    track = BlockedIdleOutboundAudioTrack()
+    session, _ = _new_session(
+        tts_adapter=adapter,
+        outbound_audio_track=track,
+    )
+
+    async def scenario() -> None:
+        queued = await asyncio.wait_for(
+            session.speak_text(
+                "turn-live-final-marker",
+                "This admitted segment must not wait for the speaker to drain.",
+                "voice-qwen",
+                "qwen3_1_7b",
+                final_chunk=False,
+                segment_id="turn-live-final-marker:0",
+                segment_ordinal=0,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="The exact reference transcript.",
+            ),
+            timeout=1.0,
+        )
+        assert queued["status"] == "queued"
+        assert track.wait_calls == []
+
+        final_task = asyncio.create_task(
+            session.complete_speech_turn(
+                turn_id="turn-live-final-marker",
+                voice_id="voice-qwen",
+                engine_id="qwen3_1_7b",
+                segment_id="turn-live-final-marker:1",
+                segment_ordinal=1,
+            )
+        )
+        await asyncio.wait_for(track.wait_started.wait(), timeout=1.0)
+        assert not final_task.done()
+        assert track.input_complete_calls == 1
+
+        track.release_idle.set()
+        final = await asyncio.wait_for(final_task, timeout=1.0)
+        assert final["type"] == "ai_done"
+        assert final["tts_playback_final"]["playout_wait_completed"] is True
+
+    _run(scenario())
 
 
 def test_qwen_failed_segment_retries_keep_reserved_ordinal_until_success() -> None:

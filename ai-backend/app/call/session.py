@@ -287,6 +287,7 @@ class CallSession:
         self._turn_started_at: str | None = None
         self._turn_index = 0
         self._tts_turn_ledgers: dict[str, _TtsTurnLedger] = {}
+        self._tts_turn_playback_seconds: dict[str, float] = {}
         self._speech_seen = False
         self._silence_ms = 0
         self._speech_start_frame: int | None = None
@@ -1532,6 +1533,22 @@ class CallSession:
             return event
 
         playback_final = dict(self._pending_speech_playback_final or {})
+        mark_track_input_complete = getattr(
+            self.outbound_audio_track,
+            "mark_playout_input_complete",
+            None,
+        )
+        if callable(mark_track_input_complete):
+            mark_track_input_complete()
+        turn_playback_seconds = self._tts_turn_playback_seconds.get(turn_id, 0.0)
+        playout_wait_completed = await self._wait_for_outbound_audio_playback(
+            turn_playback_seconds
+        )
+        playback_final["playout_wait_completed"] = playout_wait_completed
+        playback_final["turn_total_playback_ms"] = round(
+            turn_playback_seconds * 1000,
+            1,
+        )
         self._clear_pending_speech_terminal()
         self.state = "listening"
         result = await self.emit_event(
@@ -1677,9 +1694,15 @@ class CallSession:
                     },
                 )
                 await self.emit_event(audio_started_event)
-                playout_wait_completed = await self._wait_for_outbound_audio_playback(
-                    playback_seconds
+                turn_playback_seconds = self._record_tts_turn_playback(
+                    turn_id,
+                    playback_seconds,
                 )
+                playout_wait_completed: bool | None = None
+                if final_chunk:
+                    playout_wait_completed = await self._wait_for_outbound_audio_playback(
+                        turn_playback_seconds
+                    )
                 final_playback = {
                     "streaming_used": False,
                     "fallback_used": False,
@@ -1689,6 +1712,10 @@ class CallSession:
                     "total_playback_ms": round(playback_seconds * 1000, 1),
                     "inter_chunk_gaps_ms": [],
                     "playout_wait_completed": playout_wait_completed,
+                    "turn_total_playback_ms": round(
+                        turn_playback_seconds * 1000,
+                        1,
+                    ),
                 }
             else:
                 await self._queue_outbound_audio(wav_bytes)
@@ -1875,6 +1902,7 @@ class CallSession:
             ledger.next_ordinal = segment.ordinal + 1
             if segment.final_chunk:
                 ledger.state = "completed"
+                self._tts_turn_playback_seconds.pop(turn_id, None)
             segment.attempt_done.set()
 
     async def _release_tts_segment_attempt(
@@ -1906,6 +1934,19 @@ class CallSession:
             if segment.state != "committed":
                 segment.state = "cancelled"
                 segment.attempt_done.set()
+        self._tts_turn_playback_seconds.pop(turn_id, None)
+
+    def _record_tts_turn_playback(
+        self,
+        turn_id: str,
+        playback_seconds: float,
+    ) -> float:
+        total = self._tts_turn_playback_seconds.get(turn_id, 0.0) + max(
+            playback_seconds,
+            0.0,
+        )
+        self._tts_turn_playback_seconds[turn_id] = total
+        return total
 
     async def _speak_streaming_speech(
         self,
@@ -2318,7 +2359,7 @@ class CallSession:
             if generated_at_values:
                 generation_complete_ms = max(generation_complete_ms, generated_at_values[-1])
 
-            if stream_completed_normally:
+            if stream_completed_normally and final_chunk:
                 mark_track_input_complete = getattr(
                     self.outbound_audio_track,
                     "mark_playout_input_complete",
@@ -2337,11 +2378,20 @@ class CallSession:
                     cancelled_event["ai_audio_started_event"] = audio_started_event
                 return cancelled_event
 
-            playout_wait_completed = await self._wait_for_outbound_audio_playback(
-                playback_seconds
+            turn_playback_seconds = self._record_tts_turn_playback(
+                turn_id,
+                playback_seconds,
             )
-            playout_complete_ms = elapsed_ms()
+            if final_chunk:
+                playout_wait_completed = await self._wait_for_outbound_audio_playback(
+                    turn_playback_seconds
+                )
+                playout_complete_ms = elapsed_ms()
             playback_final = final_metrics()
+            playback_final["turn_total_playback_ms"] = round(
+                turn_playback_seconds * 1000,
+                1,
+            )
 
             if (
                 turn_id in self._cancelled_ai_turns
