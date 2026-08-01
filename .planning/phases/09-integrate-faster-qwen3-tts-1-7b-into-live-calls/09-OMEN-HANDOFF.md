@@ -1,6 +1,6 @@
 # Phase 09 OMEN Qwen Handoff
 
-RayMe is autonomously release-ready at deployed commit `2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae`. The remaining work is human acceptance: integrated listening and one physical multi-turn/barge-in/reconnect call on a real device. Neither has been claimed as complete.
+RayMe is autonomously release-ready at deployed commit `288c05b4742dda0aac76050658aa12a44041102e`. The remaining work is human acceptance: integrated listening and one physical multi-turn/barge-in/reconnect call on a real device. Neither has been claimed as complete.
 
 ## Live OMEN State
 
@@ -9,13 +9,13 @@ RayMe is autonomously release-ready at deployed commit `2721a4ef3ddfadf9cbc47acb
 | Web | `https://192.168.1.199:8443` |
 | AI health | `https://192.168.1.199:9443/health` |
 | WebRTC status | `https://192.168.1.199:9443/webrtc/status` — `ready`, live call ready, media transport ready |
-| Deployed commit | `2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae` |
+| Deployed commit | `288c05b4742dda0aac76050658aa12a44041102e` |
 | Resident engine | `qwen3_1_7b` |
 | Selected prompt | `ready` |
 | Active sessions | `0` before and after the real browser suite |
-| Prepared evidence voice ID | `voice_4770e0117d35481fa1fb595eef7939ff` |
+| Prepared evidence voice ID | `voice_84a55c199fb74c7f9cf4fa012ba23bf5` |
 | Prepared evidence voice name | `RayMe Phase 09 Synthetic Qwen Tracer` |
-| Prompt owner key | `voice_4770e0117d35481fa1fb595eef7939ff` — matches the live ready prompt after final finish-evidence cleanup |
+| Prompt owner key | `voice_84a55c199fb74c7f9cf4fa012ba23bf5` — matches the live ready prompt after final finish-evidence cleanup |
 
 The prepared voice is a mechanical generated non-person evidence fallback. Evidence runs may create additional transient fixture IDs, so identify it by the evidence voice name rather than one ID. It proves transport, streaming, recovery, stability, and privacy; it is not eligible for human likeness judgment. Before judging likeness or naturalness, upload and save the intended real-person reference with its matching transcript and agreed retention/deletion terms. The completed Voice Lab upload is the authorization event; there is no separate reference-authorization form.
 
@@ -30,7 +30,7 @@ All final release evidence below records the same deployed SHA:
 - `results/qwen3-soak.json` — 50-turn non-degradation and memory/throughput stability.
 - `results/qwen3-stt.json` — 50-turn spoken-message integrity.
 - `results/qwen3-speaker.json` — pinned WavLM early/middle/late and integrated-baseline drift proof.
-- `results/qwen3-browser.json` — real canonical desktop/mobile Chromium call proof, 6/6 passed in 3.4 minutes, with two completed cycles, two `ai_audio_started` events, two `ai_done` events, and two listening recoveries per device; provenance and fixture-path guards passed.
+- `results/qwen3-browser.json` — real canonical desktop/mobile Chromium call proof, 4/4 passed in 2.8 minutes, with two completed cycles and the required `ai_audio_started`, `ai_done`, persistence, and listening-recovery contracts on each device; both fixture-path guards passed.
 - `results/qwen3-log-leak-scan.json` — no raw reference audio, transcript, or local-path leakage in structured evidence or service logs.
 
 Raw reference audio, transcripts, embeddings, and scorer audio remain local and uncommitted.
@@ -39,9 +39,10 @@ Raw reference audio, transcripts, embeddings, and scorer audio remain local and 
 
 - The only deployment command was `RAYME_OMEN_VERIFY_QWEN3=1 scripts/deploy-omen.sh`.
 - The canonical deploy passed database schema migration, pinned Faster Qwen3-TTS `v0.3.2`/source/model identity, CUDA RTX 3060 residency, the production streaming tracer, exact 50-turn core evidence, and the independent core verifier.
-- The mandatory Phase 09 code review is `CLEAN`: 60 files reviewed, 0 findings.
-- Three post-review incident repairs are included in the deployed SHA: `2ed38e3` runs the OMEN database migration before launch, `f7feb6c` releases the finish-session prompt lease, and `2721a4e` makes the fake microphone loop-safe while cleaning up closed peers so the real browser suite preserves Qwen reply completion.
-- The same-commit acoustic/leak finish runner and the real browser suite were rerun after those repairs. The desktop two-cycle test passed in 1.5 minutes, the mobile two-cycle test passed in 1.6 minutes, all 6 tests passed in 3.4 minutes, and the pre/post status remained live/media ready with `qwen3_1_7b` prompt ready and `active_sessions=0`.
+- The latest mandatory live-call code review is `CLEAN`: 15 files reviewed, 0 findings. Its gate includes the receiver-drain, cancellation telemetry, browser correlation, and evidence-runner changes through `345fe33`.
+- The deployed repairs normalize uploaded audio to 16 kHz before alignment, remove authorization form/save gates, preserve curated evidence diagnostics, correlate duplicate interrupt acknowledgements, require measured zero pending playout, validate bounded drain values, and retain final cancellation telemetry across speech-task teardown.
+- The same-commit acoustic/leak finish runner and the real browser suite were rerun after those repairs. All 4 desktop/mobile tests passed in 2.8 minutes, and post-suite status remained live/media ready with `qwen3_1_7b` prompt ready and `active_sessions=0`.
+- A deployed 48 kHz stereo sample completed upload → built-in transcription → Qwen save without authorization fields → generated test-play. The transcript matched the spoken sample exactly and the temporary verification voice was deleted afterward.
 
 ## Automated Gate Commands
 
@@ -56,15 +57,15 @@ Expected and observed output: `PASS`.
 Then run the exact operational gate:
 
 ```bash
-scripts/operational-check.sh handoff --phase-dir .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls --commit "$(python3 .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-verify-evidence.py --print-deployed-commit)" --tests "PASS: full backend/server/client unit suites, mocked readiness UI, verifier self-test, canonical deploy evidence, and deployed Qwen live-call E2E" --ui-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-browser.json --live-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-call-flow.json --gpu-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-runtime.json
+scripts/operational-check.sh handoff --phase-dir .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls --commit "$(python3 .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-verify-evidence.py --print-deployed-commit)" --tests "PASS: full backend/server/client unit suites, mocked readiness UI, verifier self-test, canonical deploy evidence, deployed Voice Lab 48 kHz upload/transcribe/save/test-play, and deployed Qwen desktop/mobile live-call E2E" --ui-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-browser.json --live-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-call-flow.json --gpu-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-runtime.json
 ```
 
-Observed result: `operational-check: handoff gate passed` for commit `2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae`.
+Observed result: `operational-check: handoff gate passed` for commit `288c05b4742dda0aac76050658aa12a44041102e`.
 
 ## Physical Multi-Turn and Barge-In Acceptance
 
 1. From the physical test device, open `https://192.168.1.199:8443`. In Settings, confirm the AI backend is `https://192.168.1.199:9443` and Qwen3-TTS 1.7B is available.
-2. In Voice Lab, upload and save the intended real-person Qwen reference with its matching transcript and retention/deletion terms. Assign that saved voice to the call character. No separate reference-authorization fields are required. Do not judge likeness with the generated fallback listed above.
+2. In Voice Lab, upload the intended Qwen reference, use the built-in transcription, and confirm the transcript matches the recording. Uploading is the authorization event; there are no separate authorization fields. Save it and assign it to the call character. Do not judge likeness with the generated fallback listed above.
 3. Start the call and confirm the UI reaches `Listening` before speaking.
 4. Speak a normal first turn. Confirm audible playback begins while the assistant/TTS stream is still completing; silence until whole-response synthesis is a failure.
 5. During a later spoken response, talk over RayMe. Confirm audio stops promptly, the cancelled assistant response is not persisted as completed speech, and the UI returns to `Listening` so the interruption becomes the next turn.

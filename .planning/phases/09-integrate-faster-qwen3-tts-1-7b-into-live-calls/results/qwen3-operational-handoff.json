@@ -2,8 +2,8 @@
   "schema_version": 1,
   "phase": "09",
   "plan": "15",
-  "generated_at": "2026-08-01T12:38:06Z",
-  "deployed_commit": "2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae",
+  "generated_at": "2026-08-01T17:30:17Z",
+  "deployed_commit": "288c05b4742dda0aac76050658aa12a44041102e",
   "canonical_endpoints": {
     "web_url": "https://192.168.1.199:8443",
     "ai_health_url": "https://192.168.1.199:9443/health",
@@ -34,10 +34,10 @@
     }
   },
   "selected_saved_voice": {
-    "voice_id": "voice_2ff7f9b73a4040648d2d8317b07cf02d",
-    "name": "Live Call Voice 1785565019627",
+    "voice_id": "voice_84a55c199fb74c7f9cf4fa012ba23bf5",
+    "name": "RayMe Phase 09 Synthetic Qwen Tracer",
     "engine_id": "qwen3_1_7b",
-    "prompt_owner_key_sha256": "8481585640f8e716076611f1f49b8ae034cb58cabd95460b7c55165e48da1df2",
+    "prompt_owner_key_sha256": "f973bee44969b063b02627404edf8f715d80263f4aa6718678a3097ce4594fd4",
     "prompt_owner_key_matches_live_status": true,
     "fixture_kind": "generated_non_person_fixture",
     "authorization_basis": "generated_non_person_fixture",
@@ -62,12 +62,12 @@
   "automated_verification": {
     "decision_ready_command": "python3 .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-verify-evidence.py --decision-ready --expected-commit \"$(python3 .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-verify-evidence.py --print-deployed-commit)\"",
     "decision_ready_output": "PASS",
-    "operational_handoff_command": "scripts/operational-check.sh handoff --phase-dir .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls --commit \"$(python3 .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-verify-evidence.py --print-deployed-commit)\" --tests \"PASS: full backend/server/client unit suites, mocked readiness UI, verifier self-test, canonical deploy evidence, and deployed Qwen live-call E2E\" --ui-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-browser.json --live-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-call-flow.json --gpu-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-runtime.json",
+    "operational_handoff_command": "scripts/operational-check.sh handoff --phase-dir .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls --commit 288c05b4742dda0aac76050658aa12a44041102e --tests \"PASS: full backend/server/client unit suites, mocked readiness UI, verifier self-test, canonical deploy evidence, deployed Voice Lab 48 kHz upload/transcribe/save/test-play, and deployed Qwen desktop/mobile live-call E2E\" --ui-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-browser.json --live-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-call-flow.json --gpu-evidence .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/results/qwen3-runtime.json",
     "operational_handoff_output": "operational-check: handoff gate passed",
-    "browser_live_e2e": "6/6 passed across desktop and mobile Chromium, including provenance and fixture-path guards",
-    "browser_live_e2e_duration": "3.4m",
-    "desktop_two_cycle_duration": "1.5m",
-    "mobile_two_cycle_duration": "1.6m",
+    "browser_live_e2e": "4/4 passed across desktop and mobile Chromium, including both two-cycle production calls and both fixture-path guards",
+    "browser_live_e2e_duration": "2.8m",
+    "desktop_two_cycle_duration": "included in the 2.8m serial suite",
+    "mobile_two_cycle_duration": "included in the 2.8m serial suite",
     "real_user_to_ai_cycles_per_device": 2,
     "listening_recoveries_per_device": 2
   },
@@ -81,32 +81,33 @@
       "CUDA on NVIDIA GeForce RTX 3060 with one-hot qwen3_1_7b residency",
       "production streaming tracer",
       "exact 50-turn core evidence",
-      "independent core evidence verifier"
+      "independent core evidence verifier",
+      "48 kHz Voice Lab upload, transcription, Qwen save without authorization fields, and generated test-play"
     ]
   },
   "mandatory_code_review": {
     "status": "clean",
-    "files_reviewed": 60,
+    "files_reviewed": 15,
     "findings": 0,
-    "reviewed_commit": "4f6efd9"
+    "reviewed_commit": "345fe33"
   },
   "post_review_incident_repairs": [
     {
-      "commit": "2ed38e3",
-      "repair": "Run the canonical OMEN database migration before service launch."
+      "commit": "df9346f",
+      "repair": "Normalize uploaded reference audio to 16 kHz before faster-whisper alignment and remove the Voice Lab authorization form and save gates."
     },
     {
-      "commit": "f7feb6c",
-      "repair": "Release the evidence prompt lease when the finish session closes."
+      "commit": "50d2313",
+      "repair": "Keep unexpected evidence-runner failures sanitized while preserving curated diagnostics."
     },
     {
-      "commit": "2721a4e",
-      "repair": "Use loop-safe fake microphone teardown and clean up closed peers so real live E2E preserves Qwen reply completion."
+      "commit": "2efdecd..345fe33",
+      "repair": "Correlate receiver drains, observe delayed interrupt events, require exact measured zero pending playout, validate drain durations, and preserve cancellation telemetry across speech-task teardown."
     }
   ],
   "physical_acceptance_workflow": [
     "Open the canonical RayMe web URL from the physical test device and confirm Settings still names the canonical AI backend and qwen3_1_7b.",
-    "In Voice Lab, save or select the intended real-person Qwen reference only after confirming the data steward, authorization basis, LAN test scope, matching transcript, and retention/deletion terms.",
+    "In Voice Lab, upload the intended Qwen reference, transcribe it, and confirm the transcript matches. Uploading the sample is the authorization event; there are no separate authorization fields.",
     "Assign that saved voice to the call character; do not judge likeness using the generated non-person fallback named in this handoff.",
     "Start the physical call and confirm Listening is visible before speaking.",
     "Speak a normal first turn and confirm audible playback starts while the assistant is still generating, not after whole-response synthesis completes.",

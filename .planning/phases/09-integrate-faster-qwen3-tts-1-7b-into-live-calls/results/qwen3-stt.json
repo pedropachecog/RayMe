@@ -3,8 +3,8 @@
   "critical_gates": [
     "spoken_message_integrity"
   ],
-  "deployed_commit": "2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae",
-  "generated_at": "2026-08-01T12:23:44.517699Z",
+  "deployed_commit": "288c05b4742dda0aac76050658aa12a44041102e",
+  "generated_at": "2026-08-01T17:17:34.994662Z",
   "message_integrity": [
     {
       "consequential_terms_pass": true,
