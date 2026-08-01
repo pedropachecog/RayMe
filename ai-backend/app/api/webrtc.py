@@ -77,7 +77,7 @@ class SpeakRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     turn_id: str = Field(min_length=1, max_length=128)
-    text: str = Field(min_length=1, max_length=5000)
+    text: str = Field(max_length=5000)
     voice_id: str = Field(min_length=1, max_length=128)
     engine_id: str = Field(min_length=1, max_length=64)
     final_chunk: bool = False
@@ -105,6 +105,10 @@ class SpeakRequest(BaseModel):
     def require_paired_release_evidence_fields(self) -> "SpeakRequest":
         if (self.release_evidence_mode is None) != (self.release_evidence_seed is None):
             raise ValueError("release evidence mode and seed must be provided together")
+        if not self.text.strip() and not (
+            self.engine_id == "qwen3_1_7b" and self.final_chunk
+        ):
+            raise ValueError("speech text is required unless finalizing a Qwen turn")
         return self
 
 
@@ -465,37 +469,49 @@ async def speak_session(
                     "engine_id": payload.engine_id,
                 },
             )
-        qwen_reference_audio = None
-        if payload.engine_id == "qwen3_1_7b":
-            qwen_reference_audio = _decode_reference_audio(
-                payload.reference_audio_b64 or ""
+        terminal_marker = (
+            payload.engine_id == "qwen3_1_7b"
+            and payload.final_chunk
+            and not payload.text.strip()
+        )
+        if terminal_marker:
+            event = await session.complete_speech_turn(
+                turn_id=payload.turn_id,
+                voice_id=payload.voice_id,
+                engine_id=payload.engine_id,
             )
-        adapter = _tts_adapter(
-            request,
-            payload.engine_id,
-            voice_key=payload.voice_id,
-            reference_audio=qwen_reference_audio,
-            reference_transcript=payload.reference_transcript,
-        )
-        event = await session.speak_text(
-            payload.turn_id,
-            payload.text,
-            payload.voice_id,
-            payload.engine_id,
-            final_chunk=payload.final_chunk,
-            tts_adapter=adapter,
-            reference_audio_b64=payload.reference_audio_b64,
-            reference_transcript=payload.reference_transcript,
-            reference_audio_content_type=payload.reference_audio_content_type,
-            voxcpm2_cloning_mode=payload.voxcpm2_cloning_mode,
-            voxcpm2_style_prompt=payload.voxcpm2_style_prompt,
-            voxcpm2_cfg_value=payload.voxcpm2_cfg_value,
-            voxcpm2_inference_timesteps=payload.voxcpm2_inference_timesteps,
-            voxcpm2_normalize=payload.voxcpm2_normalize,
-            voxcpm2_denoise=payload.voxcpm2_denoise,
-            qwen3_release_evidence_mode=payload.release_evidence_mode,
-            qwen3_release_evidence_seed=payload.release_evidence_seed,
-        )
+        else:
+            qwen_reference_audio = None
+            if payload.engine_id == "qwen3_1_7b":
+                qwen_reference_audio = _decode_reference_audio(
+                    payload.reference_audio_b64 or ""
+                )
+            adapter = _tts_adapter(
+                request,
+                payload.engine_id,
+                voice_key=payload.voice_id,
+                reference_audio=qwen_reference_audio,
+                reference_transcript=payload.reference_transcript,
+            )
+            event = await session.speak_text(
+                payload.turn_id,
+                payload.text,
+                payload.voice_id,
+                payload.engine_id,
+                final_chunk=payload.final_chunk,
+                tts_adapter=adapter,
+                reference_audio_b64=payload.reference_audio_b64,
+                reference_transcript=payload.reference_transcript,
+                reference_audio_content_type=payload.reference_audio_content_type,
+                voxcpm2_cloning_mode=payload.voxcpm2_cloning_mode,
+                voxcpm2_style_prompt=payload.voxcpm2_style_prompt,
+                voxcpm2_cfg_value=payload.voxcpm2_cfg_value,
+                voxcpm2_inference_timesteps=payload.voxcpm2_inference_timesteps,
+                voxcpm2_normalize=payload.voxcpm2_normalize,
+                voxcpm2_denoise=payload.voxcpm2_denoise,
+                qwen3_release_evidence_mode=payload.release_evidence_mode,
+                qwen3_release_evidence_seed=payload.release_evidence_seed,
+            )
     except asyncio.CancelledError:
         # The SSE generator on the web-ui side was cancelled (e.g., HTTP
         # connection closed). Return 502 so the web-ui client sees a

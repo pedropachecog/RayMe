@@ -1097,6 +1097,66 @@ def test_qwen_normal_multi_segment_turn_persists_once_after_one_normal_terminal(
     ]
 
 
+def test_qwen_boundary_terminated_turn_still_submits_one_backend_terminal(
+    call_fixture: CallFixture,
+) -> None:
+    class BoundaryAwareBackend(ScriptedCallBackend):
+        async def speak_call(
+            self,
+            base_url: str,
+            session_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            self.speak_calls.append(
+                {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
+            )
+            event: dict[str, Any] = {
+                "turn_id": payload["turn_id"],
+                "tts_playback_final": {"playout_wait_completed": True},
+            }
+            if payload["final_chunk"]:
+                event["type"] = "ai_done"
+            else:
+                event["status"] = "queued"
+            return {"session_id": session_id, "event": event}
+
+    visible_text = "This complete Qwen reply ends at its sentence boundary."
+    call_fixture.completion.token_sequences = [[visible_text]]
+    thread_id, _ = asyncio.run(
+        _insert_qwen_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    calls_module = importlib.import_module("app.api.calls")
+    backend = BoundaryAwareBackend()
+    call_fixture.app.dependency_overrides[calls_module.get_call_backend_client] = lambda: backend
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-qwen-boundary-terminal",
+            "text": "Finish this live turn normally.",
+            "source": "user_final",
+        },
+    )
+
+    assert response.status_code == 200
+    assert [call["payload"]["final_chunk"] for call in backend.speak_calls] == [
+        False,
+        True,
+    ]
+    assert [call["payload"]["text"] for call in backend.speak_calls] == [
+        visible_text,
+        "",
+    ]
+    events = _sse_events(response.text)
+    assert sum(event.get("type") == "ai_done" for event in events) == 1
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert [row for row in rows if row[0] == "ai_speech"] == [
+        ("ai_speech", "assistant", visible_text)
+    ]
+
+
 @pytest.mark.parametrize("after_audio", [False, True])
 def test_cancelled_qwen_turn_never_persists_complete_speech_or_normal_done(
     call_fixture: CallFixture,

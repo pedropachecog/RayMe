@@ -186,6 +186,10 @@ class CallSession:
         self._active_tts_cancel_requested = False
         self._active_tts_metrics_snapshot: Callable[[], dict[str, Any]] | None = None
         self._last_tts_cancel_context: dict[str, Any] | None = None
+        self._pending_speech_terminal_turn_id: str | None = None
+        self._pending_speech_terminal_voice_id: str | None = None
+        self._pending_speech_terminal_engine_id: str | None = None
+        self._pending_speech_playback_final: dict[str, Any] | None = None
         self._late_tts_event_discard_count = 0
         self._undelivered_events: list[dict[str, Any]] = []
         self._media_reconnect_grace_pending = False
@@ -928,12 +932,56 @@ class CallSession:
         if changed and (
             self.active_turn_task is not None
             or self._active_tts_turn_id is not None
+            or self._pending_speech_terminal_turn_id is not None
         ):
             await self.cancel_ai_turn(cause="engine_switch")
             if self.state not in {"ended", "failed"}:
                 self.state = "listening"
         self.voice_id = voice_id
         self.engine_id = engine_id
+
+    async def complete_speech_turn(
+        self,
+        *,
+        turn_id: str,
+        voice_id: str,
+        engine_id: str,
+    ) -> dict[str, Any]:
+        """Terminalize a fully played incremental turn without synthesizing again."""
+        if turn_id in self._cancelled_ai_turns:
+            return {"status": "cancelled", "turn_id": turn_id}
+
+        matches_pending = (
+            turn_id == self._pending_speech_terminal_turn_id
+            and voice_id == self._pending_speech_terminal_voice_id
+            and engine_id == self._pending_speech_terminal_engine_id
+            and self._pending_speech_playback_final is not None
+        )
+        if not matches_pending:
+            event = failed_event(
+                session_id=self.session_id,
+                turn_id=turn_id,
+                code="call_tts_failed",
+                message="Speech playback failed. Please try again.",
+                retry_allowed=True,
+            )
+            event["engine_id"] = engine_id
+            await self.emit_event(event)
+            return event
+
+        playback_final = dict(self._pending_speech_playback_final or {})
+        self._clear_pending_speech_terminal()
+        self.state = "listening"
+        return await self.emit_event(
+            simple_event(
+                AI_DONE_EVENT,
+                session_id=self.session_id,
+                turn_id=turn_id,
+                voice_id=voice_id,
+                engine_id=engine_id,
+                tts_playback_final=playback_final,
+            )
+        )
 
     async def speak_text(
         self,
@@ -1562,6 +1610,7 @@ class CallSession:
                 return cancelled_event
 
             if final_chunk:
+                self._clear_pending_speech_terminal()
                 self.state = "listening"
                 done_event = await self.emit_event(
                     simple_event(
@@ -1586,6 +1635,10 @@ class CallSession:
             }
             if audio_started_event is not None:
                 queued_event["ai_audio_started_event"] = audio_started_event
+            self._pending_speech_terminal_turn_id = turn_id
+            self._pending_speech_terminal_voice_id = voice_id
+            self._pending_speech_terminal_engine_id = engine_id
+            self._pending_speech_playback_final = dict(playback_final)
             return queued_event
         except asyncio.CancelledError:
             self._cancelled_ai_turns.add(turn_id)
@@ -1676,7 +1729,11 @@ class CallSession:
     ) -> dict[str, Any]:
         cancel_started_at = time.perf_counter()
         active = self.active_turn_task
-        resolved_turn_id = turn_id or self._active_tts_turn_id
+        resolved_turn_id = (
+            turn_id
+            or self._active_tts_turn_id
+            or self._pending_speech_terminal_turn_id
+        )
         request_id = self._active_tts_request_id
         if resolved_turn_id is not None:
             self._cancelled_ai_turns.add(resolved_turn_id)
@@ -1689,6 +1746,8 @@ class CallSession:
         cancel_acknowledged = await self._cancel_active_tts_generation(resolved_turn_id)
         metrics_snapshot = self._active_tts_metrics_snapshot
         playback_final = metrics_snapshot() if callable(metrics_snapshot) else None
+        if playback_final is None and self._pending_speech_playback_final is not None:
+            playback_final = dict(self._pending_speech_playback_final)
         cancel_context: dict[str, Any] = {"control_cause": cause}
         if resolved_turn_id is not None:
             cancel_context["cancelled_turn_id"] = resolved_turn_id
@@ -1699,6 +1758,7 @@ class CallSession:
         if playback_final is not None:
             cancel_context["tts_playback_final"] = playback_final
         self._last_tts_cancel_context = dict(cancel_context)
+        self._clear_pending_speech_terminal()
 
         if active is not None and active is not asyncio.current_task():
             cancel = getattr(active, "cancel", None)
@@ -1733,7 +1793,11 @@ class CallSession:
     async def end(self, *, reason: str = "ended") -> dict[str, Any]:
         cancel_context: dict[str, Any] = {}
         if self.ended_at is None:
-            if self.active_turn_task is not None or self._active_tts_turn_id is not None:
+            if (
+                self.active_turn_task is not None
+                or self._active_tts_turn_id is not None
+                or self._pending_speech_terminal_turn_id is not None
+            ):
                 cause = "session_close" if reason == "removed" else reason
                 cancel_context = await self.cancel_ai_turn(cause=cause)
             self.ended_at = datetime.now(timezone.utc)
@@ -1756,9 +1820,19 @@ class CallSession:
             )
         )
 
+    def _clear_pending_speech_terminal(self) -> None:
+        self._pending_speech_terminal_turn_id = None
+        self._pending_speech_terminal_voice_id = None
+        self._pending_speech_terminal_engine_id = None
+        self._pending_speech_playback_final = None
+
     async def fail(self, *, reason: str = "connection_failed") -> dict[str, Any]:
         cancel_context: dict[str, Any] = {}
-        if self.active_turn_task is not None or self._active_tts_turn_id is not None:
+        if (
+            self.active_turn_task is not None
+            or self._active_tts_turn_id is not None
+            or self._pending_speech_terminal_turn_id is not None
+        ):
             cancel_context = await self.cancel_ai_turn(cause="connection_failure")
         self.state = "failed"
         self.end_reason = reason

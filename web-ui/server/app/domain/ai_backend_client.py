@@ -152,9 +152,6 @@ class _SpeechSubmission:
     final_chunk: bool
 
 
-_SPEECH_TURN_FINISH = object()
-
-
 class SpeechTurn:
     """Bounded sequential scheduler over the existing WebRTC speak endpoint.
 
@@ -186,13 +183,10 @@ class SpeechTurn:
             "engine_id": engine_id,
             **dict(voice_reference),
         }
-        self._queue: asyncio.Queue[_SpeechSubmission | object] = asyncio.Queue(
-            maxsize=queue_capacity
-        )
+        self._queue: asyncio.Queue[_SpeechSubmission] = asyncio.Queue(maxsize=queue_capacity)
         self._worker: asyncio.Task[None] | None = None
         self._closed = False
         self._terminal: SpeechTurnTerminal | None = None
-        self._last_response: dict[str, Any] | None = None
 
     @property
     def terminal(self) -> SpeechTurnTerminal | None:
@@ -211,10 +205,11 @@ class SpeechTurn:
     async def finalize(self, tail: str | None = None) -> SpeechTurnTerminal:
         self._require_open()
         final_text = str(tail or "").strip()
-        if final_text:
-            await self._queue.put(_SpeechSubmission(text=final_text, final_chunk=True))
-        else:
-            await self._queue.put(_SPEECH_TURN_FINISH)
+        # Even when the incremental segmenter emitted the final sentence at a
+        # natural boundary, the AI backend still owns the call state machine.
+        # Send an explicit empty terminal marker instead of completing only in
+        # this web process; the marker emits ai_done without replaying TTS.
+        await self._queue.put(_SpeechSubmission(text=final_text, final_chunk=True))
         self._closed = True
         self._ensure_worker()
         assert self._worker is not None
@@ -248,12 +243,6 @@ class SpeechTurn:
         try:
             while True:
                 item = await self._queue.get()
-                if item is _SPEECH_TURN_FINISH:
-                    self._terminal = _speech_terminal_from_response(
-                        self._last_response,
-                        require_final=False,
-                    )
-                    return
                 assert isinstance(item, _SpeechSubmission)
                 if self._terminal is not None:
                     return
@@ -272,7 +261,6 @@ class SpeechTurn:
                     self._terminal = _speech_error_terminal("call_tts_failed")
                     return
 
-                self._last_response = result
                 observed = _speech_terminal_from_response(
                     result,
                     require_final=item.final_chunk,

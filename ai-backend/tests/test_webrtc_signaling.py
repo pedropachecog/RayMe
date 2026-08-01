@@ -1080,6 +1080,128 @@ def test_webrtc_prepared_qwen_speak_uses_native_stream_and_truthful_carriers(
     assert adapter.calls[0].qwen3_release_evidence_seed is None
 
 
+def test_webrtc_qwen_empty_final_marker_terminalizes_without_repeating_synthesis(
+    stub_webrtc: None,
+) -> None:
+    adapter = ScriptedQwenStreamingTtsAdapter()
+    manager = ScriptedPreparingModelManager(adapter, ready=True)
+    client = _client(model_manager=manager)
+    session_id = "call-session-qwen-empty-terminal"
+    client.post(
+        "/webrtc/offer",
+        json={
+            **_offer_payload(session_id=session_id),
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+        },
+    )
+    common = {
+        "turn_id": "ai-turn-qwen-empty-terminal",
+        "voice_id": "voice-qwen",
+        "engine_id": "qwen3_1_7b",
+        "reference_audio_b64": "cmVhbC1zYW1wbGU=",
+        "reference_transcript": "The exact reference transcript.",
+    }
+
+    rejected = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={**common, "text": "", "final_chunk": False},
+    )
+    assert rejected.status_code == 422
+
+    segment = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={
+            **common,
+            "text": "This sentence was already played as an early segment.",
+            "final_chunk": False,
+        },
+    )
+    assert segment.status_code == 200
+    segment_payload = segment.json()
+    assert segment_payload["state"] == "speaking"
+    assert segment_payload["event"]["status"] == "queued"
+    assert segment_payload["event"]["tts_playback_final"]["playout_wait_completed"] is True
+    assert adapter.stream_identities == [
+        ("ai-turn-qwen-empty-terminal", "voice-qwen")
+    ]
+
+    terminal = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={**common, "text": "", "final_chunk": True},
+    )
+    assert terminal.status_code == 200
+    terminal_payload = terminal.json()
+    assert terminal_payload["state"] == "listening"
+    terminal_event = terminal_payload["event"]
+    assert terminal_event["type"] == "ai_done"
+    assert terminal_event["tts_playback_final"] == segment_payload["event"][
+        "tts_playback_final"
+    ]
+    assert adapter.stream_identities == [
+        ("ai-turn-qwen-empty-terminal", "voice-qwen")
+    ]
+
+
+def test_webrtc_qwen_interrupt_cancels_pending_empty_terminal(
+    stub_webrtc: None,
+) -> None:
+    adapter = ScriptedQwenStreamingTtsAdapter()
+    manager = ScriptedPreparingModelManager(adapter, ready=True)
+    client = _client(model_manager=manager)
+    session_id = "call-session-qwen-interrupt-pending-terminal"
+    client.post(
+        "/webrtc/offer",
+        json={
+            **_offer_payload(session_id=session_id),
+            "voice_id": "voice-qwen",
+            "engine_id": "qwen3_1_7b",
+        },
+    )
+    session = client.app.state.call_session_manager.get_session(session_id)
+    emitted_events: list[dict[str, Any]] = []
+    session.event_sink = emitted_events.append
+    common = {
+        "turn_id": "ai-turn-qwen-interrupt-pending-terminal",
+        "voice_id": "voice-qwen",
+        "engine_id": "qwen3_1_7b",
+        "reference_audio_b64": "cmVhbC1zYW1wbGU=",
+        "reference_transcript": "The exact reference transcript.",
+    }
+
+    segment = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={
+            **common,
+            "text": "This early segment finished before the user interrupted.",
+            "final_chunk": False,
+        },
+    )
+    assert segment.status_code == 200
+    assert segment.json()["state"] == "speaking"
+
+    interrupted = client.post(
+        INTERRUPT_ROUTE_TEMPLATE.format(session_id=session_id)
+    )
+    assert interrupted.status_code == 200
+    assert interrupted.json()["state"] == "listening"
+
+    late_terminal = client.post(
+        SPEAK_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={**common, "text": "", "final_chunk": True},
+    )
+    assert late_terminal.status_code == 200
+    assert late_terminal.json()["state"] == "listening"
+    assert late_terminal.json()["event"] == {
+        "status": "cancelled",
+        "turn_id": "ai-turn-qwen-interrupt-pending-terminal",
+    }
+    assert not any(event.get("type") == "ai_done" for event in emitted_events)
+    assert adapter.stream_identities == [
+        ("ai-turn-qwen-interrupt-pending-terminal", "voice-qwen")
+    ]
+
+
 def test_webrtc_qwen_release_evidence_seed_requires_explicit_evidence_session_and_propagates(
     stub_webrtc: None,
 ) -> None:
