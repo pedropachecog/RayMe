@@ -481,6 +481,9 @@ def test_fidelity_sweep_compares_upstream_and_bounded_fidelity_profiles() -> Non
         "negation-abbreviations",
         "punctuation-final-word",
     }
+    assert sweep.TARGET_SEEDS["names-numbers"] == (91004, 92100, 93100)
+    assert sweep.TARGET_SEEDS["negation-abbreviations"] == (91005, 92101, 93101)
+    assert sweep.TARGET_SEEDS["punctuation-final-word"] == (91006, 92102, 93102)
     assert sweep._wer("No, version 2.4.", "No version 2.4") == 0.0
 
 

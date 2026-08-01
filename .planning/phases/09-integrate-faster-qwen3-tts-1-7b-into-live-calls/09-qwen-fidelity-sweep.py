@@ -31,6 +31,11 @@ TARGETS = {
     "negation-abbreviations": "No, the U.S. office did not approve version 2.4, and Dr. Lee did not sign it.",
     "punctuation-final-word": "We can stop, wait, or continue; whichever you choose, remember the final word: lighthouse.",
 }
+TARGET_SEEDS = {
+    "names-numbers": (91004, 92100, 93100),
+    "negation-abbreviations": (91005, 92101, 93101),
+    "punctuation-final-word": (91006, 92102, 93102),
+}
 PROFILES = {
     "upstream-default": {
         "temperature": 0.9,
@@ -129,39 +134,49 @@ def generate(model_dir: Path, output_dir: Path) -> None:
     )
     manifest: list[dict[str, Any]] = []
     for profile_index, (profile_name, profile) in enumerate(PROFILES.items()):
-        for target_index, (target_name, target_text) in enumerate(TARGETS.items()):
-            seed = 92100 + target_index
-            _reset_rng(seed)
-            chunks: list[np.ndarray] = []
-            sample_rate = 24000
-            for audio, sample_rate, _timing in runtime.generate_voice_clone_streaming(
-                text=target_text,
-                language="English",
-                ref_text=REFERENCE_TEXT,
-                voice_clone_prompt=prompt,
-                max_new_tokens=384,
-                min_new_tokens=2,
-                chunk_size=4,
-                non_streaming_mode=True,
-                append_silence=True,
-                parity_mode=False,
-                **profile,
-            ):
-                chunks.append(np.asarray(audio, dtype=np.float32).reshape(-1))
-            if not chunks:
-                raise RuntimeError(f"empty sweep output: {profile_name}/{target_name}")
-            path = output_dir / f"{profile_index:02d}-{profile_name}-{target_name}.wav"
-            sf.write(path, np.concatenate(chunks), sample_rate, format="WAV", subtype="PCM_16")
-            manifest.append(
-                {
-                    "profile": profile_name,
-                    "profile_settings": profile,
-                    "target": target_name,
-                    "target_text": target_text,
-                    "seed": seed,
-                    "wav": path.name,
-                }
-            )
+        for target_name, target_text in TARGETS.items():
+            for seed in TARGET_SEEDS[target_name]:
+                _reset_rng(seed)
+                chunks: list[np.ndarray] = []
+                sample_rate = 24000
+                for audio, sample_rate, _timing in runtime.generate_voice_clone_streaming(
+                    text=target_text,
+                    language="English",
+                    ref_text=REFERENCE_TEXT,
+                    voice_clone_prompt=prompt,
+                    max_new_tokens=384,
+                    min_new_tokens=2,
+                    chunk_size=4,
+                    non_streaming_mode=True,
+                    append_silence=True,
+                    parity_mode=False,
+                    **profile,
+                ):
+                    chunks.append(np.asarray(audio, dtype=np.float32).reshape(-1))
+                if not chunks:
+                    raise RuntimeError(
+                        f"empty sweep output: {profile_name}/{target_name}/{seed}"
+                    )
+                path = output_dir / (
+                    f"{profile_index:02d}-{profile_name}-{target_name}-{seed}.wav"
+                )
+                sf.write(
+                    path,
+                    np.concatenate(chunks),
+                    sample_rate,
+                    format="WAV",
+                    subtype="PCM_16",
+                )
+                manifest.append(
+                    {
+                        "profile": profile_name,
+                        "profile_settings": profile,
+                        "target": target_name,
+                        "target_text": target_text,
+                        "seed": seed,
+                        "wav": path.name,
+                    }
+                )
     (output_dir / "manifest.json").write_text(
         json.dumps(manifest, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
