@@ -1179,6 +1179,67 @@ def test_explicit_terminal_suppresses_every_slow_ordinary_stt_outcome(
     _run(scenario())
 
 
+@pytest.mark.parametrize("stt_result", ["accepted", "empty", "error"])
+def test_stt_event_commit_orders_async_delivery_before_terminal(
+    stt_result: str,
+) -> None:
+    event_delivery_started = asyncio.Event()
+    release_event_delivery = asyncio.Event()
+    delivered_types: list[str] = []
+
+    class OutcomeSttAdapter:
+        def transcribe_pcm(
+            self,
+            pcm_frames: list[bytes],
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            assert pcm_frames
+            if stt_result == "error":
+                raise RuntimeError("simulated transcription failure")
+            return {
+                "status": "accepted" if stt_result == "accepted" else "empty",
+                "transcript": "ordered transcript" if stt_result == "accepted" else "",
+                "language": "en",
+            }
+
+    async def event_sink(event: dict[str, Any]) -> None:
+        if event["type"] in {"user_final", "failed"}:
+            event_delivery_started.set()
+            await release_event_delivery.wait()
+        delivered_types.append(event["type"])
+
+    async def scenario() -> None:
+        session, _ = _new_session(
+            vad_adapter=NeverEndingVadAdapter(),
+            stt_adapter=OutcomeSttAdapter(),
+            event_sink=event_sink,
+        )
+        pcm = np.full(320, 1800, dtype=np.int16).tobytes()
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pcm)
+        ) is None
+        finalized = asyncio.create_task(session.finalize_user_turn())
+        await event_delivery_started.wait()
+
+        terminal = asyncio.create_task(session.end(reason="explicit_hangup"))
+        while session.ended_at is None:
+            await asyncio.sleep(0)
+        assert not terminal.done()
+        assert delivered_types == ["state"]
+
+        release_event_delivery.set()
+        result = await finalized
+        ended = await terminal
+
+        expected_stt_event = "user_final" if stt_result == "accepted" else "failed"
+        assert result is not None and result["type"] == expected_stt_event
+        assert ended["type"] == "ended"
+        assert delivered_types == ["state", expected_stt_event, "ended"]
+        assert session._event_outbox == []
+
+    _run(scenario())
+
+
 def test_terminal_session_rejects_late_reconnect_backfill_without_revival() -> None:
     session, _ = _new_session()
     terminal = _run(session.fail(reason="connection_failed"))

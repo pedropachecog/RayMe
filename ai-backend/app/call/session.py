@@ -244,6 +244,17 @@ class _TerminalOutcome:
     ready: asyncio.Event = field(default_factory=asyncio.Event)
     emission_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     transaction_task: asyncio.Task[dict[str, Any]] | None = None
+    event_commit: _EventOutboxEntry | None = None
+
+
+@dataclass
+class _EventOutboxEntry:
+    sequence: int
+    event: dict[str, Any] | None = None
+    result: dict[str, Any] | None = None
+    error: BaseException | None = None
+    ready: asyncio.Event = field(default_factory=asyncio.Event)
+    done: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 @dataclass(frozen=True)
@@ -401,6 +412,9 @@ class CallSession:
         self._pending_speech_playback_final: dict[str, Any] | None = None
         self._late_tts_event_discard_count = 0
         self._undelivered_events: list[dict[str, Any]] = []
+        self._event_commit_sequence = 0
+        self._event_outbox: list[_EventOutboxEntry] = []
+        self._event_delivery_task: asyncio.Task[None] | None = None
         self._media_reconnect_grace_pending = False
         self._media_reconnect_grace_until = 0.0
         self._media_reconnect_grace_logged = False
@@ -2045,9 +2059,13 @@ class CallSession:
             stale_response = await self._stale_stt_turn_response(admission)
             if stale_response is not None:
                 return stale_response
-            await self.emit_event(event)
-            if self.ended_at is None:
-                self.state = "listening"
+            _, stale_response = await self._commit_stt_event(
+                admission,
+                event,
+                next_state="listening",
+            )
+            if stale_response is not None:
+                return stale_response
             return event
 
         if transcription is None:
@@ -2075,9 +2093,13 @@ class CallSession:
             stale_response = await self._stale_stt_turn_response(admission)
             if stale_response is not None:
                 return stale_response
-            await self.emit_event(event)
-            if self.ended_at is None:
-                self.state = "listening"
+            _, stale_response = await self._commit_stt_event(
+                admission,
+                event,
+                next_state="listening",
+            )
+            if stale_response is not None:
+                return stale_response
             return event
         event = user_final_event(
             session_id=self.session_id,
@@ -2089,13 +2111,13 @@ class CallSession:
         stale_response = await self._stale_stt_turn_response(admission)
         if stale_response is not None:
             return stale_response
-        await self.emit_event(event)
-        # Transition to "thinking" — the AI is now generating LLM text.
-        # Inbound audio during this window would be ambient noise that Whisper
-        # hallucinates into phantom transcriptions ("thank you" from silence).
-        # Dropped by the guard in handle_inbound_audio_frame.
-        if self.ended_at is None:
-            self.state = "thinking"
+        _, stale_response = await self._commit_stt_event(
+            admission,
+            event,
+            next_state="thinking",
+        )
+        if stale_response is not None:
+            return stale_response
         return {
             "type": event["type"],
             "session_id": event["session_id"],
@@ -2130,28 +2152,51 @@ class CallSession:
         admission: _SttTurnAdmission,
     ) -> dict[str, Any] | None:
         async with self._lifecycle_lock:
-            current = self._stt_admissions.get(admission.token)
-            lifecycle = self._peer_lifecycle
-            if current is not admission:
-                return {
-                    "status": "superseded",
-                    "state": self.state,
-                }
-            if (
-                self.ended_at is not None
-                or lifecycle.phase == "terminal"
-                or self.state in {"ended", "failed"}
-            ):
-                return self._terminal_stt_response_locked()
-            if (
-                admission.lifecycle_epoch != lifecycle.epoch
-                or lifecycle.phase not in {"stable", "reconnecting"}
-            ):
-                return {
-                    "status": "superseded",
-                    "state": self.state,
-                }
+            return self._stale_stt_turn_response_locked(admission)
+
+    def _stale_stt_turn_response_locked(
+        self,
+        admission: _SttTurnAdmission,
+    ) -> dict[str, Any] | None:
+        current = self._stt_admissions.get(admission.token)
+        lifecycle = self._peer_lifecycle
+        if current is not admission:
+            return {
+                "status": "superseded",
+                "state": self.state,
+            }
+        if (
+            self.ended_at is not None
+            or lifecycle.phase == "terminal"
+            or self.state in {"ended", "failed"}
+        ):
+            return self._terminal_stt_response_locked()
+        if (
+            admission.lifecycle_epoch != lifecycle.epoch
+            or lifecycle.phase not in {"stable", "reconnecting"}
+        ):
+            return {
+                "status": "superseded",
+                "state": self.state,
+            }
         return None
+
+    async def _commit_stt_event(
+        self,
+        admission: _SttTurnAdmission,
+        event: dict[str, Any],
+        *,
+        next_state: str,
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
+        """Atomically order an STT event against terminal lifecycle commit."""
+
+        async with self._lifecycle_lock:
+            stale_response = self._stale_stt_turn_response_locked(admission)
+            if stale_response is not None:
+                return None, stale_response
+            entry = self._commit_event(event)
+            self.state = next_state
+        return await self._await_event_commit(entry), None
 
     def _terminal_stt_response_locked(self) -> dict[str, Any]:
         return {
@@ -2162,7 +2207,71 @@ class CallSession:
             "reason": self.end_reason,
         }
 
+    def _commit_event(
+        self,
+        event: dict[str, Any] | None = None,
+    ) -> _EventOutboxEntry:
+        """Append one event to the session order without awaiting its sink."""
+
+        self._event_commit_sequence += 1
+        entry = _EventOutboxEntry(sequence=self._event_commit_sequence)
+        if event is not None:
+            entry.event = dict(event)
+            entry.ready.set()
+        self._event_outbox.append(entry)
+        if self._event_delivery_task is None or self._event_delivery_task.done():
+            self._event_delivery_task = asyncio.create_task(
+                self._deliver_event_outbox()
+            )
+        return entry
+
+    def _resolve_event_commit(
+        self,
+        entry: _EventOutboxEntry,
+        event: dict[str, Any],
+    ) -> None:
+        if entry.ready.is_set():
+            return
+        entry.event = dict(event)
+        entry.ready.set()
+
+    async def _deliver_event_outbox(self) -> None:
+        try:
+            while self._event_outbox:
+                entry = self._event_outbox[0]
+                await entry.ready.wait()
+                try:
+                    if entry.event is None:
+                        raise RuntimeError("committed event has no payload")
+                    entry.result = await self._deliver_event(entry.event)
+                except BaseException as exc:
+                    entry.error = exc
+                finally:
+                    if self._event_outbox and self._event_outbox[0] is entry:
+                        self._event_outbox.pop(0)
+                    entry.done.set()
+        finally:
+            self._event_delivery_task = None
+            if self._event_outbox:
+                self._event_delivery_task = asyncio.create_task(
+                    self._deliver_event_outbox()
+                )
+
+    async def _await_event_commit(
+        self,
+        entry: _EventOutboxEntry,
+    ) -> dict[str, Any]:
+        await asyncio.shield(entry.done.wait())
+        if entry.error is not None:
+            raise entry.error
+        if entry.result is None:
+            raise RuntimeError("committed event completed without a result")
+        return dict(entry.result)
+
     async def emit_event(self, event: dict[str, Any]) -> dict[str, Any]:
+        return await self._await_event_commit(self._commit_event(event))
+
+    async def _deliver_event(self, event: dict[str, Any]) -> dict[str, Any]:
         event_type = event.get("type")
         event_turn_id = event.get("turn_id")
         if (
@@ -3823,6 +3932,7 @@ class CallSession:
             target_state=target_state,
             reason=reason,
         )
+        outcome.event_commit = self._commit_event()
         self._terminal_outcome = outcome
         outcome.transaction_task = asyncio.create_task(
             self._run_terminal_transaction(cleanup, outcome)
@@ -3901,7 +4011,12 @@ class CallSession:
                         reason=outcome.reason,
                         **cancel_context,
                     )
-                outcome.event = dict(await self.emit_event(event))
+                if outcome.event_commit is None:
+                    outcome.event_commit = self._commit_event()
+                self._resolve_event_commit(outcome.event_commit, event)
+                outcome.event = dict(
+                    await self._await_event_commit(outcome.event_commit)
+                )
         return dict(outcome.event)
 
     async def _run_terminal_cleanup(
