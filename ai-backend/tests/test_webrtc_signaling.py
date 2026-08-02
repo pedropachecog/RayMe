@@ -678,6 +678,117 @@ def test_webrtc_slow_prepare_releases_lease_when_session_termination_wins(
     assert recovery_status == 200
 
 
+def test_webrtc_slow_qwen_prepare_releases_stale_lease_after_engine_switch(
+    stub_webrtc: None,
+) -> None:
+    from app.call.session import PeerOfferConfiguration
+
+    class SlowSwitchLeaseManager(ScriptedPreparingModelManager):
+        def __init__(self) -> None:
+            super().__init__(ScriptedQwenStreamingTtsAdapter())
+            self.prepare_started = asyncio.Event()
+            self.release_prepare = asyncio.Event()
+            self.owners: set[str] = set()
+
+        async def prepare_tts_engine(
+            self,
+            engine_id: str,
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            self.prepare_calls.append({"engine_id": engine_id, **kwargs})
+            self.prepare_started.set()
+            await self.release_prepare.wait()
+            self.owners.add(kwargs["prompt_lease_owner"])
+            self.ready = True
+            return {
+                "engine_id": engine_id,
+                "model_state": "resident",
+                "prompt_state": "ready",
+                "voice_key": kwargs["voice_key"],
+            }
+
+        async def release_tts_prompt_lease(self, owner: str) -> bool:
+            self.released_prompt_leases.append(owner)
+            self.owners.discard(owner)
+            return True
+
+    class CandidatePeer:
+        async def close(self) -> None:
+            return None
+
+    async def scenario() -> tuple[int, dict[str, Any], set[str], list[str]]:
+        manager = SlowSwitchLeaseManager()
+        app = create_app(
+            AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN)
+        )
+        app.state.model_manager = manager
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            headers=SERVICE_AUTH_HEADERS,
+        ) as client:
+            session_id = "call-slow-prepare-engine-switch"
+            offered = await client.post(
+                "/webrtc/offer",
+                json={
+                    **_offer_payload(session_id=session_id),
+                    "voice_id": "voice-qwen",
+                    "engine_id": "qwen3_1_7b",
+                },
+            )
+            assert offered.status_code == 200
+            prepare = asyncio.create_task(
+                client.post(
+                    f"/webrtc/sessions/{session_id}/prepare",
+                    json={
+                        "voice_id": "voice-qwen",
+                        "engine_id": "qwen3_1_7b",
+                        "reference_audio_b64": "cmVhbC1zYW1wbGU=",
+                        "reference_transcript": "The exact reference transcript.",
+                    },
+                )
+            )
+            await manager.prepare_started.wait()
+            session = app.state.call_session_manager.get_session(session_id)
+            assert session is not None
+            candidate = CandidatePeer()
+            generation = await session.mark_peer_connection_pending(
+                candidate,
+                configuration=PeerOfferConfiguration(
+                    thread_id="thread-f5",
+                    voice_id="voice-f5",
+                    engine_id="f5",
+                    prompt_messages=(),
+                    vad_adapter=None,
+                    stt_adapter=None,
+                ),
+                timeout_seconds=60.0,
+            )
+            accepted, _ = await session.accept_pending_peer_connection(
+                candidate,
+                generation=generation,
+            )
+            assert accepted is True
+            assert session.engine_id == "f5"
+
+            manager.release_prepare.set()
+            prepared = await prepare
+            assert session._tts_prompt_lease_releaser is None
+            return (
+                prepared.status_code,
+                prepared.json(),
+                set(manager.owners),
+                list(manager.released_prompt_leases),
+            )
+
+    prepare_status, payload, owners, released = asyncio.run(scenario())
+    assert prepare_status == 409
+    assert payload["detail"]["code"] == "call_tts_prepare_mismatch"
+    assert owners == set()
+    assert released == ["call-slow-prepare-engine-switch"]
+
+
 def test_webrtc_prepare_rejects_terminal_session_before_model_acquires_lease(
     stub_webrtc: None,
 ) -> None:

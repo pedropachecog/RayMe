@@ -209,16 +209,17 @@ async def prepare_session_speech(
     payload: PrepareSpeechRequest,
 ) -> dict[str, Any]:
     session = _session_or_404(request, session_id)
-    if not await session.can_prepare_tts_prompt():
-        raise _terminal_session_prepare_error()
-    if payload.voice_id != session.voice_id or payload.engine_id != session.engine_id:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "call_tts_prepare_mismatch",
-                "message": "Selected voice does not match the call",
-            },
+    try:
+        accepted_configuration = (
+            await session.reserve_accepted_speech_configuration(
+                voice_id=payload.voice_id,
+                engine_id=payload.engine_id,
+            )
         )
+    except SpeechSessionSelectionError as exc:
+        if session.ended_at is not None or session.state in {"ended", "failed"}:
+            raise _terminal_session_prepare_error() from exc
+        raise _stale_session_prepare_error() from exc
     reference_audio = _decode_reference_audio(payload.reference_audio_b64)
     model_manager = getattr(request.app.state, "model_manager", None)
     prepare = getattr(model_manager, "prepare_tts_engine", None)
@@ -241,10 +242,13 @@ async def prepare_session_speech(
         release_lease = getattr(model_manager, "release_tts_prompt_lease", None)
         if callable(release_lease):
             installed = await session.install_or_release_tts_prompt_lease(
-                release_lease
+                release_lease,
+                accepted_configuration=accepted_configuration,
             )
             if not installed:
                 raise _terminal_session_prepare_error()
+    except SpeechSessionSelectionError as exc:
+        raise _stale_session_prepare_error() from exc
     except HTTPException:
         raise
     except Qwen3WorkerError as exc:
@@ -827,6 +831,16 @@ def _terminal_session_prepare_error() -> HTTPException:
         detail={
             "code": "call_session_terminal",
             "message": "Ended call sessions cannot prepare speech",
+        },
+    )
+
+
+def _stale_session_prepare_error() -> HTTPException:
+    return HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "call_tts_prepare_mismatch",
+            "message": "Selected voice no longer matches the call",
         },
     )
 

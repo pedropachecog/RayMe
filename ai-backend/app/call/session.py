@@ -437,12 +437,28 @@ class CallSession:
     async def install_or_release_tts_prompt_lease(
         self,
         releaser: PromptLeaseReleaser,
+        *,
+        accepted_configuration: AcceptedSpeechConfiguration | None = None,
     ) -> bool:
+        selection_error: SpeechSessionSelectionError | None = None
         async with self._lifecycle_lock:
-            if self.ended_at is None and self.state not in {"ended", "failed"}:
+            if accepted_configuration is not None:
+                try:
+                    self._validate_accepted_speech_configuration_locked(
+                        accepted_configuration
+                    )
+                except SpeechSessionSelectionError as exc:
+                    selection_error = exc
+            if (
+                selection_error is None
+                and self.ended_at is None
+                and self.state not in {"ended", "failed"}
+            ):
                 self._tts_prompt_lease_releaser = releaser
                 return True
         await self._invoke_tts_prompt_lease_releaser(releaser)
+        if selection_error is not None:
+            raise selection_error
         return False
 
     async def reserve_accepted_speech_configuration(
