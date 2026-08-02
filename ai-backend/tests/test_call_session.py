@@ -850,6 +850,184 @@ def test_mute_is_orthogonal_to_active_streaming_tts_ownership(
     ]
 
 
+def test_mute_discards_only_unconfirmed_ordinary_vad_onset() -> None:
+    class NoSpeechVadAdapter:
+        def accept_audio_frame(self, _pcm: bytes) -> dict[str, bool]:
+            return {"speech_detected": False, "end_of_turn": False}
+
+    pcm = np.full(320, 1800, dtype=np.int16).tobytes()
+    partial, _ = _new_session(vad_adapter=NoSpeechVadAdapter())
+    assert _run(
+        partial.handle_inbound_audio_frame(ScriptedInboundAudioFrame(pcm))
+    ) is None
+    assert len(partial._turn_frames) == 1
+    assert partial._speech_seen is False
+
+    _run(partial.set_muted(True))
+
+    assert partial._turn_frames == []
+    assert partial._turn_started_at is None
+    assert partial._speech_start_frame is None
+
+    confirmed, _ = _new_session()
+    confirmed_frame = normalize_inbound_audio_frame(
+        ScriptedInboundAudioFrame(pcm)
+    )
+    confirmed._begin_barge_in_turn(
+        [confirmed_frame],
+        started_at="2026-08-02T00:00:00Z",
+    )
+    confirmed_frames = list(confirmed._turn_frames)
+
+    _run(confirmed.set_muted(True))
+
+    assert confirmed._speech_seen is True
+    assert confirmed._turn_frames == confirmed_frames
+    assert confirmed._turn_started_at == "2026-08-02T00:00:00Z"
+
+
+@pytest.mark.parametrize(
+    ("post_unmute_frames", "expect_interrupt"),
+    [
+        (1, False),
+        (
+            (session_module.CALL_BARGE_IN_MIN_SPEECH_MS + 19) // 20,
+            True,
+        ),
+    ],
+)
+def test_mute_requires_full_fresh_barge_in_onset_after_unmute(
+    monkeypatch: pytest.MonkeyPatch,
+    post_unmute_frames: int,
+    expect_interrupt: bool,
+) -> None:
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
+    monkeypatch.setattr(
+        session_module,
+        "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS",
+        0.0,
+    )
+    events: list[dict[str, Any]] = []
+
+    async def scenario() -> None:
+        adapter = ScriptedStreamingTtsAdapter()
+        cancel_calls: list[str] = []
+
+        def cancel(request_id: str) -> bool:
+            cancel_calls.append(request_id)
+            adapter.release_second_chunk.set()
+            return True
+
+        adapter.cancel = cancel
+        track = ObservableStreamingOutboundAudioTrack()
+        session, _ = _new_session(
+            vad_adapter=NeverEndingVadAdapter(),
+            tts_adapter=adapter,
+            outbound_audio_track=track,
+            event_sink=events.append,
+        )
+        turn_id = f"turn-mute-onset-{post_unmute_frames}"
+        speech = asyncio.create_task(
+            session.speak_text(
+                turn_id,
+                "Mute must split barge-in speech evidence.",
+                "voice-1",
+                "voxcpm2",
+                final_chunk=True,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="Real VoxCPM2 reference text.",
+                reference_audio_content_type="audio/wav",
+            )
+        )
+        try:
+            await _wait_for_async_event_or_task(
+                track.first_chunk_enqueued,
+                speech,
+                label="first streaming playback before barge-in mute",
+            )
+            while session.state != "speaking" and not speech.done():
+                await asyncio.sleep(0)
+            assert session.state == "speaking"
+            assert adapter.stream_completed.is_set() is False
+            admission = session._speech_admission
+            request_id = session._active_tts_request_id
+            assert admission is not None and request_id is not None
+
+            pre_mute_pcm = np.full(320, 3000, dtype=np.int16).tobytes()
+            onset_frame_count = (
+                session_module.CALL_BARGE_IN_MIN_SPEECH_MS + 19
+            ) // 20
+            assert onset_frame_count == 6
+            for _ in range(onset_frame_count - 1):
+                assert await session.handle_inbound_audio_frame(
+                    ScriptedInboundAudioFrame(pre_mute_pcm)
+                ) is None
+            assert session._barge_in_speech_ms == 100
+            assert len(session._barge_in_frames) == 5
+            assert cancel_calls == []
+
+            await session.set_muted(True)
+            assert session.state == "speaking"
+            assert session._barge_in_frames == []
+            assert session._barge_in_speech_ms == 0
+            assert session._barge_in_speech_start_index is None
+            assert session._barge_in_energy_start_index is None
+            assert session._speech_admission is admission
+            assert session._active_tts_request_id == request_id
+
+            dropped_before = session.dropped_audio_frames
+            muted_pcm = np.full(320, 3500, dtype=np.int16).tobytes()
+            assert await session.handle_inbound_audio_frame(
+                ScriptedInboundAudioFrame(muted_pcm)
+            ) is None
+            assert session.dropped_audio_frames == dropped_before + 1
+            assert session._barge_in_frames == []
+
+            await session.set_muted(False)
+            fresh_pcm = np.full(320, 4000, dtype=np.int16).tobytes()
+            interrupted: dict[str, Any] | None = None
+            for frame_index in range(post_unmute_frames):
+                result = await session.handle_inbound_audio_frame(
+                    ScriptedInboundAudioFrame(fresh_pcm)
+                )
+                if frame_index < post_unmute_frames - 1:
+                    assert result is None
+                    assert cancel_calls == []
+                else:
+                    interrupted = result
+
+            if expect_interrupt:
+                assert interrupted is not None
+                assert interrupted["type"] == "interrupted"
+                assert interrupted["control_cause"] == "vad_barge_in"
+                assert len(cancel_calls) == 1
+                assert all(
+                    frame.pcm == fresh_pcm for frame in session._turn_frames
+                )
+                assert len(session._turn_frames) == onset_frame_count
+            else:
+                assert interrupted is None
+                assert cancel_calls == []
+                assert session.state == "speaking"
+                assert session._barge_in_speech_ms == 20
+                assert session._speech_admission is admission
+                assert session._active_tts_request_id == request_id
+        finally:
+            adapter.release_second_chunk.set()
+
+        try:
+            terminal = await asyncio.wait_for(speech, timeout=1.0)
+        except asyncio.CancelledError:
+            terminal = None
+        if expect_interrupt:
+            assert terminal is None or terminal.get("status") == "cancelled"
+            assert "ai_done" not in [event["type"] for event in events]
+        else:
+            assert terminal is not None and terminal["type"] == "ai_done"
+
+    _run(scenario())
+
+
 def test_inbound_audio_emits_user_final_after_vad_end() -> None:
     vad = ScriptedVadAdapter()
     stt = ScriptedSttAdapter()

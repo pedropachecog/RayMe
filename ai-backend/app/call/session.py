@@ -2645,6 +2645,13 @@ class CallSession:
         async with self._lifecycle_lock:
             self._ensure_control_mutable_locked()
             self.muted = muted
+            if muted:
+                self._reset_barge_in_onset()
+                if not self._speech_seen:
+                    self._turn_frames.clear()
+                    self._turn_started_at = None
+                    self._silence_ms = 0
+                    self._speech_start_frame = None
             event = simple_event(
                 MUTED_EVENT,
                 session_id=self.session_id,
