@@ -5,6 +5,7 @@ import importlib.util
 import json
 import sys
 import threading
+import time
 from io import BytesIO
 from pathlib import Path
 from typing import Any
@@ -5038,8 +5039,14 @@ def test_switching_away_from_qwen_releases_prompt_for_another_session() -> None:
     _run(scenario())
 
 
+@pytest.mark.parametrize(
+    "force_reconnect_rendezvous_failure",
+    [False, True],
+    ids=["complete-workflow", "forced-rendezvous-failure"],
+)
 def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
     monkeypatch: Any,
+    force_reconnect_rendezvous_failure: bool,
 ) -> None:
     import app.api.webrtc as webrtc_module
 
@@ -5109,6 +5116,8 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
             self.first_stream_completed = threading.Event()
             self.cancel_calls: list[str] = []
             self.synthesize_calls = 0
+            self.producer_thread: threading.Thread | None = None
+            self.producer_exited = threading.Event()
 
         def synthesize(self, _request: Any) -> Any:
             self.synthesize_calls += 1
@@ -5125,15 +5134,20 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
             stream_index = self.stream_count
             self.stream_count += 1
             self.active_request_id = request_id
+            self.producer_thread = threading.current_thread()
             try:
                 if stream_index == 0:
                     for chunk_index in range(12):
                         if chunk_index == 4:
                             self.reconnect_pause.set()
-                            self.resume_after_reconnect.wait()
+                            assert self.resume_after_reconnect.wait(
+                                timeout=THREAD_EVENT_RENDEZVOUS_TIMEOUT_SECONDS
+                            ), "timed out waiting to resume after reconnect"
                         if chunk_index == 10:
                             self.ready_for_barge_in.set()
-                            self.release_for_cancel.wait()
+                            assert self.release_for_cancel.wait(
+                                timeout=THREAD_EVENT_RENDEZVOUS_TIMEOUT_SECONDS
+                            ), "timed out waiting for barge-in cancellation"
                         if self.release_for_cancel.is_set():
                             break
                         yield TtsAudioChunk(
@@ -5161,6 +5175,7 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
                 self.active_request_id = None
                 if stream_index == 0:
                     self.first_stream_drained.set()
+                    self.producer_exited.set()
 
         def cancel(self, request_id: str) -> bool:
             assert request_id == self.active_request_id
@@ -5176,12 +5191,14 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
         ScriptedOutboundAudioTrack,
         CallSession,
     ]:
+        nonlocal incident_adapter
         active_peer = CallbackPeer()
         replacement_peer = CallbackPeer()
         audio_clock = FakeAudioClock()
         active_track = FakeClockPacedOutboundAudioTrack(audio_clock)
         replacement_track = FakeClockPacedOutboundAudioTrack(audio_clock)
         adapter = IncidentQwenAdapter()
+        incident_adapter = adapter
         session = CallSession(
             session_id="qwen-long-turn-reconnect-incident",
             peer_connection=active_peer,
@@ -5213,98 +5230,131 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
                 reference_transcript="The exact reference transcript.",
             )
         )
-        await asyncio.wait_for(first_audio.wait(), timeout=1.0)
-        assert adapter.first_stream_completed.is_set() is False
-        await _wait_for_thread_event(adapter.reconnect_pause, label="reconnect pause")
-        assert active_track.chunks
-
-        generation = await session.mark_peer_connection_pending(
-            replacement_peer,
-            outbound_audio_track=replacement_track,
-            timeout_seconds=60.0,
-        )
-        webrtc_module._attach_peer_handlers(
-            replacement_peer,
-            session,
-            pending_generation=generation,
-        )
-        active_peer.connectionState = "closed"
-        await active_peer.handlers["connectionstatechange"]()
-
-        assert session.state == "reconnecting"
-        assert session.ended_at is None
-        assert released_prompt_leases == []
-
-        replacement_peer.connectionState = "connected"
-        replacement_peer.iceConnectionState = "connected"
-        await replacement_peer.handlers["connectionstatechange"]()
-
-        assert session.peer_connection is active_peer
-        assert active_peer.close_calls == 0
-        assert await session.commit_pending_peer_generation(generation) == "committed"
-        assert session.peer_connection is replacement_peer
-        assert session.state == "speaking"
-        assert active_peer.close_calls == 1
-        assert replacement_peer.close_calls == 0
-        assert released_prompt_leases == []
-
-        adapter.resume_after_reconnect.set()
-        await _wait_for_thread_event(
-            adapter.ready_for_barge_in,
-            label="post-reconnect audio",
-        )
-        for _ in range(100):
-            if audio_clock.elapsed_seconds >= 40.0:
-                break
-            await asyncio.sleep(0)
-        assert audio_clock.elapsed_seconds == pytest.approx(40.0)
-        assert len(audio_clock.advances) == 10
-        assert all(seconds == pytest.approx(4.0) for seconds in audio_clock.advances)
-        assert replacement_track.chunks
-
-        user_pcm = np.full(320, 4_000, dtype=np.int16).tobytes()
-        onset_frames = (session_module.CALL_BARGE_IN_MIN_SPEECH_MS + 19) // 20
-        interrupted = None
-        for _ in range(onset_frames):
-            interrupted = await session.handle_inbound_audio_frame(
-                ScriptedInboundAudioFrame(user_pcm)
-            )
-
-        assert interrupted is not None
-        assert interrupted["type"] == "interrupted"
-        assert interrupted["control_cause"] == "vad_barge_in"
         try:
-            await long_speech
-        except asyncio.CancelledError:
-            pass
+            await asyncio.wait_for(first_audio.wait(), timeout=1.0)
+            assert adapter.first_stream_completed.is_set() is False
+            await _wait_for_thread_event(
+                adapter.reconnect_pause,
+                label="reconnect pause",
+            )
+            if force_reconnect_rendezvous_failure:
+                raise AssertionError("forced reconnect rendezvous failure")
+            assert active_track.chunks
 
-        assert adapter.first_stream_completed.is_set() is False
-        assert adapter.first_stream_drained.is_set()
-        assert session.state == "listening"
-        assert released_prompt_leases == []
+            generation = await session.mark_peer_connection_pending(
+                replacement_peer,
+                outbound_audio_track=replacement_track,
+                timeout_seconds=60.0,
+            )
+            webrtc_module._attach_peer_handlers(
+                replacement_peer,
+                session,
+                pending_generation=generation,
+            )
+            active_peer.connectionState = "closed"
+            await active_peer.handlers["connectionstatechange"]()
 
-        recovery = await session.speak_text(
-            "turn-qwen-after-reconnect-barge",
-            "The recovered live call completes exactly once.",
-            "voice-qwen",
-            "qwen3_1_7b",
-            final_chunk=True,
-            reference_audio_b64="cmVhbC1zYW1wbGU=",
-            reference_transcript="The exact reference transcript.",
-        )
-        assert recovery["type"] == "ai_done"
-        assert session.state == "listening"
-        assert released_prompt_leases == []
+            assert session.state == "reconnecting"
+            assert session.ended_at is None
+            assert released_prompt_leases == []
 
-        await session.end(reason="hangup")
-        return (
-            adapter,
-            active_peer,
-            replacement_peer,
-            active_track,
-            replacement_track,
-            session,
-        )
+            replacement_peer.connectionState = "connected"
+            replacement_peer.iceConnectionState = "connected"
+            await replacement_peer.handlers["connectionstatechange"]()
+
+            assert session.peer_connection is active_peer
+            assert active_peer.close_calls == 0
+            assert await session.commit_pending_peer_generation(generation) == "committed"
+            assert session.peer_connection is replacement_peer
+            assert session.state == "speaking"
+            assert active_peer.close_calls == 1
+            assert replacement_peer.close_calls == 0
+            assert released_prompt_leases == []
+
+            adapter.resume_after_reconnect.set()
+            await _wait_for_thread_event(
+                adapter.ready_for_barge_in,
+                label="post-reconnect audio",
+            )
+            for _ in range(100):
+                if audio_clock.elapsed_seconds >= 40.0:
+                    break
+                await asyncio.sleep(0)
+            assert audio_clock.elapsed_seconds == pytest.approx(40.0)
+            assert len(audio_clock.advances) == 10
+            assert all(seconds == pytest.approx(4.0) for seconds in audio_clock.advances)
+            assert replacement_track.chunks
+
+            user_pcm = np.full(320, 4_000, dtype=np.int16).tobytes()
+            onset_frames = (session_module.CALL_BARGE_IN_MIN_SPEECH_MS + 19) // 20
+            interrupted = None
+            for _ in range(onset_frames):
+                interrupted = await session.handle_inbound_audio_frame(
+                    ScriptedInboundAudioFrame(user_pcm)
+                )
+
+            assert interrupted is not None
+            assert interrupted["type"] == "interrupted"
+            assert interrupted["control_cause"] == "vad_barge_in"
+            try:
+                await long_speech
+            except asyncio.CancelledError:
+                pass
+
+            assert adapter.first_stream_completed.is_set() is False
+            assert adapter.first_stream_drained.is_set()
+            assert session.state == "listening"
+            assert released_prompt_leases == []
+
+            recovery = await session.speak_text(
+                "turn-qwen-after-reconnect-barge",
+                "The recovered live call completes exactly once.",
+                "voice-qwen",
+                "qwen3_1_7b",
+                final_chunk=True,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="The exact reference transcript.",
+            )
+            assert recovery["type"] == "ai_done"
+            assert session.state == "listening"
+            assert released_prompt_leases == []
+
+            await session.end(reason="hangup")
+            return (
+                adapter,
+                active_peer,
+                replacement_peer,
+                active_track,
+                replacement_track,
+                session,
+            )
+        finally:
+            adapter.resume_after_reconnect.set()
+            adapter.release_for_cancel.set()
+            if not long_speech.done():
+                long_speech.cancel()
+            settled, pending = await asyncio.wait(
+                {long_speech},
+                timeout=THREAD_EVENT_RENDEZVOUS_TIMEOUT_SECONDS,
+            )
+            assert pending == set(), "timed out settling long Qwen speech task"
+            assert settled == {long_speech}
+            try:
+                await long_speech
+            except asyncio.CancelledError:
+                pass
+
+    incident_adapter: IncidentQwenAdapter | None = None
+    if force_reconnect_rendezvous_failure:
+        started_at = time.perf_counter()
+        with pytest.raises(AssertionError, match="forced reconnect rendezvous failure"):
+            _run(scenario())
+        assert time.perf_counter() - started_at < THREAD_EVENT_RENDEZVOUS_TIMEOUT_SECONDS
+        assert incident_adapter is not None
+        assert incident_adapter.producer_exited.is_set()
+        assert incident_adapter.producer_thread is not None
+        assert incident_adapter.producer_thread.is_alive() is False
+        return
 
     (
         adapter,
