@@ -202,6 +202,7 @@ class _PeerLifecycle:
     candidate: _PendingPeerCandidate | None = None
     switch_generation: int = 0
     switch_owner: Any | None = None
+    switch_task: asyncio.Task[tuple[bool, Any | None]] | None = None
     terminal_state: str | None = None
     state_before_reconnect: str | None = None
     grace_peer: Any | None = None
@@ -680,6 +681,20 @@ class CallSession:
         generation: int | None = None,
         outbound_audio_track: Any | None = None,
     ) -> tuple[bool, Any | None]:
+        # This snapshot has no await points, so another coroutine cannot alter
+        # the lifecycle between the ownership checks. Avoiding a preliminary
+        # lock acquisition also preserves FIFO ordering between candidate
+        # acceptance and a reconnect-grace terminal decision.
+        lifecycle = self._peer_lifecycle
+        existing_switch_task = (
+            lifecycle.switch_task
+            if lifecycle.phase == "switching"
+            and lifecycle.switch_owner is peer_connection
+            else None
+        )
+        if existing_switch_task is not None:
+            return await asyncio.shield(existing_switch_task)
+
         selection_changed = False
         cancel_selection = False
         captured_cancellation: _CapturedTurnCancellation | None = None
@@ -688,6 +703,7 @@ class CallSession:
         released_prompt_lease: PromptLeaseReleaser | None = None
         previous_outbound_audio_track: Any | None = None
         accepted_outbound_audio_track: Any | None = None
+        switch_task: asyncio.Task[tuple[bool, Any | None]] | None = None
         async with self._lifecycle_lock:
             lifecycle = self._peer_lifecycle
             candidate = lifecycle.candidate
@@ -747,86 +763,102 @@ class CallSession:
                 lifecycle.switch_generation += 1
                 switch_generation = lifecycle.switch_generation
                 lifecycle.switch_owner = peer_connection
+                switch = _PeerSwitchTransaction(
+                    generation=switch_generation,
+                    peer_connection=peer_connection,
+                    previous_peer_connection=previous_peer_connection,
+                    previous_outbound_audio_track=previous_outbound_audio_track,
+                    accepted_outbound_audio_track=accepted_outbound_audio_track,
+                    configuration=accepted_configuration,
+                    cancellation=captured_cancellation,
+                    prompt_lease_releaser=released_prompt_lease,
+                )
+                switch_task = asyncio.create_task(
+                    self._finish_peer_switch(switch)
+                )
+                lifecycle.switch_task = switch_task
             else:
                 if accepted_configuration is not None:
                     self._apply_peer_configuration_locked(accepted_configuration)
                 self._complete_transport_reconnect_locked()
         if selection_changed:
-            if switch_generation is None:
-                raise RuntimeError("engine switch has no owner generation")
-            switch = _PeerSwitchTransaction(
-                generation=switch_generation,
-                peer_connection=peer_connection,
-                previous_peer_connection=previous_peer_connection,
-                previous_outbound_audio_track=previous_outbound_audio_track,
-                accepted_outbound_audio_track=accepted_outbound_audio_track,
-                configuration=accepted_configuration,
-                cancellation=captured_cancellation,
-                prompt_lease_releaser=released_prompt_lease,
-            )
-            cleanup_errors = await self._run_peer_switch_cleanup(switch)
-            terminal_outcome: _TerminalOutcome | None = None
-            async with self._lifecycle_lock:
-                lifecycle = self._peer_lifecycle
-                if lifecycle.phase == "terminal" or self.ended_at is not None:
-                    return False, previous_peer_connection
-                owns_switch = (
-                    lifecycle.phase == "switching"
-                    and lifecycle.switch_generation == switch.generation
-                    and lifecycle.switch_owner is peer_connection
-                    and self.peer_connection is peer_connection
-                )
-                if not owns_switch:
-                    return False, previous_peer_connection
-                if not cleanup_errors and switch.prompt_lease_releaser is not None:
-                    try:
-                        await asyncio.wait_for(
-                            self._invoke_tts_prompt_lease_releaser(
-                                switch.prompt_lease_releaser
-                            ),
-                            timeout=CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS,
-                        )
-                    except Exception as exc:
-                        cleanup_errors.append(("prompt_lease", exc))
-                    else:
-                        if (
-                            self._tts_prompt_lease_releaser
-                            is switch.prompt_lease_releaser
-                        ):
-                            self._tts_prompt_lease_releaser = None
-                if cleanup_errors:
-                    lifecycle.switch_owner = None
-                    self._transition_terminal_locked(
-                        target_state="failed",
-                        reason="engine_switch_failed",
-                    )
-                    terminal_outcome = self._terminal_outcome
-                else:
-                    if switch.configuration is not None:
-                        self._apply_peer_configuration_locked(switch.configuration)
-                    self._complete_transport_reconnect_locked()
-                    lifecycle.switch_owner = None
-                    if self.state not in {"ended", "failed"}:
-                        self.state = "listening"
-            if cleanup_errors:
-                for step, exc in cleanup_errors:
-                    logger.error(
-                        "[rayme-call] peer.switch_cleanup_failed session=%s "
-                        "generation=%d step=%s exc=%s",
-                        self.session_id,
-                        switch.generation,
-                        step,
-                        exc.__class__.__name__,
-                    )
-                if (
-                    terminal_outcome is not None
-                    and terminal_outcome.transaction_task is not None
-                ):
-                    await asyncio.shield(terminal_outcome.transaction_task)
-                return False, previous_peer_connection
+            if switch_task is None:
+                raise RuntimeError("engine switch has no owned completion task")
+            return await asyncio.shield(switch_task)
         elif previous_peer_connection is not None:
             await self._close_peer(previous_peer_connection)
         return True, previous_peer_connection
+
+    async def _finish_peer_switch(
+        self,
+        switch: _PeerSwitchTransaction,
+    ) -> tuple[bool, Any | None]:
+        """Finish one switch independently of its initiating callback."""
+
+        cleanup_errors = await self._run_peer_switch_cleanup(switch)
+        terminal_outcome: _TerminalOutcome | None = None
+        async with self._lifecycle_lock:
+            lifecycle = self._peer_lifecycle
+            if lifecycle.phase == "terminal" or self.ended_at is not None:
+                return False, switch.previous_peer_connection
+            owns_switch = (
+                lifecycle.phase == "switching"
+                and lifecycle.switch_generation == switch.generation
+                and lifecycle.switch_owner is switch.peer_connection
+                and self.peer_connection is switch.peer_connection
+                and lifecycle.switch_task is asyncio.current_task()
+            )
+            if not owns_switch:
+                return False, switch.previous_peer_connection
+            if not cleanup_errors and switch.prompt_lease_releaser is not None:
+                try:
+                    await asyncio.wait_for(
+                        self._invoke_tts_prompt_lease_releaser(
+                            switch.prompt_lease_releaser
+                        ),
+                        timeout=CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS,
+                    )
+                except Exception as exc:
+                    cleanup_errors.append(("prompt_lease", exc))
+                else:
+                    if (
+                        self._tts_prompt_lease_releaser
+                        is switch.prompt_lease_releaser
+                    ):
+                        self._tts_prompt_lease_releaser = None
+            if cleanup_errors:
+                lifecycle.switch_owner = None
+                lifecycle.switch_task = None
+                self._transition_terminal_locked(
+                    target_state="failed",
+                    reason="engine_switch_failed",
+                )
+                terminal_outcome = self._terminal_outcome
+            else:
+                if switch.configuration is not None:
+                    self._apply_peer_configuration_locked(switch.configuration)
+                self._complete_transport_reconnect_locked()
+                lifecycle.switch_owner = None
+                lifecycle.switch_task = None
+                if self.state not in {"ended", "failed"}:
+                    self.state = "listening"
+        if cleanup_errors:
+            for step, exc in cleanup_errors:
+                logger.error(
+                    "[rayme-call] peer.switch_cleanup_failed session=%s "
+                    "generation=%d step=%s exc=%s",
+                    self.session_id,
+                    switch.generation,
+                    step,
+                    exc.__class__.__name__,
+                )
+            if (
+                terminal_outcome is not None
+                and terminal_outcome.transaction_task is not None
+            ):
+                await asyncio.shield(terminal_outcome.transaction_task)
+            return False, switch.previous_peer_connection
+        return True, switch.previous_peer_connection
 
     async def _run_peer_switch_cleanup(
         self,
@@ -3310,6 +3342,7 @@ class CallSession:
         lifecycle.epoch += 1
         lifecycle.phase = "terminal"
         lifecycle.switch_owner = None
+        lifecycle.switch_task = None
         lifecycle.terminal_state = None
         lifecycle.state_before_reconnect = None
         lifecycle.grace_peer = None

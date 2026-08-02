@@ -2540,6 +2540,109 @@ def test_engine_switch_cleanup_failure_never_leaves_switching(
     _run(scenario())
 
 
+@pytest.mark.parametrize(
+    "blocked_step",
+    ["stop", "old_peer_close", "cancel", "prompt_lease"],
+)
+def test_cancelled_switch_initiator_cannot_strand_owned_transaction(
+    blocked_step: str,
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+
+    class BlockingStopTrack(ScriptedOutboundAudioTrack):
+        async def stop_current(self) -> None:
+            self.stop_calls += 1
+            if blocked_step == "stop":
+                entered.set()
+                await release.wait()
+
+    class BlockingClosePeer(ScriptedPeerConnection):
+        async def close(self) -> None:
+            self.close_calls += 1
+            if blocked_step == "old_peer_close":
+                entered.set()
+                await release.wait()
+
+    async def scenario() -> None:
+        old_peer = BlockingClosePeer()
+        session = CallSession(
+            session_id=f"cancelled-switch-{blocked_step}",
+            peer_connection=old_peer,
+            outbound_audio_track=BlockingStopTrack(),
+        )
+        session.voice_id = "voice-before"
+        session.engine_id = "qwen3_1_7b"
+
+        if blocked_step == "cancel":
+            session.active_turn_task = ScriptedAiTurn()
+
+            async def block_cancel(*_: Any, **__: Any) -> dict[str, Any]:
+                entered.set()
+                await release.wait()
+                session.active_turn_task = None
+                return {"control_cause": "engine_switch"}
+
+            session.cancel_ai_turn = block_cancel  # type: ignore[method-assign]
+
+        if blocked_step == "prompt_lease":
+            async def block_release(_: str) -> bool:
+                entered.set()
+                await release.wait()
+                return True
+
+            assert await session.install_or_release_tts_prompt_lease(block_release)
+
+        candidate = ScriptedPeerConnection()
+        generation = await session.mark_peer_connection_pending(
+            candidate,
+            outbound_audio_track=ScriptedOutboundAudioTrack(),
+            configuration=PeerOfferConfiguration(
+                thread_id="thread-after",
+                voice_id="voice-after",
+                engine_id="f5",
+                prompt_messages=(),
+                vad_adapter=None,
+                stt_adapter=None,
+            ),
+            timeout_seconds=60.0,
+        )
+        acceptance = asyncio.create_task(
+            session.accept_pending_peer_connection(
+                candidate,
+                generation=generation,
+            )
+        )
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+        owned_switch = session._peer_lifecycle.switch_task
+        assert owned_switch is not None
+        assert owned_switch.done() is False
+
+        acceptance.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await acceptance
+        assert session._peer_lifecycle.phase == "switching"
+        assert owned_switch.done() is False
+
+        release.set()
+        accepted, previous_peer = await asyncio.wait_for(
+            asyncio.shield(owned_switch),
+            timeout=1.0,
+        )
+        assert accepted is True
+        assert previous_peer is old_peer
+        assert session._peer_lifecycle.phase == "stable"
+        assert session._peer_lifecycle.switch_owner is None
+        assert session._peer_lifecycle.switch_task is None
+        reservation = await session.reserve_accepted_speech_configuration(
+            voice_id="voice-after",
+            engine_id="f5",
+        )
+        assert reservation.engine_id == "f5"
+
+    _run(scenario())
+
+
 def test_switching_away_from_qwen_releases_prompt_for_another_session() -> None:
     lease_owner: str | None = "qwen-owner-one"
     releases: list[str] = []
