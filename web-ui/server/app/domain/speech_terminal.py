@@ -40,10 +40,18 @@ def _speech_terminal_from_response(
     if event_type in {"failed", "error"} or event_status == "error":
         return _speech_error_terminal("call_tts_failed", response=response)
 
-    normal_shape = event_type == "ai_done" or (
-        not require_final and event_status in {"queued", "normal"}
-    )
-    if not normal_shape:
+    if not require_final and event_status in {"queued", "normal"}:
+        # A Qwen segment is deliberately admitted before its playout drains so
+        # the next natural segment can start generating. Only the explicit
+        # final marker proves end-of-turn playout; treating this queued result
+        # as a terminal failure prevents that marker from ever being sent.
+        return SpeechTurnTerminal(
+            status="normal",
+            playout_completed=False,
+            response=dict(response),
+        )
+
+    if event_type != "ai_done":
         return _speech_error_terminal("call_tts_failed", response=response)
 
     raw_playout = event.get("tts_playback_final")

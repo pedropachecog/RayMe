@@ -1442,7 +1442,13 @@ def test_qwen_normal_multi_segment_turn_persists_once_after_one_normal_terminal(
             )
             event: dict[str, Any] = {
                 "turn_id": payload["turn_id"],
-                "tts_playback_final": {"playout_wait_completed": True},
+                # A non-final Qwen segment starts playout but must not wait for
+                # it: the explicit empty final marker is the only completion
+                # boundary. Treating this as a failed terminal loses that
+                # marker and strands the live session in speaking.
+                "tts_playback_final": {
+                    "playout_wait_completed": True if payload["final_chunk"] else None
+                },
             }
             if payload["final_chunk"]:
                 event["type"] = "ai_done"

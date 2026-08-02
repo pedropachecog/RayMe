@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, basename, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,12 +18,17 @@ type ActiveLiveCall = {
 };
 
 const liveEnabled = process.env.RAYME_ENABLE_LIVE_E2E === '1';
+const liveFakeAudioPeriodSeconds = 30;
+const liveFakeAudioRepeatCount = 10;
 const liveWebUrl = process.env.RAYME_LIVE_WEB_URL;
 const liveAiHealthUrl = process.env.RAYME_LIVE_AI_HEALTH_URL;
 const liveReferenceAudioFile = resolveLiveFixturePath(
   process.env.RAYME_LIVE_REFERENCE_AUDIO_FILE
 );
 const liveFakeAudioFile = resolveLiveFixturePath(process.env.RAYME_LIVE_FAKE_AUDIO_FILE);
+const liveFakeAudioCaptureFile = liveEnabled
+  ? prepareRepeatingLiveFakeAudioFixture(liveFakeAudioFile)
+  : liveFakeAudioFile;
 const liveReferenceTranscriptFile = resolveLiveFixturePath(
   process.env.RAYME_LIVE_REFERENCE_TRANSCRIPT_FILE
 );
@@ -58,7 +63,7 @@ test.use({
       '--force-webrtc-ip-handling-policy=default_public_interface_only',
       '--use-fake-device-for-media-stream',
       '--use-fake-ui-for-media-stream',
-      `--use-file-for-fake-audio-capture=${liveFakeAudioFile ?? ''}`
+      `--use-file-for-fake-audio-capture=${liveFakeAudioCaptureFile ?? ''}`
     ]
   }
 });
@@ -71,6 +76,35 @@ test('live fixture paths resolve from the repository root', () => {
   expect(resolveLiveFixturePath(fixture)).toBe(resolve(repositoryRoot, fixture));
   expect(resolveLiveFixturePath('/tmp/reference.wav')).toBe('/tmp/reference.wav');
   expect(resolveLiveFixturePath(undefined)).toBeUndefined();
+});
+
+test('repeating live fake microphone fixture preserves each speech period', () => {
+  const sourceData = Buffer.from([1, 0, 2, 0]);
+  const source = Buffer.alloc(44 + sourceData.length);
+  source.write('RIFF', 0, 'ascii');
+  source.writeUInt32LE(source.length - 8, 4);
+  source.write('WAVEfmt ', 8, 'ascii');
+  source.writeUInt32LE(16, 16);
+  source.writeUInt16LE(1, 20);
+  source.writeUInt16LE(1, 22);
+  source.writeUInt32LE(2, 24);
+  source.writeUInt32LE(4, 28);
+  source.writeUInt16LE(2, 32);
+  source.writeUInt16LE(16, 34);
+  source.write('data', 36, 'ascii');
+  source.writeUInt32LE(sourceData.length, 40);
+  sourceData.copy(source, 44);
+
+  const repeated = repeatLiveFakeAudioWav(source, 2, 2);
+
+  expect(repeated.readUInt32LE(4)).toBe(repeated.length - 8);
+  expect(repeated.readUInt32LE(40)).toBe(16);
+  expect(repeated.subarray(44)).toEqual(
+    Buffer.from([
+      1, 0, 2, 0, 0, 0, 0, 0,
+      1, 0, 2, 0, 0, 0, 0, 0
+    ])
+  );
 });
 
 for (const liveTtsEngine of liveTtsEngines) {
@@ -162,6 +196,24 @@ for (const liveTtsEngine of liveTtsEngines) {
       await page.waitForTimeout(5_000);
       await page.getByRole('button', { name: 'Unmute' }).click();
       await expect(page.getByRole('button', { name: 'Mute' })).toBeVisible({ timeout: 30_000 });
+
+      // The generated capture file repeats the supplied utterance at bounded
+      // intervals. Do not credit a later utterance until the first turn has
+      // reached the normal terminal: otherwise a broken TTS final marker or
+      // Listening recovery could be hidden by audio arriving while speaking.
+      await expect
+        .poll(
+          async () => ({
+            firstUserFinalized: (await transcriptTurnCount(page, 'user_speech')) >= 1,
+            firstPlaybackStarted: liveSignals.aiAudioStartedTurnIds.size >= 1,
+            firstPlaybackCompleted: liveSignals.aiDoneEvents >= 1
+          }),
+          { timeout: 180_000 }
+        )
+        .toEqual({ firstUserFinalized: true, firstPlaybackStarted: true, firstPlaybackCompleted: true });
+      await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible({
+        timeout: 30_000
+      });
 
       await expect.poll(() => transcriptTurnCount(page, 'user_speech'), { timeout: 240_000 }).toBeGreaterThanOrEqual(2);
       await expect.poll(() => transcriptTurnCount(page, 'ai_speech'), { timeout: 300_000 }).toBeGreaterThanOrEqual(2);
@@ -390,6 +442,101 @@ function resolveLiveFixturePath(value: string | undefined): string | undefined {
     return undefined;
   }
   return isAbsolute(value) ? value : resolve(repositoryRoot, value);
+}
+
+function prepareRepeatingLiveFakeAudioFixture(sourcePath: string | undefined): string | undefined {
+  if (!sourcePath) {
+    return undefined;
+  }
+
+  const outputDirectory = resolve(repositoryRoot, 'web-ui/client/test-results/.live-call-fixtures');
+  const outputPath = resolve(outputDirectory, `${basename(sourcePath, '.wav')}.repeating.wav`);
+  const temporaryPath = `${outputPath}.${process.pid}.${Date.now()}.tmp`;
+  const repeated = repeatLiveFakeAudioWav(
+    readFileSync(sourcePath),
+    liveFakeAudioRepeatCount,
+    liveFakeAudioPeriodSeconds
+  );
+
+  mkdirSync(outputDirectory, { recursive: true });
+  writeFileSync(temporaryPath, repeated);
+  renameSync(temporaryPath, outputPath);
+  return outputPath;
+}
+
+function repeatLiveFakeAudioWav(
+  wav: Buffer,
+  repeatCount: number,
+  periodSeconds: number
+): Buffer {
+  if (!Number.isInteger(repeatCount) || repeatCount < 2) {
+    throw new Error('Live fake microphone repeat count must be at least two');
+  }
+  if (!Number.isFinite(periodSeconds) || periodSeconds <= 0) {
+    throw new Error('Live fake microphone period must be positive');
+  }
+  if (
+    wav.length < 12 ||
+    wav.toString('ascii', 0, 4) !== 'RIFF' ||
+    wav.toString('ascii', 8, 12) !== 'WAVE'
+  ) {
+    throw new Error('Live fake microphone fixture must be a RIFF/WAVE file');
+  }
+
+  let cursor = 12;
+  let byteRate: number | undefined;
+  let blockAlign: number | undefined;
+  let dataOffset: number | undefined;
+  let dataLength: number | undefined;
+  let dataSizeOffset: number | undefined;
+
+  while (cursor + 8 <= wav.length) {
+    const chunkId = wav.toString('ascii', cursor, cursor + 4);
+    const chunkLength = wav.readUInt32LE(cursor + 4);
+    const chunkOffset = cursor + 8;
+    const chunkEnd = chunkOffset + chunkLength;
+    if (chunkEnd > wav.length) {
+      throw new Error('Live fake microphone fixture has a truncated WAV chunk');
+    }
+    if (chunkId === 'fmt ') {
+      if (chunkLength < 16) {
+        throw new Error('Live fake microphone fixture has an invalid WAV format chunk');
+      }
+      byteRate = wav.readUInt32LE(chunkOffset + 8);
+      blockAlign = wav.readUInt16LE(chunkOffset + 12);
+    } else if (chunkId === 'data' && dataOffset === undefined) {
+      dataOffset = chunkOffset;
+      dataLength = chunkLength;
+      dataSizeOffset = cursor + 4;
+    }
+    cursor = chunkEnd + (chunkLength % 2);
+  }
+
+  if (
+    !byteRate ||
+    !blockAlign ||
+    dataOffset === undefined ||
+    dataLength === undefined ||
+    dataSizeOffset === undefined ||
+    dataLength === 0 ||
+    dataLength % blockAlign !== 0
+  ) {
+    throw new Error('Live fake microphone fixture must contain aligned PCM audio data');
+  }
+
+  const periodBytes = Math.max(
+    dataLength,
+    Math.ceil((byteRate * periodSeconds) / blockAlign) * blockAlign
+  );
+  const repeatedData = Buffer.alloc(periodBytes * repeatCount);
+  for (let index = 0; index < repeatCount; index += 1) {
+    wav.copy(repeatedData, index * periodBytes, dataOffset, dataOffset + dataLength);
+  }
+
+  const header = Buffer.from(wav.subarray(0, dataOffset));
+  header.writeUInt32LE(repeatedData.length, dataSizeOffset);
+  header.writeUInt32LE(header.length + repeatedData.length - 8, 4);
+  return Buffer.concat([header, repeatedData]);
 }
 
 function loadLiveReferenceFixture(): {
