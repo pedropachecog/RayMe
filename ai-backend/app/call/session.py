@@ -478,6 +478,7 @@ class CallSession:
         self._media_reconnect_grace_logged = False
         self._media_reconnect_grace_audio_diag_count = 0
         self._reconnect_audio_backfill_ids: set[str] = set()
+        self._reconnect_audio_backfill_epochs: dict[str, int] = {}
         self._active_reconnect_backfills = 0
         self._reconnect_backfill_admission_generation = 0
         self._reconnect_backfill_admissions: dict[
@@ -1560,6 +1561,7 @@ class CallSession:
         sample_rate: int = 16000,
         channels: int = 1,
         backfill_id: str | None = None,
+        audio_input_epoch: int | None = None,
         reason: str | None = None,
         attempt: int | None = None,
         batch_index: int | None = None,
@@ -1578,12 +1580,92 @@ class CallSession:
                     "state": self.state,
                     "reason": self.end_reason,
                 }
+            current_audio_epoch = self._audio_input_epoch
+            if backfill_id:
+                reserved_audio_epoch = self._reconnect_audio_backfill_epochs.get(
+                    backfill_id
+                )
+                if reserved_audio_epoch is None:
+                    reserved_audio_epoch = (
+                        current_audio_epoch
+                        if audio_input_epoch is None
+                        else audio_input_epoch
+                    )
+                    if reserved_audio_epoch > current_audio_epoch:
+                        logger.info(
+                            "[rayme-call] reconnect_audio.backfill.future_audio_epoch "
+                            "session=%s backfill_id=%s requested_epoch=%d "
+                            "current_epoch=%d",
+                            self.session_id,
+                            backfill_id,
+                            reserved_audio_epoch,
+                            current_audio_epoch,
+                        )
+                        return {
+                            "status": "skipped",
+                            "frames": 0,
+                            "duration_ms": 0,
+                            "state": self.state,
+                            "reason": "audio_input_epoch_invalid",
+                        }
+                    self._reconnect_audio_backfill_epochs[backfill_id] = (
+                        reserved_audio_epoch
+                    )
+                elif (
+                    audio_input_epoch is not None
+                    and audio_input_epoch != reserved_audio_epoch
+                ):
+                    logger.info(
+                        "[rayme-call] reconnect_audio.backfill.epoch_reused "
+                        "session=%s backfill_id=%s reserved_epoch=%d "
+                        "requested_epoch=%d",
+                        self.session_id,
+                        backfill_id,
+                        reserved_audio_epoch,
+                        audio_input_epoch,
+                    )
+            elif audio_input_epoch is None:
+                if current_audio_epoch > 0:
+                    logger.info(
+                        "[rayme-call] reconnect_audio.backfill.anonymous_epoch_required "
+                        "session=%s current_epoch=%d",
+                        self.session_id,
+                        current_audio_epoch,
+                    )
+                    return {
+                        "status": "skipped",
+                        "frames": 0,
+                        "duration_ms": 0,
+                        "state": self.state,
+                        "reason": "audio_input_epoch_required",
+                    }
+                reserved_audio_epoch = current_audio_epoch
+            else:
+                reserved_audio_epoch = audio_input_epoch
+
+            if reserved_audio_epoch > current_audio_epoch:
+                logger.info(
+                    "[rayme-call] reconnect_audio.backfill.future_audio_epoch "
+                    "session=%s backfill_id=%s reserved_epoch=%d "
+                    "current_epoch=%d",
+                    self.session_id,
+                    backfill_id or "",
+                    reserved_audio_epoch,
+                    current_audio_epoch,
+                )
+                return {
+                    "status": "skipped",
+                    "frames": 0,
+                    "duration_ms": 0,
+                    "state": self.state,
+                    "reason": "audio_input_epoch_invalid",
+                }
             self._active_reconnect_backfills += 1
             self._reconnect_backfill_admission_generation += 1
             admission = _ReconnectBackfillAdmission(
                 token=self._reconnect_backfill_admission_generation,
                 lifecycle_epoch=self._peer_lifecycle.epoch,
-                audio_input_epoch=self._audio_input_epoch,
+                audio_input_epoch=reserved_audio_epoch,
             )
             self._reconnect_backfill_admissions[admission.token] = admission
         try:

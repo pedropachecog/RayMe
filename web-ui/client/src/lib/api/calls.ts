@@ -14,6 +14,7 @@ export interface CallReconnectAudioBackfillRequest {
   sample_rate: number;
   channels: number;
   backfill_id?: string;
+  audio_input_epoch?: number;
   reason?: string;
   attempt?: number;
   duration_ms?: number;

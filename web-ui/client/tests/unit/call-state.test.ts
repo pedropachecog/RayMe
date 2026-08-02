@@ -161,7 +161,8 @@ describe('client call API wrappers', () => {
       session_id: 'rtc-1',
       pcm_b64: 'AAAA',
       sample_rate: 16000,
-      channels: 1
+      channels: 1,
+      audio_input_epoch: 3
     });
 
     expect(lastRequest(fetchMock)).toMatchObject({
@@ -172,7 +173,8 @@ describe('client call API wrappers', () => {
       session_id: 'rtc-1',
       pcm_b64: 'AAAA',
       sample_rate: 16000,
-      channels: 1
+      channels: 1,
+      audio_input_epoch: 3
     });
   });
 

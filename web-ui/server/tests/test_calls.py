@@ -361,6 +361,7 @@ def test_reconnect_audio_backfill_forwards_to_backend_without_persistence(
             "sample_rate": 16000,
             "channels": 1,
             "backfill_id": "gap-1",
+            "audio_input_epoch": 4,
             "reason": "failed",
             "attempt": 1,
             "duration_ms": 40,
@@ -378,6 +379,7 @@ def test_reconnect_audio_backfill_forwards_to_backend_without_persistence(
                 "sample_rate": 16000,
                 "channels": 1,
                 "backfill_id": "gap-1",
+                "audio_input_epoch": 4,
                 "reason": "failed",
                 "attempt": 1,
                 "duration_ms": 40,
@@ -389,6 +391,64 @@ def test_reconnect_audio_backfill_forwards_to_backend_without_persistence(
     rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
     assert rows[-1] == ("call_start", "event", "Call started")
     assert not any(row[0] in {"user_speech", "ai_speech"} for row in rows)
+
+
+@pytest.mark.parametrize(
+    "requests",
+    [
+        [
+            {"backfill_id": "stale-first", "audio_input_epoch": 0, "attempt": 1},
+            {"backfill_id": "stale-first", "audio_input_epoch": 0, "attempt": 2},
+        ],
+        [
+            {"backfill_id": "retry-first", "audio_input_epoch": 0, "attempt": 2},
+            {"backfill_id": "retry-first", "audio_input_epoch": 0, "attempt": 1},
+        ],
+        [{"audio_input_epoch": 0, "attempt": 1}],
+    ],
+    ids=["stale-first", "retry-first", "anonymous"],
+)
+def test_reconnect_audio_epoch_identity_survives_web_proxy_ordering(
+    call_fixture: CallFixture,
+    requests: list[dict[str, Any]],
+) -> None:
+    thread_id = asyncio.run(
+        _insert_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post(
+        "/api/calls/start",
+        json={"thread_id": thread_id},
+    ).json()
+
+    for request_payload in requests:
+        response = call_fixture.client.post(
+            f"/api/calls/{started['call_id']}/reconnect-audio",
+            json={
+                "session_id": started["session_id"],
+                "pcm_b64": "AAECAw==",
+                "sample_rate": 16000,
+                "channels": 1,
+                **request_payload,
+            },
+        )
+        assert response.status_code == 200
+
+    forwarded = [
+        {
+            "backfill_id": item["payload"]["backfill_id"],
+            "audio_input_epoch": item["payload"]["audio_input_epoch"],
+            "attempt": item["payload"]["attempt"],
+        }
+        for item in call_fixture.backend.backfill_calls
+    ]
+    assert forwarded == [
+        {
+            "backfill_id": item.get("backfill_id"),
+            "audio_input_epoch": item["audio_input_epoch"],
+            "attempt": item["attempt"],
+        }
+        for item in requests
+    ]
 
 
 def test_recover_call_events_forwards_undelivered_user_final(

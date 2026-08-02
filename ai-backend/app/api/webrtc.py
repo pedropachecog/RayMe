@@ -153,6 +153,7 @@ class ReconnectAudioBackfillRequest(BaseModel):
     sample_rate: int = Field(default=16000, ge=8000, le=48000)
     channels: int = Field(default=1, ge=1, le=2)
     backfill_id: str | None = Field(default=None, max_length=160)
+    audio_input_epoch: int | None = Field(default=None, ge=0)
     reason: str | None = Field(default=None, max_length=80)
     attempt: int | None = Field(default=None, ge=0, le=10)
     duration_ms: int | None = Field(default=None, ge=0, le=60000)
@@ -706,6 +707,7 @@ async def backfill_session_reconnect_audio(
             sample_rate=payload.sample_rate,
             channels=payload.channels,
             backfill_id=payload.backfill_id,
+            audio_input_epoch=payload.audio_input_epoch,
             reason=payload.reason,
             attempt=payload.attempt,
             batch_index=payload.batch_index,

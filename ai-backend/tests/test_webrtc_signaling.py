@@ -2694,6 +2694,44 @@ def test_webrtc_reconnect_audio_backfill_appends_to_call_session(stub_webrtc: No
     assert len(session._turn_frames) == 2
 
 
+def test_webrtc_reconnect_audio_requires_anonymous_epoch_after_mute(
+    stub_webrtc: None,
+) -> None:
+    client = _client()
+    session_id = "call-session-anonymous-epoch"
+    client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+    session = client.app.state.call_session_manager.get_session(session_id)
+    asyncio.run(session.set_muted(True))
+    asyncio.run(session.set_muted(False))
+    pcm = np.full(320, 2200, dtype=np.int16).tobytes()
+    route = RECONNECT_AUDIO_ROUTE_TEMPLATE.format(session_id=session_id)
+
+    missing_epoch = client.post(
+        route,
+        json={
+            "pcm_b64": base64.b64encode(pcm).decode("ascii"),
+            "sample_rate": 16000,
+            "channels": 1,
+        },
+    )
+    stale_epoch = client.post(
+        route,
+        json={
+            "pcm_b64": base64.b64encode(pcm).decode("ascii"),
+            "sample_rate": 16000,
+            "channels": 1,
+            "audio_input_epoch": 0,
+        },
+    )
+
+    assert missing_epoch.status_code == 200
+    assert missing_epoch.json()["status"] == "skipped"
+    assert missing_epoch.json()["reason"] == "audio_input_epoch_required"
+    assert stale_epoch.status_code == 200
+    assert stale_epoch.json()["status"] == "skipped"
+    assert session._turn_frames == []
+
+
 def test_webrtc_events_drain_returns_undelivered_user_final(stub_webrtc: None) -> None:
     client = _client()
     session_id = "call-session-1"

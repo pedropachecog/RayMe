@@ -2459,6 +2459,9 @@ def test_mute_discards_reconnect_hold_and_rejects_stale_backfill_epoch() -> None
         stale_admission = next(
             iter(session._reconnect_backfill_admissions.values())
         )
+        assert session._reconnect_audio_backfill_epochs[
+            "pre-mute-delayed-backfill"
+        ] == stale_admission.audio_input_epoch
 
         await session.set_muted(True)
 
@@ -2485,11 +2488,97 @@ def test_mute_discards_reconnect_hold_and_rejects_stale_backfill_epoch() -> None
             backfill_id="pre-mute-delayed-backfill",
             final=True,
         )
-        assert duplicate["status"] == "duplicate"
+        assert duplicate["status"] == "skipped"
         assert vad.frames == [post_unmute_pcm]
 
         result = await session.finalize_user_turn()
         assert result is not None and result["type"] == "user_final"
+        assert stt.calls == [[post_unmute_pcm]]
+
+    _run(scenario())
+
+
+def test_retry_before_stale_backfill_uses_reserved_pre_mute_epoch() -> None:
+    async def scenario() -> None:
+        vad = NeverEndingVadAdapter()
+        stt = ScriptedSttAdapter()
+        session, _ = _new_session(vad_adapter=vad, stt_adapter=stt)
+        pre_mute_pcm = np.full(320, 2400, dtype=np.int16).tobytes()
+        post_unmute_pcm = np.full(320, 3600, dtype=np.int16).tobytes()
+        original_backfill = session._backfill_reconnect_audio_admitted
+        first_admitted = asyncio.Event()
+        release_first = asyncio.Event()
+        admission_count = 0
+
+        async def delay_first_admission(**kwargs: Any) -> dict[str, Any]:
+            nonlocal admission_count
+            admission_count += 1
+            if admission_count == 1:
+                first_admitted.set()
+                await release_first.wait()
+            return await original_backfill(**kwargs)
+
+        session._backfill_reconnect_audio_admitted = delay_first_admission
+        original = asyncio.create_task(
+            session.backfill_reconnect_audio(
+                pcm=pre_mute_pcm,
+                backfill_id="retry-before-stale-original",
+                audio_input_epoch=0,
+                final=True,
+            )
+        )
+        await asyncio.wait_for(first_admitted.wait(), timeout=1.0)
+        assert session._reconnect_audio_backfill_epochs == {
+            "retry-before-stale-original": 0
+        }
+
+        await session.set_muted(True)
+        await session.set_muted(False)
+        assert session._audio_input_epoch == 1
+
+        retry = await session.backfill_reconnect_audio(
+            pcm=pre_mute_pcm,
+            backfill_id="retry-before-stale-original",
+            audio_input_epoch=1,
+            attempt=2,
+            final=True,
+        )
+        assert retry["status"] == "skipped"
+        assert session._reconnect_audio_backfill_epochs == {
+            "retry-before-stale-original": 0
+        }
+        assert vad.frames == []
+
+        release_first.set()
+        stale_original = await asyncio.wait_for(original, timeout=1.0)
+        assert stale_original["status"] == "skipped"
+        assert vad.frames == []
+
+        anonymous = await session.backfill_reconnect_audio(
+            pcm=pre_mute_pcm,
+            final=True,
+        )
+        assert anonymous == {
+            "status": "skipped",
+            "frames": 0,
+            "duration_ms": 0,
+            "state": "listening",
+            "reason": "audio_input_epoch_required",
+        }
+        stale_anonymous = await session.backfill_reconnect_audio(
+            pcm=pre_mute_pcm,
+            audio_input_epoch=0,
+            final=True,
+        )
+        assert stale_anonymous["status"] == "skipped"
+        assert vad.frames == []
+
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(post_unmute_pcm)
+        ) is None
+        result = await session.finalize_user_turn()
+        assert result is not None and result["type"] == "user_final"
+        assert vad.frames == [post_unmute_pcm]
         assert stt.calls == [[post_unmute_pcm]]
 
     _run(scenario())

@@ -91,6 +91,7 @@
   let callId = $state('');
   let sessionId = $state('');
   let serverMuted = $state(false);
+  let localMicAudioEpoch = 0;
   let listeningRms = $state<number | null>(null);
   let speakingRms = $state<number | null>(null);
   let transcript = $state<CallTranscriptTurn[]>([]);
@@ -126,6 +127,7 @@
   let reconnectAudioBackfillLastEndMs = 0;
   let reconnectAudioBackfillBatchIndex = 0;
   let reconnectAudioBackfillId = '';
+  let reconnectAudioBackfillEpoch = 0;
   let reconnectAudioBackfillReason: MediaReconnectReason | null = null;
   let reconnectAudioBackfillFlushPromise: Promise<void> | null = null;
   let reconnectAudioBackfillFinalPromise: Promise<void> | null = null;
@@ -231,6 +233,8 @@
     callState = 'connecting';
     clearEventTimers();
     handledUserFinalTurnIds.clear();
+    localMicAudioEpoch = 0;
+    reconnectAudioBackfillEpoch = 0;
 
     try {
       localMediaStream = await requestCallMicrophone();
@@ -920,6 +924,7 @@
     reconnectAudioBackfillLastEndMs = 0;
     reconnectAudioBackfillBatchIndex = 0;
     reconnectAudioBackfillId = `${debugCallId || 'call'}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    reconnectAudioBackfillEpoch = localMicAudioEpoch;
     reconnectAudioBackfillReason = reason;
     if (callState === 'listening') {
       applyCallState('understanding');
@@ -1160,6 +1165,7 @@
         sample_rate: MIC_BACKFILL_SAMPLE_RATE,
         channels: 1,
         backfill_id: batchBackfillId,
+        audio_input_epoch: reconnectAudioBackfillEpoch,
         reason,
         attempt,
         duration_ms: selection?.durationMs ?? 0,
@@ -2351,14 +2357,23 @@
       return;
     }
 
-    const nextMuted = !serverMuted;
+    const previousMuted = serverMuted;
+    const nextMuted = !previousMuted;
     serverMuted = nextMuted;
 
     try {
       const result = await setCallMuted(callId, sessionId, nextMuted);
-      serverMuted = Boolean((result as typeof result & { serverMuted?: boolean }).serverMuted ?? result.muted ?? nextMuted);
+      const confirmedMuted = Boolean(
+        (result as typeof result & { serverMuted?: boolean }).serverMuted ??
+          result.muted ??
+          nextMuted
+      );
+      serverMuted = confirmedMuted;
+      if (!previousMuted && confirmedMuted) {
+        localMicAudioEpoch += 1;
+      }
     } catch {
-      serverMuted = !nextMuted;
+      serverMuted = previousMuted;
     }
   }
 
