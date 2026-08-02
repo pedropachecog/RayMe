@@ -108,12 +108,20 @@
 
   interface BrowserMediaConnectionOwner {
     readonly generationId: number;
+    readonly lifecycleGeneration: number;
+    readonly lifecycleSignal: AbortSignal;
+    readonly localMediaStream: MediaStream;
     readonly connection: RTCPeerConnection;
     eventsChannel: RTCDataChannel;
     candidateRemoteStream: MediaStream | null;
     readonly candidateRemoteStreamReady: Promise<MediaStream>;
     readonly resolveCandidateRemoteStream: (stream: MediaStream) => void;
     remoteAudioPromoted: boolean;
+  }
+
+  interface BrowserMediaLifecycleOwner {
+    readonly generationId: number;
+    readonly abortController: AbortController;
   }
 
   interface MuteRequestOwner {
@@ -171,6 +179,13 @@
     }
   }
 
+  class ObsoleteBrowserMediaContinuationError extends Error {
+    constructor() {
+      super('Browser media continuation no longer owns the call lifecycle');
+      this.name = 'ObsoleteBrowserMediaContinuationError';
+    }
+  }
+
   type MediaReconnectReason = 'failed' | 'disconnected';
 
   let thread = $state<ThreadDetail | null>(null);
@@ -208,8 +223,15 @@
   let peerConnection: RTCPeerConnection | null = null;
   let eventsChannel: RTCDataChannel | null = null;
   let browserMediaConnectionGeneration = 0;
+  let browserMediaLifecycleGeneration = 0;
+  let browserMediaLifecycle: BrowserMediaLifecycleOwner = {
+    generationId: browserMediaLifecycleGeneration,
+    abortController: new AbortController()
+  };
   let activeBrowserMediaConnection: BrowserMediaConnectionOwner | null = null;
   const stagedBrowserMediaConnections = new Set<BrowserMediaConnectionOwner>();
+  const closedBrowserPeerConnections = new WeakSet<RTCPeerConnection>();
+  const closedBrowserEventChannels = new WeakSet<RTCDataChannel>();
   let mediaReconnectTimer = 0;
   let mediaReconnectStableTimer = 0;
   let mediaReconnecting = false;
@@ -382,6 +404,9 @@
       }
 
     } catch (error) {
+      if (error instanceof ObsoleteBrowserMediaContinuationError) {
+        return;
+      }
       await failCallStartup(error);
     }
   }
@@ -396,6 +421,9 @@
     if (!localMediaStream) {
       return null;
     }
+
+    const connectionLocalMediaStream = localMediaStream;
+    const lifecycle = browserMediaLifecycle;
 
     if (typeof RTCPeerConnection === 'undefined') {
       throw new CallApiError('This browser cannot start a real WebRTC call.', 400, 'webrtc_offer_failed');
@@ -415,6 +443,9 @@
     });
     const connectionOwner: BrowserMediaConnectionOwner = {
       generationId: ++browserMediaConnectionGeneration,
+      lifecycleGeneration: lifecycle.generationId,
+      lifecycleSignal: lifecycle.abortController.signal,
+      localMediaStream: connectionLocalMediaStream,
       connection,
       eventsChannel: candidateEventsChannel,
       candidateRemoteStream: null,
@@ -427,7 +458,13 @@
     }
     let candidateDiscarded = false;
     const ownsCandidateConnection = () =>
-      !candidateDiscarded && (
+      !candidateDiscarded &&
+      ownsBrowserMediaLifecycle(connectionOwner) &&
+      localMediaStream === connectionLocalMediaStream &&
+      !ending &&
+      callState !== 'ended' &&
+      callState !== 'failed' &&
+      (
         ownsBrowserMediaConnection(connectionOwner) ||
         (
           preserveExisting &&
@@ -435,6 +472,11 @@
           activeBrowserMediaConnection === previousConnectionOwner
         )
       );
+    const assertCandidateConnectionOwner = () => {
+      if (!ownsCandidateConnection()) {
+        throw new ObsoleteBrowserMediaContinuationError();
+      }
+    };
     if (!preserveExisting) {
       peerConnection = connection;
       activeBrowserMediaConnection = connectionOwner;
@@ -448,7 +490,7 @@
       'browser-created'
     );
     if (!preserveExisting) {
-      previousConnection?.close();
+      closeBrowserPeerConnectionOnce(previousConnection);
     }
     connection.ondatachannel = (event) => {
       emitDebugEvent(started.call_id, 'pc.ondatachannel', {
@@ -458,7 +500,7 @@
         isCurrentPeer: ownsBrowserMediaConnection(connectionOwner)
       });
       if (!ownsCandidateConnection()) {
-        event.channel.close();
+        closeBrowserEventChannelOnce(event.channel);
         return;
       }
       if (event.channel.label === 'rayme-events') {
@@ -501,7 +543,7 @@
       connectionOwner.remoteAudioPromoted = true;
       attachRemoteAudio(stream, started.call_id);
     };
-    for (const track of localMediaStream.getAudioTracks()) {
+    for (const track of connectionLocalMediaStream.getAudioTracks()) {
       emitDebugEvent(started.call_id, 'pc.addTrack', {
         kind: track.kind,
         id: track.id,
@@ -510,26 +552,36 @@
         enabled: track.enabled,
         settings: summarizeLocalAudioTrackSettings(track)
       });
-      connection.addTrack(track, localMediaStream);
+      connection.addTrack(track, connectionLocalMediaStream);
     }
 
     let pendingPeerGeneration: number | null = null;
     let backendPeerCommitted = false;
     let promotionSessionId = started.session_id || started.call_id;
     try {
+      assertCandidateConnectionOwner();
       const offer = await connection.createOffer();
+      assertCandidateConnectionOwner();
       await connection.setLocalDescription(offer);
+      assertCandidateConnectionOwner();
       emitDebugEvent(started.call_id, 'pc.setLocalDescription', {
         type: offer.type,
         sdp_len: offer.sdp?.length ?? 0
       });
-      await waitForIceGathering(connection);
+      await waitForIceGathering(connection, lifecycle.abortController.signal);
+      assertCandidateConnectionOwner();
       const localDescription = connection.localDescription ?? offer;
       emitDebugEvent(started.call_id, 'pc.offer.sending', {
         iceGatheringState: connection.iceGatheringState,
         sdp_len: localDescription.sdp?.length ?? 0
       });
-      const response = await offerCall(started.call_id, localDescription, started.session_id);
+      const response = await offerCall(
+        started.call_id,
+        localDescription,
+        started.session_id,
+        { signal: lifecycle.abortController.signal }
+      );
+      assertCandidateConnectionOwner();
       sessionId = response.session_id || started.session_id || started.call_id;
       promotionSessionId = sessionId;
       emitDebugEvent(started.call_id, 'pc.answer.received', {
@@ -539,9 +591,11 @@
       });
       if (options.beforeRemoteDescription) {
         await options.beforeRemoteDescription();
+        assertCandidateConnectionOwner();
       }
       if (response.answer) {
         await connection.setRemoteDescription(response.answer);
+        assertCandidateConnectionOwner();
         emitDebugEvent(started.call_id, 'pc.setRemoteDescription.done', {
           signalingState: connection.signalingState,
           iceConnectionState: connection.iceConnectionState,
@@ -556,17 +610,31 @@
           throw new Error('Replacement offer did not include a valid peer generation');
         }
         pendingPeerGeneration = response.peer_generation as number;
-        await waitForBrowserMediaConnected(connection, started.call_id);
+        await waitForBrowserMediaConnected(
+          connection,
+          started.call_id,
+          7000,
+          lifecycle.abortController.signal
+        );
+        assertCandidateConnectionOwner();
         const candidateRemoteStream =
           connectionOwner.candidateRemoteStream ??
-          await waitForBrowserMediaCandidateStream(connectionOwner, started.call_id);
+          await waitForBrowserMediaCandidateStream(
+            connectionOwner,
+            started.call_id,
+            7000,
+            lifecycle.abortController.signal
+          );
+        assertCandidateConnectionOwner();
         await commitBrowserPeerPromotion(
           started.call_id,
           promotionSessionId,
           pendingPeerGeneration,
-          response.peer_commit_timeout_ms
+          response.peer_commit_timeout_ms,
+          lifecycle.abortController.signal
         );
         backendPeerCommitted = true;
+        assertCandidateConnectionOwner();
         stagedBrowserMediaConnections.delete(connectionOwner);
         peerConnection = connection;
         activeBrowserMediaConnection = connectionOwner;
@@ -578,11 +646,31 @@
         );
       }
       if (preserveExisting && previousConnection && previousConnection !== connection) {
-        previousConnection.close();
+        assertCandidateConnectionOwner();
+        closeBrowserPeerConnectionOnce(previousConnection);
       }
       return response;
     } catch (error) {
       if (preserveExisting) {
+        if (
+          error instanceof ObsoleteBrowserMediaContinuationError ||
+          lifecycle.abortController.signal.aborted
+        ) {
+          candidateDiscarded = true;
+          discardBrowserMediaCandidate(connectionOwner, started.call_id, error);
+          if (peerConnection === connection) {
+            peerConnection = previousConnection;
+          }
+          if (activeBrowserMediaConnection === connectionOwner) {
+            activeBrowserMediaConnection = previousConnectionOwner;
+          }
+          if (eventsChannel === connectionOwner.eventsChannel) {
+            eventsChannel = previousEventsChannel;
+          }
+          closeBrowserEventChannelOnce(connectionOwner.eventsChannel);
+          closeBrowserPeerConnectionOnce(connection);
+          throw new ObsoleteBrowserMediaContinuationError();
+        }
         if (
           error instanceof AmbiguousPeerPromotionError ||
           error instanceof FailedPeerPromotionError
@@ -604,7 +692,8 @@
           const rejection = await rejectBrowserPeerPromotion(
             started.call_id,
             promotionSessionId,
-            pendingPeerGeneration
+            pendingPeerGeneration,
+            lifecycle.abortController.signal
           );
           if (rejection !== 'rollback_safe') {
             throw new AmbiguousPeerPromotionError(
@@ -623,7 +712,8 @@
         if (eventsChannel === candidateEventsChannel) {
           eventsChannel = previousEventsChannel;
         }
-        connection.close();
+        closeBrowserEventChannelOnce(connectionOwner.eventsChannel);
+        closeBrowserPeerConnectionOnce(connection);
       }
       throw error;
     }
@@ -633,7 +723,8 @@
     callId: string,
     promotionSessionId: string,
     generation: number,
-    backendDecisionTimeoutMs: number | null | undefined
+    backendDecisionTimeoutMs: number | null | undefined,
+    lifecycleSignal: AbortSignal
   ) {
     const deadline = performance.now() + PEER_PROMOTION_RECONCILIATION_TIMEOUT_MS;
     let attempt = 0;
@@ -641,21 +732,25 @@
     let authoritativeInProgress = false;
 
     while (performance.now() < deadline) {
+      assertBrowserMediaLifecycleSignal(lifecycleSignal);
       attempt += 1;
-      const controller = new AbortController();
       const attemptTimeout = Math.max(
         1,
         Math.min(PEER_PROMOTION_ATTEMPT_TIMEOUT_MS, deadline - performance.now())
       );
-      const timeout = window.setTimeout(() => controller.abort(), attemptTimeout);
+      const attemptOwner = createBrowserMediaRequestAttempt(
+        lifecycleSignal,
+        attemptTimeout
+      );
       try {
         const promotion = await promoteCallPeer(
           callId,
           promotionSessionId,
           generation,
           'commit',
-          { signal: controller.signal }
+          { signal: attemptOwner.controller.signal }
         );
+        assertBrowserMediaLifecycleSignal(lifecycleSignal);
         if (
           promotion.session_id !== promotionSessionId ||
           promotion.generation !== generation
@@ -689,6 +784,7 @@
         }
         return;
       } catch (error) {
+        assertBrowserMediaLifecycleSignal(lifecycleSignal);
         if (
           error instanceof CallApiError &&
           error.code === 'webrtc_peer_already_committed'
@@ -718,9 +814,12 @@
           name: (error as DOMException)?.name ?? 'unknown',
           code: error instanceof CallApiError ? error.code : undefined
         });
-        await delay(Math.min(PEER_PROMOTION_RETRY_DELAY_MS, remainingMs));
+        await delayWithSignal(
+          Math.min(PEER_PROMOTION_RETRY_DELAY_MS, remainingMs),
+          lifecycleSignal
+        );
       } finally {
-        window.clearTimeout(timeout);
+        attemptOwner.cleanup();
       }
     }
 
@@ -731,7 +830,8 @@
         generation,
         attempt,
         backendDecisionTimeoutMs,
-        lastError
+        lastError,
+        lifecycleSignal
       );
     }
 
@@ -744,7 +844,8 @@
     generation: number,
     initialAttempt: number,
     backendDecisionTimeoutMs: number | null | undefined,
-    initialError: unknown
+    initialError: unknown,
+    lifecycleSignal: AbortSignal
   ) {
     const decisionTimeoutMs = normalizePeerPromotionDecisionTimeoutMs(
       backendDecisionTimeoutMs
@@ -754,26 +855,34 @@
     let lastError = initialError;
 
     while (performance.now() < deadline) {
+      assertBrowserMediaLifecycleSignal(lifecycleSignal);
       const remainingBeforeDelay = deadline - performance.now();
-      await delay(Math.min(PEER_PROMOTION_RETRY_DELAY_MS, remainingBeforeDelay));
+      await delayWithSignal(
+        Math.min(PEER_PROMOTION_RETRY_DELAY_MS, remainingBeforeDelay),
+        lifecycleSignal
+      );
+      assertBrowserMediaLifecycleSignal(lifecycleSignal);
       if (performance.now() >= deadline) {
         break;
       }
       attempt += 1;
-      const controller = new AbortController();
       const attemptTimeout = Math.max(
         1,
         Math.min(PEER_PROMOTION_ATTEMPT_TIMEOUT_MS, deadline - performance.now())
       );
-      const timeout = window.setTimeout(() => controller.abort(), attemptTimeout);
+      const attemptOwner = createBrowserMediaRequestAttempt(
+        lifecycleSignal,
+        attemptTimeout
+      );
       try {
         const promotion = await promoteCallPeer(
           callId,
           promotionSessionId,
           generation,
           'commit',
-          { signal: controller.signal }
+          { signal: attemptOwner.controller.signal }
         );
+        assertBrowserMediaLifecycleSignal(lifecycleSignal);
         if (
           promotion.session_id !== promotionSessionId ||
           promotion.generation !== generation
@@ -801,6 +910,7 @@
           remainingMs: Math.round(deadline - performance.now())
         });
       } catch (error) {
+        assertBrowserMediaLifecycleSignal(lifecycleSignal);
         if (
           error instanceof CallApiError &&
           error.code === 'webrtc_peer_already_committed'
@@ -827,7 +937,7 @@
           code: error instanceof CallApiError ? error.code : undefined
         });
       } finally {
-        window.clearTimeout(timeout);
+        attemptOwner.cleanup();
       }
     }
 
@@ -836,7 +946,8 @@
       promotionSessionId,
       generation,
       attempt,
-      lastError
+      lastError,
+      lifecycleSignal
     );
   }
 
@@ -855,16 +966,17 @@
     promotionSessionId: string,
     generation: number,
     attempt: number,
-    lastError: unknown
+    lastError: unknown,
+    lifecycleSignal: AbortSignal
   ) {
+    assertBrowserMediaLifecycleSignal(lifecycleSignal);
     emitDebugEvent(callId, 'remote_audio.candidate.commit_decision_deadline', {
       generation,
       attempt
     });
 
-    const controller = new AbortController();
-    const timeout = window.setTimeout(
-      () => controller.abort(),
+    const attemptOwner = createBrowserMediaRequestAttempt(
+      lifecycleSignal,
       PEER_PROMOTION_ATTEMPT_TIMEOUT_MS
     );
     try {
@@ -873,8 +985,9 @@
         promotionSessionId,
         generation,
         'commit',
-        { signal: controller.signal }
+        { signal: attemptOwner.controller.signal }
       );
+      assertBrowserMediaLifecycleSignal(lifecycleSignal);
       if (
         promotion.session_id !== promotionSessionId ||
         promotion.generation !== generation
@@ -897,6 +1010,7 @@
       }
       lastError = new Error('Replacement peer commit remained in progress at its deadline');
     } catch (error) {
+      assertBrowserMediaLifecycleSignal(lifecycleSignal);
       if (
         error instanceof CallApiError &&
         error.code === 'webrtc_peer_already_committed'
@@ -908,14 +1022,16 @@
       }
       lastError = error;
     } finally {
-      window.clearTimeout(timeout);
+      attemptOwner.cleanup();
     }
 
     const rejection = await rejectBrowserPeerPromotion(
       callId,
       promotionSessionId,
-      generation
+      generation,
+      lifecycleSignal
     );
+    assertBrowserMediaLifecycleSignal(lifecycleSignal);
     if (rejection === 'rollback_safe') {
       throw new RejectedPeerPromotionError();
     }
@@ -951,18 +1067,24 @@
   async function rejectBrowserPeerPromotion(
     callId: string,
     promotionSessionId: string,
-    generation: number
+    generation: number,
+    lifecycleSignal?: AbortSignal
   ): Promise<'rollback_safe' | 'committed' | 'failed' | 'in_progress' | 'ambiguous'> {
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 1000);
+    if (lifecycleSignal) {
+      assertBrowserMediaLifecycleSignal(lifecycleSignal);
+    }
+    const requestOwner = createBrowserMediaRequestAttempt(lifecycleSignal, 1000);
     try {
       const promotion = await promoteCallPeer(
         callId,
         promotionSessionId,
         generation,
         'reject',
-        { signal: controller.signal }
+        { signal: requestOwner.controller.signal }
       );
+      if (lifecycleSignal) {
+        assertBrowserMediaLifecycleSignal(lifecycleSignal);
+      }
       if (
         promotion.session_id !== promotionSessionId ||
         promotion.generation !== generation
@@ -977,6 +1099,9 @@
       }
       return promotion.status;
     } catch (error) {
+      if (lifecycleSignal) {
+        assertBrowserMediaLifecycleSignal(lifecycleSignal);
+      }
       emitDebugEvent(callId, 'remote_audio.candidate.reject_failed', {
         generation,
         name: (error as DOMException)?.name ?? 'unknown',
@@ -990,7 +1115,7 @@
       }
       return peerPromotionProvesNotCommitted(error) ? 'rollback_safe' : 'ambiguous';
     } finally {
-      window.clearTimeout(timeout);
+      requestOwner.cleanup();
     }
   }
 
@@ -1023,9 +1148,83 @@
   ): owner is BrowserMediaConnectionOwner {
     return Boolean(
       owner &&
+      ownsBrowserMediaLifecycle(owner) &&
       activeBrowserMediaConnection === owner &&
       peerConnection === owner.connection
     );
+  }
+
+  function ownsBrowserMediaLifecycle(owner: BrowserMediaConnectionOwner) {
+    return (
+      owner.lifecycleGeneration === browserMediaLifecycle.generationId &&
+      owner.lifecycleSignal === browserMediaLifecycle.abortController.signal &&
+      !owner.lifecycleSignal.aborted
+    );
+  }
+
+  function assertBrowserMediaLifecycleSignal(signal: AbortSignal) {
+    if (
+      signal.aborted ||
+      signal !== browserMediaLifecycle.abortController.signal
+    ) {
+      throw new ObsoleteBrowserMediaContinuationError();
+    }
+  }
+
+  function invalidateBrowserMediaLifecycle(reason: unknown) {
+    const previousLifecycle = browserMediaLifecycle;
+    if (!previousLifecycle.abortController.signal.aborted) {
+      previousLifecycle.abortController.abort(reason);
+    }
+    browserMediaLifecycleGeneration += 1;
+    browserMediaLifecycle = {
+      generationId: browserMediaLifecycleGeneration,
+      abortController: new AbortController()
+    };
+  }
+
+  function createBrowserMediaRequestAttempt(
+    lifecycleSignal: AbortSignal | undefined,
+    timeoutMs: number
+  ) {
+    const controller = new AbortController();
+    const abortForLifecycle = () => {
+      controller.abort(
+        lifecycleSignal?.reason ??
+        new DOMException('Browser media lifecycle ended', 'AbortError')
+      );
+    };
+    if (lifecycleSignal?.aborted) {
+      abortForLifecycle();
+    } else {
+      lifecycleSignal?.addEventListener('abort', abortForLifecycle, { once: true });
+    }
+    const timeout = window.setTimeout(() => {
+      controller.abort(new DOMException('Browser media request timed out', 'TimeoutError'));
+    }, timeoutMs);
+    return {
+      controller,
+      cleanup: () => {
+        window.clearTimeout(timeout);
+        lifecycleSignal?.removeEventListener('abort', abortForLifecycle);
+      }
+    };
+  }
+
+  function closeBrowserPeerConnectionOnce(connection: RTCPeerConnection | null) {
+    if (!connection || closedBrowserPeerConnections.has(connection)) {
+      return;
+    }
+    closedBrowserPeerConnections.add(connection);
+    connection.close();
+  }
+
+  function closeBrowserEventChannelOnce(channel: RTCDataChannel | null) {
+    if (!channel || closedBrowserEventChannels.has(channel)) {
+      return;
+    }
+    closedBrowserEventChannels.add(channel);
+    channel.close();
   }
 
   function attachPeerConnectionDebug(
@@ -2679,30 +2878,52 @@
     return closingLocalAudioContext.close().catch(() => undefined);
   }
 
-  function waitForIceGathering(connection: RTCPeerConnection): Promise<void> {
+  function waitForIceGathering(
+    connection: RTCPeerConnection,
+    lifecycleSignal?: AbortSignal
+  ): Promise<void> {
     if (connection.iceGatheringState === 'complete') {
       return Promise.resolve();
     }
 
-    return new Promise((resolve) => {
-      const timeout = window.setTimeout(resolve, 1500);
-      connection.addEventListener(
-        'icegatheringstatechange',
-        () => {
-          if (connection.iceGatheringState === 'complete') {
-            window.clearTimeout(timeout);
-            resolve();
-          }
-        },
-        { once: false }
-      );
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const cleanup = () => {
+        window.clearTimeout(timeout);
+        connection.removeEventListener('icegatheringstatechange', handleStateChange);
+        lifecycleSignal?.removeEventListener('abort', handleAbort);
+      };
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve();
+      };
+      const handleStateChange = () => {
+        if (connection.iceGatheringState === 'complete') {
+          finish();
+        }
+      };
+      const handleAbort = () => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(new ObsoleteBrowserMediaContinuationError());
+      };
+      const timeout = window.setTimeout(finish, 1500);
+      connection.addEventListener('icegatheringstatechange', handleStateChange);
+      lifecycleSignal?.addEventListener('abort', handleAbort, { once: true });
+      if (lifecycleSignal?.aborted) {
+        handleAbort();
+      }
     });
   }
 
   function waitForBrowserMediaConnected(
     connection: RTCPeerConnection,
     debugCallId: string,
-    timeoutMs = 7000
+    timeoutMs = 7000,
+    lifecycleSignal?: AbortSignal
   ): Promise<void> {
     if (isBrowserMediaConnected(connection)) {
       return Promise.resolve();
@@ -2713,6 +2934,7 @@
         window.clearTimeout(timeout);
         connection.removeEventListener('connectionstatechange', handleStateChange);
         connection.removeEventListener('iceconnectionstatechange', handleStateChange);
+        lifecycleSignal?.removeEventListener('abort', handleAbort);
       };
       const handleStateChange = () => {
         if (isBrowserMediaConnected(connection)) {
@@ -2730,6 +2952,10 @@
           reject(new Error('Replacement media did not connect'));
         }
       };
+      const handleAbort = () => {
+        cleanup();
+        reject(new ObsoleteBrowserMediaContinuationError());
+      };
       const timeout = window.setTimeout(() => {
         cleanup();
         emitDebugEvent(debugCallId, 'pc.media_connect.timeout', {
@@ -2742,6 +2968,11 @@
 
       connection.addEventListener('connectionstatechange', handleStateChange);
       connection.addEventListener('iceconnectionstatechange', handleStateChange);
+      lifecycleSignal?.addEventListener('abort', handleAbort, { once: true });
+      if (lifecycleSignal?.aborted) {
+        handleAbort();
+        return;
+      }
       handleStateChange();
     });
   }
@@ -2749,7 +2980,8 @@
   function waitForBrowserMediaCandidateStream(
     owner: BrowserMediaConnectionOwner,
     debugCallId: string,
-    timeoutMs = 7000
+    timeoutMs = 7000,
+    lifecycleSignal?: AbortSignal
   ): Promise<MediaStream> {
     if (owner.candidateRemoteStream) {
       return Promise.resolve(owner.candidateRemoteStream);
@@ -2761,6 +2993,7 @@
         window.clearTimeout(timeout);
         owner.connection.removeEventListener('connectionstatechange', handleStateChange);
         owner.connection.removeEventListener('iceconnectionstatechange', handleStateChange);
+        lifecycleSignal?.removeEventListener('abort', handleAbort);
       };
       const rejectOnce = (error: Error) => {
         if (settled) return;
@@ -2778,6 +3011,9 @@
           rejectOnce(new Error('Replacement media stream failed before promotion'));
         }
       };
+      const handleAbort = () => {
+        rejectOnce(new ObsoleteBrowserMediaContinuationError());
+      };
       const timeout = window.setTimeout(() => {
         emitDebugEvent(debugCallId, 'remote_audio.candidate.timeout', {
           connectionGeneration: owner.generationId,
@@ -2790,12 +3026,17 @@
 
       owner.connection.addEventListener('connectionstatechange', handleStateChange);
       owner.connection.addEventListener('iceconnectionstatechange', handleStateChange);
+      lifecycleSignal?.addEventListener('abort', handleAbort, { once: true });
       owner.candidateRemoteStreamReady.then((stream) => {
         if (settled) return;
         settled = true;
         cleanup();
         resolve(stream);
       });
+      if (lifecycleSignal?.aborted) {
+        handleAbort();
+        return;
+      }
       handleStateChange();
     });
   }
@@ -3937,6 +4178,28 @@
     });
   }
 
+  function delayWithSignal(ms: number, signal: AbortSignal) {
+    assertBrowserMediaLifecycleSignal(signal);
+    return new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        window.clearTimeout(timeout);
+        signal.removeEventListener('abort', handleAbort);
+      };
+      const handleAbort = () => {
+        cleanup();
+        reject(new ObsoleteBrowserMediaContinuationError());
+      };
+      const timeout = window.setTimeout(() => {
+        cleanup();
+        resolve();
+      }, ms);
+      signal.addEventListener('abort', handleAbort, { once: true });
+      if (signal.aborted) {
+        handleAbort();
+      }
+    });
+  }
+
   async function runHangupRequestWithDeadline<T>(
     requestName: 'recovery' | 'end',
     timeoutMs: number,
@@ -4211,6 +4474,7 @@
     candidateReason: unknown = new Error('Browser media stopped'),
     options: { preserveReconnectBackfill?: boolean } = {}
   ) {
+    invalidateBrowserMediaLifecycle(candidateReason);
     resetBrowserMediaReconnectIncident();
     clearInterruptDrainState();
     stopLocalMicReconnectDiagnostics();
@@ -4247,10 +4511,10 @@
     eventsChannel = null;
     peerConnection = null;
     for (const channel of closingEventsChannels) {
-      channel.close();
+      closeBrowserEventChannelOnce(channel);
     }
     for (const connection of closingPeerConnections) {
-      connection.close();
+      closeBrowserPeerConnectionOnce(connection);
     }
     localMediaStream?.getTracks().forEach((track) => {
       track.enabled = false;

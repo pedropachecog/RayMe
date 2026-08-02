@@ -79,11 +79,13 @@ async function readJsonPayload(response: Response): Promise<Record<string, unkno
 export async function sendCallOffer(
   callId: string,
   offer: RTCSessionDescriptionInit,
-  sessionId?: string | null
+  sessionId?: string | null,
+  options: { signal?: AbortSignal } = {}
 ): Promise<CallOfferResponse> {
   const response = await fetch(toApiPath(`/calls/${encodeURIComponent(callId)}/offer`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal: options.signal,
     body: JSON.stringify({
       session_id: sessionId ?? undefined,
       offer: {
