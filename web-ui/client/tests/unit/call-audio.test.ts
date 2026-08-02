@@ -9,6 +9,7 @@ import {
   MAX_REMOTE_CALL_INTERRUPT_DRAIN_MS,
   normalizeRemoteCallInterruptDrainMs,
   requestCallMicrophone,
+  setCallMicrophoneTracksEnabled,
   syncRemoteCallAudioAudibility,
   unlockCallAudioContext
 } from '../../src/lib/call/audio';
@@ -114,6 +115,19 @@ describe('call audio helpers', () => {
     expect(keepCallMicrophoneTracksLive(stream)).toBe(1);
     expect(tracks.map((track) => track.enabled)).toEqual([true, true]);
     expect(keepCallMicrophoneTracksLive(stream)).toBe(0);
+  });
+
+  it('physically disables every owned microphone track during ambiguous mute state', () => {
+    const tracks = [{ enabled: true }, { enabled: false }];
+    const stream = {
+      getAudioTracks: () => tracks
+    } as unknown as MediaStream;
+
+    expect(setCallMicrophoneTracksEnabled(stream, false)).toBe(1);
+    expect(tracks.map((track) => track.enabled)).toEqual([false, false]);
+    expect(setCallMicrophoneTracksEnabled(stream, false)).toBe(0);
+    expect(setCallMicrophoneTracksEnabled(stream, true)).toBe(2);
+    expect(tracks.map((track) => track.enabled)).toEqual([true, true]);
   });
 
   it('raises listeningRms for non-zero microphone samples and returns near zero for silence', () => {

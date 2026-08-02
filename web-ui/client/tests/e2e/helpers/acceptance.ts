@@ -89,6 +89,7 @@ export async function installMockCallMedia(
       __raymeMockPeerConnections?: MockRTCPeerConnection[];
       __raymeMockDataChannels?: MockRTCDataChannel[];
       __raymeMockRemoteAudioStreams?: MediaStream[];
+      __raymeMockLocalMediaStream?: MediaStream;
       __raymeMockPcmProcessors?: Array<{
         onaudioprocess: ((event: AudioProcessingEvent) => void) | null;
       }>;
@@ -136,7 +137,9 @@ export async function installMockCallMedia(
 
     const mediaDevices = {
       async getUserMedia() {
-        return createMockRemoteAudioStream();
+        const stream = createMockRemoteAudioStream();
+        (window as MockPeerWindow).__raymeMockLocalMediaStream = stream;
+        return stream;
       },
       async enumerateDevices() {
         return [];

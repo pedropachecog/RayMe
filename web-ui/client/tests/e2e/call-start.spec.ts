@@ -31,6 +31,7 @@ type ReconnectRouteOptions = {
   firstBackfillGate?: Promise<void>;
   finalBackfillGate?: Promise<void>;
   firstMuteGate?: Promise<void>;
+  muteGate?: Promise<void>;
   abortMuteNumbers?: number[];
   authoritativeMuteEpoch?: number;
   failBackfill?: boolean;
@@ -500,6 +501,108 @@ test('serializes delayed double-click mute so responses cannot reverse or backfi
   expect(values.has(3333)).toBe(true);
   expect(values.has(1111)).toBe(false);
   expect(values.has(2222)).toBe(false);
+  assertNoBrowserErrors();
+});
+
+test('matching mute data acknowledgement settles ownership and aborts the pending HTTP wait', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  let releaseMute: () => void = () => {};
+  const muteGate = new Promise<void>((resolve) => {
+    releaseMute = resolve;
+  });
+  await installMockCallMedia(page);
+  const counters = await installReconnectCallRoutes(page, { firstMuteGate: muteGate });
+
+  await startReconnectCall(page, counters);
+  await page.getByRole('button', { name: 'Mute' }).click();
+  await expect.poll(() => counters.muteCount).toBe(1);
+  expect(await getMockLocalAudioTrackStates(page)).toEqual([false]);
+
+  await emitLatestMockDataChannelEvent(page, {
+    type: 'muted',
+    session_id: 'rtc-call-reconnect-01',
+    muted: true,
+    audio_input_epoch: 1,
+    mute_revision: 1
+  });
+
+  await expect(page.getByRole('button', { name: 'Unmute' })).toBeEnabled();
+  expect(await getMockLocalAudioTrackStates(page)).toEqual([false]);
+  expect(
+    counters.debugEvents.some(
+      (entry) =>
+        entry.event === 'call.mute.acknowledged' &&
+        entry.detail.source === 'data-channel'
+    )
+  ).toBe(true);
+  releaseMute();
+  assertNoBrowserErrors();
+});
+
+test('no mute acknowledgement times out into visible retry and end recovery controls', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  let releaseMute: () => void = () => {};
+  const muteGate = new Promise<void>((resolve) => {
+    releaseMute = resolve;
+  });
+  await installMockCallMedia(page);
+  const counters = await installReconnectCallRoutes(page, { muteGate });
+
+  await startReconnectCall(page, counters);
+  await page.getByRole('button', { name: 'Mute' }).click();
+
+  const recovery = page.getByRole('alert');
+  await expect(recovery).toContainText('Your microphone is physically off.');
+  await expect(recovery.getByRole('button', { name: 'Retry microphone sync' })).toBeEnabled({
+    timeout: 5000
+  });
+  await expect(recovery.getByRole('button', { name: 'End call now' })).toBeEnabled();
+  expect(counters.muteCount).toBe(2);
+  expect(await getMockLocalAudioTrackStates(page)).toEqual([false]);
+  releaseMute();
+  await recovery.getByRole('button', { name: 'Retry microphone sync' }).click();
+  await expect(page.getByRole('button', { name: 'Unmute' })).toBeEnabled();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+  expect(await getMockLocalAudioTrackStates(page)).toEqual([false]);
+  assertNoBrowserErrors();
+});
+
+test('lost unmute acknowledgements leave the actual outgoing microphone track disabled', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+    allowConsoleErrors: [/Failed to load resource/]
+  });
+  await installMockCallMedia(page);
+  const counters = await installReconnectCallRoutes(page, {
+    abortMuteNumbers: [2, 3, 4]
+  });
+
+  await startReconnectCall(page, counters);
+  await page.getByRole('button', { name: 'Mute' }).click();
+  await expect(page.getByRole('button', { name: 'Unmute' })).toBeEnabled();
+  expect(await getMockLocalAudioTrackStates(page)).toEqual([false]);
+
+  await page.getByRole('button', { name: 'Unmute' }).click();
+  await expect(page.getByRole('alert')).toContainText('Your microphone is physically off.');
+  await emitLatestMockDataChannelEvent(page, {
+    type: 'state',
+    session_id: 'rtc-call-reconnect-01',
+    state: 'listening'
+  });
+
+  expect(counters.muteRequests.map((entry) => entry.muted)).toEqual([
+    true,
+    false,
+    false,
+    true
+  ]);
+  expect(await getMockLocalAudioTrackStates(page)).toEqual([false]);
+  await expect(page.getByRole('button', { name: 'Retry microphone sync' })).toBeEnabled();
   assertNoBrowserErrors();
 });
 
@@ -1152,6 +1255,15 @@ async function emitMockPcm(page: Page, sample: number, sampleCount = 320) {
   }, { sample, sampleCount });
 }
 
+async function getMockLocalAudioTrackStates(page: Page): Promise<boolean[]> {
+  return page.evaluate(() => {
+    const stream = (
+      window as Window & { __raymeMockLocalMediaStream?: MediaStream }
+    ).__raymeMockLocalMediaStream;
+    return (stream?.getAudioTracks() ?? []).map((track) => track.enabled);
+  });
+}
+
 function decodePcmValues(pcmBase64: string) {
   const bytes = Buffer.from(pcmBase64, 'base64');
   const values: number[] = [];
@@ -1515,6 +1627,9 @@ async function installReconnectCallRoutes(
     authoritativeMuteRevision += 1;
     if (options.firstMuteGate && counters.muteCount === 1) {
       await options.firstMuteGate;
+    }
+    if (options.muteGate) {
+      await options.muteGate;
     }
     if (options.abortMuteNumbers?.includes(counters.muteCount)) {
       await route.abort('failed');

@@ -22,6 +22,7 @@
     keepCallMicrophoneTracksLive,
     normalizeRemoteCallInterruptDrainMs,
     requestCallMicrophone,
+    setCallMicrophoneTracksEnabled,
     syncRemoteCallAudioAudibility,
     unlockCallAudioContext
   } from '$lib/call/audio';
@@ -116,11 +117,21 @@
     readonly sessionId: string;
     readonly previousMuted: boolean;
     readonly targetMuted: boolean;
+    readonly abortController: AbortController;
     readonly acknowledgement: {
       muted: boolean | null;
       audioInputEpoch: number | null;
       muteRevision: number | null;
+      settled: boolean;
+      promise: Promise<AuthoritativeMuteResult>;
+      resolve: (result: AuthoritativeMuteResult) => void;
     };
+  }
+
+  interface AuthoritativeMuteResult {
+    muted: boolean;
+    audio_input_epoch: number;
+    mute_revision: number;
   }
 
   type MediaReconnectReason = 'failed' | 'disconnected';
@@ -207,6 +218,8 @@
   const MIC_BACKFILL_MAX_MS = 30000;
   const MIC_BACKFILL_BATCH_MAX_MS = 10000;
   const MISSED_CALL_EVENTS_RECOVERY_RETRY_MS = 2000;
+  const MUTE_ACKNOWLEDGEMENT_TIMEOUT_MS = 1500;
+  const MUTE_COMPENSATION_TIMEOUT_MS = 1000;
   const TERMINAL_RECONNECT_BACKFILL_WAIT_MS = 2000;
   const TERMINAL_RECONNECT_ACTIVE_RESPONSE_WAIT_MS = 120000;
   const TERMINAL_RECONNECT_RESPONSE_VISIBLE_GRACE_MS = 1500;
@@ -276,6 +289,7 @@
     localMuteRevision = 0;
     muteRequestPending = false;
     muteSynchronizationFailed = false;
+    activeMuteRequest?.abortController.abort();
     activeMuteRequest = null;
     retireReconnectAudioBackfill(activeReconnectAudioBackfill);
 
@@ -2209,14 +2223,33 @@
     if (!localMediaStream) {
       return;
     }
-    const changed = keepCallMicrophoneTracksLive(localMediaStream);
+    const transmissionAllowed =
+      !muteRequestPending && !muteSynchronizationFailed && !serverMuted;
+    const changed = transmissionAllowed
+      ? keepCallMicrophoneTracksLive(localMediaStream)
+      : setCallMicrophoneTracksEnabled(localMediaStream, false);
     if (changed > 0 || prevState !== nextState) {
       emitDebugEvent(callId, 'mic.keep_live', {
         changed,
         prevState: prevState ?? null,
-        nextState
+        nextState,
+        transmissionAllowed,
+        policy: transmissionAllowed ? 'authoritative-unmute' : 'mute-fail-safe'
       });
     }
+  }
+
+  function setOwnedMicrophoneTransmission(enabled: boolean, reason: string) {
+    if (!localMediaStream) {
+      return;
+    }
+    const changed = setCallMicrophoneTracksEnabled(localMediaStream, enabled);
+    emitDebugEvent(callId, 'mic.transmission_policy', {
+      enabled,
+      reason,
+      changed,
+      tracks: summarizeLocalAudioTracks()
+    });
   }
 
   function syncRemoteAudioAudibility() {
@@ -2434,7 +2467,8 @@
         event.muted,
         event.audio_input_epoch,
         event.mute_revision,
-        owner
+        owner,
+        'data-channel'
       );
       return;
     }
@@ -2783,7 +2817,8 @@
     muted: boolean,
     audioInputEpoch: unknown,
     muteRevision: unknown,
-    owner: MuteRequestOwner | null = null
+    owner: MuteRequestOwner | null = null,
+    source: 'http' | 'data-channel' = 'http'
   ): boolean {
     if (
       typeof muted !== 'boolean' ||
@@ -2808,96 +2843,172 @@
     localMuteRevision = muteRevision;
     serverMuted = muted;
     muteSynchronizationFailed = false;
+    setOwnedMicrophoneTransmission(!muted, muted ? 'authoritative-mute' : 'authoritative-unmute');
     if (muted || epochChanged) {
       localMicPcmBuffer = [];
     }
     if (muted) {
       retireReconnectAudioBackfill(activeReconnectAudioBackfill);
     }
+    if (owner && source === 'data-channel' && !owner.acknowledgement.settled) {
+      const result = {
+        muted,
+        audio_input_epoch: audioInputEpoch,
+        mute_revision: muteRevision
+      };
+      owner.acknowledgement.settled = true;
+      owner.acknowledgement.resolve(result);
+      owner.abortController.abort();
+      emitDebugEvent(owner.callId, 'call.mute.acknowledged', {
+        requestId: owner.requestId,
+        source,
+        muted,
+        muteRevision
+      });
+    }
     return true;
   }
 
-  function acknowledgedMuteResult(owner: MuteRequestOwner) {
-    const { muted, audioInputEpoch, muteRevision } = owner.acknowledgement;
-    if (muted !== owner.targetMuted || audioInputEpoch === null || muteRevision === null) {
-      return null;
-    }
-    return {
-      muted,
-      audio_input_epoch: audioInputEpoch,
-      mute_revision: muteRevision
-    };
+  function validAuthoritativeMuteResult(
+    result: Partial<AuthoritativeMuteResult>
+  ): result is AuthoritativeMuteResult {
+    return (
+      typeof result.muted === 'boolean' &&
+      isAuthoritativeAudioInputEpoch(result.audio_input_epoch) &&
+      isAuthoritativeMuteRevision(result.mute_revision)
+    );
   }
 
   async function requestAuthoritativeMute(owner: MuteRequestOwner) {
     let lastError: unknown = new Error('Mute request failed');
-    for (let attempt = 1; attempt <= 2; attempt += 1) {
-      try {
-        const result = await setCallMuted(
-          owner.callId,
-          owner.sessionId,
-          owner.targetMuted
-        );
-        if (!ownsMuteRequest(owner)) {
-          return null;
+    const httpResult = (async (): Promise<AuthoritativeMuteResult> => {
+      for (let attempt = 1; attempt <= 2; attempt += 1) {
+        try {
+          const result = await setCallMuted(
+            owner.callId,
+            owner.sessionId,
+            owner.targetMuted,
+            { signal: owner.abortController.signal }
+          );
+          if (!ownsMuteRequest(owner)) {
+            throw new DOMException('Mute request owner was superseded', 'AbortError');
+          }
+          if (
+            validAuthoritativeMuteResult(result) &&
+            result.muted === owner.targetMuted
+          ) {
+            emitDebugEvent(owner.callId, 'call.mute.acknowledged', {
+              requestId: owner.requestId,
+              source: 'http',
+              muted: result.muted,
+              muteRevision: result.mute_revision
+            });
+            return result;
+          }
+          lastError = new Error('Mute response did not include authoritative state');
+        } catch (error) {
+          if (!ownsMuteRequest(owner) || owner.abortController.signal.aborted) {
+            throw error;
+          }
+          lastError = error;
         }
-        if (
-          typeof result.muted === 'boolean' &&
-          isAuthoritativeAudioInputEpoch(result.audio_input_epoch) &&
-          isAuthoritativeMuteRevision(result.mute_revision)
-        ) {
-          return result;
+        if (attempt === 1) {
+          emitDebugEvent(owner.callId, 'call.mute.retry', {
+            requestId: owner.requestId,
+            muted: owner.targetMuted
+          });
         }
-        lastError = new Error('Mute response did not include an authoritative audio epoch');
-      } catch (error) {
-        if (!ownsMuteRequest(owner)) {
-          return null;
-        }
-        lastError = error;
       }
-      const acknowledged = acknowledgedMuteResult(owner);
-      if (acknowledged) {
-        return acknowledged;
-      }
-      if (attempt === 1) {
-        emitDebugEvent(owner.callId, 'call.mute.retry', {
-          requestId: owner.requestId,
-          muted: owner.targetMuted
-        });
+      throw lastError;
+    })();
+    let timeoutId = 0;
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timeoutId = window.setTimeout(() => {
+        owner.abortController.abort();
+        reject(new DOMException('Mute acknowledgement timed out', 'TimeoutError'));
+      }, MUTE_ACKNOWLEDGEMENT_TIMEOUT_MS);
+    });
+    try {
+      return await Promise.race([
+        httpResult,
+        owner.acknowledgement.promise,
+        timeout
+      ]);
+    } finally {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
       }
     }
-    const acknowledged = acknowledgedMuteResult(owner);
-    if (acknowledged) {
-      return acknowledged;
-    }
-    throw lastError;
   }
 
-  async function toggleMute() {
-    if (
-      muteRequestPending ||
-      muteSynchronizationFailed ||
-      !callId ||
-      !sessionId
-    ) {
-      return;
+  async function requestCompensatingMute(
+    owner: MuteRequestOwner
+  ): Promise<AuthoritativeMuteResult | null> {
+    const controller = new AbortController();
+    let timeoutId = 0;
+    const timeout = new Promise<null>((resolve) => {
+      timeoutId = window.setTimeout(() => {
+        controller.abort();
+        resolve(null);
+      }, MUTE_COMPENSATION_TIMEOUT_MS);
+    });
+    try {
+      const result = await Promise.race([
+        setCallMuted(owner.callId, owner.sessionId, true, { signal: controller.signal })
+          .then((response) =>
+            validAuthoritativeMuteResult(response) && response.muted === true
+              ? response
+              : null
+          )
+          .catch(() => null),
+        timeout
+      ]);
+      emitDebugEvent(owner.callId, 'call.mute.compensation', {
+        requestId: owner.requestId,
+        confirmed: Boolean(result),
+        muteRevision: result?.mute_revision ?? null
+      });
+      return result;
+    } finally {
+      if (timeoutId) {
+        window.clearTimeout(timeoutId);
+      }
     }
+  }
 
-    const owner = Object.freeze<MuteRequestOwner>({
+  function createMuteRequestOwner(targetMuted: boolean): MuteRequestOwner {
+    let resolveAcknowledgement!: (result: AuthoritativeMuteResult) => void;
+    const acknowledgementPromise = new Promise<AuthoritativeMuteResult>((resolve) => {
+      resolveAcknowledgement = resolve;
+    });
+    return Object.freeze<MuteRequestOwner>({
       requestId: ++muteRequestGeneration,
       callId,
       sessionId,
       previousMuted: serverMuted,
-      targetMuted: !serverMuted,
+      targetMuted,
+      abortController: new AbortController(),
       acknowledgement: {
         muted: null,
         audioInputEpoch: null,
-        muteRevision: null
+        muteRevision: null,
+        settled: false,
+        promise: acknowledgementPromise,
+        resolve: resolveAcknowledgement
       }
     });
+  }
+
+  async function applyMuteTarget(targetMuted: boolean) {
+    if (muteRequestPending || !callId || !sessionId) {
+      return;
+    }
+
+    const owner = createMuteRequestOwner(targetMuted);
     activeMuteRequest = owner;
     muteRequestPending = true;
     serverMuted = owner.targetMuted;
+    setOwnedMicrophoneTransmission(false, 'mute-control-pending');
 
     try {
       const result = await requestAuthoritativeMute(owner);
@@ -2918,6 +3029,7 @@
       }
       serverMuted = true;
       muteSynchronizationFailed = true;
+      setOwnedMicrophoneTransmission(false, 'mute-control-ambiguous');
       localMicPcmBuffer = [];
       retireReconnectAudioBackfill(activeReconnectAudioBackfill);
       emitDebugEvent(owner.callId, 'call.mute.sync_failed', {
@@ -2926,12 +3038,42 @@
         previousMuted: owner.previousMuted,
         name: (error as Error)?.name ?? 'unknown'
       });
+      const compensated = await requestCompensatingMute(owner);
+      if (
+        ownsMuteRequest(owner) &&
+        compensated &&
+        compensated.muted === true
+      ) {
+        applyAuthoritativeMuteState(
+          compensated.muted,
+          compensated.audio_input_epoch,
+          compensated.mute_revision
+        );
+      }
     } finally {
       if (ownsMuteRequest(owner)) {
         activeMuteRequest = null;
         muteRequestPending = false;
+        setOwnedMicrophoneTransmission(
+          !serverMuted && !muteSynchronizationFailed,
+          'mute-control-settled'
+        );
       }
     }
+  }
+
+  async function toggleMute() {
+    if (muteSynchronizationFailed) {
+      return;
+    }
+    await applyMuteTarget(!serverMuted);
+  }
+
+  async function retryMuteSynchronization() {
+    if (!muteSynchronizationFailed || muteRequestPending) {
+      return;
+    }
+    await applyMuteTarget(true);
   }
 
   async function interrupt() {
@@ -3297,6 +3439,9 @@
     clearInterruptDrainState();
     stopLocalMicReconnectDiagnostics();
     mediaReconnecting = false;
+    activeMuteRequest?.abortController.abort();
+    activeMuteRequest = null;
+    muteRequestPending = false;
     stopLocalMicMeter();
     detachRemoteAudio();
     remoteAudioContext?.close().catch(() => undefined);
@@ -3588,6 +3733,21 @@
         onInterrupt={interrupt}
         onEnd={hangup}
       />
+      {#if muteSynchronizationFailed}
+        <div class="mute-recovery" role="alert">
+          <p>RayMe could not confirm the microphone state. Your microphone is physically off.</p>
+          <div class="mute-recovery-actions">
+            <button
+              type="button"
+              disabled={muteRequestPending}
+              onclick={retryMuteSynchronization}
+            >
+              Retry microphone sync
+            </button>
+            <button type="button" disabled={ending} onclick={hangup}>End call now</button>
+          </div>
+        </div>
+      {/if}
     </div>
 
     <div class="call-canvas">
@@ -3671,6 +3831,43 @@
     top: calc(8px + env(safe-area-inset-top));
     display: grid;
     gap: var(--space-sm);
+  }
+
+  .mute-recovery {
+    display: grid;
+    gap: var(--space-sm);
+    border: 1px solid rgba(255, 191, 105, 0.56);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    background: rgba(70, 42, 12, 0.94);
+    color: var(--color-text);
+    box-shadow: var(--shadow-float);
+  }
+
+  .mute-recovery p {
+    line-height: var(--line-body);
+  }
+
+  .mute-recovery-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-sm);
+  }
+
+  .mute-recovery-actions button {
+    min-height: 44px;
+    border: 0;
+    border-radius: var(--radius-md);
+    padding: 0 var(--space-md);
+    background: rgba(20, 31, 56, 0.9);
+    color: var(--color-text);
+    font: inherit;
+    font-weight: 600;
+  }
+
+  .mute-recovery-actions button:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
   }
 
   .blocking-panel,

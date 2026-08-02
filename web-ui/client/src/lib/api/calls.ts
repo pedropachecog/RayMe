@@ -145,7 +145,8 @@ export function recoverCallEvents(
 export function setCallMuted(
   callId: string,
   sessionId: string,
-  muted: boolean
+  muted: boolean,
+  options: { signal?: AbortSignal } = {}
 ): Promise<{
   call_id: string;
   session_id: string;
@@ -155,6 +156,7 @@ export function setCallMuted(
 }> {
   return apiFetch(`/calls/${encodeURIComponent(callId)}/mute`, {
     method: 'POST',
+    signal: options.signal,
     body: JSON.stringify({ session_id: sessionId, muted })
   });
 }

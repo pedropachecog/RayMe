@@ -116,10 +116,17 @@ export function syncRemoteCallAudioAudibility(
 }
 
 export function keepCallMicrophoneTracksLive(stream: Pick<MediaStream, 'getAudioTracks'>): number {
+  return setCallMicrophoneTracksEnabled(stream, true);
+}
+
+export function setCallMicrophoneTracksEnabled(
+  stream: Pick<MediaStream, 'getAudioTracks'>,
+  enabled: boolean
+): number {
   let changed = 0;
   for (const track of stream.getAudioTracks()) {
-    if (!track.enabled) {
-      track.enabled = true;
+    if (track.enabled !== enabled) {
+      track.enabled = enabled;
       changed += 1;
     }
   }
