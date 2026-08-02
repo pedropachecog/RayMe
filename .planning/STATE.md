@@ -4,15 +4,15 @@ milestone: v1.0
 milestone_name: milestone
 status: ready_to_verify
 stopped_at: Completed 09-15-PLAN.md
-last_updated: "2026-08-01T12:38:06Z"
-last_activity: 2026-08-01
+last_updated: "2026-08-02T18:45:48Z"
+last_activity: 2026-08-02
 progress:
   total_phases: 11
   completed_phases: 8
   total_plans: 112
   completed_plans: 109
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
-last_activity_desc: "Reconciled Phase 09 Plan 15 at deployed commit 2721a4e: post-review repairs, same-commit evidence, real browser E2E, and release handoff are green; human acceptance remains pending"
+last_activity_desc: "Completed quick task 260802-q26: permanently prohibited reference-authorization forms, fields, gates, blockers, and metadata-driven fallback"
 ---
 
 ## Phase Status
@@ -116,7 +116,7 @@ last_activity_desc: "Reconciled Phase 09 Plan 15 at deployed commit 2721a4e: pos
 - Phase 08-04 decision gate policy: decision-ready verification requires live call-flow evidence plus a separate `voxcpm2-decision.json` artifact.
 - Phase 08-05 OMEN preservation policy: dirty OMEN checkout changes are preserved on a named branch and commit before deployment; the preserved Phase 07 evidence branch is `preserve/phase08-omen-dirty-20260511T183300Z` at `2077f8ddb7d50a6cca5f1d14ff26456a781f990a`.
 - Phase 08-05 live evidence result: on OMEN commit `6b69aeb98434678f4aa1853953a710f8b9b0f905`, VoxCPM2 warm live call TTFA median was `762.7 ms` versus F5 `948.0 ms`, with `voxcpm2_beats_f5: true`, streaming used, and whole-WAV fallback false.
-- Phase 08-05 evidence hygiene policy: live call-flow evidence must use sanitized reference source labels and must not include absolute local reference-audio paths.
+- Phase 08-05 evidence hygiene policy: live call-flow evidence must use sanitized historical sample-source labels only and must not include absolute local reference-audio paths; a label is never a product authorization field.
 - Phase 08-06 final VoxCPM2 live-call decision: VoxCPM2 is promoted as the preferred/default live-call TTS engine, with F5 retained as fallback/comparator, after `--decision-ready` verified Phase 8 same-run live streaming evidence.
 - Phase 08.1 live-call invariant: live-call TTS/STT/WebRTC fixes must preserve phone-call behavior. They may use bounded jitter/startup buffering, but must never wait for full assistant response generation or full TTS stream completion before first playback unless an explicitly named non-live mode is being built.
 - Phase 08.1 VoxCPM2 crash-containment policy: production VoxCPM2 runtime runs in a supervised CUDA-only worker process. The parent AI backend must preserve chunk streaming from the worker, reject whole-synthesis fallback on the live streaming path, and convert worker death or timeout into sanitized recoverable TTS failure without terminating the backend.
@@ -239,6 +239,7 @@ last_activity_desc: "Reconciled Phase 09 Plan 15 at deployed commit 2721a4e: pos
 | 260602-1hh | add a launcher for omen-pc on the windows desktop to run rayme | 2026-06-02 | a30054f | [260602-1hh-add-a-launcher-for-omen-pc-on-the-window](./quick/260602-1hh-add-a-launcher-for-omen-pc-on-the-window/) |
 | 260602-4xz | repair OMEN desktop RayMe launcher so it is quiet, does not auto-open browser, and does not show blank command prompts | 2026-06-02 | 3dffff8 | [260602-4xz-repair-omen-desktop-rayme-launcher-so-it](./quick/260602-4xz-repair-omen-desktop-rayme-launcher-so-it/) |
 | 260602-5bv | replace OMEN desktop RayMe shortcut with a visible foreground console that streams logs and stops services when closed | 2026-06-02 | 12d62d1 | [260602-5bv-replace-omen-desktop-rayme-shortcut-with](./quick/260602-5bv-replace-omen-desktop-rayme-shortcut-with/) |
+| 260802-q26 | permanently remove reference authorization from active and future RayMe planning | 2026-08-02 | f40d018 | [260802-q26-permanently-remove-reference-authorizati](./quick/260802-q26-permanently-remove-reference-authorizati/) |
 
 ### Roadmap Evolution
 
@@ -260,9 +261,9 @@ last_activity_desc: "Reconciled Phase 09 Plan 15 at deployed commit 2721a4e: pos
 
 ## Session Continuity
 
-Last activity: 2026-08-01
-Last session: 2026-08-01T06:42:44.609Z
-Stopped at: Completed 09-15-PLAN.md
+Last activity: 2026-08-02
+Last session: 2026-08-02T18:45:48.976Z
+Stopped at: Completed quick task 260802-q26; live-call incident repair remains active
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -299,14 +300,13 @@ Resume file: None
 - [Phase 09]: Use a capacity-two blocking thread-to-async bridge with bridge totals emitted only at terminal time.
 - [Phase 09]: Signal the matching TTS request before cancelling the call task for both interrupt and hangup.
 - [Phase 09]: Canonical OMEN deploy alone owns exact Qwen source, model snapshot, CUDA attestation, and verified local model-path launcher wiring.
-- [Phase 09]: Uploading a Qwen reference through Voice Lab is the uploader's authorization; RayMe still requires a valid contained asset, stored asset hash, matching nonblank transcript, and acoustic alignment.
+- [Phase 09]: Voice sample upload is assumed authorized. The durable policy at `.planning/REFERENCE-AUTHORIZATION-PROHIBITION.md` prohibits reference-source, steward, consent, authorization-basis, use-scope, and authorization-status fields, forms, sidecars, gates, blockers, and metadata-driven synthetic/non-person substitution; RayMe retains only contained valid assets, hash integrity, matching nonblank transcripts, acoustic alignment, private handling, and deletion/cache invalidation.
 - [Phase 09]: Windows Qwen workers use console Python and complete the mandatory CUDA load before starting the cancellation reader.
 - [Phase 09]: Prompt readiness is content-bound while the exact approved transcript enters full ICL unchanged.
 - [Phase 09]: Qwen clone alignment accepts when token coverage reaches 0.45 or normalized edit similarity reaches 0.50, caching only opaque identity and scalar results.
 - [Phase 09]: Only Qwen runtime/protocol failures mark the engine unavailable; validation, prompt, and ceiling failures remain correctable and scoped.
 - [Phase 09]: Qwen preview collects only validated native stream chunks; live-call whole-synthesis fallback remains prohibited.
 - [Phase 09]: Only exact persisted qwen3_0_6b values translate to qwen3_1_7b; migration 0008 removes superseded qwen3_authorization metadata while preserving unrelated voice metadata.
-- [Phase 09]: Reference source, authorization basis, use scope, and authorization status are no longer product fields; save, preview, test-play, and call preparation infer authorization from the completed RayMe upload.
 - [Phase 09]: Live calls retain the durable saved voice id publicly while using a content-derived opaque voice key at the AI backend boundary.
 - [Phase 09]: Call preparation runs once and then polls separate shared model and prompt readiness with safe fixed failures.
 - [Phase 09]: Prompt ownership uses sha256('rayme:qwen3_1_7b:' + saved_voice_id), separate from private prompt-content cache identity.
@@ -327,7 +327,7 @@ Resume file: None
 - [Phase 09]: Natural sentence and safe newline boundaries emit as soon as useful, tiny fragments remain attached, and a late phrase boundary or the 60th word enforces the hard segment ceiling.
 - [Phase 09]: Only a typed normal terminal with completed playout authorizes one durable ai_speech row containing the exact visible accumulated text.
 - [Phase 09]: Hangup cancels the server-owned LLM/speech turn before ending the backend session so late completion cannot write history.
-- [Phase 09]: Freeze the selected release fixture to the passed hardware tracer generated non-person SAPI reference for transport evidence only; human likeness acceptance uses the intended reference uploaded through Voice Lab.
+- [Phase 09]: The passed hardware-tracer generated non-person SAPI sample remains an explicitly selected historical transport-evidence fixture only; it is never automatically substituted for the intended reference uploaded through Voice Lab.
 - [Phase 09]: Run microsoft/wavlm-base-plus-sv only from revision feb593a6c23c1cc3d9510425c29b0a14d2b07b1e on pinned CUDA, retaining only hashes and cosine scalars.
 - [Phase 09]: Ignore stored overall booleans and independently recompute release thresholds from raw exact-commit evidence.
 - [Phase 09]: Keep autonomous release readiness separate from pending integrated listening and physical-call acceptance.
