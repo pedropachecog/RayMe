@@ -1569,6 +1569,98 @@ def test_failed_replacement_callback_leaves_active_close_to_reconnect_grace(
 
 
 @pytest.mark.parametrize(
+    ("retiring_event", "retiring_state_attribute"),
+    [
+        ("connectionstatechange", "connectionState"),
+        ("iceconnectionstatechange", "iceConnectionState"),
+    ],
+)
+def test_retiring_peer_terminal_callback_cannot_steal_switch_ownership(
+    retiring_event: str,
+    retiring_state_attribute: str,
+) -> None:
+    from app.call.session import CallSession, PeerOfferConfiguration
+
+    class CallbackPeer:
+        def __init__(self) -> None:
+            self.connectionState = "new"
+            self.iceConnectionState = "new"
+            self.handlers: dict[str, Any] = {}
+            self.close_calls = 0
+
+        def on(self, event_name: str) -> Any:
+            def decorator(handler: Any) -> Any:
+                self.handlers[event_name] = handler
+                return handler
+
+            return decorator
+
+        async def close(self) -> None:
+            self.close_calls += 1
+            setattr(self, retiring_state_attribute, "closed")
+            await self.handlers[retiring_event]()
+
+    class Track:
+        def __init__(self) -> None:
+            self.stop_calls = 0
+
+        async def stop_current(self) -> None:
+            self.stop_calls += 1
+
+    async def scenario() -> tuple[CallSession, CallbackPeer, CallbackPeer, int]:
+        retiring_peer = CallbackPeer()
+        candidate_peer = CallbackPeer()
+        old_track = Track()
+        new_track = Track()
+        session = CallSession(
+            session_id=f"retiring-callback-{retiring_event}",
+            thread_id="thread-old",
+            voice_id="voice-old",
+            engine_id="qwen3_1_7b",
+            peer_connection=retiring_peer,
+            outbound_audio_track=old_track,
+        )
+        webrtc_module._attach_peer_handlers(retiring_peer, session)
+        generation = await session.mark_peer_connection_pending(
+            candidate_peer,
+            outbound_audio_track=new_track,
+            configuration=PeerOfferConfiguration(
+                thread_id="thread-new",
+                voice_id="voice-new",
+                engine_id="f5",
+                prompt_messages=(),
+                vad_adapter=None,
+                stt_adapter=None,
+            ),
+            timeout_seconds=60.0,
+        )
+        webrtc_module._attach_peer_handlers(
+            candidate_peer,
+            session,
+            pending_generation=generation,
+        )
+
+        candidate_peer.connectionState = "connected"
+        await candidate_peer.handlers["connectionstatechange"]()
+        return session, retiring_peer, candidate_peer, generation
+
+    session, retiring_peer, candidate_peer, generation = asyncio.run(scenario())
+
+    assert session.peer_connection is candidate_peer
+    assert session.thread_id == "thread-new"
+    assert session.voice_id == "voice-new"
+    assert session.engine_id == "f5"
+    assert session.state == "listening"
+    assert session._peer_lifecycle.phase == "stable"
+    assert session._peer_lifecycle.active_generation == generation
+    assert session._peer_lifecycle.switch_owner is None
+    assert session._peer_lifecycle.switch_task is None
+    assert session._peer_lifecycle.retiring_peer is None
+    assert retiring_peer.close_calls == 1
+    assert candidate_peer.close_calls == 0
+
+
+@pytest.mark.parametrize(
     ("recovery_event", "recovery_attribute", "recovery_state"),
     [
         ("connectionstatechange", "connectionState", "connected"),

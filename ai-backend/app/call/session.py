@@ -200,9 +200,12 @@ class _PeerLifecycle:
     phase: str = "stable"
     candidate_generation: int = 0
     candidate: _PendingPeerCandidate | None = None
+    active_generation: int = 0
     switch_generation: int = 0
     switch_owner: Any | None = None
     switch_task: asyncio.Task[tuple[bool, Any | None]] | None = None
+    retiring_peer: Any | None = None
+    retiring_generation: int | None = None
     terminal_state: str | None = None
     state_before_reconnect: str | None = None
     grace_peer: Any | None = None
@@ -267,6 +270,7 @@ class _SpeechAdmission:
 @dataclass(frozen=True)
 class _PeerSwitchTransaction:
     generation: int
+    candidate_generation: int
     peer_connection: Any
     previous_peer_connection: Any | None
     previous_outbound_audio_track: Any | None
@@ -418,6 +422,8 @@ class CallSession:
         self._terminal_cleanup_failure_state: dict[str, Any] | None = None
         self._owned_peer_cleanup_tasks: set[asyncio.Task[None]] = set()
         self._owned_peer_cleanup_failures: list[dict[str, Any]] = []
+        self._owned_track_cleanup_tasks: set[asyncio.Task[None]] = set()
+        self._owned_track_cleanup_failures: list[dict[str, Any]] = []
 
     @property
     def _pending_peer_connections(self) -> list[Any]:
@@ -750,6 +756,68 @@ class CallSession:
             else:
                 return
 
+    def _start_owned_track_cleanup(
+        self,
+        track: Any,
+        *,
+        reason: str,
+    ) -> asyncio.Task[None]:
+        task = asyncio.create_task(
+            self._stop_track_until_resolved(track, reason=reason)
+        )
+        self._owned_track_cleanup_tasks.add(task)
+        task.add_done_callback(self._owned_track_cleanup_tasks.discard)
+        return task
+
+    async def _stop_track_until_resolved(
+        self,
+        track: Any,
+        *,
+        reason: str,
+    ) -> None:
+        stop = getattr(track, "stop_current", None)
+        if not callable(stop):
+            return
+        for attempt in range(1, CALL_TERMINAL_CLEANUP_RETRY_LIMIT + 1):
+            try:
+                result = stop()
+                if inspect.isawaitable(result):
+                    await asyncio.wait_for(
+                        result,
+                        timeout=CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS,
+                    )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "[rayme-call] track.owned_cleanup_failed session=%s "
+                    "reason=%s attempt=%d exc=%s",
+                    self.session_id,
+                    reason,
+                    attempt,
+                    exc.__class__.__name__,
+                )
+                if attempt < CALL_TERMINAL_CLEANUP_RETRY_LIMIT:
+                    delay = min(
+                        CALL_TERMINAL_CLEANUP_RETRY_BASE_SECONDS
+                        * (2 ** max(attempt - 1, 0)),
+                        CALL_TERMINAL_CLEANUP_RETRY_MAX_SECONDS,
+                    )
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                    continue
+                self._owned_track_cleanup_failures.append(
+                    {
+                        "status": "retry_exhausted",
+                        "reason": reason,
+                        "attempts": attempt,
+                        "track_id": id(track),
+                    }
+                )
+                return
+            else:
+                return
+
     def is_peer_connection_pending(
         self,
         peer_connection: Any,
@@ -918,8 +986,11 @@ class CallSession:
                 lifecycle.switch_generation += 1
                 switch_generation = lifecycle.switch_generation
                 lifecycle.switch_owner = peer_connection
+                lifecycle.retiring_peer = previous_peer_connection
+                lifecycle.retiring_generation = lifecycle.active_generation
                 switch = _PeerSwitchTransaction(
                     generation=switch_generation,
+                    candidate_generation=candidate.generation,
                     peer_connection=peer_connection,
                     previous_peer_connection=previous_peer_connection,
                     previous_outbound_audio_track=previous_outbound_audio_track,
@@ -935,6 +1006,7 @@ class CallSession:
                 lifecycle.switch_task = switch_task
             else:
                 self.peer_connection = peer_connection
+                lifecycle.active_generation = candidate.generation
                 self.outbound_audio_track = accepted_outbound_audio_track
                 self.data_channel = accepted_data_channel
                 if accepted_configuration is not None:
@@ -956,19 +1028,45 @@ class CallSession:
 
         cleanup = await self._run_peer_switch_cleanup(switch)
         terminal_outcome: _TerminalOutcome | None = None
+        abandoned_peer: Any | None = None
+        abandoned_track: Any | None = None
         async with self._lifecycle_lock:
             lifecycle = self._peer_lifecycle
             if lifecycle.phase == "terminal" or self.ended_at is not None:
-                return False, switch.previous_peer_connection
-            owns_switch = (
-                lifecycle.phase == "switching"
-                and lifecycle.switch_generation == switch.generation
-                and lifecycle.switch_owner is switch.peer_connection
-                and lifecycle.switch_task is asyncio.current_task()
-            )
+                abandoned_peer = switch.peer_connection
+                if (
+                    switch.accepted_outbound_audio_track
+                    in cleanup.unresolved_tracks
+                    and switch.accepted_outbound_audio_track
+                    is not switch.previous_outbound_audio_track
+                ):
+                    abandoned_track = switch.accepted_outbound_audio_track
+                terminal_outcome = self._terminal_outcome
+                owns_switch = False
+            else:
+                owns_switch = (
+                    lifecycle.phase == "switching"
+                    and lifecycle.switch_generation == switch.generation
+                    and lifecycle.switch_owner is switch.peer_connection
+                    and lifecycle.switch_task is asyncio.current_task()
+                )
             if not owns_switch:
-                return False, switch.previous_peer_connection
-            if not cleanup.errors and switch.prompt_lease_releaser is not None:
+                if lifecycle.switch_task is asyncio.current_task():
+                    lifecycle.switch_task = None
+                if lifecycle.switch_owner is switch.peer_connection:
+                    lifecycle.switch_owner = None
+                if lifecycle.retiring_peer is switch.previous_peer_connection:
+                    lifecycle.retiring_peer = None
+                    lifecycle.retiring_generation = None
+                abandoned_peer = switch.peer_connection
+                if (
+                    switch.accepted_outbound_audio_track
+                    in cleanup.unresolved_tracks
+                    and switch.accepted_outbound_audio_track
+                    is not switch.previous_outbound_audio_track
+                ):
+                    abandoned_track = switch.accepted_outbound_audio_track
+            elif not cleanup.errors and switch.prompt_lease_releaser is not None:
                 try:
                     await asyncio.wait_for(
                         self._invoke_tts_prompt_lease_releaser(
@@ -984,7 +1082,7 @@ class CallSession:
                         is switch.prompt_lease_releaser
                     ):
                         self._tts_prompt_lease_releaser = None
-            if cleanup.errors:
+            if owns_switch and cleanup.errors:
                 # The candidate becomes the terminal active transport only
                 # after the stable switch has been abandoned. Every unresolved
                 # old resource is transferred explicitly into terminal retry.
@@ -993,6 +1091,8 @@ class CallSession:
                 self.data_channel = switch.accepted_data_channel
                 lifecycle.switch_owner = None
                 lifecycle.switch_task = None
+                lifecycle.retiring_peer = None
+                lifecycle.retiring_generation = None
                 self._transition_terminal_locked(
                     target_state="failed",
                     reason="engine_switch_failed",
@@ -1000,8 +1100,9 @@ class CallSession:
                     extra_tracks=cleanup.unresolved_tracks,
                 )
                 terminal_outcome = self._terminal_outcome
-            else:
+            elif owns_switch:
                 self.peer_connection = switch.peer_connection
+                lifecycle.active_generation = switch.candidate_generation
                 self.outbound_audio_track = switch.accepted_outbound_audio_track
                 self.data_channel = switch.accepted_data_channel
                 if switch.configuration is not None:
@@ -1009,8 +1110,28 @@ class CallSession:
                 self._complete_transport_reconnect_locked()
                 lifecycle.switch_owner = None
                 lifecycle.switch_task = None
+                lifecycle.retiring_peer = None
+                lifecycle.retiring_generation = None
                 if self.state not in {"ended", "failed"}:
                     self.state = "listening"
+        if not owns_switch:
+            if abandoned_peer is not None and abandoned_peer is not self.peer_connection:
+                self._start_owned_peer_cleanup(
+                    abandoned_peer,
+                    reason="switch_ownership_lost",
+                )
+            if abandoned_track is not None:
+                self._start_owned_track_cleanup(
+                    abandoned_track,
+                    reason="switch_ownership_lost",
+                )
+            await asyncio.sleep(0)
+            if (
+                terminal_outcome is not None
+                and terminal_outcome.transaction_task is not None
+            ):
+                await asyncio.shield(terminal_outcome.transaction_task)
+            return False, switch.previous_peer_connection
         if cleanup.errors:
             for step, exc in cleanup.errors:
                 logger.error(
@@ -3569,6 +3690,8 @@ class CallSession:
         lifecycle.phase = "terminal"
         lifecycle.switch_owner = None
         lifecycle.switch_task = None
+        lifecycle.retiring_peer = None
+        lifecycle.retiring_generation = None
         lifecycle.terminal_state = None
         lifecycle.state_before_reconnect = None
         lifecycle.grace_peer = None
@@ -3917,27 +4040,56 @@ class CallSession:
         peer_connection: Any | None = None,
         *,
         terminal_state: str | None = None,
+        peer_generation: int | None = None,
     ) -> None:
         peer = peer_connection or self.peer_connection
-        if peer is not self.peer_connection:
-            return
         connection_state = terminal_state or getattr(peer, "connectionState", None)
         if connection_state in {"failed", "closed"}:
-            await self._begin_transport_reconnect(peer, connection_state)
+            await self._begin_transport_reconnect(
+                peer,
+                connection_state,
+                peer_generation=peer_generation,
+            )
         elif connection_state in {"connected", "completed"}:
-            await self._recover_active_transport(peer)
+            await self._recover_active_transport(
+                peer,
+                peer_generation=peer_generation,
+            )
 
     async def _begin_transport_reconnect(
         self,
         peer_connection: Any,
         terminal_state: str,
+        *,
+        peer_generation: int | None = None,
     ) -> None:
         async with self._lifecycle_lock:
             lifecycle = self._peer_lifecycle
             if (
+                lifecycle.phase == "switching"
+                and lifecycle.retiring_peer is peer_connection
+                and (
+                    peer_generation is None
+                    or peer_generation == lifecycle.retiring_generation
+                )
+            ):
+                logger.info(
+                    "[rayme-call] peer.retiring.terminal_ignored session=%s "
+                    "switch_generation=%d peer_generation=%s state=%s",
+                    self.session_id,
+                    lifecycle.switch_generation,
+                    peer_generation,
+                    terminal_state,
+                )
+                return
+            if (
                 self.ended_at is not None
                 or lifecycle.phase == "terminal"
                 or peer_connection is not self.peer_connection
+                or (
+                    peer_generation is not None
+                    and peer_generation != lifecycle.active_generation
+                )
             ):
                 return
             if lifecycle.phase != "reconnecting" or lifecycle.grace_peer is not peer_connection:
@@ -4038,13 +4190,22 @@ class CallSession:
         async with self._lifecycle_lock:
             self._complete_transport_reconnect_locked()
 
-    async def _recover_active_transport(self, peer_connection: Any) -> bool:
+    async def _recover_active_transport(
+        self,
+        peer_connection: Any,
+        *,
+        peer_generation: int | None = None,
+    ) -> bool:
         async with self._lifecycle_lock:
             lifecycle = self._peer_lifecycle
             if (
                 lifecycle.phase != "reconnecting"
                 or lifecycle.grace_peer is not peer_connection
                 or peer_connection is not self.peer_connection
+                or (
+                    peer_generation is not None
+                    and peer_generation != lifecycle.active_generation
+                )
             ):
                 return False
             self._complete_transport_reconnect_locked()

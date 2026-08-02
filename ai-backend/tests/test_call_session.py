@@ -2619,6 +2619,71 @@ def test_overlapping_switch_rejection_owns_slow_peer_cleanup() -> None:
     _run(scenario())
 
 
+def test_lost_switch_ownership_closes_candidate_without_orphan_state() -> None:
+    class BlockingRetiringPeer(ScriptedPeerConnection):
+        def __init__(self) -> None:
+            super().__init__()
+            self.close_started = asyncio.Event()
+            self.release_close = asyncio.Event()
+
+        async def close(self) -> None:
+            self.close_calls += 1
+            self.close_started.set()
+            await self.release_close.wait()
+
+    async def scenario() -> None:
+        old_track = ScriptedOutboundAudioTrack()
+        new_track = ScriptedOutboundAudioTrack()
+        session, _ = _new_session(outbound_audio_track=old_track)
+        retiring_peer = BlockingRetiringPeer()
+        candidate_peer = ScriptedPeerConnection()
+        session.peer_connection = retiring_peer
+        session.voice_id = "voice-old"
+        session.engine_id = "qwen3_1_7b"
+        generation = await session.mark_peer_connection_pending(
+            candidate_peer,
+            outbound_audio_track=new_track,
+            configuration=PeerOfferConfiguration(
+                thread_id="thread-new",
+                voice_id="voice-new",
+                engine_id="f5",
+                prompt_messages=(),
+                vad_adapter=None,
+                stt_adapter=None,
+            ),
+            timeout_seconds=60.0,
+        )
+        acceptance = asyncio.create_task(
+            session.accept_pending_peer_connection(
+                candidate_peer,
+                generation=generation,
+            )
+        )
+        await retiring_peer.close_started.wait()
+
+        async with session._lifecycle_lock:
+            session._peer_lifecycle.phase = "reconnecting"
+            session._peer_lifecycle.epoch += 1
+        retiring_peer.release_close.set()
+
+        accepted, previous_peer = await acceptance
+        cleanup_tasks = tuple(session._owned_peer_cleanup_tasks)
+        if cleanup_tasks:
+            await asyncio.gather(*cleanup_tasks)
+        assert accepted is False
+        assert previous_peer is retiring_peer
+        assert session.peer_connection is retiring_peer
+        assert candidate_peer.close_calls == 1
+        assert new_track.stop_calls == 1
+        assert session._peer_lifecycle.phase == "reconnecting"
+        assert session._peer_lifecycle.switch_owner is None
+        assert session._peer_lifecycle.switch_task is None
+        assert session._peer_lifecycle.retiring_peer is None
+        assert session._owned_peer_cleanup_failures == []
+
+    _run(scenario())
+
+
 @pytest.mark.parametrize(
     "failed_step",
     ["stop", "old_peer_close", "cancel", "prompt_lease"],
