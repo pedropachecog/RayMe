@@ -495,7 +495,7 @@ async def promote_peer_candidate(
                     "message": "Replacement peer transport is not connected",
                 },
             )
-        if outcome != "committed":
+        if outcome not in {"committed", "failed", "in_progress"}:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={
@@ -513,7 +513,7 @@ async def promote_peer_candidate(
                     "message": "Replacement peer generation was already committed",
                 },
             )
-        if outcome != "rejected":
+        if outcome not in {"rejected", "failed", "in_progress"}:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail={

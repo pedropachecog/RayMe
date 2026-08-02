@@ -22,6 +22,11 @@ type ReconnectRouteCounters = {
   backendActivePeerGeneration: number | null;
   backendOldPeerRetirementCount: number;
   abortedPeerCommitResponses: number;
+  peerPromotionInProgressCount: number;
+  backendVoiceId: string;
+  backendEngineId: string;
+  backendPromptLeaseOwner: string | null;
+  backendPromptLeaseReleaseCount: number;
   offers: Array<{ peerId: number | null; sdp: string }>;
   backfills: Array<Record<string, unknown>>;
   recoveredEvents: Array<Record<string, unknown>>;
@@ -54,6 +59,8 @@ type ReconnectRouteOptions = {
   turnStreamEvents?: Array<Record<string, unknown>>;
   abortFirstPeerCommitResponse?: boolean;
   reconcileCommittedAsConflict?: boolean;
+  selectionChangingPeerCommitDelayMs?: number;
+  selectionChangingPeerCommitGate?: Promise<void>;
 };
 
 type StartupRouteCounters = {
@@ -464,6 +471,71 @@ for (const reconciliation of [
     assertNoBrowserErrors();
   });
 }
+
+test('reconciles a lost response while a selection-changing peer switch is still in progress', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+    allowConsoleErrors: [/Failed to load resource: net::ERR_FAILED/]
+  });
+  await installMockCallMedia(page);
+  let releaseSelectionSwitch: () => void = () => {};
+  const selectionSwitchGate = new Promise<void>((resolve) => {
+    releaseSelectionSwitch = resolve;
+  });
+  const counters = await installReconnectCallRoutes(page, {
+    selectionChangingPeerCommitGate: selectionSwitchGate
+  });
+
+  await startReconnectCall(page, counters);
+  const initial = await getMockCallMediaSnapshot(page);
+  const initialStreamId = initial.peers[0].remoteStreamId;
+  expect(initialStreamId).not.toBeNull();
+
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await expect.poll(() => counters.peerPromotionInProgressCount).toBeGreaterThan(0);
+
+  const switching = await getMockCallMediaSnapshot(page);
+  expect(counters.backendVoiceId).toBe('voice-before');
+  expect(counters.backendEngineId).toBe('qwen3_1_7b');
+  expect(counters.backendPromptLeaseOwner).toBe('rtc-call-reconnect-01');
+  expect(counters.backendOldPeerRetirementCount).toBe(0);
+  expect(switching.peers[0]).toMatchObject({ closed: false, closeCount: 0 });
+  expect(switching.peers[1]).toMatchObject({ closed: false, closeCount: 0 });
+  expect(switching.audioPlayback.activeStreamId).toBe(initialStreamId);
+  expect(switching.audioPlayback.pausedStreamIds).not.toContain(initialStreamId);
+
+  releaseSelectionSwitch();
+  await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.ok')).toBe(1);
+  const reconciled = await getMockCallMediaSnapshot(page);
+  const candidateStreamId = reconciled.peers[1].remoteStreamId;
+  expect(candidateStreamId).not.toBeNull();
+  expect(counters.peerPromotions.length).toBeGreaterThan(2);
+  expect(counters.peerPromotions.every((promotion) =>
+    promotion.session_id === 'rtc-call-reconnect-01' &&
+    promotion.generation === 1 &&
+    promotion.action === 'commit'
+  )).toBe(true);
+  expect(counters.abortedPeerCommitResponses).toBe(1);
+  expect(counters.backendActivePeerGeneration).toBe(1);
+  expect(counters.backendActivePeerId).toBe(reconciled.peers[1].id);
+  expect(counters.backendOldPeerRetirementCount).toBe(1);
+  expect(counters.backendVoiceId).toBe('voice-after');
+  expect(counters.backendEngineId).toBe('f5');
+  expect(counters.backendPromptLeaseOwner).toBeNull();
+  expect(counters.backendPromptLeaseReleaseCount).toBe(1);
+  expect(reconciled.peers[0]).toMatchObject({ closed: true, closeCount: 1 });
+  expect(reconciled.peers[1]).toMatchObject({ closed: false, closeCount: 0 });
+  expect(reconciled.audioPlayback.activeStreamId).toBe(candidateStreamId);
+  expect(reconciled.audioPlayback.pausedStreamIds).toContain(initialStreamId);
+  expect(debugEventCount(counters, 'remote_audio.candidate.promoted')).toBe(1);
+  expect(debugEventCount(counters, 'remote_audio.candidate.discarded')).toBe(0);
+  expect(debugEventCount(counters, 'pc.media_reconnect.failed')).toBe(0);
+  expect(debugEventCount(counters, 'pc.media_reconnect.give_up')).toBe(0);
+  expect(counters.endCount).toBe(0);
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  assertNoBrowserErrors();
+});
 
 test('discards a failed replacement candidate without touching old audible audio', async ({
   page
@@ -1759,6 +1831,11 @@ async function installReconnectCallRoutes(
     backendActivePeerGeneration: null,
     backendOldPeerRetirementCount: 0,
     abortedPeerCommitResponses: 0,
+    peerPromotionInProgressCount: 0,
+    backendVoiceId: 'voice-before',
+    backendEngineId: 'qwen3_1_7b',
+    backendPromptLeaseOwner: 'rtc-call-reconnect-01',
+    backendPromptLeaseReleaseCount: 0,
     offers: [],
     backfills: [],
     recoveredEvents: [],
@@ -1771,7 +1848,28 @@ async function installReconnectCallRoutes(
   let authoritativeMuted = false;
   let authoritativeAudioInputEpoch = 0;
   let authoritativeMuteRevision = 0;
+  let switchingPeerGeneration: number | null = null;
   const pendingPeerIds = new Map<number, number | null>();
+  const commitBackendPeer = (generation: number, peerId: number | null) => {
+    if (counters.backendActivePeerId !== peerId) {
+      counters.backendOldPeerRetirementCount += 1;
+    }
+    counters.backendActivePeerId = peerId;
+    counters.backendActivePeerGeneration = generation;
+    pendingPeerIds.delete(generation);
+    switchingPeerGeneration = null;
+    if (
+      options.selectionChangingPeerCommitDelayMs ||
+      options.selectionChangingPeerCommitGate
+    ) {
+      counters.backendVoiceId = 'voice-after';
+      counters.backendEngineId = 'f5';
+      if (counters.backendPromptLeaseOwner !== null) {
+        counters.backendPromptLeaseReleaseCount += 1;
+        counters.backendPromptLeaseOwner = null;
+      }
+    }
+  };
   const thread = makeThreadDetail({
     id: threadId,
     character_id: characterId,
@@ -1875,6 +1973,16 @@ async function installReconnectCallRoutes(
       });
       return;
     }
+    if (switchingPeerGeneration === payload.generation) {
+      counters.peerPromotionInProgressCount += 1;
+      await fulfillJson(route, {
+        call_id: 'call-reconnect-01',
+        session_id: payload.session_id,
+        generation: payload.generation,
+        status: 'in_progress'
+      });
+      return;
+    }
     if (pendingPeerId === undefined) {
       await fulfillJson(route, {
         detail: {
@@ -1884,14 +1992,31 @@ async function installReconnectCallRoutes(
       }, 409);
       return;
     }
-    if (payload.action === 'commit') {
-      if (counters.backendActivePeerId !== pendingPeerId) {
-        counters.backendOldPeerRetirementCount += 1;
+    if (
+      payload.action === 'commit' &&
+      (options.selectionChangingPeerCommitDelayMs ||
+        options.selectionChangingPeerCommitGate)
+    ) {
+      switchingPeerGeneration = payload.generation;
+      pendingPeerIds.delete(payload.generation);
+      if (options.selectionChangingPeerCommitGate) {
+        await options.selectionChangingPeerCommitGate;
+      } else {
+        await new Promise((resolve) =>
+          setTimeout(resolve, options.selectionChangingPeerCommitDelayMs)
+        );
       }
-      counters.backendActivePeerId = pendingPeerId;
-      counters.backendActivePeerGeneration = payload.generation;
+      commitBackendPeer(payload.generation, pendingPeerId);
+      counters.abortedPeerCommitResponses += 1;
+      await route.abort('failed').catch(() => undefined);
+      return;
     }
-    pendingPeerIds.delete(payload.generation);
+    if (payload.action === 'commit') {
+      commitBackendPeer(payload.generation, pendingPeerId);
+    }
+    if (payload.action === 'reject') {
+      pendingPeerIds.delete(payload.generation);
+    }
     if (
       payload.action === 'commit' &&
       options.abortFirstPeerCommitResponse &&

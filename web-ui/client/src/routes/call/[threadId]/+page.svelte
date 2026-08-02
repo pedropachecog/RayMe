@@ -149,6 +149,20 @@
     }
   }
 
+  class FailedPeerPromotionError extends Error {
+    constructor() {
+      super('Replacement peer switch failed');
+      this.name = 'FailedPeerPromotionError';
+    }
+  }
+
+  class RejectedPeerPromotionError extends Error {
+    constructor() {
+      super('Replacement peer commit was rejected');
+      this.name = 'RejectedPeerPromotionError';
+    }
+  }
+
   type MediaReconnectReason = 'failed' | 'disconnected';
 
   let thread = $state<ThreadDetail | null>(null);
@@ -551,20 +565,34 @@
       return response;
     } catch (error) {
       if (preserveExisting) {
-        if (error instanceof AmbiguousPeerPromotionError) {
+        if (
+          error instanceof AmbiguousPeerPromotionError ||
+          error instanceof FailedPeerPromotionError
+        ) {
           emitDebugEvent(started.call_id, 'remote_audio.candidate.commit_ambiguous', {
             generation: pendingPeerGeneration,
-            name: (error.lastError as DOMException)?.name ?? 'unknown',
-            message: (error.lastError as Error)?.message ?? ''
+            name:
+              error instanceof AmbiguousPeerPromotionError
+                ? (error.lastError as DOMException)?.name ?? 'unknown'
+                : error.name,
+            message:
+              error instanceof AmbiguousPeerPromotionError
+                ? (error.lastError as Error)?.message ?? ''
+                : error.message
           });
           throw error;
         }
         if (pendingPeerGeneration !== null && !backendPeerCommitted) {
-          await rejectBrowserPeerPromotion(
+          const rollbackSafe = await rejectBrowserPeerPromotion(
             started.call_id,
             promotionSessionId,
             pendingPeerGeneration
           );
+          if (!rollbackSafe) {
+            throw new AmbiguousPeerPromotionError(
+              new Error('Replacement peer rejection remained in progress')
+            );
+          }
         }
         candidateDiscarded = true;
         discardBrowserMediaCandidate(connectionOwner, started.call_id, error);
@@ -610,10 +638,18 @@
         );
         if (
           promotion.session_id !== promotionSessionId ||
-          promotion.generation !== generation ||
-          promotion.status !== 'committed'
+          promotion.generation !== generation
         ) {
           throw new Error('Replacement peer commit returned an invalid acknowledgement');
+        }
+        if (promotion.status === 'in_progress') {
+          throw new Error('Replacement peer commit is still in progress');
+        }
+        if (promotion.status === 'failed') {
+          throw new FailedPeerPromotionError();
+        }
+        if (promotion.status === 'rejected') {
+          throw new RejectedPeerPromotionError();
         }
         if (attempt > 1) {
           emitDebugEvent(callId, 'remote_audio.candidate.commit_reconciled', {
@@ -634,6 +670,9 @@
             result: 'already_committed'
           });
           return;
+        }
+        if (error instanceof FailedPeerPromotionError) {
+          throw error;
         }
         if (peerPromotionProvesNotCommitted(error)) {
           throw error;
@@ -660,6 +699,9 @@
   }
 
   function peerPromotionProvesNotCommitted(error: unknown) {
+    if (error instanceof RejectedPeerPromotionError) {
+      return true;
+    }
     if (!(error instanceof CallApiError)) {
       return false;
     }
@@ -675,23 +717,28 @@
     callId: string,
     promotionSessionId: string,
     generation: number
-  ) {
+  ): Promise<boolean> {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 1000);
     try {
-      await promoteCallPeer(
+      const promotion = await promoteCallPeer(
         callId,
         promotionSessionId,
         generation,
         'reject',
         { signal: controller.signal }
       );
+      return promotion.status === 'rejected';
     } catch (error) {
       emitDebugEvent(callId, 'remote_audio.candidate.reject_failed', {
         generation,
         name: (error as DOMException)?.name ?? 'unknown',
         message: (error as Error)?.message ?? ''
       });
+      return !(
+        error instanceof CallApiError &&
+        error.code === 'webrtc_peer_already_committed'
+      );
     } finally {
       window.clearTimeout(timeout);
     }

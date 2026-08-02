@@ -1150,6 +1150,38 @@ def test_reconnect_candidate_requires_connected_commit_and_can_be_rejected(
     assert session._peer_lifecycle.candidate is None
 
 
+@pytest.mark.parametrize("action", ["commit", "reject"])
+def test_peer_promotion_exposes_owned_switch_in_progress_status(
+    action: str,
+    stub_webrtc: None,
+) -> None:
+    client = _client()
+    session_id = f"peer-switch-in-progress-{action}"
+    response = client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+    assert response.status_code == 200
+    session = client.app.state.call_session_manager.get_session(session_id)
+
+    async def in_progress(_generation: int) -> str:
+        return "in_progress"
+
+    if action == "commit":
+        session.commit_pending_peer_generation = in_progress
+    else:
+        session.reject_pending_peer_generation = in_progress
+
+    promoted = client.post(
+        f"/webrtc/sessions/{session_id}/peer-promotion",
+        json={"generation": 1, "action": action},
+    )
+
+    assert promoted.status_code == 200
+    assert promoted.json() == {
+        "session_id": session_id,
+        "generation": 1,
+        "status": "in_progress",
+    }
+
+
 def test_reconnect_offer_rejects_explicitly_ended_session_before_allocating_media(
     monkeypatch: pytest.MonkeyPatch,
     stub_webrtc: None,

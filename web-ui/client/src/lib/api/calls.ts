@@ -100,7 +100,7 @@ export interface CallPeerPromotionResponse {
   call_id: string;
   session_id: string;
   generation: number;
-  status: 'committed' | 'rejected';
+  status: 'committed' | 'rejected' | 'failed' | 'in_progress';
 }
 
 export async function promoteCallPeer(

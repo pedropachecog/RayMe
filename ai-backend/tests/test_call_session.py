@@ -4587,6 +4587,8 @@ def test_engine_switch_cleanup_failure_never_leaves_switching(
         assert session._peer_lifecycle.phase != "switching"
         assert session._peer_lifecycle.switch_owner is None
         assert session.state == "failed"
+        assert await session.commit_pending_peer_generation(generation) == "failed"
+        assert await session.reject_pending_peer_generation(generation) == "failed"
         if failed_step == "prompt_lease":
             cleanup = session._terminal_cleanup
             assert cleanup is not None
@@ -4594,6 +4596,106 @@ def test_engine_switch_cleanup_failure_never_leaves_switching(
             assert cleanup.prompt_lease_pending is True
 
     _run(scenario())
+
+
+@pytest.mark.parametrize("blocked_step", ["old_peer", "prompt_lease"])
+def test_generation_decisions_join_owned_selection_switch_cleanup(
+    blocked_step: str,
+) -> None:
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    released_prompt_leases: list[str] = []
+
+    class BlockingRetiringPeer(ScriptedPeerConnection):
+        async def close(self) -> None:
+            self.close_calls += 1
+            if blocked_step == "old_peer":
+                entered.set()
+                await release.wait()
+
+    async def release_prompt_lease(owner: str) -> bool:
+        released_prompt_leases.append(owner)
+        if blocked_step == "prompt_lease":
+            entered.set()
+            await release.wait()
+        return True
+
+    async def scenario() -> None:
+        old_peer = BlockingRetiringPeer()
+        candidate = ScriptedPeerConnection()
+        candidate.connectionState = "connected"
+        session = CallSession(
+            session_id=f"switch-generation-decision-{blocked_step}",
+            thread_id="thread-before",
+            voice_id="voice-before",
+            engine_id="qwen3_1_7b",
+            peer_connection=old_peer,
+            outbound_audio_track=ScriptedOutboundAudioTrack(),
+        )
+        assert await session.install_or_release_tts_prompt_lease(
+            release_prompt_lease
+        )
+        generation = await session.mark_peer_connection_pending(
+            candidate,
+            outbound_audio_track=ScriptedOutboundAudioTrack(),
+            configuration=PeerOfferConfiguration(
+                thread_id="thread-after",
+                voice_id="voice-after",
+                engine_id="f5",
+                prompt_messages=(),
+                vad_adapter=None,
+                stt_adapter=None,
+            ),
+            timeout_seconds=60.0,
+        )
+
+        first_commit = asyncio.create_task(
+            session.commit_pending_peer_generation(generation)
+        )
+        await asyncio.wait_for(entered.wait(), timeout=1.0)
+        transaction = session._peer_lifecycle.switch_transaction
+        switch_task = session._peer_lifecycle.switch_task
+        assert transaction is not None
+        assert transaction.candidate_generation == generation
+        assert switch_task is not None and switch_task.done() is False
+        assert session._peer_lifecycle.phase == "switching"
+        assert session._peer_lifecycle.candidate is None
+        assert session._peer_lifecycle.active_generation == 0
+        assert session.voice_id == "voice-before"
+        assert session.engine_id == "qwen3_1_7b"
+
+        first_commit.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await first_commit
+        assert switch_task.done() is False
+        assert await session.commit_pending_peer_generation(generation) == "in_progress"
+        assert await session.reject_pending_peer_generation(generation) == "in_progress"
+        assert switch_task.done() is False
+        assert candidate.close_calls == 0
+
+        release.set()
+        accepted, previous_peer = await asyncio.wait_for(
+            asyncio.shield(switch_task),
+            timeout=1.0,
+        )
+        assert accepted is True
+        assert previous_peer is old_peer
+        assert await session.commit_pending_peer_generation(generation) == "committed"
+        assert await session.reject_pending_peer_generation(generation) == "committed"
+        assert session.peer_connection is candidate
+        assert session.thread_id == "thread-after"
+        assert session.voice_id == "voice-after"
+        assert session.engine_id == "f5"
+        assert session._tts_prompt_lease_releaser is None
+        assert session._peer_lifecycle.active_generation == generation
+        assert session._peer_lifecycle.last_switch_candidate_generation == generation
+        assert session._peer_lifecycle.last_switch_outcome == "committed"
+        assert old_peer.close_calls == 1
+        assert candidate.close_calls == 0
+
+    _run(scenario())
+
+    assert released_prompt_leases == [f"switch-generation-decision-{blocked_step}"]
 
 
 @pytest.mark.parametrize(

@@ -75,6 +75,7 @@ CALL_RECOVERABLE_EVENT_TYPES = {"user_final", "failed"}
 CALL_ENDED_EVENT_RECOVERY_GRACE_SECONDS = 60.0
 CALL_PEER_RECONNECT_GRACE_SECONDS = 8.0
 CALL_PEER_REPLACEMENT_TIMEOUT_SECONDS = 8.0
+CALL_PEER_PROMOTION_SWITCH_JOIN_SECONDS = 0.1
 CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS = 2.0
 CALL_TERMINAL_CLEANUP_STEP_TIMEOUT_SECONDS = 2.0
 CALL_TERMINAL_CLEANUP_RETRY_LIMIT = 32
@@ -207,6 +208,8 @@ class _PeerLifecycle:
     switch_owner: Any | None = None
     switch_task: asyncio.Task[tuple[bool, Any | None]] | None = None
     switch_transaction: _PeerSwitchTransaction | None = None
+    last_switch_candidate_generation: int | None = None
+    last_switch_outcome: str | None = None
     retiring_peer: Any | None = None
     retiring_generation: int | None = None
     terminal_state: str | None = None
@@ -1089,13 +1092,30 @@ class CallSession:
     async def commit_pending_peer_generation(self, generation: int) -> str:
         """Promote one transport-connected candidate after browser media staging."""
 
+        switch_outcome = self._peer_switch_generation_outcome(generation)
+        if switch_outcome == "in_progress":
+            switch_task = self._peer_lifecycle.switch_task
+            if switch_task is None:
+                return "in_progress"
+            try:
+                accepted, _ = await asyncio.wait_for(
+                    asyncio.shield(switch_task),
+                    timeout=CALL_PEER_PROMOTION_SWITCH_JOIN_SECONDS,
+                )
+            except asyncio.TimeoutError:
+                return "in_progress"
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                return "failed"
+            durable_outcome = self._peer_switch_generation_outcome(generation)
+            if durable_outcome is not None:
+                return durable_outcome
+            return "committed" if accepted else "failed"
+        if switch_outcome is not None:
+            return switch_outcome
+
         lifecycle = self._peer_lifecycle
-        if (
-            lifecycle.active_generation == generation
-            and lifecycle.candidate is None
-            and self.peer_connection is not None
-        ):
-            return "committed"
         candidate = lifecycle.candidate
         if candidate is None or candidate.generation != generation:
             return "stale"
@@ -1118,14 +1138,18 @@ class CallSession:
             and self.peer_connection is peer_connection
         ):
             return "committed"
+        switch_outcome = self._peer_switch_generation_outcome(generation)
+        if switch_outcome is not None:
+            return switch_outcome
         return "stale"
 
     async def reject_pending_peer_generation(self, generation: int) -> str:
         """Reject one uncommitted candidate without disturbing active media."""
 
         lifecycle = self._peer_lifecycle
-        if lifecycle.active_generation == generation:
-            return "committed"
+        switch_outcome = self._peer_switch_generation_outcome(generation)
+        if switch_outcome is not None:
+            return switch_outcome
         candidate = lifecycle.candidate
         if candidate is None or candidate.generation != generation:
             return "stale"
@@ -1134,6 +1158,35 @@ class CallSession:
             generation=generation,
         )
         return "rejected" if rejected else "stale"
+
+    def _peer_switch_generation_outcome(self, generation: int) -> str | None:
+        lifecycle = self._peer_lifecycle
+        if (
+            lifecycle.active_generation == generation
+            and self.peer_connection is not None
+        ):
+            return "committed"
+        if lifecycle.last_switch_candidate_generation == generation:
+            return lifecycle.last_switch_outcome
+        transaction = lifecycle.switch_transaction
+        if (
+            lifecycle.phase == "switching"
+            and transaction is not None
+            and transaction.candidate_generation == generation
+        ):
+            return "in_progress"
+        return None
+
+    def _record_peer_switch_outcome_locked(
+        self,
+        generation: int,
+        outcome: str,
+    ) -> None:
+        lifecycle = self._peer_lifecycle
+        recorded_generation = lifecycle.last_switch_candidate_generation
+        if recorded_generation is None or generation >= recorded_generation:
+            lifecycle.last_switch_candidate_generation = generation
+            lifecycle.last_switch_outcome = outcome
 
     def set_data_channel_for_peer(
         self,
@@ -1314,6 +1367,10 @@ class CallSession:
                     and lifecycle.switch_transaction is switch
                 )
             if not owns_switch:
+                self._record_peer_switch_outcome_locked(
+                    switch.candidate_generation,
+                    "failed",
+                )
                 if lifecycle.switch_task is asyncio.current_task():
                     lifecycle.switch_task = None
                 if lifecycle.switch_owner is switch.peer_connection:
@@ -1348,6 +1405,10 @@ class CallSession:
                     ):
                         self._tts_prompt_lease_releaser = None
             if owns_switch and cleanup.errors:
+                self._record_peer_switch_outcome_locked(
+                    switch.candidate_generation,
+                    "failed",
+                )
                 # The candidate becomes the terminal active transport only
                 # after the stable switch has been abandoned. Every unresolved
                 # old resource is transferred explicitly into terminal retry.
@@ -1368,6 +1429,10 @@ class CallSession:
             elif owns_switch:
                 self.peer_connection = switch.peer_connection
                 lifecycle.active_generation = switch.candidate_generation
+                self._record_peer_switch_outcome_locked(
+                    switch.candidate_generation,
+                    "committed",
+                )
                 self.outbound_audio_track = switch.accepted_outbound_audio_track
                 self.data_channel = switch.accepted_data_channel
                 if switch.configuration is not None:

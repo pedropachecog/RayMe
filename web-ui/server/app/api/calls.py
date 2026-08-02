@@ -358,11 +358,16 @@ async def promote_call_peer(
             payload.generation,
             payload.action,
         )
-        expected_status = "committed" if payload.action == "commit" else "rejected"
+        expected_statuses = (
+            {"committed", "failed", "in_progress"}
+            if payload.action == "commit"
+            else {"rejected", "failed", "in_progress"}
+        )
+        promotion_status = backend_result.get("status")
         if (
             backend_result.get("session_id") != session_id
             or backend_result.get("generation") != payload.generation
-            or backend_result.get("status") != expected_status
+            or promotion_status not in expected_statuses
         ):
             raise AiBackendProcessingError(
                 code="call_control_failed",
@@ -372,7 +377,7 @@ async def promote_call_peer(
             "call_id": call_id,
             "session_id": session_id,
             "generation": payload.generation,
-            "status": expected_status,
+            "status": promotion_status,
         }
     except CallServiceError as exc:
         raise _call_error(exc) from exc
