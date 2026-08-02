@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import {
   backfillCallReconnectAudio,
+  endCall,
   recoverCallEvents,
   setCallMuted
 } from '../../src/lib/api/calls';
@@ -197,6 +198,33 @@ describe('client call API wrappers', () => {
     });
     expect(JSON.parse(lastRequest(fetchMock).init.body as string)).toEqual({
       session_id: 'rtc-1'
+    });
+  });
+
+  it('forwards caller-owned abort signals for recovery and end requests', async () => {
+    const fetchMock = installFetch({
+      call_id: 'call/a',
+      session_id: 'rtc-1',
+      events: [],
+      reason: 'hangup'
+    });
+    const recoveryController = new AbortController();
+    const endController = new AbortController();
+
+    await recoverCallEvents('call/a', 'rtc-1', {
+      signal: recoveryController.signal
+    });
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/calls/call%2Fa/events/recover',
+      init: { method: 'POST', signal: recoveryController.signal }
+    });
+
+    await endCall('call/a', 'rtc-1', 'hangup', {
+      signal: endController.signal
+    });
+    expect(lastRequest(fetchMock)).toMatchObject({
+      url: '/api/calls/call%2Fa/end',
+      init: { method: 'POST', signal: endController.signal }
     });
   });
 

@@ -269,6 +269,8 @@
   const TERMINAL_RECONNECT_ACTIVE_RESPONSE_WAIT_MS = 120000;
   const TERMINAL_RECONNECT_RESPONSE_VISIBLE_GRACE_MS = 1500;
   const TERMINAL_RECONNECT_RESPONSE_PLAYBACK_MAX_MS = 60000;
+  const HANGUP_RECOVERY_DEADLINE_MS = 2500;
+  const HANGUP_END_DEADLINE_MS = 5000;
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'RayMe');
@@ -2189,7 +2191,7 @@
     debugCallId: string,
     reason: string,
     generation: ReconnectAudioBackfillGeneration | null = null,
-    throwOnFailure = false
+    options: { signal?: AbortSignal; throwOnFailure?: boolean } = {}
   ) {
     if (generation && !ownsReconnectAudioBackfill(generation)) {
       return;
@@ -2198,7 +2200,9 @@
       return;
     }
     try {
-      const response = await recoverCallEvents(callId, sessionId);
+      const response = await recoverCallEvents(callId, sessionId, {
+        signal: options.signal
+      });
       emitDebugEvent(debugCallId, 'call.events_recover.done', {
         reason,
         events: response.events.length
@@ -2215,7 +2219,7 @@
         name: (error as Error)?.name ?? 'unknown',
         message: (error as Error)?.message ?? ''
       });
-      if (throwOnFailure) {
+      if (options.throwOnFailure) {
         throw error;
       }
     }
@@ -2643,7 +2647,9 @@
     return btoa(binary);
   }
 
-  function stopLocalMicMeter(): Promise<void> {
+  function stopLocalMicMeter(
+    options: { preserveReconnectBackfill?: boolean } = {}
+  ): Promise<void> {
     if (localMicMeterFrame) {
       cancelAnimationFrame(localMicMeterFrame);
       localMicMeterFrame = 0;
@@ -2663,8 +2669,10 @@
     localAudioContext = null;
     localMicRawRms = null;
     localMicRawPeak = null;
-    localMicPcmBuffer = [];
-    retireReconnectAudioBackfill(activeReconnectAudioBackfill);
+    if (!options.preserveReconnectBackfill) {
+      localMicPcmBuffer = [];
+      retireReconnectAudioBackfill(activeReconnectAudioBackfill);
+    }
     if (!closingLocalAudioContext || closingLocalAudioContext.state === 'closed') {
       return Promise.resolve();
     }
@@ -3929,6 +3937,27 @@
     });
   }
 
+  async function runHangupRequestWithDeadline<T>(
+    requestName: 'recovery' | 'end',
+    timeoutMs: number,
+    request: (signal: AbortSignal) => Promise<T>
+  ) {
+    const abortController = new AbortController();
+    const timeoutId = window.setTimeout(() => {
+      abortController.abort(
+        new DOMException(`Hangup ${requestName} request timed out`, 'TimeoutError')
+      );
+    }, timeoutMs);
+    try {
+      return await request(abortController.signal);
+    } finally {
+      window.clearTimeout(timeoutId);
+      if (!abortController.signal.aborted) {
+        abortController.abort();
+      }
+    }
+  }
+
   function markLastAiTurnInterrupted() {
     for (let index = transcript.length - 1; index >= 0; index -= 1) {
       const turn = transcript[index];
@@ -3949,31 +3978,49 @@
     const rememberHangupFailure = (error: unknown) => {
       hangupFailure ??= error;
     };
+    const reconnectDrain = drainReconnectAudioBackfillBeforeHangup();
+    const browserMediaTeardown = stopBrowserMedia(
+      callId,
+      new Error('Browser media stopped for hangup'),
+      { preserveReconnectBackfill: true }
+    ).catch((error) => {
+      rememberHangupFailure(error);
+    });
 
     try {
+      try {
+        await reconnectDrain;
+      } catch (error) {
+        rememberHangupFailure(error);
+      } finally {
+        localMicPcmBuffer = [];
+        retireReconnectAudioBackfill(activeReconnectAudioBackfill);
+      }
       if (callId && sessionId) {
         try {
-          await drainReconnectAudioBackfillBeforeHangup();
+          await runHangupRequestWithDeadline(
+            'recovery',
+            HANGUP_RECOVERY_DEADLINE_MS,
+            (signal) => recoverMissedCallEvents(callId, 'hangup', null, {
+              signal,
+              throwOnFailure: true
+            })
+          );
         } catch (error) {
           rememberHangupFailure(error);
         }
         try {
-          await recoverMissedCallEvents(callId, 'hangup', null, true);
-        } catch (error) {
-          rememberHangupFailure(error);
-        }
-        try {
-          await endCall(callId, sessionId);
+          await runHangupRequestWithDeadline(
+            'end',
+            HANGUP_END_DEADLINE_MS,
+            (signal) => endCall(callId, sessionId, 'hangup', { signal })
+          );
         } catch (error) {
           rememberHangupFailure(error);
         }
       }
     } finally {
-      try {
-        await stopBrowserMedia();
-      } catch (error) {
-        rememberHangupFailure(error);
-      }
+      await browserMediaTeardown;
     }
 
     if (hangupFailure) {
@@ -4002,7 +4049,6 @@
     } catch {
       // Hangup must still recover/end when reconnect backfill itself fails.
     }
-    await recoverMissedCallEvents(callId, 'hangup_flush');
   }
 
   async function returnToThread() {
@@ -4162,7 +4208,8 @@
 
   async function stopBrowserMedia(
     debugCallId = callId,
-    candidateReason: unknown = new Error('Browser media stopped')
+    candidateReason: unknown = new Error('Browser media stopped'),
+    options: { preserveReconnectBackfill?: boolean } = {}
   ) {
     resetBrowserMediaReconnectIncident();
     clearInterruptDrainState();
@@ -4171,7 +4218,7 @@
     activeMuteRequest?.abortController.abort();
     activeMuteRequest = null;
     muteRequestPending = false;
-    const localContextClose = stopLocalMicMeter();
+    const localContextClose = stopLocalMicMeter(options);
     detachRemoteAudio();
     const closingRemoteAudioContext = remoteAudioContext;
     remoteAudioContext = null;

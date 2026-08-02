@@ -62,7 +62,10 @@ type ReconnectRouteOptions = {
   selectionChangingPeerCommitDelayMs?: number;
   selectionChangingPeerCommitGate?: Promise<void>;
   failRecover?: boolean;
+  hangRecover?: boolean;
   failEnd?: boolean;
+  hangEnd?: boolean;
+  abortEnd?: boolean;
 };
 
 type StartupRouteCounters = {
@@ -619,56 +622,104 @@ test('hard peer-switch deadline tears down every local browser media owner', asy
   assertNoBrowserErrors();
 });
 
-test('failed End Call recovery and acknowledgement tear down browser media before the panel', async ({
-  page
-}) => {
-  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
-    allowConsoleErrors: [/Failed to load resource: the server responded with a status of 502/]
+for (const failureCase of [
+  {
+    label: 'recovery 502 and end success',
+    options: { failRecover: true }
+  },
+  {
+    label: 'end 502',
+    options: { failEnd: true }
+  },
+  {
+    label: 'held recovery and held end',
+    options: { hangRecover: true, hangEnd: true },
+    assertImmediateTeardown: true
+  },
+  {
+    label: 'aborted end request',
+    options: { abortEnd: true }
+  }
+] satisfies Array<{
+  label: string;
+  options: ReconnectRouteOptions;
+  assertImmediateTeardown?: boolean;
+}>) {
+  test(`failed End Call tears down browser media before the panel: ${failureCase.label}`, async ({
+    page
+  }) => {
+    test.setTimeout(30_000);
+    const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+      allowConsoleErrors: [
+        /Failed to load resource: net::ERR_FAILED/,
+        /Failed to load resource: the server responded with a status of 502/
+      ]
+    });
+    await installMockCallMedia(page);
+    const heldSelectionSwitch = new Promise<void>(() => undefined);
+    const counters = await installReconnectCallRoutes(page, {
+      selectionChangingPeerCommitGate: heldSelectionSwitch,
+      ...failureCase.options
+    });
+
+    await startReconnectCall(page, counters);
+    const initial = await getMockCallMediaSnapshot(page);
+    const initialStreamId = initial.peers[0].remoteStreamId;
+    expect(initialStreamId).not.toBeNull();
+    await expect.poll(
+      async () => (await getMockCallMediaSnapshot(page)).applicationAudioContexts.length
+    ).toBe(2);
+
+    await setCurrentMockPeerState(page, 'failed', 'disconnected');
+    await expect.poll(() => counters.peerPromotionInProgressCount).toBeGreaterThan(0);
+    await expect.poll(async () => (await getMockCallMediaSnapshot(page)).peers.length).toBe(2);
+    await page.getByRole('button', { name: 'End Call' }).click();
+
+    if (failureCase.assertImmediateTeardown) {
+      await expect.poll(() => counters.recoverCount).toBe(1);
+      expect(counters.endCount).toBe(0);
+      await expect.poll(async () => browserMediaIsStopped(
+        await getMockCallMediaSnapshot(page)
+      )).toBe(true);
+      expectBrowserMediaStopped(await getMockCallMediaSnapshot(page), initialStreamId);
+      await expect(page.getByRole('alert')).toHaveCount(0);
+    }
+
+    const failurePanel = page.getByRole('alert');
+    await expect(failurePanel.getByText(TERMINAL_CONNECTION_DROPPED_COPY)).toBeVisible({
+      timeout: 12_000
+    });
+    await expect(failurePanel.getByRole('button', { name: 'Return to Thread' })).toBeVisible();
+    expect(counters.recoverCount).toBe(1);
+    expect(counters.endCount).toBe(1);
+    expect(counters.requestOrder.indexOf('recover')).toBeLessThan(
+      counters.requestOrder.indexOf('end')
+    );
+
+    const terminal = await getMockCallMediaSnapshot(page);
+    expect(terminal.peers).toHaveLength(2);
+    expect(terminal.channels).toHaveLength(2);
+    expectBrowserMediaStopped(terminal, initialStreamId);
+    expect(debugEventCount(counters, 'remote_audio.candidate.discarded')).toBe(1);
+    expect(debugEventCount(counters, 'remote_audio.candidate.promoted')).toBe(0);
+    expect(
+      counters.debugEvents.some(
+        (entry) => entry.event === 'mic.keep_live' && entry.detail.nextState === 'failed'
+      )
+    ).toBe(false);
+    await expect(page.getByTestId('voice-visualizer')).toHaveCount(0);
+
+    await emitLatestMockDataChannelEvent(page, {
+      type: 'state',
+      session_id: 'rtc-call-reconnect-01',
+      state: 'listening'
+    });
+    await page.waitForTimeout(50);
+    expectBrowserMediaStopped(await getMockCallMediaSnapshot(page), initialStreamId);
+    await expect(failurePanel.getByText(TERMINAL_CONNECTION_DROPPED_COPY)).toBeVisible();
+    assertNoBrowserErrors();
   });
-  await installMockCallMedia(page);
-  const heldSelectionSwitch = new Promise<void>(() => undefined);
-  const counters = await installReconnectCallRoutes(page, {
-    selectionChangingPeerCommitGate: heldSelectionSwitch,
-    failRecover: true,
-    failEnd: true
-  });
-
-  await startReconnectCall(page, counters);
-  const initial = await getMockCallMediaSnapshot(page);
-  const initialStreamId = initial.peers[0].remoteStreamId;
-  expect(initialStreamId).not.toBeNull();
-  await expect.poll(
-    async () => (await getMockCallMediaSnapshot(page)).applicationAudioContexts.length
-  ).toBe(2);
-
-  await setCurrentMockPeerState(page, 'failed', 'disconnected');
-  await expect.poll(() => counters.peerPromotionInProgressCount).toBeGreaterThan(0);
-  await expect.poll(async () => (await getMockCallMediaSnapshot(page)).peers.length).toBe(2);
-  await page.getByRole('button', { name: 'End Call' }).click();
-
-  const failurePanel = page.getByRole('alert');
-  await expect(failurePanel.getByText(TERMINAL_CONNECTION_DROPPED_COPY)).toBeVisible();
-  await expect(failurePanel.getByRole('button', { name: 'Return to Thread' })).toBeVisible();
-  expect(counters.recoverCount).toBeGreaterThanOrEqual(1);
-  expect(counters.endCount).toBe(1);
-  expect(counters.requestOrder.lastIndexOf('recover')).toBeLessThan(
-    counters.requestOrder.indexOf('end')
-  );
-
-  const terminal = await getMockCallMediaSnapshot(page);
-  expect(terminal.peers).toHaveLength(2);
-  expect(terminal.channels).toHaveLength(2);
-  expectBrowserMediaStopped(terminal, initialStreamId);
-  expect(debugEventCount(counters, 'remote_audio.candidate.discarded')).toBe(1);
-  expect(debugEventCount(counters, 'remote_audio.candidate.promoted')).toBe(0);
-  expect(
-    counters.debugEvents.some(
-      (entry) => entry.event === 'mic.keep_live' && entry.detail.nextState === 'failed'
-    )
-  ).toBe(false);
-  await expect(page.getByTestId('voice-visualizer')).toHaveCount(0);
-  assertNoBrowserErrors();
-});
+}
 
 test('discards a failed replacement candidate without touching old audible audio', async ({
   page
@@ -1850,6 +1901,26 @@ function expectBrowserMediaStopped(
   expect(snapshot.audioPlayback.pausedStreamIds).toContain(initialStreamId);
 }
 
+function browserMediaIsStopped(snapshot: MockCallMediaSnapshot) {
+  return (
+    snapshot.peers.length > 0 &&
+    snapshot.peers.every((peer) => peer.closed && peer.closeCount === 1) &&
+    snapshot.channels.every(
+      (channel) => channel.readyState === 'closed' && channel.closeCount === 1
+    ) &&
+    snapshot.localAudioTracks.every(
+      (track) => !track.enabled && track.readyState === 'ended'
+    ) &&
+    snapshot.applicationAudioContexts.every((context) => context.state === 'closed') &&
+    snapshot.remoteStreams.every((stream) =>
+      stream.audioTrackStates.every(
+        (track) => !track.enabled && track.readyState === 'ended'
+      )
+    ) &&
+    snapshot.audioPlayback.activeStreamId === null
+  );
+}
+
 function debugEventCount(counters: ReconnectRouteCounters, event: string) {
   return counters.debugEvents.filter((entry) => entry.event === event).length;
 }
@@ -2260,6 +2331,10 @@ async function installReconnectCallRoutes(
   await page.route('**/api/calls/*/events/recover', async (route) => {
     counters.recoverCount += 1;
     counters.requestOrder.push('recover');
+    if (options.hangRecover) {
+      await new Promise<void>(() => undefined);
+      return;
+    }
     if (options.failRecover) {
       await fulfillJson(route, {
         detail: {
@@ -2324,6 +2399,14 @@ async function installReconnectCallRoutes(
     counters.requestOrder.push('end');
     while (hangingBackfillResolvers.length > 0) {
       hangingBackfillResolvers.shift()?.();
+    }
+    if (options.hangEnd) {
+      await new Promise<void>(() => undefined);
+      return;
+    }
+    if (options.abortEnd) {
+      await route.abort('failed');
+      return;
     }
     if (options.failEnd) {
       await fulfillJson(route, {

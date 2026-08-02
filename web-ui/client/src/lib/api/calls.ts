@@ -156,7 +156,8 @@ export function backfillCallReconnectAudio(
 
 export function recoverCallEvents(
   callId: string,
-  sessionId: string
+  sessionId: string,
+  options: { signal?: AbortSignal } = {}
 ): Promise<{
   call_id: string;
   session_id: string;
@@ -164,6 +165,7 @@ export function recoverCallEvents(
 }> {
   return apiFetch(`/calls/${encodeURIComponent(callId)}/events/recover`, {
     method: 'POST',
+    signal: options.signal,
     body: JSON.stringify({ session_id: sessionId })
   });
 }
@@ -206,10 +208,12 @@ export function interruptCall(
 export function endCall(
   callId: string,
   sessionId: string,
-  reason = 'hangup'
+  reason = 'hangup',
+  options: { signal?: AbortSignal } = {}
 ): Promise<{ call_id: string; session_id: string; reason: string }> {
   return apiFetch(`/calls/${encodeURIComponent(callId)}/end`, {
     method: 'POST',
+    signal: options.signal,
     body: JSON.stringify({ session_id: sessionId, reason })
   });
 }
