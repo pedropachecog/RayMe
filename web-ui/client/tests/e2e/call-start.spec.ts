@@ -29,6 +29,7 @@ type ReconnectRouteCounters = {
 type ReconnectRouteOptions = {
   backfillDelayMs?: number;
   firstBackfillGate?: Promise<void>;
+  finalBackfillGate?: Promise<void>;
   firstMuteGate?: Promise<void>;
   abortMuteNumbers?: number[];
   authoritativeMuteEpoch?: number;
@@ -303,7 +304,8 @@ test('re-offers with a new peer instead of ending when browser peer connection f
   });
   expect(afterReconnect.remoteStreams).toHaveLength(2);
   expect(debugEventCount(counters, 'datachannel.attach')).toBe(2);
-  expect(debugEventCount(counters, 'datachannel.close')).toBe(1);
+  // Closing the retired owner's channel must not publish current-owner diagnostics.
+  expect(debugEventCount(counters, 'datachannel.close')).toBe(0);
   expect(debugEventCount(counters, 'remote_audio.attach')).toBe(2);
   await expect.poll(
     () =>
@@ -585,6 +587,44 @@ test('sends reconnect backfill tail without omitting the 35256-69467ms missing-c
     (entry, index) => index > finalSendingIndex && entry.event === 'pc.setRemoteDescription.done'
   );
   expect(remoteDescriptionIndex).toBeGreaterThanOrEqual(0);
+  assertNoBrowserErrors();
+});
+
+test('keeps the current reconnect final tail alive when the replacement peer reports connected', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  let releaseFinalBackfill: () => void = () => {};
+  const finalBackfillGate = new Promise<void>((resolve) => {
+    releaseFinalBackfill = resolve;
+  });
+  await installMockCallMedia(page, { controllablePcm: true });
+  const counters = await installReconnectCallRoutes(page, { finalBackfillGate });
+
+  await startReconnectCall(page, counters);
+  await emitMockPcm(page, 1111, 400_000);
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+
+  await expect.poll(() => counters.backfills.some((entry) => entry.final === true)).toBe(true);
+  const finalBatch = counters.backfills.find((entry) => entry.final === true);
+  expect(finalBatch).toBeDefined();
+  await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.ok')).toBe(1);
+
+  await setCurrentMockPeerState(page, 'connected', 'connected');
+  await expect(page.getByTestId('voice-visualizer').getByText('Understanding')).toBeVisible();
+  expect(debugEventCount(counters, 'mic.reconnect_backfill.recovery_drain')).toBeGreaterThan(0);
+
+  releaseFinalBackfill();
+  await expect.poll(
+    () =>
+      counters.debugEvents.filter(
+        (entry) =>
+          entry.event === 'mic.reconnect_backfill.sent' &&
+          entry.detail.final === true
+      ).length
+  ).toBe(1);
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  expect(debugEventCount(counters, 'mic.reconnect_backfill.recovery_drain_timeout')).toBe(0);
   assertNoBrowserErrors();
 });
 
@@ -1392,9 +1432,13 @@ async function installReconnectCallRoutes(
   await page.route('**/api/calls/*/reconnect-audio', async (route) => {
     counters.backfillCount += 1;
     counters.requestOrder.push('backfill');
-    counters.backfills.push(route.request().postDataJSON() as Record<string, unknown>);
+    const backfillPayload = route.request().postDataJSON() as Record<string, unknown>;
+    counters.backfills.push(backfillPayload);
     if (options.firstBackfillGate && counters.backfillCount === 1) {
       await options.firstBackfillGate;
+    }
+    if (options.finalBackfillGate && backfillPayload.final === true) {
+      await options.finalBackfillGate;
     }
     if (options.backfillDelayMs && counters.backfillCount === 1) {
       await new Promise((resolve) => setTimeout(resolve, options.backfillDelayMs));

@@ -88,6 +88,8 @@
     lastEndMs: number;
     flushPromise: Promise<void> | null;
     finalPromise: Promise<void> | null;
+    recoveryDrainTimer: number;
+    finalAcknowledged: boolean;
     promotedState: boolean;
     awaitingFinalResponse: boolean;
   }
@@ -522,14 +524,7 @@
         );
       }
       if ((iceConnectionState === 'connected' || iceConnectionState === 'completed') && isBrowserMediaConnected(connection)) {
-        clearMediaReconnectTimer(owner);
-        mediaReconnectAttempts = 0;
-        retireReconnectAudioBackfill(activeReconnectAudioBackfill);
-        emitLocalMicReconnectDiagnostic(debugCallId, {
-          phase: 'recovered',
-          reason: 'disconnected',
-          source: 'iceconnectionstatechange'
-        });
+        handleBrowserMediaRecovered(owner, debugCallId, 'disconnected', 'iceconnectionstatechange');
       }
     });
     connection.addEventListener('connectionstatechange', () => {
@@ -557,14 +552,7 @@
         );
       }
       if (connection.connectionState === 'connected' && isBrowserMediaConnected(connection)) {
-        clearMediaReconnectTimer(owner);
-        mediaReconnectAttempts = 0;
-        retireReconnectAudioBackfill(activeReconnectAudioBackfill);
-        emitLocalMicReconnectDiagnostic(debugCallId, {
-          phase: 'recovered',
-          reason: 'failed',
-          source: 'connectionstatechange'
-        });
+        handleBrowserMediaRecovered(owner, debugCallId, 'failed', 'connectionstatechange');
         try {
           if (eventsChannel && (eventsChannel.readyState === 'closed' || eventsChannel.readyState === 'closing')) {
             emitDebugEvent(debugCallId, 'datachannel.recreate', {
@@ -678,12 +666,7 @@
       }
       mediaReconnectTimer = 0;
       if (isBrowserMediaConnected(connection)) {
-        retireReconnectAudioBackfill(activeReconnectAudioBackfill);
-        emitLocalMicReconnectDiagnostic(debugCallId, {
-          phase: 'schedule_cancelled_connected',
-          reason,
-          attempts: mediaReconnectAttempts
-        });
+        handleBrowserMediaRecovered(owner, debugCallId, reason, 'schedule_timer');
         return;
       }
       void reconnectBrowserMedia(owner, debugCallId, reason);
@@ -749,6 +732,13 @@
               backfillGeneration
             )
         }
+      );
+      handleBrowserMediaRecovered(
+        activeBrowserMediaConnection,
+        debugCallId,
+        reason,
+        'replacement_connected',
+        false
       );
       if (
         !ownsReconnectAudioBackfill(backfillGeneration) ||
@@ -849,12 +839,7 @@
         return;
       }
       if (isBrowserMediaConnected(connection)) {
-        retireReconnectAudioBackfill(activeReconnectAudioBackfill);
-        emitLocalMicReconnectDiagnostic(debugCallId, {
-          phase: 'retry_cancelled_connected',
-          reason,
-          attempts: mediaReconnectAttempts
-        });
+        handleBrowserMediaRecovered(owner, debugCallId, reason, 'retry_timer');
         return;
       }
       void reconnectBrowserMedia(owner, debugCallId, reason);
@@ -982,6 +967,38 @@
     }
   }
 
+  function handleBrowserMediaRecovered(
+    owner: BrowserMediaConnectionOwner | null,
+    debugCallId: string,
+    reason: MediaReconnectReason,
+    source: string,
+    resetAttemptBudget = true
+  ) {
+    if (!ownsBrowserMediaConnection(owner)) {
+      return;
+    }
+    clearMediaReconnectTimer(owner);
+    if (resetAttemptBudget) {
+      mediaReconnectAttempts = 0;
+    }
+    const generation = activeReconnectAudioBackfill;
+    if (generation) {
+      beginReconnectAudioBackfillRecoveryDrain(
+        generation,
+        debugCallId,
+        reason,
+        source
+      );
+    }
+    emitLocalMicReconnectDiagnostic(debugCallId, {
+      phase: 'recovered',
+      reason,
+      source,
+      backfillGeneration: generation?.generationId ?? null,
+      awaitingFinalResponse: generation?.progress.awaitingFinalResponse ?? false
+    });
+  }
+
   function isBrowserMediaConnected(connection: RTCPeerConnection) {
     return (
       connection.connectionState === 'connected' &&
@@ -1079,6 +1096,8 @@
         lastEndMs: 0,
         flushPromise: null,
         finalPromise: null,
+        recoveryDrainTimer: 0,
+        finalAcknowledged: false,
         promotedState: false,
         awaitingFinalResponse: false
       }
@@ -1127,6 +1146,10 @@
     if (!ownsReconnectAudioBackfill(generation)) {
       return false;
     }
+    if (generation.progress.recoveryDrainTimer) {
+      window.clearTimeout(generation.progress.recoveryDrainTimer);
+      generation.progress.recoveryDrainTimer = 0;
+    }
     generation.abortController.abort();
     activeReconnectAudioBackfill = null;
     if (generation.progress.promotedState && callState === 'understanding') {
@@ -1135,6 +1158,54 @@
     generation.progress.promotedState = false;
     generation.progress.awaitingFinalResponse = false;
     return true;
+  }
+
+  function beginReconnectAudioBackfillRecoveryDrain(
+    generation: ReconnectAudioBackfillGeneration,
+    debugCallId: string,
+    reason: MediaReconnectReason,
+    source: string
+  ) {
+    if (!ownsReconnectAudioBackfill(generation)) {
+      return;
+    }
+    if (generation.progress.finalAcknowledged) {
+      retireReconnectAudioBackfill(generation);
+      return;
+    }
+    if (!generation.progress.finalPromise && !generation.progress.flushPromise) {
+      void flushReconnectAudioBackfill(
+        debugCallId,
+        reason,
+        Math.max(mediaReconnectAttempts, 1),
+        {},
+        generation
+      );
+    }
+    if (generation.progress.recoveryDrainTimer) {
+      return;
+    }
+    emitDebugEvent(debugCallId, 'mic.reconnect_backfill.recovery_drain', {
+      reason,
+      source,
+      generation: generation.generationId,
+      backfillId: generation.backfillId,
+      timeoutMs: TERMINAL_RECONNECT_BACKFILL_WAIT_MS
+    });
+    generation.progress.recoveryDrainTimer = window.setTimeout(() => {
+      generation.progress.recoveryDrainTimer = 0;
+      if (!ownsReconnectAudioBackfill(generation)) {
+        return;
+      }
+      emitDebugEvent(debugCallId, 'mic.reconnect_backfill.recovery_drain_timeout', {
+        reason,
+        source,
+        generation: generation.generationId,
+        backfillId: generation.backfillId,
+        timeoutMs: TERMINAL_RECONNECT_BACKFILL_WAIT_MS
+      });
+      retireReconnectAudioBackfill(generation);
+    }, TERMINAL_RECONNECT_BACKFILL_WAIT_MS);
   }
 
   function finishReconnectBackfillFinalResponse(
@@ -1243,7 +1314,7 @@
         batchIndex: generation.progress.batchIndex,
         final: true,
         selection: null
-      }).finally(() => retireReconnectAudioBackfill(generation)));
+      }));
       if (options.awaitFinal) {
         await finalPromise;
         if (!ownsReconnectAudioBackfill(generation)) {
@@ -1333,7 +1404,7 @@
         }
         generation.progress.lastEndMs = chunk.endMs;
       }
-    })().finally(() => retireReconnectAudioBackfill(generation)));
+    })());
     if (options.awaitFinal) {
       await finalPromise;
       if (!ownsReconnectAudioBackfill(generation)) {
@@ -1442,6 +1513,9 @@
         frames: response.frames ?? null,
         responseDurationMs: response.duration_ms ?? null
       });
+      if (final && (response.status === 'accepted' || response.status === 'duplicate')) {
+        generation.progress.finalAcknowledged = true;
+      }
       if (response.event) {
         await handleCallDataEvent(response.event);
         if (!ownsReconnectAudioBackfill(generation)) {
@@ -1450,6 +1524,9 @@
       }
       if (final) {
         finishReconnectBackfillFinalResponse(generation, Boolean(response.event));
+        if (generation.progress.finalAcknowledged) {
+          retireReconnectAudioBackfill(generation);
+        }
       }
     } catch (error) {
       if (
