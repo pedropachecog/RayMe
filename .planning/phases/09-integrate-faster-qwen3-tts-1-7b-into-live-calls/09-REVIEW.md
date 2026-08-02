@@ -1,13 +1,13 @@
 ---
 phase: 09-integrate-faster-qwen3-tts-1-7b-into-live-calls
-reviewed: 2026-08-02T13:04:30Z
+reviewed: 2026-08-02T13:38:56Z
 depth: deep
-diff_base: 93215db04cd81c83569c96adb28960d9aaf49c0c
-reviewed_head: 93215db04cd81c83569c96adb28960d9aaf49c0c+worktree
+diff_base: a3129daf959260fe225cbcbcecd4b95ac8c535f3
+reviewed_head: f64b2ee18ca3e19f5e3ca82b146111f684df7299
 files_reviewed: 2
 files_reviewed_list:
-  - scripts/deploy-omen.sh
-  - ai-backend/tests/test_omen_deploy_contract.py
+  - .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-run-omen-evidence.py
+  - .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/test_phase09_evidence.py
 findings:
   critical: 0
   warning: 0
@@ -18,9 +18,9 @@ status: clean
 
 # Phase 09: Code Review Report
 
-**Reviewed:** 2026-08-02T13:04:30Z
+**Reviewed:** 2026-08-02T13:38:56Z
 **Depth:** deep
-**Diff:** uncommitted Schannel hotfix over `93215db`
+**Diff:** `a3129da..f64b2ee`
 **Files Reviewed:** 2
 **Status:** clean
 
@@ -28,28 +28,28 @@ status: clean
 
 ### Summary
 
-All reviewed files meet quality standards. No blocker or warning was found in the focused Windows private-CA curl hotfix.
+The repaired multipart STT boundary is safe under the reviewed attack surface. It derives the destination from the live `RayMeApi.ai_base_url`, requires the request and configured base to resolve to the same normalized HTTPS origin, rejects userinfo and malformed or mismatched hosts/ports, uses the API's configured SSL context, strips the bearer token, and enforces the 32-character minimum before I/O.
 
-All seven canonical Windows probes now pass `--ssl-no-revoke` while retaining the pinned `--cacert $aiCaBundle`. For Schannel, this option disables certificate-revocation lookup only; it is not equivalent to `-k`/`--insecure` and does not disable certificate-chain or hostname verification. This is an appropriate operational exception for RayMe's private Phase 1 CA, which has no reachable Windows revocation service. The serving certificate must still chain to the durable Phase 1 root and match `192.168.1.199`.
+The dedicated urllib opener rejects 301, 302, 303, 307, and 308 before a follow-up request is constructed. A real-network hostile matrix used trusted TLS and tested all five statuses against same-origin HTTPS, foreign HTTPS, and foreign HTTP targets. All 15 cases emitted exactly one trusted initial request and zero redirected requests; no bearer or multipart body reached a second endpoint. Rejected responses expose numeric status only and do not read, print, write, or chain private response content.
 
-Every curl invocation places the Schannel option and CA bundle before the URL. The authenticated readiness probe also retains `--fail`, its exit-code handling, and the explicit `status == ready`/`authenticated == true` checks. AI health, Web settings, WebRTC readiness, deployed-commit identity, Qwen worker memory, final resident-engine state, and selected-prompt identity checks remain unchanged. No probe was omitted, duplicated, or converted to insecure verification.
+The regression suite covers canonical success, the exact trusted API URL and SSL context, token stripping and length boundaries, untrusted initial destinations, all redirect statuses to HTTPS and HTTP, and sanitized 401/403/500 behavior. Transcript acceptance, normalized WER, final-word comparison, authorization hashes, evidence privacy gates, and quality thresholds are unchanged.
 
-The regression contract checks the exact count of both options, the normal and `--fail` command shapes, and the absence of both `-k` and `--insecure`. The pre-existing durable TLS leaf-file gate, token rotation and ACL restriction, launcher interpolation, and canonical task ownership remain intact.
+All reviewed files meet quality standards. No issues found.
 
 ## Verification Performed
 
-- OMEN deployment contract: `8 passed`.
-- `bash -n scripts/deploy-omen.sh`: passed.
-- Focused `git diff --check`: passed.
-- Probe inventory: exactly `7` `curl.exe` commands, `7` `--ssl-no-revoke` options, and `7` pinned `--cacert $aiCaBundle` options.
-- Per-line safety audit: every curl command carries both options before its HTTPS URL; none contains `-k` or `--insecure`.
-- Readiness/auth audit: the one credential-readiness request retains `--fail`; authenticated readiness validation is unchanged.
-- Evidence audit: live-call readiness, deployed commit, Qwen runtime availability, memory, final engine, and selected prompt assertions are unchanged.
-- Compatibility audit: `--ssl-no-revoke` is the curl Schannel revocation-control option and predates Schannel support for file-based `--cacert`; option ordering is valid.
-- No source files, tests, commits, pushes, launchers, scheduled tasks, deployment state, or remote state were modified by this review.
+- Focused STT trust/authentication suite: `21 passed`.
+- Full Phase 09 evidence suite: `89 passed`.
+- Real-network redirect matrix: 15/15 rejected across 301/302/303/307/308 and same-origin HTTPS, foreign HTTPS, and foreign HTTP; 0 replay requests.
+- HTTPS origin normalization matrix: 4 legitimate normalized matches accepted; 9 malformed, insecure, credential-bearing, cross-origin, or port-mismatched cases rejected.
+- Evidence verifier contracts-only mode: `PASS`.
+- Evidence verifier adversarial self-test: 33 named mutations rejected; final `PASS`.
+- `git diff --check a3129da..f64b2ee`: passed.
+- Diff audit found no changes to transcript targets, transcript normalization, WER, final-word gates, authorization hashes, or result-quality decisions.
+- No source files, tests, commits, pushes, deployments, evidence results, or remote state were modified by this review.
 
 ---
 
-_Reviewed: 2026-08-02T13:04:30Z_
+_Reviewed: 2026-08-02T13:38:56Z_
 _Reviewer: the agent (gsd-code-reviewer)_
 _Depth: deep_
