@@ -2188,7 +2188,8 @@
   async function recoverMissedCallEvents(
     debugCallId: string,
     reason: string,
-    generation: ReconnectAudioBackfillGeneration | null = null
+    generation: ReconnectAudioBackfillGeneration | null = null,
+    throwOnFailure = false
   ) {
     if (generation && !ownsReconnectAudioBackfill(generation)) {
       return;
@@ -2214,6 +2215,9 @@
         name: (error as Error)?.name ?? 'unknown',
         message: (error as Error)?.message ?? ''
       });
+      if (throwOnFailure) {
+        throw error;
+      }
     }
   }
 
@@ -3941,25 +3945,43 @@
     ending = true;
     clearEventTimers();
     cancelActiveTurnStream();
+    let hangupFailure: unknown = null;
+    const rememberHangupFailure = (error: unknown) => {
+      hangupFailure ??= error;
+    };
 
     try {
       if (callId && sessionId) {
-        await drainReconnectAudioBackfillBeforeHangup();
-        await recoverMissedCallEvents(callId, 'hangup');
-        await endCall(callId, sessionId);
+        try {
+          await drainReconnectAudioBackfillBeforeHangup();
+        } catch (error) {
+          rememberHangupFailure(error);
+        }
+        try {
+          await recoverMissedCallEvents(callId, 'hangup', null, true);
+        } catch (error) {
+          rememberHangupFailure(error);
+        }
+        try {
+          await endCall(callId, sessionId);
+        } catch (error) {
+          rememberHangupFailure(error);
+        }
       }
-      await stopBrowserMedia();
-      callState = 'ended';
-    } catch {
-      callState = 'failed';
-      blockingPanel = {
-        body: 'The call ended because the connection dropped. Your transcript so far was saved.',
-        action: 'Return to Thread',
-        tone: 'danger'
-      };
     } finally {
-      ending = false;
+      try {
+        await stopBrowserMedia();
+      } catch (error) {
+        rememberHangupFailure(error);
+      }
     }
+
+    if (hangupFailure) {
+      showBlockingPanel(hangupFailure);
+    } else {
+      callState = 'ended';
+    }
+    ending = false;
   }
 
   async function drainReconnectAudioBackfillBeforeHangup() {

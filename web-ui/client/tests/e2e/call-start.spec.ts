@@ -61,6 +61,7 @@ type ReconnectRouteOptions = {
   reconcileCommittedAsConflict?: boolean;
   selectionChangingPeerCommitDelayMs?: number;
   selectionChangingPeerCommitGate?: Promise<void>;
+  failRecover?: boolean;
   failEnd?: boolean;
 };
 
@@ -603,36 +604,8 @@ test('hard peer-switch deadline tears down every local browser media owner', asy
   expect(debugEventCount(counters, 'pc.media_reconnect.peer_decision_deadline')).toBe(1);
   expect(counters.endCount).toBe(1);
   expect(terminal.peers).toHaveLength(2);
-  expect(terminal.peers.every((peer) => peer.closed && peer.closeCount === 1)).toBe(true);
   expect(terminal.channels).toHaveLength(2);
-  expect(
-    terminal.channels.every(
-      (channel) => channel.readyState === 'closed' && channel.closeCount === 1
-    )
-  ).toBe(true);
-  expect(terminal.localAudioTracks).toHaveLength(1);
-  expect(terminal.localAudioTracks[0]).toEqual({
-    enabled: false,
-    readyState: 'ended'
-  });
-  expect(terminal.applicationAudioContexts).toHaveLength(2);
-  expect(
-    terminal.applicationAudioContexts.every(
-      (context) =>
-        context.state === 'closed' &&
-        context.closeCount === 1 &&
-        context.sourceDisconnectCount === 1
-    )
-  ).toBe(true);
-  expect(
-    terminal.remoteStreams.every((stream) =>
-      stream.audioTrackStates.every(
-        (track) => !track.enabled && track.readyState === 'ended'
-      )
-    )
-  ).toBe(true);
-  expect(terminal.audioPlayback.activeStreamId).toBeNull();
-  expect(terminal.audioPlayback.pausedStreamIds).toContain(initialStreamId);
+  expectBrowserMediaStopped(terminal, initialStreamId);
   expect(debugEventCount(counters, 'remote_audio.candidate.discarded')).toBe(1);
   expect(debugEventCount(counters, 'remote_audio.candidate.promoted')).toBe(0);
   expect(
@@ -642,6 +615,57 @@ test('hard peer-switch deadline tears down every local browser media owner', asy
   ).toBe(false);
   await expect(page.getByRole('alert').getByRole('button', { name: 'Return to Thread' }))
     .toBeVisible();
+  await expect(page.getByTestId('voice-visualizer')).toHaveCount(0);
+  assertNoBrowserErrors();
+});
+
+test('failed End Call recovery and acknowledgement tear down browser media before the panel', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+    allowConsoleErrors: [/Failed to load resource: the server responded with a status of 502/]
+  });
+  await installMockCallMedia(page);
+  const heldSelectionSwitch = new Promise<void>(() => undefined);
+  const counters = await installReconnectCallRoutes(page, {
+    selectionChangingPeerCommitGate: heldSelectionSwitch,
+    failRecover: true,
+    failEnd: true
+  });
+
+  await startReconnectCall(page, counters);
+  const initial = await getMockCallMediaSnapshot(page);
+  const initialStreamId = initial.peers[0].remoteStreamId;
+  expect(initialStreamId).not.toBeNull();
+  await expect.poll(
+    async () => (await getMockCallMediaSnapshot(page)).applicationAudioContexts.length
+  ).toBe(2);
+
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await expect.poll(() => counters.peerPromotionInProgressCount).toBeGreaterThan(0);
+  await expect.poll(async () => (await getMockCallMediaSnapshot(page)).peers.length).toBe(2);
+  await page.getByRole('button', { name: 'End Call' }).click();
+
+  const failurePanel = page.getByRole('alert');
+  await expect(failurePanel.getByText(TERMINAL_CONNECTION_DROPPED_COPY)).toBeVisible();
+  await expect(failurePanel.getByRole('button', { name: 'Return to Thread' })).toBeVisible();
+  expect(counters.recoverCount).toBeGreaterThanOrEqual(1);
+  expect(counters.endCount).toBe(1);
+  expect(counters.requestOrder.lastIndexOf('recover')).toBeLessThan(
+    counters.requestOrder.indexOf('end')
+  );
+
+  const terminal = await getMockCallMediaSnapshot(page);
+  expect(terminal.peers).toHaveLength(2);
+  expect(terminal.channels).toHaveLength(2);
+  expectBrowserMediaStopped(terminal, initialStreamId);
+  expect(debugEventCount(counters, 'remote_audio.candidate.discarded')).toBe(1);
+  expect(debugEventCount(counters, 'remote_audio.candidate.promoted')).toBe(0);
+  expect(
+    counters.debugEvents.some(
+      (entry) => entry.event === 'mic.keep_live' && entry.detail.nextState === 'failed'
+    )
+  ).toBe(false);
   await expect(page.getByTestId('voice-visualizer')).toHaveCount(0);
   assertNoBrowserErrors();
 });
@@ -1791,6 +1815,41 @@ async function getMockCallMediaSnapshot(page: Page): Promise<MockCallMediaSnapsh
   });
 }
 
+function expectBrowserMediaStopped(
+  snapshot: MockCallMediaSnapshot,
+  initialStreamId: string | null
+) {
+  expect(snapshot.peers.every((peer) => peer.closed && peer.closeCount === 1)).toBe(true);
+  expect(
+    snapshot.channels.every(
+      (channel) => channel.readyState === 'closed' && channel.closeCount === 1
+    )
+  ).toBe(true);
+  expect(snapshot.localAudioTracks).toHaveLength(1);
+  expect(snapshot.localAudioTracks[0]).toEqual({
+    enabled: false,
+    readyState: 'ended'
+  });
+  expect(snapshot.applicationAudioContexts).toHaveLength(2);
+  expect(
+    snapshot.applicationAudioContexts.every(
+      (context) =>
+        context.state === 'closed' &&
+        context.closeCount === 1 &&
+        context.sourceDisconnectCount === 1
+    )
+  ).toBe(true);
+  expect(
+    snapshot.remoteStreams.every((stream) =>
+      stream.audioTrackStates.every(
+        (track) => !track.enabled && track.readyState === 'ended'
+      )
+    )
+  ).toBe(true);
+  expect(snapshot.audioPlayback.activeStreamId).toBeNull();
+  expect(snapshot.audioPlayback.pausedStreamIds).toContain(initialStreamId);
+}
+
 function debugEventCount(counters: ReconnectRouteCounters, event: string) {
   return counters.debugEvents.filter((entry) => entry.event === event).length;
 }
@@ -2201,6 +2260,15 @@ async function installReconnectCallRoutes(
   await page.route('**/api/calls/*/events/recover', async (route) => {
     counters.recoverCount += 1;
     counters.requestOrder.push('recover');
+    if (options.failRecover) {
+      await fulfillJson(route, {
+        detail: {
+          code: 'call_events_recover_failed',
+          message: 'Call event recovery failed'
+        }
+      }, 502);
+      return;
+    }
     const events = counters.recoverCount === 1 ? options.recoverEvents ?? [] : [];
     counters.recoveredEvents.push(...events);
     await fulfillJson(route, {
