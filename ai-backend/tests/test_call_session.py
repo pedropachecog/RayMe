@@ -1257,17 +1257,74 @@ def test_call_vad_reconnect_grace_preserves_turn_until_speech_resumes(
     session.mark_media_reconnect_pending()
     session.start_media_reconnect_grace_if_pending()
 
-    for _ in range(40):  # 800 ms: past the 700 ms silence threshold.
+    # Replacement-track frames are held until the final backfill batch arrives.
+    # Release 600 ms first so final backfill itself cannot finalize the turn.
+    for _ in range(30):
         result = _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(speech_pcm)))
         assert not (isinstance(result, dict) and result.get("type") == "user_final")
+
+    assert vad.calls == 1
+    assert len(session._reconnect_live_frame_hold_frames) == 30
+    released = _run(
+        session.backfill_reconnect_audio(
+            pcm=b"",
+            sample_rate=16000,
+            channels=1,
+            backfill_id="gap-final-empty-release",
+            reason="connection_failed",
+            attempt=1,
+            final=True,
+        )
+    )
+
+    assert released["status"] == "empty"
+    assert "event" not in released
+    assert vad.calls == 7
+    assert session._silence_ms == 600
+    assert session._reconnect_live_frame_hold_frames == []
+
+    # Calls 8 and 9 carry the false-negative interval beyond the 700-ms end
+    # threshold, but active reconnect grace must keep the turn listening.
+    for _ in range(10):
+        result = _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(speech_pcm)))
+        assert not (isinstance(result, dict) and result.get("type") == "user_final")
+
+    assert vad.calls == 9
+    assert session._silence_ms == 800
+    assert session._in_media_reconnect_grace() is True
+    assert stt.calls == []
+
+    # Four frames remain below the next 100-ms analysis boundary. The fifth
+    # reaches call 10, where speech resumes and clears accumulated silence.
+    for _ in range(4):
+        resumed = _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(speech_pcm)))
+        assert resumed is None
+    assert vad.calls == 9
+    assert session._silence_ms == 800
 
     resumed = _run(session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(speech_pcm)))
 
     assert resumed is None
+    assert vad.calls == 10
     assert stt.calls == []
     assert session.state == "listening"
     assert session._speech_seen is True
     assert session._silence_ms == 0
+
+    # Once grace expires, a fresh 700-ms false-negative interval can finalize.
+    # STT must receive every pre-reconnect, held, grace, resumed, and final frame.
+    now = 6.0
+    vad.false_silence_calls.update(range(11, 18))
+    final_event = None
+    for _ in range(35):
+        final_event = _run(
+            session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(speech_pcm))
+        )
+
+    assert final_event is not None
+    assert final_event["type"] == "user_final"
+    assert vad.calls == 17
+    assert stt.calls == [[speech_pcm] * 81]
 
 
 def test_reconnect_audio_backfill_is_inserted_before_replacement_track_frames() -> None:
