@@ -79,6 +79,11 @@ type MockCallMediaSnapshot = {
     sentMessages: string[];
   }>;
   remoteStreams: Array<{ id: string; audioTracks: number }>;
+  audioPlayback: {
+    activeStreamId: string | null;
+    playedStreamIds: string[];
+    pausedStreamIds: string[];
+  };
 };
 
 test('starts a call from the thread header Start call control', async ({ page }) => {
@@ -320,6 +325,83 @@ test('re-offers with a new peer instead of ending when browser peer connection f
   expect(micReconnectDiagPhases).toContain('scheduled');
   expect(micReconnectDiagPhases).toContain('start');
   expect(micReconnectDiagPhases).toContain('ok');
+  assertNoBrowserErrors();
+});
+
+test('keeps old audio live while a slow replacement stream stages, then promotes atomically', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page, { deferReplacementConnection: true });
+  const counters = await installReconnectCallRoutes(page);
+
+  await startReconnectCall(page, counters);
+  const initial = await getMockCallMediaSnapshot(page);
+  const initialStreamId = initial.peers[0].remoteStreamId;
+  expect(initialStreamId).not.toBeNull();
+  expect(initial.audioPlayback.activeStreamId).toBe(initialStreamId);
+
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await expect.poll(() => counters.offerCount).toBe(2);
+  await expect.poll(() => debugEventCount(counters, 'remote_audio.candidate.staged')).toBe(1);
+
+  const staged = await getMockCallMediaSnapshot(page);
+  const candidateStreamId = staged.peers[1].remoteStreamId;
+  expect(candidateStreamId).not.toBeNull();
+  expect(staged.peers[0].closed).toBe(false);
+  expect(staged.peers[1]).toMatchObject({
+    connectionState: 'new',
+    iceConnectionState: 'new',
+    closed: false
+  });
+  expect(staged.audioPlayback.activeStreamId).toBe(initialStreamId);
+  expect(staged.audioPlayback.pausedStreamIds).not.toContain(initialStreamId);
+  expect(debugEventCount(counters, 'remote_audio.attach')).toBe(1);
+
+  await completeCurrentMockPeerConnection(page);
+  await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.ok')).toBe(1);
+
+  const promoted = await getMockCallMediaSnapshot(page);
+  expect(promoted.peers[0].closed).toBe(true);
+  expect(promoted.peers[1]).toMatchObject({
+    connectionState: 'connected',
+    iceConnectionState: 'connected',
+    closed: false
+  });
+  expect(promoted.audioPlayback.activeStreamId).toBe(candidateStreamId);
+  expect(promoted.audioPlayback.pausedStreamIds).toContain(initialStreamId);
+  expect(debugEventCount(counters, 'remote_audio.attach')).toBe(2);
+  expect(debugEventCount(counters, 'remote_audio.candidate.promoted')).toBe(1);
+  assertNoBrowserErrors();
+});
+
+test('discards a failed replacement candidate without touching old audible audio', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page, { failReplacementConnection: true });
+  const counters = await installReconnectCallRoutes(page);
+
+  await startReconnectCall(page, counters);
+  const initial = await getMockCallMediaSnapshot(page);
+  const initialStreamId = initial.peers[0].remoteStreamId;
+  expect(initialStreamId).not.toBeNull();
+  await page.clock.install();
+
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await page.clock.fastForward(0);
+  await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.failed')).toBe(1);
+  await expect.poll(() => debugEventCount(counters, 'remote_audio.candidate.discarded')).toBe(1);
+
+  const rolledBack = await getMockCallMediaSnapshot(page);
+  expect(counters.offerCount).toBe(2);
+  expect(rolledBack.peers).toHaveLength(2);
+  expect(rolledBack.peers[0].closed).toBe(false);
+  expect(rolledBack.peers[1].closed).toBe(true);
+  expect(rolledBack.audioPlayback.activeStreamId).toBe(initialStreamId);
+  expect(rolledBack.audioPlayback.pausedStreamIds).not.toContain(initialStreamId);
+  expect(debugEventCount(counters, 'remote_audio.attach')).toBe(1);
+  expect(debugEventCount(counters, 'remote_audio.candidate.promoted')).toBe(0);
   assertNoBrowserErrors();
 });
 
@@ -1197,6 +1279,21 @@ async function setCurrentMockPeerState(
   await setMockPeerState(page, -1, connectionState, iceConnectionState);
 }
 
+async function completeCurrentMockPeerConnection(page: Page) {
+  await page.evaluate(() => {
+    const target = window as Window & {
+      __raymeMockPeerConnections?: Array<{
+        completeMockConnection: () => void;
+      }>;
+    };
+    const peer = target.__raymeMockPeerConnections?.at(-1);
+    if (!peer) {
+      throw new Error('No mock peer connection is available');
+    }
+    peer.completeMockConnection();
+  });
+}
+
 async function setMockPeerState(
   page: Page,
   peerIndex: number,
@@ -1305,6 +1402,11 @@ async function getMockCallMediaSnapshot(page: Page): Promise<MockCallMediaSnapsh
         sentMessages: string[];
       }>;
       __raymeMockRemoteAudioStreams?: MediaStream[];
+      __raymeMockAudioPlayback?: {
+        activeStreamId: string | null;
+        playedStreamIds: string[];
+        pausedStreamIds: string[];
+      };
     };
 
     return {
@@ -1330,7 +1432,12 @@ async function getMockCallMediaSnapshot(page: Page): Promise<MockCallMediaSnapsh
       remoteStreams: (target.__raymeMockRemoteAudioStreams ?? []).map((stream) => ({
         id: stream.id,
         audioTracks: stream.getAudioTracks().length
-      }))
+      })),
+      audioPlayback: {
+        activeStreamId: target.__raymeMockAudioPlayback?.activeStreamId ?? null,
+        playedStreamIds: [...(target.__raymeMockAudioPlayback?.playedStreamIds ?? [])],
+        pausedStreamIds: [...(target.__raymeMockAudioPlayback?.pausedStreamIds ?? [])]
+      }
     };
   });
 }

@@ -109,6 +109,10 @@
     readonly generationId: number;
     readonly connection: RTCPeerConnection;
     eventsChannel: RTCDataChannel;
+    candidateRemoteStream: MediaStream | null;
+    readonly candidateRemoteStreamReady: Promise<MediaStream>;
+    readonly resolveCandidateRemoteStream: (stream: MediaStream) => void;
+    remoteAudioPromoted: boolean;
   }
 
   interface MuteRequestOwner {
@@ -364,10 +368,18 @@
 
     const connection = new RTCPeerConnection();
     const candidateEventsChannel = connection.createDataChannel('rayme-events');
+    let resolveCandidateRemoteStream = (_stream: MediaStream) => undefined;
+    const candidateRemoteStreamReady = new Promise<MediaStream>((resolve) => {
+      resolveCandidateRemoteStream = resolve;
+    });
     const connectionOwner: BrowserMediaConnectionOwner = {
       generationId: ++browserMediaConnectionGeneration,
       connection,
-      eventsChannel: candidateEventsChannel
+      eventsChannel: candidateEventsChannel,
+      candidateRemoteStream: null,
+      candidateRemoteStreamReady,
+      resolveCandidateRemoteStream,
+      remoteAudioPromoted: false
     };
     peerConnection = connection;
     activeBrowserMediaConnection = connectionOwner;
@@ -417,6 +429,18 @@
         return;
       }
       const stream = event.streams[0] ?? new MediaStream([event.track]);
+      if (preserveExisting && !connectionOwner.remoteAudioPromoted) {
+        if (!connectionOwner.candidateRemoteStream) {
+          connectionOwner.candidateRemoteStream = stream;
+          connectionOwner.resolveCandidateRemoteStream(stream);
+        }
+        emitDebugEvent(started.call_id, 'remote_audio.candidate.staged', {
+          stream_id: stream.id,
+          connectionGeneration: connectionOwner.generationId
+        });
+        return;
+      }
+      connectionOwner.remoteAudioPromoted = true;
       attachRemoteAudio(stream, started.call_id);
     };
     for (const track of localMediaStream.getAudioTracks()) {
@@ -464,6 +488,14 @@
       }
       if (preserveExisting) {
         await waitForBrowserMediaConnected(connection, started.call_id);
+        const candidateRemoteStream =
+          connectionOwner.candidateRemoteStream ??
+          await waitForBrowserMediaCandidateStream(connectionOwner, started.call_id);
+        promoteBrowserMediaCandidate(
+          connectionOwner,
+          candidateRemoteStream,
+          started.call_id
+        );
       }
       if (preserveExisting && previousConnection && previousConnection !== connection) {
         previousConnection.close();
@@ -471,6 +503,7 @@
       return response;
     } catch (error) {
       if (preserveExisting) {
+        discardBrowserMediaCandidate(connectionOwner, started.call_id, error);
         if (peerConnection === connection) {
           peerConnection = previousConnection;
         }
@@ -2180,6 +2213,95 @@
       connection.addEventListener('connectionstatechange', handleStateChange);
       connection.addEventListener('iceconnectionstatechange', handleStateChange);
       handleStateChange();
+    });
+  }
+
+  function waitForBrowserMediaCandidateStream(
+    owner: BrowserMediaConnectionOwner,
+    debugCallId: string,
+    timeoutMs = 7000
+  ): Promise<MediaStream> {
+    if (owner.candidateRemoteStream) {
+      return Promise.resolve(owner.candidateRemoteStream);
+    }
+
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const cleanup = () => {
+        window.clearTimeout(timeout);
+        owner.connection.removeEventListener('connectionstatechange', handleStateChange);
+        owner.connection.removeEventListener('iceconnectionstatechange', handleStateChange);
+      };
+      const rejectOnce = (error: Error) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        reject(error);
+      };
+      const handleStateChange = () => {
+        if (
+          owner.connection.connectionState === 'failed' ||
+          owner.connection.connectionState === 'closed' ||
+          owner.connection.iceConnectionState === 'failed' ||
+          owner.connection.iceConnectionState === 'closed'
+        ) {
+          rejectOnce(new Error('Replacement media stream failed before promotion'));
+        }
+      };
+      const timeout = window.setTimeout(() => {
+        emitDebugEvent(debugCallId, 'remote_audio.candidate.timeout', {
+          connectionGeneration: owner.generationId,
+          connectionState: owner.connection.connectionState,
+          iceConnectionState: owner.connection.iceConnectionState,
+          timeoutMs
+        });
+        rejectOnce(new Error('Replacement media stream timed out before promotion'));
+      }, timeoutMs);
+
+      owner.connection.addEventListener('connectionstatechange', handleStateChange);
+      owner.connection.addEventListener('iceconnectionstatechange', handleStateChange);
+      owner.candidateRemoteStreamReady.then((stream) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        resolve(stream);
+      });
+      handleStateChange();
+    });
+  }
+
+  function promoteBrowserMediaCandidate(
+    owner: BrowserMediaConnectionOwner,
+    stream: MediaStream,
+    debugCallId: string
+  ) {
+    if (!ownsBrowserMediaConnection(owner)) {
+      throw new Error('Replacement media ownership changed before audio promotion');
+    }
+    attachRemoteAudio(stream, debugCallId);
+    owner.remoteAudioPromoted = true;
+    owner.candidateRemoteStream = null;
+    emitDebugEvent(debugCallId, 'remote_audio.candidate.promoted', {
+      stream_id: stream.id,
+      connectionGeneration: owner.generationId
+    });
+  }
+
+  function discardBrowserMediaCandidate(
+    owner: BrowserMediaConnectionOwner,
+    debugCallId: string,
+    error: unknown
+  ) {
+    const stream = owner.candidateRemoteStream;
+    owner.candidateRemoteStream = null;
+    if (!stream || owner.remoteAudioPromoted) {
+      return;
+    }
+    emitDebugEvent(debugCallId, 'remote_audio.candidate.discarded', {
+      stream_id: stream.id,
+      connectionGeneration: owner.generationId,
+      name: (error as DOMException)?.name ?? 'unknown',
+      message: (error as Error)?.message ?? ''
     });
   }
 

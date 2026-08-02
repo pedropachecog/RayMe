@@ -82,13 +82,26 @@ export async function installCallDebugEventRoute(
 
 export async function installMockCallMedia(
   page: Page,
-  options: { controllablePcm?: boolean } = {}
+  options: {
+    controllablePcm?: boolean;
+    deferReplacementConnection?: boolean;
+    failReplacementConnection?: boolean;
+  } = {}
 ) {
-  await page.addInitScript(({ controllablePcm }) => {
+  await page.addInitScript(({
+    controllablePcm,
+    deferReplacementConnection,
+    failReplacementConnection
+  }) => {
     type MockPeerWindow = Window & {
       __raymeMockPeerConnections?: MockRTCPeerConnection[];
       __raymeMockDataChannels?: MockRTCDataChannel[];
       __raymeMockRemoteAudioStreams?: MediaStream[];
+      __raymeMockAudioPlayback?: {
+        activeStreamId: string | null;
+        playedStreamIds: string[];
+        pausedStreamIds: string[];
+      };
       __raymeMockLocalMediaStream?: MediaStream;
       __raymeMockPcmProcessors?: Array<{
         onaudioprocess: ((event: AudioProcessingEvent) => void) | null;
@@ -252,6 +265,23 @@ export async function installMockCallMedia(
       async setRemoteDescription(description: RTCSessionDescriptionInit) {
         this.remoteDescription = description;
         this.dispatchRemoteTrack();
+        if (this.id > 1 && failReplacementConnection) {
+          this.connectionState = 'failed';
+          this.iceConnectionState = 'failed';
+          this.dispatchMockEvent('connectionstatechange');
+          this.dispatchMockEvent('iceconnectionstatechange');
+          return;
+        }
+        if (this.id > 1 && deferReplacementConnection) {
+          return;
+        }
+        this.completeMockConnection();
+      }
+
+      completeMockConnection() {
+        if (this.closed) {
+          return;
+        }
         this.connectionState = 'connected';
         this.iceConnectionState = 'connected';
         this.dispatchMockEvent('connectionstatechange');
@@ -348,13 +378,32 @@ export async function installMockCallMedia(
       return new MediaStream();
     }
 
+    const playback: NonNullable<MockPeerWindow['__raymeMockAudioPlayback']> = {
+      activeStreamId: null,
+      playedStreamIds: [],
+      pausedStreamIds: []
+    };
+    (window as MockPeerWindow).__raymeMockAudioPlayback = playback;
+
     const originalPlay = HTMLMediaElement.prototype.play;
+    const originalPause = HTMLMediaElement.prototype.pause;
     HTMLMediaElement.prototype.play = function play() {
       if (this.srcObject instanceof MediaStream) {
+        playback.activeStreamId = this.srcObject.id;
+        playback.playedStreamIds.push(this.srcObject.id);
         return Promise.resolve();
       }
 
       return originalPlay.call(this);
+    };
+    HTMLMediaElement.prototype.pause = function pause() {
+      if (this.srcObject instanceof MediaStream) {
+        playback.pausedStreamIds.push(this.srcObject.id);
+        if (playback.activeStreamId === this.srcObject.id) {
+          playback.activeStreamId = null;
+        }
+      }
+      return originalPause.call(this);
     };
 
     Object.defineProperty(window, 'RTCPeerConnection', {
