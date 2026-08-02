@@ -679,8 +679,10 @@ def test_webrtc_slow_prepare_releases_lease_when_session_termination_wins(
     assert recovery_status == 200
 
 
-def test_webrtc_slow_qwen_prepare_releases_stale_lease_after_engine_switch(
+@pytest.mark.parametrize("release_failures", [0, 1])
+def test_webrtc_slow_qwen_prepare_retries_stale_lease_after_engine_switch(
     stub_webrtc: None,
+    release_failures: int,
 ) -> None:
     from app.call.session import PeerOfferConfiguration
 
@@ -690,6 +692,7 @@ def test_webrtc_slow_qwen_prepare_releases_stale_lease_after_engine_switch(
             self.prepare_started = asyncio.Event()
             self.release_prepare = asyncio.Event()
             self.owners: set[str] = set()
+            self.release_attempts = 0
 
         async def prepare_tts_engine(
             self,
@@ -709,7 +712,10 @@ def test_webrtc_slow_qwen_prepare_releases_stale_lease_after_engine_switch(
             }
 
         async def release_tts_prompt_lease(self, owner: str) -> bool:
+            self.release_attempts += 1
             self.released_prompt_leases.append(owner)
+            if self.release_attempts <= release_failures:
+                raise RuntimeError("simulated transient stale release failure")
             self.owners.discard(owner)
             return True
 
@@ -729,7 +735,7 @@ def test_webrtc_slow_qwen_prepare_releases_stale_lease_after_engine_switch(
             base_url="http://testserver",
             headers=SERVICE_AUTH_HEADERS,
         ) as client:
-            session_id = "call-slow-prepare-engine-switch"
+            session_id = f"call-slow-prepare-engine-switch-{release_failures}"
             offered = await client.post(
                 "/webrtc/offer",
                 json={
@@ -787,7 +793,9 @@ def test_webrtc_slow_qwen_prepare_releases_stale_lease_after_engine_switch(
     assert prepare_status == 409
     assert payload["detail"]["code"] == "call_tts_prepare_mismatch"
     assert owners == set()
-    assert released == ["call-slow-prepare-engine-switch"]
+    assert released == [
+        f"call-slow-prepare-engine-switch-{release_failures}"
+    ] * (release_failures + 1)
 
 
 def test_webrtc_prepare_rejects_terminal_session_before_model_acquires_lease(

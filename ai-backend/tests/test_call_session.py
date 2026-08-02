@@ -2898,6 +2898,217 @@ def test_switch_preserves_slow_stt_and_thinking_frame_drop_states() -> None:
     _run(scenario())
 
 
+def test_stale_prompt_lease_cleanup_retries_transient_release(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        session_module,
+        "CALL_TERMINAL_CLEANUP_RETRY_BASE_SECONDS",
+        0.0,
+    )
+
+    async def scenario() -> None:
+        session, _ = _new_session()
+        session.voice_id = "voice-old"
+        session.engine_id = "qwen3_1_7b"
+        reservation = await session.reserve_accepted_speech_configuration(
+            voice_id="voice-old",
+            engine_id="qwen3_1_7b",
+        )
+        async with session._lifecycle_lock:
+            session._peer_lifecycle.epoch += 1
+            session.voice_id = "voice-new"
+            session.engine_id = "f5"
+        owners = {session.session_id}
+        attempts = 0
+
+        async def release(owner: str) -> None:
+            nonlocal attempts
+            attempts += 1
+            if attempts == 1:
+                raise RuntimeError("transient release failure")
+            owners.discard(owner)
+
+        with pytest.raises(SpeechSessionSelectionError):
+            await session.install_or_release_tts_prompt_lease(
+                release,
+                accepted_configuration=reservation,
+            )
+        cleanup = session._owned_prompt_lease_cleanups[-1]
+        assert attempts == 2
+        assert owners == set()
+        assert cleanup.released is True
+        assert cleanup.failure_state is None
+        assert session._owned_prompt_lease_cleanup_failures == []
+
+    _run(scenario())
+
+
+def test_stale_prompt_lease_permanent_failure_remains_terminal_owned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(session_module, "CALL_PROMPT_LEASE_CLEANUP_RETRY_LIMIT", 3)
+    monkeypatch.setattr(session_module, "CALL_TERMINAL_CLEANUP_RETRY_LIMIT", 2)
+    monkeypatch.setattr(
+        session_module,
+        "CALL_TERMINAL_CLEANUP_RETRY_BASE_SECONDS",
+        0.0,
+    )
+
+    async def scenario() -> None:
+        session, _ = _new_session()
+        session.voice_id = "voice-old"
+        session.engine_id = "qwen3_1_7b"
+        reservation = await session.reserve_accepted_speech_configuration(
+            voice_id="voice-old",
+            engine_id="qwen3_1_7b",
+        )
+        async with session._lifecycle_lock:
+            session._peer_lifecycle.epoch += 1
+            session.voice_id = "voice-new"
+            session.engine_id = "f5"
+        attempts = 0
+
+        async def release(_owner: str) -> None:
+            nonlocal attempts
+            attempts += 1
+            raise RuntimeError("permanent release failure")
+
+        with pytest.raises(SpeechSessionSelectionError):
+            await session.install_or_release_tts_prompt_lease(
+                release,
+                accepted_configuration=reservation,
+            )
+        owned = session._owned_prompt_lease_cleanups[-1]
+        assert attempts == 3
+        assert owned.released is False
+        assert owned.failure_state == {
+            "status": "retry_exhausted",
+            "reason": "stale_prepare_selection",
+            "attempts": 3,
+            "error": "RuntimeError",
+        }
+
+        await session.end(reason="explicit_hangup")
+        terminal_task = session._terminal_cleanup_task
+        if terminal_task is not None:
+            await terminal_task
+        cleanup = session._terminal_cleanup
+        assert cleanup is not None
+        assert cleanup.owned_prompt_cleanups_pending == [owned]
+        assert session._terminal_cleanup_failure_state is not None
+        assert "owned_prompt_lease:1" in session._terminal_cleanup_failure_state[
+            "pending_steps"
+        ]
+
+    _run(scenario())
+
+
+def test_stale_prompt_lease_blocking_release_is_bounded_and_recorded(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(session_module, "CALL_PROMPT_LEASE_CLEANUP_RETRY_LIMIT", 2)
+    monkeypatch.setattr(
+        session_module,
+        "CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(
+        session_module,
+        "CALL_TERMINAL_CLEANUP_RETRY_BASE_SECONDS",
+        0.0,
+    )
+
+    async def scenario() -> None:
+        session, _ = _new_session()
+        session.voice_id = "voice-old"
+        session.engine_id = "qwen3_1_7b"
+        reservation = await session.reserve_accepted_speech_configuration(
+            voice_id="voice-old",
+            engine_id="qwen3_1_7b",
+        )
+        async with session._lifecycle_lock:
+            session._peer_lifecycle.epoch += 1
+            session.voice_id = "voice-new"
+            session.engine_id = "f5"
+        attempts = 0
+
+        async def release(_owner: str) -> None:
+            nonlocal attempts
+            attempts += 1
+            await asyncio.Event().wait()
+
+        with pytest.raises(SpeechSessionSelectionError):
+            await asyncio.wait_for(
+                session.install_or_release_tts_prompt_lease(
+                    release,
+                    accepted_configuration=reservation,
+                ),
+                timeout=0.2,
+            )
+        owned = session._owned_prompt_lease_cleanups[-1]
+        assert attempts == 2
+        assert owned.released is False
+        assert owned.failure_state is not None
+        assert owned.failure_state["error"] == "TimeoutError"
+
+    _run(scenario())
+
+
+def test_stale_prompt_lease_caller_cancellation_cannot_cancel_owned_release() -> None:
+    async def scenario() -> None:
+        session, _ = _new_session()
+        session.voice_id = "voice-old"
+        session.engine_id = "qwen3_1_7b"
+        reservation = await session.reserve_accepted_speech_configuration(
+            voice_id="voice-old",
+            engine_id="qwen3_1_7b",
+        )
+        async with session._lifecycle_lock:
+            session._peer_lifecycle.epoch += 1
+            session.voice_id = "voice-new"
+            session.engine_id = "f5"
+        release_started = asyncio.Event()
+        allow_release = asyncio.Event()
+        owners = {session.session_id}
+
+        async def release(owner: str) -> None:
+            release_started.set()
+            await allow_release.wait()
+            owners.discard(owner)
+
+        caller = asyncio.create_task(
+            session.install_or_release_tts_prompt_lease(
+                release,
+                accepted_configuration=reservation,
+            )
+        )
+        await release_started.wait()
+        caller.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await caller
+        owned = session._owned_prompt_lease_cleanups[-1]
+        assert owned.task is not None and not owned.task.done()
+        assert owners == {session.session_id}
+
+        terminal = asyncio.create_task(session.end(reason="explicit_hangup"))
+        while session.ended_at is None:
+            await asyncio.sleep(0)
+        cleanup = session._terminal_cleanup
+        assert cleanup is not None
+        assert cleanup.owned_prompt_cleanups_pending == [owned]
+
+        allow_release.set()
+        await owned.task
+        await terminal
+        assert owned.released is True
+        assert owners == set()
+        assert cleanup.owned_prompt_cleanups_pending == []
+        assert session._owned_prompt_lease_cleanup_failures == []
+
+    _run(scenario())
+
+
 @pytest.mark.parametrize(
     "failed_step",
     ["stop", "old_peer_close", "cancel", "prompt_lease"],

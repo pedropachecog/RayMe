@@ -80,6 +80,7 @@ CALL_TERMINAL_CLEANUP_STEP_TIMEOUT_SECONDS = 2.0
 CALL_TERMINAL_CLEANUP_RETRY_LIMIT = 32
 CALL_TERMINAL_CLEANUP_RETRY_BASE_SECONDS = 0.05
 CALL_TERMINAL_CLEANUP_RETRY_MAX_SECONDS = 1.0
+CALL_PROMPT_LEASE_CLEANUP_RETRY_LIMIT = 3
 
 
 def _voxcpm2_options_for_engine(engine_id: str, options: dict[str, Any]) -> dict[str, Any]:
@@ -224,6 +225,9 @@ class _TerminalCleanup:
     cancel_pending: bool
     owned_peer_ids: set[int] = field(default_factory=set)
     owned_track_ids: set[int] = field(default_factory=set)
+    owned_prompt_cleanups_pending: list[_OwnedPromptLeaseCleanup] = field(
+        default_factory=list
+    )
     extra_peers_pending: list[Any] = field(default_factory=list)
     extra_tracks_pending: list[Any] = field(default_factory=list)
     active_peer_pending: bool = True
@@ -245,6 +249,16 @@ class _TerminalOutcome:
     emission_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     transaction_task: asyncio.Task[dict[str, Any]] | None = None
     event_commit: _EventOutboxEntry | None = None
+
+
+@dataclass
+class _OwnedPromptLeaseCleanup:
+    releaser: PromptLeaseReleaser
+    reason: str
+    attempts: int = 0
+    released: bool = False
+    failure_state: dict[str, Any] | None = None
+    task: asyncio.Task[None] | None = None
 
 
 @dataclass
@@ -442,6 +456,9 @@ class CallSession:
         self._owned_peer_cleanup_failures: list[dict[str, Any]] = []
         self._owned_track_cleanup_tasks: set[asyncio.Task[None]] = set()
         self._owned_track_cleanup_failures: list[dict[str, Any]] = []
+        self._owned_prompt_lease_cleanups: list[_OwnedPromptLeaseCleanup] = []
+        self._owned_prompt_lease_cleanup_tasks: set[asyncio.Task[None]] = set()
+        self._owned_prompt_lease_cleanup_failures: list[dict[str, Any]] = []
 
     @property
     def _pending_peer_connections(self) -> list[Any]:
@@ -467,6 +484,7 @@ class CallSession:
         accepted_configuration: AcceptedSpeechConfiguration | None = None,
     ) -> bool:
         selection_error: SpeechSessionSelectionError | None = None
+        owned_cleanup: _OwnedPromptLeaseCleanup | None = None
         async with self._lifecycle_lock:
             if accepted_configuration is not None:
                 try:
@@ -482,10 +500,80 @@ class CallSession:
             ):
                 self._tts_prompt_lease_releaser = releaser
                 return True
-        await self._invoke_tts_prompt_lease_releaser(releaser)
+            owned_cleanup = self._start_owned_prompt_lease_cleanup_locked(
+                releaser,
+                reason=(
+                    "stale_prepare_selection"
+                    if selection_error is not None
+                    else "terminal_prepare_result"
+                ),
+            )
+        if owned_cleanup.task is None:
+            raise RuntimeError("owned prompt lease cleanup has no task")
+        await asyncio.shield(owned_cleanup.task)
         if selection_error is not None:
             raise selection_error
         return False
+
+    def _start_owned_prompt_lease_cleanup_locked(
+        self,
+        releaser: PromptLeaseReleaser,
+        *,
+        reason: str,
+    ) -> _OwnedPromptLeaseCleanup:
+        cleanup = _OwnedPromptLeaseCleanup(releaser=releaser, reason=reason)
+        task = asyncio.create_task(self._run_owned_prompt_lease_cleanup(cleanup))
+        cleanup.task = task
+        self._owned_prompt_lease_cleanups.append(cleanup)
+        self._owned_prompt_lease_cleanup_tasks.add(task)
+        task.add_done_callback(self._owned_prompt_lease_cleanup_tasks.discard)
+        return cleanup
+
+    async def _run_owned_prompt_lease_cleanup(
+        self,
+        cleanup: _OwnedPromptLeaseCleanup,
+    ) -> None:
+        for attempt in range(1, CALL_PROMPT_LEASE_CLEANUP_RETRY_LIMIT + 1):
+            cleanup.attempts = attempt
+            try:
+                await asyncio.wait_for(
+                    self._invoke_tts_prompt_lease_releaser(cleanup.releaser),
+                    timeout=CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "[rayme-call] prompt_lease.owned_cleanup_failed session=%s "
+                    "reason=%s attempt=%d exc=%s",
+                    self.session_id,
+                    cleanup.reason,
+                    attempt,
+                    exc.__class__.__name__,
+                )
+                if attempt < CALL_PROMPT_LEASE_CLEANUP_RETRY_LIMIT:
+                    delay = min(
+                        CALL_TERMINAL_CLEANUP_RETRY_BASE_SECONDS
+                        * (2 ** max(attempt - 1, 0)),
+                        CALL_TERMINAL_CLEANUP_RETRY_MAX_SECONDS,
+                    )
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                    continue
+                cleanup.failure_state = {
+                    "status": "retry_exhausted",
+                    "reason": cleanup.reason,
+                    "attempts": attempt,
+                    "error": exc.__class__.__name__,
+                }
+                self._owned_prompt_lease_cleanup_failures.append(
+                    dict(cleanup.failure_state)
+                )
+                return
+            else:
+                cleanup.released = True
+                cleanup.failure_state = None
+                return
 
     async def reserve_accepted_speech_configuration(
         self,
@@ -3887,6 +3975,11 @@ class CallSession:
             self._clear_pending_peer_locked(candidate.peer_connection)
         releaser = self._tts_prompt_lease_releaser
         self._tts_prompt_lease_releaser = None
+        owned_prompt_cleanups = [
+            cleanup
+            for cleanup in self._owned_prompt_lease_cleanups
+            if not cleanup.released
+        ]
         self.ended_at = datetime.now(timezone.utc)
         self.end_reason = reason
         self.state = target_state
@@ -3913,6 +4006,7 @@ class CallSession:
                 if peer is not None
             },
             owned_track_ids={id(track) for track in terminal_extra_tracks},
+            owned_prompt_cleanups_pending=owned_prompt_cleanups,
             cancel_pending=(
                 self._speech_admission is not None
                 or self.active_turn_task is not None
@@ -3982,6 +4076,7 @@ class CallSession:
                 cleanup.active_peer_pending,
                 cleanup.candidate_peer_pending,
                 cleanup.prompt_lease_pending,
+                bool(cleanup.owned_prompt_cleanups_pending),
                 bool(cleanup.extra_peers_pending),
                 bool(cleanup.extra_tracks_pending),
             )
@@ -4149,6 +4244,31 @@ class CallSession:
                         )
                     else:
                         cleanup.prompt_lease_pending = False
+                for owned_cleanup in list(
+                    cleanup.owned_prompt_cleanups_pending
+                ):
+                    task = owned_cleanup.task
+                    if owned_cleanup.released:
+                        cleanup.owned_prompt_cleanups_pending.remove(
+                            owned_cleanup
+                        )
+                        continue
+                    if task is None:
+                        continue
+                    if not task.done():
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.shield(task),
+                                timeout=CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS,
+                            )
+                        except asyncio.TimeoutError:
+                            cleanup.last_attempt_timed_out = True
+                        except asyncio.CancelledError:
+                            raise
+                    if owned_cleanup.released:
+                        cleanup.owned_prompt_cleanups_pending.remove(
+                            owned_cleanup
+                        )
         return dict(cleanup.cancel_context)
 
     async def _retry_terminal_cleanup_until_resolved(
@@ -4214,6 +4334,11 @@ class CallSession:
             pending.append("candidate_peer")
         if cleanup.prompt_lease_pending:
             pending.append("prompt_lease")
+        if cleanup.owned_prompt_cleanups_pending:
+            pending.append(
+                "owned_prompt_lease:"
+                f"{len(cleanup.owned_prompt_cleanups_pending)}"
+            )
         if cleanup.extra_peers_pending:
             pending.append(f"extra_peer:{len(cleanup.extra_peers_pending)}")
         if cleanup.extra_tracks_pending:
