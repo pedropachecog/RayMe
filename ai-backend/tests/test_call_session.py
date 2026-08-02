@@ -2762,6 +2762,81 @@ def test_explicit_terminal_adopts_private_switch_candidate_resources(
     _run(scenario())
 
 
+def test_switch_preserves_slow_stt_and_thinking_frame_drop_states() -> None:
+    entered_stt = threading.Event()
+    release_stt = threading.Event()
+
+    class SlowSttAdapter:
+        def transcribe_pcm(
+            self,
+            pcm_frames: list[bytes],
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            assert pcm_frames
+            entered_stt.set()
+            assert release_stt.wait(timeout=2.0)
+            return {
+                "status": "accepted",
+                "transcript": "the original turn remains ordered",
+                "language": "en",
+            }
+
+    async def scenario() -> None:
+        session, _ = _new_session(
+            vad_adapter=NeverEndingVadAdapter(),
+            stt_adapter=SlowSttAdapter(),
+            outbound_audio_track=ScriptedOutboundAudioTrack(),
+        )
+        retiring_peer = ScriptedPeerConnection()
+        candidate_peer = ScriptedPeerConnection()
+        session.peer_connection = retiring_peer
+        session.voice_id = "voice-old"
+        session.engine_id = "qwen3_1_7b"
+        pcm = np.full(320, 1800, dtype=np.int16).tobytes()
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pcm)
+        ) is None
+        transcription = asyncio.create_task(session.finalize_user_turn())
+        assert await asyncio.to_thread(entered_stt.wait, 1.0)
+        assert session.state == "understanding"
+
+        generation = await session.mark_peer_connection_pending(
+            candidate_peer,
+            outbound_audio_track=ScriptedOutboundAudioTrack(),
+            configuration=PeerOfferConfiguration(
+                thread_id="thread-new",
+                voice_id="voice-new",
+                engine_id="f5",
+                prompt_messages=(),
+                vad_adapter=NeverEndingVadAdapter(),
+                stt_adapter=SlowSttAdapter(),
+            ),
+            timeout_seconds=60.0,
+        )
+        accepted, _ = await session.accept_pending_peer_connection(
+            candidate_peer,
+            generation=generation,
+        )
+        assert accepted is True
+        assert session.state == "understanding"
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pcm)
+        ) is None
+        assert session._turn_frames == []
+
+        release_stt.set()
+        result = await transcription
+        assert result is not None and result["type"] == "user_final"
+        assert session.state == "thinking"
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pcm)
+        ) is None
+        assert session._turn_frames == []
+        assert session.dropped_audio_frames == 2
+
+    _run(scenario())
+
+
 @pytest.mark.parametrize(
     "failed_step",
     ["stop", "old_peer_close", "cancel", "prompt_lease"],

@@ -282,6 +282,7 @@ class _PeerSwitchTransaction:
     configuration: PeerOfferConfiguration | None
     cancellation: _CapturedTurnCancellation | None
     prompt_lease_releaser: PromptLeaseReleaser | None
+    state_before_switch: str
 
 
 @dataclass
@@ -1002,6 +1003,7 @@ class CallSession:
                     configuration=accepted_configuration,
                     cancellation=captured_cancellation,
                     prompt_lease_releaser=released_prompt_lease,
+                    state_before_switch=self.state,
                 )
                 switch_task = asyncio.create_task(
                     self._finish_peer_switch(switch)
@@ -1114,14 +1116,25 @@ class CallSession:
                 self.data_channel = switch.accepted_data_channel
                 if switch.configuration is not None:
                     self._apply_peer_configuration_locked(switch.configuration)
+                preserved_conversational_state = (
+                    self.state
+                    if switch.state_before_switch in {"understanding", "thinking"}
+                    and self.state in {"understanding", "thinking"}
+                    else None
+                )
                 self._complete_transport_reconnect_locked()
                 lifecycle.switch_owner = None
                 lifecycle.switch_task = None
                 lifecycle.switch_transaction = None
                 lifecycle.retiring_peer = None
                 lifecycle.retiring_generation = None
-                if self.state not in {"ended", "failed"}:
+                if (
+                    switch.cancellation is not None
+                    and self.state not in {"ended", "failed"}
+                ):
                     self.state = "listening"
+                elif preserved_conversational_state is not None:
+                    self.state = preserved_conversational_state
         if not owns_switch:
             terminal_cleanup = self._terminal_cleanup
             terminal_owns_abandoned_peer = (
