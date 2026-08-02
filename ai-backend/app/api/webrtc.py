@@ -19,6 +19,7 @@ from app.call.session import (
     AcceptedSpeechConfiguration,
     CallSession,
     CallSessionManager,
+    PeerSwitchInProgressError,
     PeerOfferConfiguration,
     SpeechSegmentConflictError,
     SpeechSessionSelectionError,
@@ -357,6 +358,19 @@ async def create_webrtc_offer_answer(
                     "message": "A newer reconnect offer replaced this offer",
                 },
             )
+    except PeerSwitchInProgressError as exc:
+        logger.info(
+            "[rayme-call] offer.rejected_switch_in_progress session=%s elapsed_ms=%d",
+            payload.session_id,
+            int((time.monotonic() - negotiate_started) * 1000),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "webrtc_offer_switch_in_progress",
+                "message": "A call engine switch is already in progress",
+            },
+        ) from exc
     except TerminalCallSessionError as exc:
         await _close_peer_connection(peer_connection)
         logger.info(

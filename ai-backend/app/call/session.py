@@ -416,6 +416,8 @@ class CallSession:
         self._terminal_outcome: _TerminalOutcome | None = None
         self._terminal_cleanup_task: asyncio.Task[None] | None = None
         self._terminal_cleanup_failure_state: dict[str, Any] | None = None
+        self._owned_peer_cleanup_tasks: set[asyncio.Task[None]] = set()
+        self._owned_peer_cleanup_failures: list[dict[str, Any]] = []
 
     @property
     def _pending_peer_connections(self) -> list[Any]:
@@ -664,13 +666,89 @@ class CallSession:
                     )
                 )
         if reject_switching:
-            await self._close_peer(peer_connection)
+            self._start_owned_peer_cleanup(
+                peer_connection,
+                reason="overlapping_switch_rejected",
+            )
+            await asyncio.sleep(0)
             raise PeerSwitchInProgressError(
                 "cannot register a peer candidate during an engine switch"
             )
         for superseded_peer in superseded_peers:
-            await self._close_peer(superseded_peer)
+            self._start_owned_peer_cleanup(
+                superseded_peer,
+                reason="candidate_superseded",
+            )
+        if superseded_peers:
+            await asyncio.sleep(0)
         return generation
+
+    def _start_owned_peer_cleanup(
+        self,
+        peer_connection: Any,
+        *,
+        reason: str,
+    ) -> asyncio.Task[None]:
+        task = asyncio.create_task(
+            self._close_peer_until_resolved(
+                peer_connection,
+                reason=reason,
+            )
+        )
+        self._owned_peer_cleanup_tasks.add(task)
+        task.add_done_callback(self._owned_peer_cleanup_tasks.discard)
+        return task
+
+    async def _close_peer_until_resolved(
+        self,
+        peer_connection: Any,
+        *,
+        reason: str,
+    ) -> None:
+        for attempt in range(1, CALL_TERMINAL_CLEANUP_RETRY_LIMIT + 1):
+            try:
+                await asyncio.wait_for(
+                    self._close_peer(peer_connection),
+                    timeout=CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS,
+                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.warning(
+                    "[rayme-call] peer.owned_cleanup_failed session=%s "
+                    "reason=%s attempt=%d exc=%s",
+                    self.session_id,
+                    reason,
+                    attempt,
+                    exc.__class__.__name__,
+                )
+                if attempt < CALL_TERMINAL_CLEANUP_RETRY_LIMIT:
+                    delay = min(
+                        CALL_TERMINAL_CLEANUP_RETRY_BASE_SECONDS
+                        * (2 ** max(attempt - 1, 0)),
+                        CALL_TERMINAL_CLEANUP_RETRY_MAX_SECONDS,
+                    )
+                    if delay > 0:
+                        await asyncio.sleep(delay)
+                    continue
+                failure = {
+                    "status": "retry_exhausted",
+                    "reason": reason,
+                    "attempts": attempt,
+                    "peer_id": id(peer_connection),
+                }
+                self._owned_peer_cleanup_failures.append(failure)
+                logger.error(
+                    "[rayme-call] peer.owned_cleanup_exhausted session=%s "
+                    "reason=%s attempts=%d peer_id=%d",
+                    self.session_id,
+                    reason,
+                    attempt,
+                    id(peer_connection),
+                )
+                return
+            else:
+                return
 
     def is_peer_connection_pending(
         self,
@@ -1069,7 +1147,11 @@ class CallSession:
             if not self.is_peer_connection_pending(peer_connection, generation):
                 return False
             self._clear_pending_peer_locked(peer_connection)
-        await self._close_peer(peer_connection)
+        self._start_owned_peer_cleanup(
+            peer_connection,
+            reason="candidate_rejected",
+        )
+        await asyncio.sleep(0)
         return True
 
     def _clear_pending_peer_locked(self, peer_connection: Any) -> None:

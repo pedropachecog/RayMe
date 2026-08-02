@@ -16,6 +16,7 @@ from fastapi.testclient import TestClient
 
 import app.api.webrtc as webrtc_module
 from app.api.auth import require_service_auth
+from app.call.session import PeerSwitchInProgressError
 from app.main import create_app
 from app.config import AiBackendSettings
 from app.models.tts_registry import TtsAudioChunk
@@ -1035,6 +1036,37 @@ def test_reconnect_offer_rejects_explicitly_ended_session_before_allocating_medi
     assert session.peer_connection is original_peer
     assert session.state == "ended"
     assert session.end_reason == "hangup"
+
+
+def test_overlapping_switch_offer_returns_stable_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+    stub_webrtc: None,
+) -> None:
+    client = _client()
+    session_id = "reconnect-overlapping-switch"
+    first = client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+    assert first.status_code == 200
+    session = client.app.state.call_session_manager.get_session(session_id)
+
+    async def reject_overlapping_offer(*args: Any, **kwargs: Any) -> int:
+        raise PeerSwitchInProgressError("switch already owned")
+
+    monkeypatch.setattr(
+        session,
+        "mark_peer_connection_pending",
+        reject_overlapping_offer,
+    )
+
+    response = client.post(
+        "/webrtc/offer",
+        json=_offer_payload(session_id=session_id),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == {
+        "code": "webrtc_offer_switch_in_progress",
+        "message": "A call engine switch is already in progress",
+    }
 
 
 def test_concurrent_hangup_wins_before_reconnect_candidate_registration(
