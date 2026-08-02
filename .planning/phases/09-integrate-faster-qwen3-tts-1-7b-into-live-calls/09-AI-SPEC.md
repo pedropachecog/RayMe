@@ -29,9 +29,9 @@ RayMe turns streaming assistant text into a cloned voice during a full-duplex si
 
 **User Population:** The RayMe builder/product owner who creates and tests saved voices; the people whose recordings and vocal identity are used as references; and listeners participating in simulated live calls.
 
-**Stakes Level:** High. This is not a safety-critical or regulated-industry deployment, but failure is immediately audible in a live conversation and misuse of an identifiable person's voice can create privacy, consent, impersonation, and reputational harm.
+**Stakes Level:** High. This is not a safety-critical or regulated-industry deployment, but failure is immediately audible in a live conversation and mishandling an identifiable person's voice can create privacy, impersonation, and reputational harm.
 
-**Output Consequence:** Assistant text is spoken immediately into a full-duplex call in a recognizable cloned voice. Quality failures break comprehension and turn-taking in real time; identity or provenance failures can falsely represent the reference speaker.
+**Output Consequence:** Assistant text is spoken immediately into a full-duplex call in a recognizable cloned voice. Quality failures break comprehension and turn-taking in real time; identity instability or private-data leakage can falsely represent or expose the reference speaker.
 
 ### What Domain Experts Evaluate Against
 
@@ -75,15 +75,15 @@ RayMe turns streaming assistant text into a cloned voice during a full-duplex si
 
 **Source:** Qwen3-TTS is designed for streaming first-packet emission, but the product-level contract comes from RayMe's live-call invariants and accepted capacity-two completion/interruption probe: first consumption at 387 ms while production continued for 24.0 seconds, and cancellation stopped within 278 ms with no normal completion. ([Qwen3-TTS technical report](https://arxiv.org/abs/2601.15621), [RayMe live-call invariants](../../LIVE-CALL-INVARIANTS.md), [RayMe Spike 006](../../spikes/006-faster-qwen3-tts-live-stream-contract/README.md))
 
-#### Dimension: Reference consent, provenance, and private handling
+#### Dimension: Reference asset integrity, containment, and private handling
 
-**Good (domain expert would accept):** Every saved clone records who supplied/owns the reference, that person's permission for this use, the source and matching transcript, and the intended scope. Reference audio, transcript, prompt tensors, and generated samples stay access-controlled on the self-hosted system, have a deliberate retention/deletion path, are not repurposed for training or sharing, and are never used to mislead a listener about who is speaking.
+**Good (domain expert would accept):** Uploading a voice sample is assumed authorized. Every saved clone uses a RayMe-owned contained sample with valid bytes, matching stored byte/hash and transcript hashes, and acoustic alignment where the engine needs it. Reference audio, transcript, prompt tensors, and generated samples stay private on the self-hosted system, have a deliberate deletion/cache-eviction path, are not repurposed for training or sharing, and are never used to mislead a listener about who is speaking.
 
-**Bad (domain expert would flag):** The reference was scraped, copied, or supplied by someone without authority; consent or source cannot be shown; private voice material persists in temp files/logs/caches after deletion; or a clone is exposed outside the agreed LAN/test context without disclosure and review.
+**Bad (domain expert would flag):** A path escapes RayMe storage, bytes or hashes do not match, the transcript is blank or mismatched, private voice material persists in temp files/logs/caches after deletion, or a clone is exposed through a private-data leak.
 
 **Stakes:** Critical
 
-**Source:** The FTC identifies voice appropriation, fraud, and misuse of biometric data/creative content as concrete voice-cloning harms, and separately emphasizes control over how voice recordings are obtained, retained, accessed, and reused. NIST's identity-proofing rules are not binding on RayMe, but their explicit-consent, use-disclosure, retention, and deletion controls are a sound conservative benchmark for voice data stewardship. ([FTC voice-cloning harms](https://www.ftc.gov/policy/advocacy-research/tech-at-ftc/2023/11/preventing-harms-ai-enabled-voice-cloning), [FTC voice-data privacy guidance](https://www.ftc.gov/business-guidance/blog/2023/06/hey-alexa-what-are-you-doing-my-data), [NIST SP 800-63A-4](https://pages.nist.gov/800-63-4/sp800-63a.html))
+**Source:** The FTC identifies voice appropriation, fraud, and misuse of biometric data/creative content as concrete voice-cloning harms, and separately emphasizes control over how voice recordings are retained, accessed, and reused. RayMe responds with containment, integrity, private handling, and deletion controls without adding policy metadata to its product flow. ([FTC voice-cloning harms](https://www.ftc.gov/policy/advocacy-research/tech-at-ftc/2023/11/preventing-harms-ai-enabled-voice-cloning), [FTC voice-data privacy guidance](https://www.ftc.gov/business-guidance/blog/2023/06/hey-alexa-what-are-you-doing-my-data))
 
 ### Known Failure Modes in This Domain
 
@@ -98,14 +98,13 @@ No sector-specific healthcare, financial, employment, or public-service regulati
 
 For EU-context use, the GDPR defines personal data broadly as information relating to an identifiable person and defines biometric data as data from specific technical processing that allows or confirms unique identification. Its special-category rule is specifically for biometric data processed to uniquely identify a person. It also contains a purely personal/household exemption, but whether a particular reference, recording, participant, publication, or later commercial use falls within it is fact-specific. ([GDPR Articles 2, 4, and 9](https://eur-lex.europa.eu/eli/reg/2016/679/oj))
 
-In the United States, the FTC has identified deceptive impersonation, voice appropriation, weak access control, repurposing, and indefinite retention as concrete concerns. State voice/biometric and call-recording rules vary. This spec therefore makes reference provenance, explicit permission, purpose limitation, LAN access control, and deletion product gates rather than asserting that one statute definitely governs. Any use involving a third party's voice, a real outside caller, publication, monetization, identity verification, or a child requires a fresh jurisdiction-specific legal/privacy review before expansion.
+In the United States, the FTC has identified deceptive impersonation, voice appropriation, weak access control, repurposing, and indefinite retention as concrete concerns. State voice/biometric and call-recording rules vary. This spec therefore requires contained assets, integrity checks, private handling, and deletion/cache eviction rather than asserting that one statute definitely governs. Any use involving a third party's voice, a real outside caller, publication, monetization, identity verification, or a child requires a fresh jurisdiction-specific legal/privacy review before expansion.
 
 ### Domain Expert Roles for Evaluation
 
 | Role | Responsibility |
 |------|---------------|
-| Builder / product owner | Own the acceptance rubric; verify intended use; perform blinded reference-versus-clone and early/middle/late listening; approve the physical-call experience. |
-| Reference speaker / voice-data steward | Confirm source, ownership/authority, consent scope, matching transcript, acceptable likeness, retention, and deletion. This may be the builder for self-cloned voices but must be recorded explicitly. |
+| Builder / product owner | Upload the intended sample, confirm its matching transcript, own the acceptance rubric, evaluate likeness and live-call behavior, and ensure private handling and deletion behavior are observed. |
 | Speech-quality harness owner | Maintain the fixed text/reference set and run STT WER, duration/EOS, speaker/acoustic drift, clipping/silence/noise, TTFA, RTF, queue-debt, memory, and cancellation checks without treating any single automated score as final quality judgment. |
 | Live-call test operator/listener | Exercise long mixed-length conversations, accents/names/numbers/final words, visible load/prewarm, joins, barge-in, hangup, and state recovery; flag cases where objective metrics pass but the call sounds or feels wrong. |
 
@@ -115,8 +114,8 @@ In the United States, the FTC has identified deceptive impersonation, voice appr
 - [ITU-T P.800](https://www.itu.int/rec/T-REC-P.800) and [ASA/ANSI S3.50-2013 (R2022)](https://webstore.ansi.org/standards/asa/asaansis3502013r2022) — subjective telephone quality and listener-recovered TTS intelligibility.
 - [Sanchez et al., “An Evaluation Framework for Text-to-Speech Voice Reconstruction”](https://arxiv.org/abs/2606.21343) — why perceived identity/intelligibility and objective evidence should be combined.
 - [faster-qwen3-tts issue #96](https://github.com/andimarafioti/faster-qwen3-tts/issues/96) and [issue #105](https://github.com/andimarafioti/faster-qwen3-tts/issues/105) — observed pitch/style discontinuity and swallowed-ending failure reports.
-- [FTC voice-cloning risk analysis](https://www.ftc.gov/policy/advocacy-research/tech-at-ftc/2023/11/preventing-harms-ai-enabled-voice-cloning) and [voice-data privacy guidance](https://www.ftc.gov/business-guidance/blog/2023/06/hey-alexa-what-are-you-doing-my-data) — consent, appropriation, impersonation, retention, reuse, and access-control risks.
-- [GDPR official text](https://eur-lex.europa.eu/eli/reg/2016/679/oj) and [NIST SP 800-63A-4](https://pages.nist.gov/800-63-4/sp800-63a.html) — scoped definitions and conservative consent/retention/deletion controls; neither is asserted here as automatically binding on this deployment.
+- [FTC voice-cloning risk analysis](https://www.ftc.gov/policy/advocacy-research/tech-at-ftc/2023/11/preventing-harms-ai-enabled-voice-cloning) and [voice-data privacy guidance](https://www.ftc.gov/business-guidance/blog/2023/06/hey-alexa-what-are-you-doing-my-data) — appropriation, impersonation, retention, reuse, and access-control risks.
+- [GDPR official text](https://eur-lex.europa.eu/eli/reg/2016/679/oj) — scoped definitions and retention/deletion context; it is not asserted here as automatically binding on this deployment.
 
 ---
 
@@ -607,7 +606,7 @@ samples. No aggregate score may hide a failed Critical row.
 | Longitudinal non-degradation | **PASS:** at least 50 sequential mixed-length generations run in one hot worker; 50/50 are valid, live, faster than realtime, and natural-EOS; reset-seed anchor hashes stay identical; early-to-late absolute RMS change is at most 3 dB, spectral-centroid ratio at least `0.70`, flatness growth at most `0.15`, RTFx ratio at least `0.75`, TTFA growth at most 200 ms, and reserved-memory growth at most 256 MiB. The early/middle/late reel has no progressive muffling, whisper, noise, metallic sound, silence, accent loss, or identity change. **FAIL:** any state, acoustic, intelligibility, latency, or memory measure trends toward the user-reported collapse, even if turn one sounds good. | **Code:** integrated descendant of Spike 005 `soak_probe.py` and `evaluate_stt.py`. **Human:** product-owner early/middle/late reel review. | Critical |
 | Clone likeness, natural delivery, and joins | **PASS:** in blinded reference-versus-clone review, the intended speaker remains recognizable across short/long and early/middle/late samples, with median likeness and naturalness at least 4/5 and no sample below 3/5; cadence fits the text; native chunk and RayMe text-segment joins contain no audible click, gap, clipped phoneme, pitch reset, or mood/speaker switch. A pinned local speaker-verification scorer records reference-to-clone cosine similarity for trend detection; late median may not fall more than `0.05` below early median or the frozen product-owner-accepted integrated baseline. **FAIL:** the clone becomes generic or sounds like another speaker, leaks reference content, or joins sound like separate takes. | **Code:** local versioned speaker-embedding trend and join/underflow metrics; the absolute cosine value is not a standalone likeness verdict. **Human:** blinded 1–5 product-owner rubric is the release authority. No remote audio judge is used. | High |
 | Visible readiness and contained failures | **PASS:** model `loading`/`resident` and voice `prewarming`/`ready`/`failed` states are separately visible; cached-model voice prewarm targets at most 15 s and completes before first call speech; malformed worker data, timeout, CUDA failure, and transcript/ceiling rejection become stable engine-scoped codes with actionable public wording while other engines, STT, WebRTC, and the backend remain usable. **FAIL:** the UI freezes with hidden work, reports ready early, exposes a traceback/path/model-cache/private transcript, uses a generic lie, or one Qwen failure disables unrelated service. | **Code:** model-manager/API/server/client tests, public-error leak scans, status transitions, and post-failure health/new-call probe. **Human:** visible Voice Lab and call-readiness spot check. | High |
-| Voice-data safety and scope adherence | **PASS:** every real-person evaluation reference has a hash-bound authorization/provenance sidecar naming the speaker/data steward or opaque steward id, authorization basis, intended LAN-test scope, reference SHA-256, and transcript SHA-256; both hashes match before the reference is used. Missing/malformed/wrong-hash/wrong-scope Phase 005 metadata automatically selects the deterministic non-person fixture. Requests can use only that authorized saved voice/reference under RayMe-owned paths; logs contain request ids, hashed voice keys, scores, and scalar metrics but no raw reference audio, full transcript, generated private speech, access token, or absolute private path; temp audio/prompt cache is bounded and cleared on voice deletion/model unload. **FAIL:** product-owner direction/listening is treated as speaker permission, an invalid sidecar reaches real-person audio, an arbitrary path/unsaved voice is accepted, private voice material leaks to logs/evidence, or prompt tensors/temp files outlive their defined lifecycle. | **Code:** missing/malformed/wrong-reference-hash/wrong-transcript-hash/wrong-scope sidecar tests, automatic synthetic fallback tests, path/schema/authorship-field tests, log/evidence leak scan, cache/delete lifecycle tests. **Human:** voice-data steward signs the release evidence for the reference used in listening tests. | Critical |
+| Reference asset integrity, containment, and private handling | **PASS:** upload is assumed authorized; the intended saved voice uses a RayMe-owned contained reference with valid bytes, matching reference and transcript hashes, a nonblank matching transcript, and acoustic alignment before prompt extraction. Requests use only the selected saved voice/reference under RayMe-owned paths; logs contain request ids, hashed voice keys, scores, and scalar metrics but no raw reference audio, full transcript, generated private speech, access token, or absolute private path; temp audio/prompt cache is bounded and cleared on voice deletion/model unload. An explicitly selected deterministic non-person fixture may test transport only; missing metadata never selects it. **FAIL:** an arbitrary path/unsaved voice is accepted, bytes/hashes or alignment do not match, private voice material leaks to logs/evidence, or prompt tensors/temp files outlive their defined lifecycle. | **Code:** valid-byte, contained-path, reference/transcript-hash, alignment, log/evidence leak-scan, and cache/delete lifecycle tests. **Human:** product owner listens to the intended uploaded voice for likeness and quality. | Critical |
 
 An LLM judge is deliberately not part of the release gate. The dominant failures
 are measurable stream/control invariants or audible identity/naturalness defects;
@@ -696,14 +695,12 @@ residency, and deployed-call cases.
 | **Total** | **20** | | |
 
 The manifest stores scenario text, expected events/thresholds, fixture hashes,
-runtime/model revision, seeds, and labels. A real-person fixture is eligible only
-through a local sidecar containing the speaker/data-steward name or opaque id,
-authorization basis, `rayme_lan_call_testing` scope, reference SHA-256, and
-transcript SHA-256, with both hashes verified before use. Missing, malformed,
-wrong-hash, or wrong-scope metadata selects the deterministic non-person SAPI
-fixture automatically. Private reference WAVs/transcripts/sidecars are not
-committed; the manifest refers to the selected RayMe-owned OMEN fixture by opaque
-id and hashes. Public CI substitutes deterministic synthetic WAV/worker fixtures.
+runtime/model revision, seeds, and labels. Upload is assumed authorized. A
+real-person listening fixture uses the intended RayMe-owned contained sample with
+valid bytes, reference/transcript hash matches, and acoustic alignment before use.
+Private reference WAVs/transcripts are not committed; the manifest refers to the
+selected OMEN fixture by opaque id and hashes. Public CI uses explicitly selected
+deterministic synthetic WAV/worker fixtures for transport tests only.
 
 **Labeling:**
 
@@ -712,8 +709,8 @@ id and hashes. Public CI substitutes deterministic synthetic WAV/worker fixtures
 - The builder/product owner scores blinded likeness, naturalness, intelligibility,
   and join quality from 1–5, reviews the early/middle/late reel, and signs the
   physical-call acceptance separately from automated deployment readiness.
-- The reference speaker/voice-data steward confirms provenance, authority,
-  intended LAN-test scope, retention, and deletion for the evaluation voice.
+- The builder/product owner confirms the intended uploaded sample, its matching
+  transcript, observed likeness, private handling, and deletion/cache behavior.
 - Code metrics decide transport/runtime/ceiling/WER gates. Human judgment decides
   audible likeness and naturalness when an automated score disagrees. There is
   no uncalibrated LLM labeler.
@@ -818,8 +815,8 @@ with values learned at completion.
   prompt-preparation, chunking, sampling, cache, queue, or playout change.
 - If an objective metric passes but the user reports muffling, whispering,
   noise, identity drift, gaps, or swallowed endings, the report wins: preserve
-  that saved-output sample with consent, add a minimized fixture/label, and
-  expand the flywheel before changing thresholds.
+  a minimized private-safe fixture/label and expand the flywheel before changing
+  thresholds.
 
 ---
 

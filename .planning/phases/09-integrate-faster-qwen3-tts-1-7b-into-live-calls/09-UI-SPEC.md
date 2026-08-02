@@ -20,7 +20,7 @@ Phase 09 preserves RayMe's existing Voice Lab, Voice Library, Settings, voice-as
 
 - truthful `Qwen3-TTS 1.7B-Base` identity from RayMe server metadata;
 - separate model-load and selected-voice preparation states;
-- Qwen reference-transcript validation in the existing creation flow, with upload implying authorization;
+- Qwen reference-transcript validation in the existing creation flow; upload is assumed authorized;
 - row-scoped preview/test-play progress and retry;
 - a call-preparation gate that stays visibly `Connecting` until the selected Qwen voice is ready.
 
@@ -120,7 +120,7 @@ Model and selected-voice preparation are two independent rows. Do not collapse t
 
 ### Qwen uploaded-reference contract
 
-When `qwen3_1_7b` is selected, the completed Voice Lab upload is the authorization event. Do not render or submit `Reference source`, `Authorization basis`, `Use scope`, or any replacement authorization form.
+When `qwen3_1_7b` is selected, uploading a voice sample is assumed authorized. Do not render or submit reference-source, steward, consent, authorization-basis, use-scope, or authorization-status fields, a replacement policy form, sidecar, status/readiness state, or metadata-driven fallback.
 
 - Keep model and saved-voice readiness visible immediately after the engine picker.
 - Preserve the sample, transcript, name, preview text, and engine choice across preview, prewarm, alignment, worker, or network failure and across Qwen/non-Qwen engine switches.
@@ -129,7 +129,7 @@ When `qwen3_1_7b` is selected, the completed Voice Lab upload is the authorizati
 
 ### Voice Lab and Voice Library
 
-- Keep the existing five-step strip (`Upload`, `Transcript`, `Engine`, `Preview`, `Save`); do not add an authorization step or conditional authorization panel.
+- Keep the existing five-step strip (`Upload`, `Transcript`, `Engine`, `Preview`, `Save`); do not add a policy step or conditional policy panel.
 - Use the shared save helper: `Save Voice is available once sample, name, transcript, and engine are valid. Preview success is not required.`
 - Preview uses the existing `Preview Voice` button. During load/prewarm it reads `Preparing voice…`; during native synthesis it reads `Synthesizing…`.
 - Test-play uses the existing `Test Voice` button. During load/prewarm it reads `Preparing voice…`; during synthesis it reads `Testing voice…`.

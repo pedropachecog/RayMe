@@ -20,7 +20,7 @@ awaiting: user response
 
 - Keep both tests pending until the builder performs them and records direct observations.
 - Do not use the generated non-person evidence fixture for likeness or naturalness acceptance. Evidence runs may rotate its opaque voice ID; that fixture proves automated transport only.
-- Uploading the intended real-person reference through Voice Lab is the authorization event. Use its matching transcript and follow the agreed retention/deletion terms.
+- Uploading the intended sample through Voice Lab is assumed authorized. Confirm its matching transcript; keep private material out of this record and verify deletion/cache behavior through the technical flow.
 - Do not paste raw reference audio, its transcript, recordings, credentials, or private local paths into this file. Record only opaque IDs, device details, timestamps, and observations.
 - Mark `result: pass` only when every pass condition holds. Otherwise use `result: issue` and fill the failure evidence fields verbatim.
 
@@ -30,10 +30,10 @@ awaiting: user response
 
 **Procedure:**
 
-1. In Voice Lab, upload and save the intended real-person Qwen3-TTS 1.7B voice with its matching transcript; no separate reference-authorization fields are required.
+1. In Voice Lab, upload and save the intended Qwen3-TTS 1.7B voice with its matching transcript; no policy metadata is required.
 2. Confirm this is the intended uploaded voice rather than the generated transport fixture, then assign it to the call character.
 3. Start a real OMEN call and listen deliberately to an early response, a middle response, and a later longer response.
-4. For each sample, judge intelligibility, naturalness, consistency with the authorized reference, chunk joins, and whether playback starts while the response is still being generated.
+4. For each sample, judge intelligibility, naturalness, consistency with the intended sample, chunk joins, and whether playback starts while the response is still being generated.
 
 **Pass conditions:** All three listening points are intelligible and natural; identity remains acceptably consistent; no objectionable joins or late degradation occur; playback is observably early rather than whole-response-delayed.
 
@@ -42,7 +42,7 @@ awaiting: user response
 result: [pending]
 saved_voice_id: ""
 saved_voice_name: ""
-reference_uploaded_by: ""
+intended_sample_confirmed: ""
 test_device_and_browser: ""
 tested_at: ""
 early_turn_observation: ""

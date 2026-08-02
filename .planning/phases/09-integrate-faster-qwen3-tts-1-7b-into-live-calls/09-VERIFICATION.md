@@ -6,8 +6,8 @@ score: 47/47 must-haves verified
 behavior_unverified: 0
 overrides_applied: 0
 human_verification:
-  - test: "Integrated listening with the intended, explicitly authorized real-person saved voice"
-    expected: "Early, middle, and late call turns remain intelligible, natural, recognizably consistent with the authorized reference, and free of objectionable chunk joins while playback begins before full generation finishes."
+  - test: "Integrated listening with the intended uploaded saved voice"
+    expected: "Early, middle, and late call turns remain intelligible, natural, recognizably consistent with the intended sample, and free of objectionable chunk joins while playback begins before full generation finishes."
     why_human: "The committed release fixture is a generated non-person SAPI voice and is explicitly ineligible for likeness or naturalness acceptance; hashes, WER, and WavLM trend scores cannot replace listening."
   - test: "Physical multi-turn call on the builder's real desktop/mobile device, including spoken barge-in, hangup, and reconnect"
     expected: "Model and prompt preparation stay visible; speech begins early; a spoken interruption silences playout promptly, preserves the user's utterance, returns to Listening, emits no ghost audio or normal ai_done/persistence for the cancelled turn, and a later/reconnected turn succeeds."
@@ -17,6 +17,11 @@ human_verification:
 # Phase 09: Faster Qwen3-TTS 1.7B Live-Call Integration Verification Report
 
 **Phase Goal:** Make `faster-qwen3-tts==0.3.2` with `Qwen/Qwen3-TTS-12Hz-1.7B-Base` a first-class saved-voice engine for real OMEN calls, with visible loading/prewarm, transcript alignment, bounded early streaming, barge-in cancellation, and no whole-synthesis fallback.
+
+Uploading a voice sample is assumed authorized. Current verification retains only
+contained assets, valid bytes/hash integrity, matching nonblank transcripts and
+acoustic alignment, private handling, and deletion/cache invalidation; it has no
+policy metadata, confirmation state, policy-based rejection, or automatic fixture substitution.
 
 **Verified:** 2026-08-01T12:53:38Z  
 **Status:** human_needed  
@@ -36,7 +41,7 @@ human_verification:
 
 | # | Observable truth | Status | Evidence |
 |---|---|---|---|
-| 1 | Qwen3-TTS 1.7B is visible as a saved-voice engine; saving/using it requires a matching transcript and authorized reference, with sanitized failures. | ✓ VERIFIED | `tts_registry.py` publishes `qwen3_1_7b` with transcript/streaming metadata. `voice_service.py` hashes and binds reference/transcript authorization, contains blob paths, and derives an opaque owner key. The migration maps only `qwen3_0_6b` to the canonical id and resets authorization to `needs_confirmation`. Client Voice Lab/readiness tests and server authorization tests exercise the user-visible and trust-boundary paths. |
+| 1 | Qwen3-TTS 1.7B is visible as a saved-voice engine; saving/using it requires a contained sample with a matching transcript and sanitized technical failures. | ✓ VERIFIED | `tts_registry.py` publishes `qwen3_1_7b` with transcript/streaming metadata. `voice_service.py` contains blob paths, validates technical reference/transcript integrity, and derives an opaque owner key. The migration maps only `qwen3_0_6b` to the canonical id while removing retired policy metadata. Client Voice Lab/readiness and server technical-boundary tests exercise the user-visible path. |
 | 2 | OMEN runs the pinned package/model on CUDA through one-hot residency, exposes loading/resident state, and prewarms the selected prompt before a call turn. | ✓ VERIFIED | Worker pins model revision `fd4b254…`, rejects non-CUDA/model substitution, and uses the native runtime. `model_manager.py` unloads the previous resident engine, exposes `loading_engine`/`resident_tts_engine`, validates alignment, prewarms one prompt, and leases it to the call. Raw runtime evidence records RTX 3060, Torch `2.10.0+cu126`, CUDA 12.6, one resident `qwen3_1_7b`, no CPU fallback, and prompt-cache capacity/high-water 1/1. |
 | 3 | Calls use bounded native streaming, start playback before generation completes on slow streams, separate immediate/final metrics, and never fall back to whole synthesis (including VoxCPM2 guards). | ✓ VERIFIED | `Qwen3TtsAdapter.synthesize()` raises; the worker calls only `generate_voice_clone_streaming`. `CallSession` uses a capacity-2 bridge and the paced track caps pending audio at 1.5 s. Focused early-playback/backpressure/no-fallback tests pass. Deployed short playback starts at 1021.5 ms before 2505.5 ms completion; slow-stream playback starts at 754.1 ms before 7944.0 ms completion with bridge 2/2, track 1500/1500 ms, positive producer blocking, zero underflow, and no fallback. |
 | 4 | Barge-in, hangup, and engine switch cancel the exact generation, discard queued/late audio, suppress normal completion/persistence, and recover to listening. | ✓ VERIFIED | `cancel_ai_turn()` begins exact-request cancellation, silences paced playout before awaiting the worker terminal, retains cancellation guards through drain, and clears pending speech completion. Focused request-scoped cancellation, spoken-VAD barge-in, and persistence-suppression tests pass. Deployed cancel/hangup/switch scenarios show 52.9–116.1 ms acknowledgements, zero late audio/enqueue, zero normal `ai_done`, zero cancelled persistence, and recovery true. |
@@ -51,10 +56,10 @@ The five roadmap criteria above are the contract wording. The fifteen plans refi
 | 09-01 | 3/3 | ✓ VERIFIED | Immutable runtime source lock, canonical `qwen3_1_7b` roster identity, truthful transcript/streaming metadata. |
 | 09-02 | 3/3 | ✓ VERIFIED | Versioned IPC, supervised CUDA worker, native stream lifecycle and exact-request cancellation. |
 | 09-03 | 3/3 | ✓ VERIFIED | One-hot readiness/prewarm, early live playback, separate immediate/final metrics. |
-| 09-04 | 5/5 | ✓ VERIFIED | Sole deploy seam, authorized deterministic fixture selection, real CUDA hardware tracer and pinned runtime attestation. |
+| 09-04 | 5/5 | ✓ VERIFIED | Sole deploy seam, explicitly selected deterministic transport fixture, real CUDA hardware tracer and pinned runtime attestation. |
 | 09-05 | 3/3 | ✓ VERIFIED | Alignment, prompt identity, output ceilings, sanitized failure containment, streaming-only adapter. |
 | 09-06 | 2/2 | ✓ VERIFIED | Saved-voice delete invalidates only the matching opaque prompt and safely handles active use/failure. |
-| 09-07 | 4/4 | ✓ VERIFIED | Exact legacy-id migration, provenance binding, contained authorized sample access, stale authorization rejection. |
+| 09-07 | 4/4 | ✓ VERIFIED | Exact legacy-id migration, contained sample access, transcript alignment, and deletion/cache handling. |
 | 09-08 | 3/3 | ✓ VERIFIED | Voice Lab and call UI expose model/prompt readiness, retry/error states, and gate start until ready. |
 | 09-09 | 3/3 | ✓ VERIFIED | Mocked readiness acceptance plus opt-in, exact-commit, real deployed WebRTC acceptance contract. |
 | 09-10 | 3/3 | ✓ VERIFIED | Natural-boundary incremental segmentation, first viable segment before LLM completion, bounded 60-word requests. |
@@ -74,7 +79,7 @@ All 30 distinct PLAN-declared artifacts exist. Every source artifact is substant
 |---|---|---|---|
 | Runtime identity and worker (`uv.lock`, registry, protocol, worker, adapter) | Pinned package/model, supervised CUDA-native streaming, typed terminals | ✓ VERIFIED | 402–5,426 lines per source/lock artifact; imports and runtime call path are live. Non-streaming Qwen synthesis is explicitly disabled. |
 | Residency, alignment, and call pipeline (`model_manager.py`, `api/tts.py`, `session.py`, `tracks.py`) | One-hot load/prewarm, alignment, bounded early playout, terminal-safe cancellation | ✓ VERIFIED | Production source, named state-transition tests, and raw OMEN measurements agree. |
-| Saved-voice lifecycle and migration (`voice_service.py`, migration 0003) | Provenance/authorization, contained blob use, exact legacy migration, deletion invalidation | ✓ VERIFIED | Hash-bound authorization is checked again at use time; opaque prompt keys carry no private clone content. |
+| Saved-voice lifecycle and migration (`voice_service.py`, migration 0003) | Contained blob use, technical integrity, exact legacy migration, deletion invalidation | ✓ VERIFIED | Hash-bound asset/transcript integrity is checked at use time; opaque prompt keys carry no private clone content. |
 | Client readiness and call surface (four Svelte/unit artifacts) | Visible model/prompt/loading/error states and honest call-start gate | ✓ VERIFIED | Components are used by the Voice Lab/settings/call routes; readiness state comes from server/backend status rather than hardcoded values. |
 | Browser and segmentation contracts (four test/segmenter artifacts) | Incremental safe segments and mocked/real acceptance contracts | ✓ VERIFIED | Server focused slow-LLM test passes; final live browser result is non-mocked and same-commit. |
 | Canonical deployment and hardware trace (`deploy-omen.sh`, tracer, hard-gate JSON) | Sole install/launcher/task/evidence seam and real CUDA proof | ✓ VERIFIED | Script writes only canonical launchers, registers tasks to those launchers, pins Torch/CUDA/runtime/model, and invokes the committed tracer/verifier. |
@@ -88,7 +93,7 @@ All 30 distinct PLAN-declared artifacts exist. Every source artifact is substant
 | Link group | Count | Status | Details |
 |---|---:|---|---|
 | 09-01 through 09-04: lock/registry → adapter/worker → manager/session → deploy/tracer | 6/6 | ✓ WIRED | Runtime identity reaches the real worker and canonical OMEN evidence path. |
-| 09-05 through 09-07: API/alignment → prompt identity → delete invalidation → migration/provenance | 8/8 | ✓ WIRED | Operations cannot bypass authorization, containment, alignment, or prompt ownership. |
+| 09-05 through 09-07: API/alignment → prompt identity → delete invalidation → migration | 8/8 | ✓ WIRED | Operations cannot bypass containment, integrity, alignment, or prompt ownership. |
 | 09-08 through 09-10: backend readiness → server → UI/tests; token stream → segmenter → call TTS | 8/8 | ✓ WIRED | Visible state is sourced from live readiness; incremental text reaches live speech submission. |
 | 09-11 through 09-13: native stream → bounded bridge/track → raw runner → verifier/scorer | 9/9 | ✓ WIRED | Backpressure and cancellation metrics flow into independent release thresholds. |
 | 09-14 through 09-15: canonical deploy → final evidence → real browser/handoff | 3/3 | ✓ WIRED | Same-commit final evidence and exact handoff command close the automated release path. |
@@ -97,7 +102,7 @@ All 30 distinct PLAN-declared artifacts exist. Every source artifact is substant
 
 | Dynamic artifact | Data variable | Source | Produces real data | Status |
 |---|---|---|---|---|
-| Voice Lab / saved-voice rows | engine metadata, transcript, authorization, preparation state | Saved DB rows + contained voice blob + backend `/tts` readiness/preparation APIs | Yes; server hashes and validates the stored sample/transcript at use time | ✓ FLOWING |
+| Voice Lab / saved-voice rows | engine metadata, transcript, technical preparation state | Saved DB rows + contained voice blob + backend `/tts` readiness/preparation APIs | Yes; server hashes and validates the stored sample/transcript at use time | ✓ FLOWING |
 | Call preparation panel | model and prompt states | AI model-manager status via server call preparation polling | Yes; `loading`/`resident` and `prewarming`/`ready` are runtime state | ✓ FLOWING |
 | Live call audio | incremental assistant segments | LLM token stream → `CallTtsSegmenter` → server speech turn → `CallSession` → Qwen worker native chunks → bounded track → WebRTC | Yes; deployed result contains real chunk/timing/backpressure measurements | ✓ FLOWING |
 | Interrupt/hangup/switch state | exact turn/request id and cancellation terminal | VAD/UI/control event → `cancel_ai_turn()` → adapter/worker cancel → queue drain → listening recovery | Yes; deployed control scenarios record acknowledgement and zero late effects | ✓ FLOWING |
@@ -141,7 +146,7 @@ Only named checks were run; no server or external service was started and no sta
 
 | Requirement | Source plans | Description | Status | Evidence |
 |---|---|---|---|---|
-| REQ-22 | 09-01 through 09-10, 09-12 through 09-15 | Saved Qwen voice uses the pinned 1.7B runtime/model and matching transcript; old identity is compatibility-only. | ✓ SATISFIED | Registry/lock/worker pins, hash-bound saved-voice authorization, exact migration, readiness UI, and deployed CUDA identity. |
+| REQ-22 | 09-01 through 09-10, 09-12 through 09-15 | Saved Qwen voice uses the pinned 1.7B runtime/model and matching transcript; old identity is compatibility-only. | ✓ SATISFIED | Registry/lock/worker pins, contained asset/transcript integrity, exact migration, readiness UI, and deployed CUDA identity. |
 | REQ-45 | 09-02 through 09-05, 09-07 through 09-15 | Natural bounded chunk planning/native streaming starts from the first viable chunk and records timing/join metrics. | ✓ SATISFIED | Incremental segmenter, streaming-only adapter, capacity-2 bridge, paced track, immediate/final metrics, no-fallback tests, and deployed early-playback results. |
 | REQ-46 | 09-03/04, 09-08 through 09-15 | End-to-end turn latency target, explicitly a design budget rather than blocking acceptance. | ✓ SATISFIED | Turn 1/50 first playback 799.5/826.8 ms and native TTFA about 358–363 ms are recorded honestly; the verifier does not falsely convert the non-blocking target into a release gate. |
 
@@ -158,9 +163,9 @@ No additional requirement is mapped to Phase 09 in `REQUIREMENTS.md`; there are 
 
 ## Human Verification Required
 
-### 1. Integrated listening with the intended authorized saved voice
+### 1. Integrated listening with the intended uploaded saved voice
 
-**Test:** Save or reconfirm the intended authorized real-person Qwen voice, start a real OMEN call, and listen deliberately to early, middle, and late turns, including a longer response.
+**Test:** Upload or reconfirm the intended Qwen voice with its matching transcript, start a real OMEN call, and listen deliberately to early, middle, and late turns, including a longer response.
 
 **Expected:** Speech is intelligible and natural, retains the intended voice consistently, has no objectionable chunk joins or degradation late in the call, and begins while synthesis is still streaming.
 
