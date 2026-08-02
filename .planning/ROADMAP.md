@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-RayMe ships v1 through Phase 6: one measurement spike (Phase 0) followed by delivery phases that culminate in a full-duplex, barge-in-capable voice-call app usable from a mobile browser on LAN. The load-bearing core value — "call feel" — is validated **twice**: first as an MVP call in Phase 3 (flat, one-sentence reply, no streaming) and then as a tuned duplex experience in Phase 4 (sentence-streamed TTS, VAD barge-in with LLM cancel, live bidirectional captions). Everything after Phase 4 exists to broaden (up to three TTS engines — F5-TTS, XTTS v2, and Qwen3-TTS — with cold-swap UX, unified thread polish) and harden (mobile hardening, ship polish) what Phase 4 proves works; Phase 7 then evaluates VoxCPM2 as an additional roster candidate before any runtime promotion.
+RayMe ships v1 through Phase 6: one measurement spike (Phase 0) followed by delivery phases that culminate in a full-duplex voice-call app, with an explicit Interrupt control, usable from a mobile browser on LAN. The load-bearing core value — "call feel" — is validated **twice**: first as an MVP call in Phase 3 (flat, one-sentence reply, no streaming) and then as a tuned duplex experience in Phase 4 (sentence-streamed TTS, explicit interruption that reaches the LLM/TTS work, live bidirectional captions). Automatic microphone/VAD barge-in is disabled and deferred; it is only a conditional Phase 4 candidate after fresh, explicit product-owner authorization. Everything after Phase 4 exists to broaden (up to three TTS engines — F5-TTS, XTTS v2, and Qwen3-TTS — with cold-swap UX, unified thread polish) and harden (mobile hardening, ship polish) what Phase 4 proves works; Phase 7 then evaluates VoxCPM2 as an additional roster candidate before any runtime promotion.
 
 ## v1 Milestone Definition
 
@@ -23,7 +23,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 - Voice Lab with STT-auto-transcribed reference, three TTS engines (F5-TTS, XTTS v2, Qwen3-TTS — the last Phase-0-conditional), test-play, library management.
 - Unified thread: single messages table with `message_kind` discriminator; text and call turns interleave chronologically.
 - SillyTavern text-UX parity: Regenerate, Edit, Swipes, Continue, virtualized long threads.
-- Full-duplex voice calls with VAD-driven barge-in, sentence-streamed TTS, streaming STT with live captions, streaming LLM with live AI captions, Voice Visualizer three-state, call-end summary row.
+- Full-duplex voice calls with explicit Interrupt control, sentence-streamed TTS, streaming STT with live captions, streaming LLM with live AI captions, Voice Visualizer three-state, call-end summary row. Automatic microphone/VAD barge-in is deferred/disabled for v1.
 - Per-chat voice override on top of per-character default.
 - AI audio saved per turn by default; mic audio off by default; both togglable in Settings.
 - PWA manifest + icons for add-to-home-screen on Android.
@@ -33,12 +33,13 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 ### What's explicitly deferred
 
 - **v1.x:** v3 PNG export, lorebook injection, waveform scrubber on saved audio, thread search, gallery search/tag filters, mixed-WAV call export, per-thread LLM sampling overrides, full PWA offline-shell polish.
+- **Automatic microphone/VAD barge-in:** deferred/disabled. It may be considered only as a conditional Phase 4 candidate after fresh, explicit product-owner authorization during that phase's discussion; without that authorization, Phase 4 ships without it.
 - **v2+:** Summarization memory, multilingual, speech-to-speech models, optional auth / beyond-LAN, RVC post-processing, emotion/style swap mid-call.
 - **Out of scope permanently:** Multi-user, native mobile apps, video/avatar, managed cloud TTS/STT, tool-using agents, built-in LLM inference, cloud deployment.
 
 ### Single acceptance statement
 
-**v1 ships when the builder can, on their Android phone over LAN with a mkcert-trusted cert and a Bluetooth headset connected, import a SillyTavern v3 PNG card, record a voice in Voice Lab, assign that voice as the character default, start a call from a chat thread, have a back-and-forth conversation with mid-sentence barge-in that feels like a phone call, and later reopen the same thread on desktop to see the call transcripts interleaved with any prior text messages.**
+**v1 ships when the builder can, on their Android phone over LAN with a mkcert-trusted cert and a Bluetooth headset connected, import a SillyTavern v3 PNG card, record a voice in Voice Lab, assign that voice as the character default, start a call from a chat thread, have a back-and-forth conversation that feels like a phone call while the explicit Interrupt control safely stops an active response when needed, and later reopen the same thread on desktop to see the call transcripts interleaved with any prior text messages.**
 
 ---
 
@@ -49,7 +50,7 @@ The v1 milestone delivers every requirement marked `[v1]` in `REQUIREMENTS.md`. 
 - [x] **Phase 01.1: UI Acceptance & Regression Test Hardening** — Inserted verification pass to convert manually discovered Phase 1 UI regressions into durable Playwright/API coverage before Phase 2.
 - [x] **Phase 2: AI Backend Skeleton & Voice Lab** — FastAPI + aiortc signaling, resident Whisper + Silero VAD + one-hot TTS engine on the GPU, Voice Lab upload → auto-transcript → edit → synth-preview → save, Settings with three-endpoint connection tests.
 - [ ] **Phase 3: First Working Call (MVP)** — Voice Call screen with `RTCPeerConnection`, AudioContext gesture unlock, orchestrator FSM skeleton, one-sentence non-streaming reply. Proves the media plumbing end-to-end.
-- [ ] **Phase 4: Call Feel** — Sentence-chunked streaming TTS, VAD-driven barge-in with LIFO cancel and mid-stream LLM abort, live bidirectional captions over data channel, echo-loop mitigation, Voice Visualizer three-state. The core-value phase.
+- [ ] **Phase 4: Call Feel** — Sentence-chunked streaming TTS, explicit Interrupt cancellation and mid-stream LLM abort, live bidirectional captions over data channel, echo-loop mitigation, Voice Visualizer three-state. Automatic microphone/VAD barge-in is a conditional future candidate only after fresh authorization; otherwise it is not Phase 4 scope. The core-value phase.
 - [ ] **Phase 5: Voice Breadth & Unified Thread Polish** — Both TTS engines with cold-swap UX, per-character default + per-chat override, saved-audio toggles + inline replay, unified thread visual treatment, full SillyTavern text-UX parity (Regenerate / Edit / Swipes / Continue / alternate greetings / virtualization).
 - [ ] **Phase 6: Mobile Hardening & Ship Polish** — Full Android Chrome pass (Bluetooth routing, Wake Lock, visibility change), PWA manifest + icons, storage housekeeping (orphan reaper, retention), full Settings surface, error states, soak-test acceptance. v1 ships.
 - [x] **Phase 7: Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations** — Completed on 2026-05-11; outcome `selectable_with_caveats`.
@@ -322,29 +323,31 @@ Plans:
 
 **Automatic-barge authorization gate:** Phase 4 is unexecuted. Automatic microphone/VAD barge-in is deferred/disabled and is not approved Phase 4 scope. It may not be implemented or reactivated unless the product owner gives fresh, explicit authorization during a Phase 4 discussion; until then, preserve the explicit Interrupt button only.
 
+**Historical terminology:** Any retained “barge-in” wording in completed-phase records below describes historical evidence only. It is non-normative and does not authorize automatic microphone/VAD interruption in the current or future plan.
+
 **Depends on:** Phase 3 (media plumbing, FSM skeleton, timing instrumentation in place).
 
-**Requirements delivered:** REQ-41, REQ-42, REQ-43, REQ-44, REQ-45, REQ-46, REQ-49 (full three-state Voice Visualizer), REQ-61 (call turns visually distinct in scrollback), REQ-80 (VAD sensitivity slider wired end-to-end).
+**Requirements delivered:** REQ-41, REQ-43, REQ-44, REQ-45, REQ-46, REQ-49 (full three-state Voice Visualizer), REQ-61 (call turns visually distinct in scrollback), REQ-80 (VAD sensitivity slider wired end-to-end). REQ-42 remains deferred and can enter Phase 4 only if the authorization gate above is satisfied; otherwise Phase 4 ships with explicit Interrupt control only.
 
 **Pitfalls owned:**
 
 - **#1 Echo loop** — TTS routed through `<audio>` / `MediaStreamAudioDestinationNode` so browser AEC sees the reference; server-side playback gate keyed to the TTS sample-accurate timeline.
 - **#4 TTS streaming/chunking across engines** — shared chunk planner on the LLM token stream; native streaming where available, chunked playback where not; enforce engine-specific limits such as XTTS's 400-token stream cap; system-prompt bias toward short acknowledgments.
-- **#5 STT endpointing** — Silero VAD endpoint with tuned silence window (500–700 ms default, adaptive shrink during AI playback for aggressive barge-in).
-- **#8 LLM mid-stream cancel** — verified GPU-drop on barge-in via `nvidia-smi`; wasted-token-count logged per cancel.
-- **#10 False barge-in** — minimum-duration (≥250–400 ms) + word-count (≥1 confident word) + energy-threshold gates before cancel fires; optional TTS ducking as a first tier.
+- **#5 STT endpointing** — Silero VAD endpoint with a tuned 500–700 ms silence window for normal user turns; assistant playback must not start a microphone/VAD replacement turn. Any automatic-interrupt tuning is conditional on a separately authorized future scope.
+- **#8 LLM mid-stream cancel** — verified GPU drop after the explicit Interrupt control via `nvidia-smi`; wasted-token-count logged per explicit cancellation.
+- **#10 Conditional automatic-interrupt candidate** — only if the authorization gate is satisfied, evaluate minimum-duration (≥250–400 ms), word-count (≥1 confident word), and energy-threshold gates before any automatic cancel. Without authorization, this work is out of Phase 4 scope.
 - **#11 TTS/user-turn race** — perceived-playback-end clock from browser; server-side VAD suppression during jitter-buffer tail.
 - **#23 Sentence boundary extraction / chunk planning** — abbreviation-aware splitter (`Dr.` `Mr.` `i.e.` etc.), short-first-sentence 150 ms flush, minimum useful chunk sizing, model-specific token/character caps, stitched-audio gap measurement, and fallback chunking for non-streaming engines.
 
 **Success criteria** (observable, testable):
 
-1. The builder can hold a 5-minute back-and-forth call on laptop speakers (no headphones) in Spanish-accented English with **no** self-interrupt ping-pongs, **no** false barge-in on breath or back-channel "mm-hmm", and confident barge-in when they genuinely interrupt a sentence.
+1. The builder can hold a 5-minute back-and-forth call on laptop speakers (no headphones) in Spanish-accented English with **no** self-interrupt ping-pongs; the explicit Interrupt control cancels an active response cleanly without creating a duplicate transcript row or stranding Listening. If automatic microphone/VAD interruption is separately authorized, it requires its own false-trigger acceptance criteria before it can ship.
 2. Time-to-first-audio measured end-to-end (user stops speaking → first TTS sample plays) lands under 800 ms in the warm pipeline on the 3060, with <500 ms as a stretch; numbers logged and tracked.
 
 2a. Long-form TTS is measured through the shared chunk planner for every enabled engine. Metrics include first-chunk TTFA, total stitched playback time, inter-chunk gaps, and a stitched WAV for listening; raw whole-generation fallback numbers are not accepted as final long-form engine comparisons.
 
 3. During a call, the Voice Call screen shows the user's STT partial captions updating within ~500 ms of speech and streaming AI tokens rendering ahead of TTS playback; interim vs final STT state is visually distinct per the DESIGN.md Transcription Chips treatment.
-4. On a barge-in, `nvidia-smi` shows the LLM server's GPU utilization drop to idle within ~200 ms and the wasted-token-count log is non-empty (confirming cancel reaches the GPU, not just the client).
+4. On explicit Interrupt, `nvidia-smi` shows the LLM server's GPU utilization drop to idle within ~200 ms and the wasted-token-count log is non-empty (confirming cancel reaches the GPU, not just the client). Automatic microphone/VAD cancellation is not a Phase 4 acceptance criterion unless separately authorized.
 5. The Voice Visualizer cleanly transitions across listening (user RMS pulse) → thinking (indeterminate shimmer) → speaking (AI TTS waveform) with no flickers on the state transitions, matching DESIGN.md §5.
 
 **Plans:** TBD
@@ -405,7 +408,7 @@ Plans:
 2. An active call with the builder's Bluetooth headset connected routes audio correctly (or, if not, surfaces the documented known-limitation banner rather than failing silently); disconnecting the headset mid-call triggers a `devicechange`-driven warning with a reconnect affordance.
 3. Locking the Android phone screen during a call triggers Wake Lock where supported; backgrounding the tab shows a "Call paused — tap to resume" overlay instead of silent death, and returning to foreground either resumes cleanly or ends the call gracefully with the transcript intact.
 4. Settings shows current storage footprint and a configurable retention policy; the danger-zone clear-all-data flow requires confirmation and leaves no dangling blob files.
-5. The v1 acceptance statement runs end-to-end on the builder's Android phone: import a v3 PNG card, record a voice in Voice Lab, assign it, start a call from a chat thread, have a barge-in-capable conversation, reopen the thread on desktop and see interleaved text + call turns. All other v1 success criteria from prior phases still hold.
+5. The v1 acceptance statement runs end-to-end on the builder's Android phone: import a v3 PNG card, record a voice in Voice Lab, assign it, start a call from a chat thread, use explicit Interrupt safely during a live response when needed, reopen the thread on desktop, and see interleaved text + call turns. All other v1 success criteria from prior phases still hold.
 
 **Plans:** TBD
 
@@ -462,7 +465,7 @@ Every v1 requirement from `REQUIREMENTS.md` is covered. Phase-0 requirements are
 | REQ-36 | Virtualized thread + jump-to-latest | 1 |
 | REQ-40 | Call initiable from thread or character card | 3 |
 | REQ-41 | Full-duplex call audio | 4 |
-| REQ-42 | VAD-driven barge-in with gates | 4 |
+| REQ-42 | Automatic VAD-driven interruption (deferred; Phase 4 only after fresh authorization) | Conditional 4 |
 | REQ-43 | Streaming STT with live user captions | 4 |
 | REQ-44 | Streaming LLM with live AI captions | 4 |
 | REQ-45 | Sentence-boundary streaming TTS | 4 |
@@ -497,7 +500,7 @@ Every v1 requirement from `REQUIREMENTS.md` is covered. Phase-0 requirements are
 
 3. **Voice Lab before first call in Phase 2.** A call needs a voice. A voice needs STT. Voice Lab is the minimum-viable path to exercise STT end-to-end without yet needing WebRTC, and it forces the VRAM coexistence rule (exactly-one TTS engine resident) to be real before Phase 3 depends on it. Settings' three-endpoint connection tests land here so Phase 3's call setup is a tap, not a debugging session.
 
-4. **First working call before call feel in Phase 3–4.** Establishes the media plumbing (aiortc, AudioContext gesture unlock, FSM skeleton, timing instrumentation) under the simplest possible semantics — one-sentence non-streaming reply — so the load-bearing Phase 4 work (streaming, barge-in, echo-loop, mid-stream LLM cancel) layers on known-working transport. Research explicitly warned against compressing these two.
+4. **First working call before call feel in Phase 3–4.** Establishes the media plumbing (aiortc, AudioContext gesture unlock, FSM skeleton, timing instrumentation) under the simplest possible semantics — one-sentence non-streaming reply — so the load-bearing Phase 4 work (streaming, explicit interruption, echo-loop mitigation, mid-stream LLM cancel) layers on known-working transport. Automatic microphone/VAD interruption remains a conditional candidate only after fresh authorization. Research explicitly warned against compressing these two.
 
 5. **Call feel (Phase 4) is where the product either lives or dies.** Phase 4 validates the single line in PROJECT.md that justifies the whole project: "It must feel like an actual phone call with an AI." If Phase 4 doesn't land, nothing after it matters. This is why call feel is validated as early as Phase 4 and not left for the end.
 
@@ -519,9 +522,9 @@ Roadmap-level decisions that remain open after Phase-0 resolves the empirical qu
 
 3. **LLM mid-stream cancel on the chosen server may not actually reach the GPU within the latency budget.** `llama-server` is the current presumed pick; if Phase 0's probe shows it cancels lazily or not at all, the recommended fallback is to pin a specific known-good server (or the OpenAI API) in `PROJECT.md` as the v1 LLM contract. **Owner: Phase 0 outputs; falls back to Phase 4 as a hard gate.**
 
-4. **Orchestrator custom vs Pipecat decision is conditional on implementation size.** Research resolved this for v1 (custom), but the revisit trigger — orchestrator grows past ~800 lines — may fire during Phase 4's barge-in work. If it does, Phase 5 absorbs a port to Pipecat. Not an acceptance gate for v1, but could reshape Phase 5 scope. **Owner: Phase 4 implementation checkpoint.**
+4. **Orchestrator custom vs Pipecat decision is conditional on implementation size.** Research resolved this for v1 (custom), but the revisit trigger — orchestrator grows past ~800 lines — may fire during Phase 4 call-control work. If it does, Phase 5 absorbs a port to Pipecat. Not an acceptance gate for v1, but could reshape Phase 5 scope. **Owner: Phase 4 implementation checkpoint.**
 
-5. **VAD sensitivity tuning (REQ-80 slider) is empirical on the builder's actual speech and hardware.** Phase 4 ships a tuned default; Phase 6 may need a second tuning pass after real-world call hours accumulate. No fixed threshold is committed in the roadmap — only the gate pattern (minimum-duration + word-count + energy) is. **Owner: Phase 4 initial, Phase 6 re-tune.**
+5. **VAD sensitivity tuning (REQ-80 slider) is empirical on the builder's actual speech and hardware.** Phase 4 ships a tuned default for normal user-turn endpointing; Phase 6 may need a second tuning pass after real-world call hours accumulate. No automatic-interrupt threshold is committed. If automatic microphone/VAD interruption is newly authorized later, its duration/word-count/energy gates require a separate Phase 4 decision and acceptance plan. **Owner: Phase 4 initial, Phase 6 re-tune.**
 
 6. **`coqui-tts[server]` streaming to aiortc without Docker is not explicitly documented in upstream Pipecat docs** (flagged in `STACK.md` as a Phase-0-ish verification item). If the in-process Python path has issues, Phase 2 may need to run XTTS in a subprocess with its own CUDA context — which changes the "one-hot engine" implementation without changing the rule. **Owner: Phase 2 spike during AI-backend bringup.**
 
@@ -650,7 +653,7 @@ Voice Sample Authorization Policy (2026-08-02): `.planning/REFERENCE-AUTHORIZATI
 
 - [x] 09-15-PLAN.md - Pinned acoustic/privacy gates, real Qwen live E2E, decision-ready evidence, and operational handoff (Wave 11)
 
-**Final outcome:** Autonomous release readiness passed at canonical OMEN deployed commit `2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae`. The pinned CUDA runtime/model, production streaming tracer, exact 50-turn core evidence, same-commit acoustic/privacy evidence, and exact real desktop/mobile browser suite are green; the mandatory code review is clean (60 files, 0 findings). Integrated human listening and physical real-device multi-turn/barge-in/reconnect acceptance remain explicitly pending.
+**Final outcome (historical, non-normative for current automatic-interrupt scope):** Autonomous release readiness passed at canonical OMEN deployed commit `2721a4ef3ddfadf9cbc47acb0522cb41bc62fbae`. The pinned CUDA runtime/model, production streaming tracer, exact 50-turn core evidence, same-commit acoustic/privacy evidence, and exact real desktop/mobile browser suite are green; the mandatory code review is clean (60 files, 0 findings). Integrated human listening and physical real-device multi-turn/automatic-barge-in/reconnect acceptance remain explicitly pending under the prior evidence vocabulary; the current plan excludes automatic microphone/VAD interruption unless freshly authorized in Phase 4.
 
 ---
 
