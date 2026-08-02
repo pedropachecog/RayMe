@@ -1106,7 +1106,7 @@ def test_webrtc_offer_creates_session_answer_and_events_channel(stub_webrtc: Non
     assert payload["answer"]["sdp"].startswith("v=0")
     assert payload["data_channel"]["label"] == "rayme-events"
     assert payload["peer_generation"] is None
-    assert payload["peer_commit_timeout_ms"] == 8000
+    assert payload["peer_commit_timeout_ms"] == 11000
     session = client.app.state.call_session_manager.get_session("call-session-1")
     assert session.peer_connection.create_data_channel_calls == 0
     assert session.outbound_audio_track is not None

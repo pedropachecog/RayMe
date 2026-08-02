@@ -17,7 +17,7 @@ from app.api.tts import _qwen_error_detail, _qwen_http_status
 from app.api.auth import require_service_auth as _require_service_auth
 from app.call.session import (
     AcceptedSpeechConfiguration,
-    CALL_PEER_REPLACEMENT_TIMEOUT_SECONDS,
+    CALL_PEER_SWITCH_DECISION_TIMEOUT_SECONDS,
     CallSession,
     CallSessionManager,
     PeerSwitchInProgressError,
@@ -470,7 +470,7 @@ async def create_webrtc_offer_answer(
         "data_channel": {"label": RAYME_EVENTS_CHANNEL},
         "peer_generation": pending_generation,
         "peer_commit_timeout_ms": int(
-            CALL_PEER_REPLACEMENT_TIMEOUT_SECONDS * 1000
+            CALL_PEER_SWITCH_DECISION_TIMEOUT_SECONDS * 1000
         ),
     }
 

@@ -132,7 +132,7 @@ class ScriptedCallBackend:
             "session_id": payload["session_id"],
             "answer": {"type": "answer", "sdp": "v=0\r\n"},
             "peer_generation": self.offer_peer_generation,
-            "peer_commit_timeout_ms": 8000,
+            "peer_commit_timeout_ms": 11000,
         }
 
     async def promote_call_peer(
@@ -880,7 +880,7 @@ def test_peer_promotion_preserves_offer_generation_and_forwards_authenticated_ac
 
     assert offered.status_code == 200
     assert offered.json()["peer_generation"] == 7
-    assert offered.json()["peer_commit_timeout_ms"] == 8000
+    assert offered.json()["peer_commit_timeout_ms"] == 11000
     assert promoted.status_code == 200
     assert promoted.json()["status"] == (
         "committed" if action == "commit" else "rejected"

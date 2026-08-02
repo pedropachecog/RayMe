@@ -472,7 +472,7 @@ for (const reconciliation of [
   });
 }
 
-test('reconciles a lost response while a selection-changing peer switch is still in progress', async ({
+test('keeps a long selection-changing peer switch outside reconnect retry budget', async ({
   page
 }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page, {
@@ -494,8 +494,14 @@ test('reconciles a lost response while a selection-changing peer switch is still
 
   await setCurrentMockPeerState(page, 'failed', 'disconnected');
   await expect.poll(() => counters.peerPromotionInProgressCount).toBeGreaterThan(0);
+  await page.waitForTimeout(3800);
 
   const switching = await getMockCallMediaSnapshot(page);
+  expect(counters.offerCount).toBe(2);
+  expect(debugEventCount(counters, 'pc.media_reconnect.start')).toBe(1);
+  expect(debugEventCount(counters, 'pc.media_reconnect.failed')).toBe(0);
+  expect(debugEventCount(counters, 'pc.media_reconnect.give_up')).toBe(0);
+  expect(counters.endCount).toBe(0);
   expect(counters.backendVoiceId).toBe('voice-before');
   expect(counters.backendEngineId).toBe('qwen3_1_7b');
   expect(counters.backendPromptLeaseOwner).toBe('rtc-call-reconnect-01');
@@ -504,6 +510,8 @@ test('reconciles a lost response while a selection-changing peer switch is still
   expect(switching.peers[1]).toMatchObject({ closed: false, closeCount: 0 });
   expect(switching.audioPlayback.activeStreamId).toBe(initialStreamId);
   expect(switching.audioPlayback.pausedStreamIds).not.toContain(initialStreamId);
+  expect(debugEventCount(counters, 'remote_audio.candidate.staged')).toBe(1);
+  expect(debugEventCount(counters, 'remote_audio.candidate.discarded')).toBe(0);
 
   releaseSelectionSwitch();
   await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.ok')).toBe(1);
@@ -511,6 +519,7 @@ test('reconciles a lost response while a selection-changing peer switch is still
   const candidateStreamId = reconciled.peers[1].remoteStreamId;
   expect(candidateStreamId).not.toBeNull();
   expect(counters.peerPromotions.length).toBeGreaterThan(2);
+  expect(counters.offerCount).toBe(2);
   expect(counters.peerPromotions.every((promotion) =>
     promotion.session_id === 'rtc-call-reconnect-01' &&
     promotion.generation === 1 &&
@@ -1942,7 +1951,7 @@ async function installReconnectCallRoutes(
       answer: { type: 'answer', sdp: 'v=0\r\n' },
       event_channel: 'rayme-events',
       peer_generation: peerGeneration,
-      peer_commit_timeout_ms: 8000
+      peer_commit_timeout_ms: 11000
     });
   });
   await page.route('**/api/calls/*/peer-promotion', async (route) => {

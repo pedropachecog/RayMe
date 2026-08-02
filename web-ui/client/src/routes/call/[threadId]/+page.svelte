@@ -149,6 +149,14 @@
     }
   }
 
+  class PeerPromotionDecisionDeadlineError extends AmbiguousPeerPromotionError {
+    constructor(lastError: unknown) {
+      super(lastError);
+      this.name = 'PeerPromotionDecisionDeadlineError';
+      this.message = 'Replacement peer switch exceeded its backend decision deadline';
+    }
+  }
+
   class FailedPeerPromotionError extends Error {
     constructor() {
       super('Replacement peer switch failed');
@@ -246,6 +254,8 @@
   const PEER_PROMOTION_RECONCILIATION_TIMEOUT_MS = 2500;
   const PEER_PROMOTION_ATTEMPT_TIMEOUT_MS = 750;
   const PEER_PROMOTION_RETRY_DELAY_MS = 100;
+  const PEER_PROMOTION_SWITCH_DECISION_FALLBACK_MS = 11000;
+  const PEER_PROMOTION_SWITCH_DECISION_MAX_MS = 30000;
   const MIC_BACKFILL_SAMPLE_RATE = 16000;
   const MIC_BACKFILL_ROLLING_MS = 180000;
   const MIC_BACKFILL_RECONNECT_PREROLL_MS = 30000;
@@ -547,7 +557,8 @@
         await commitBrowserPeerPromotion(
           started.call_id,
           promotionSessionId,
-          pendingPeerGeneration
+          pendingPeerGeneration,
+          response.peer_commit_timeout_ms
         );
         backendPeerCommitted = true;
         peerConnection = connection;
@@ -583,14 +594,14 @@
           throw error;
         }
         if (pendingPeerGeneration !== null && !backendPeerCommitted) {
-          const rollbackSafe = await rejectBrowserPeerPromotion(
+          const rejection = await rejectBrowserPeerPromotion(
             started.call_id,
             promotionSessionId,
             pendingPeerGeneration
           );
-          if (!rollbackSafe) {
+          if (rejection !== 'rollback_safe') {
             throw new AmbiguousPeerPromotionError(
-              new Error('Replacement peer rejection remained in progress')
+              new Error(`Replacement peer rejection was ${rejection}`)
             );
           }
         }
@@ -614,11 +625,13 @@
   async function commitBrowserPeerPromotion(
     callId: string,
     promotionSessionId: string,
-    generation: number
+    generation: number,
+    backendDecisionTimeoutMs: number | null | undefined
   ) {
     const deadline = performance.now() + PEER_PROMOTION_RECONCILIATION_TIMEOUT_MS;
     let attempt = 0;
     let lastError: unknown = new Error('Replacement peer commit was not attempted');
+    let authoritativeInProgress = false;
 
     while (performance.now() < deadline) {
       attempt += 1;
@@ -643,7 +656,16 @@
           throw new Error('Replacement peer commit returned an invalid acknowledgement');
         }
         if (promotion.status === 'in_progress') {
-          throw new Error('Replacement peer commit is still in progress');
+          authoritativeInProgress = true;
+          lastError = new Error('Replacement peer commit is still in progress');
+          emitDebugEvent(callId, 'remote_audio.candidate.commit_in_progress', {
+            generation,
+            attempt,
+            decisionTimeoutMs: normalizePeerPromotionDecisionTimeoutMs(
+              backendDecisionTimeoutMs
+            )
+          });
+          break;
         }
         if (promotion.status === 'failed') {
           throw new FailedPeerPromotionError();
@@ -695,7 +717,213 @@
       }
     }
 
+    if (authoritativeInProgress) {
+      return reconcileInProgressBrowserPeerPromotion(
+        callId,
+        promotionSessionId,
+        generation,
+        attempt,
+        backendDecisionTimeoutMs,
+        lastError
+      );
+    }
+
     throw new AmbiguousPeerPromotionError(lastError);
+  }
+
+  async function reconcileInProgressBrowserPeerPromotion(
+    callId: string,
+    promotionSessionId: string,
+    generation: number,
+    initialAttempt: number,
+    backendDecisionTimeoutMs: number | null | undefined,
+    initialError: unknown
+  ) {
+    const decisionTimeoutMs = normalizePeerPromotionDecisionTimeoutMs(
+      backendDecisionTimeoutMs
+    );
+    const deadline = performance.now() + decisionTimeoutMs;
+    let attempt = initialAttempt;
+    let lastError = initialError;
+
+    while (performance.now() < deadline) {
+      const remainingBeforeDelay = deadline - performance.now();
+      await delay(Math.min(PEER_PROMOTION_RETRY_DELAY_MS, remainingBeforeDelay));
+      if (performance.now() >= deadline) {
+        break;
+      }
+      attempt += 1;
+      const controller = new AbortController();
+      const attemptTimeout = Math.max(
+        1,
+        Math.min(PEER_PROMOTION_ATTEMPT_TIMEOUT_MS, deadline - performance.now())
+      );
+      const timeout = window.setTimeout(() => controller.abort(), attemptTimeout);
+      try {
+        const promotion = await promoteCallPeer(
+          callId,
+          promotionSessionId,
+          generation,
+          'commit',
+          { signal: controller.signal }
+        );
+        if (
+          promotion.session_id !== promotionSessionId ||
+          promotion.generation !== generation
+        ) {
+          throw new Error('Replacement peer commit returned an invalid acknowledgement');
+        }
+        if (promotion.status === 'committed') {
+          emitDebugEvent(callId, 'remote_audio.candidate.commit_reconciled', {
+            generation,
+            attempt,
+            result: 'committed_after_in_progress'
+          });
+          return;
+        }
+        if (promotion.status === 'failed') {
+          throw new FailedPeerPromotionError();
+        }
+        if (promotion.status === 'rejected') {
+          throw new RejectedPeerPromotionError();
+        }
+        lastError = new Error('Replacement peer commit is still in progress');
+        emitDebugEvent(callId, 'remote_audio.candidate.commit_status_poll', {
+          generation,
+          attempt,
+          remainingMs: Math.round(deadline - performance.now())
+        });
+      } catch (error) {
+        if (
+          error instanceof CallApiError &&
+          error.code === 'webrtc_peer_already_committed'
+        ) {
+          emitDebugEvent(callId, 'remote_audio.candidate.commit_reconciled', {
+            generation,
+            attempt,
+            result: 'already_committed_after_in_progress'
+          });
+          return;
+        }
+        if (error instanceof FailedPeerPromotionError) {
+          throw error;
+        }
+        if (peerPromotionProvesNotCommitted(error)) {
+          throw error;
+        }
+        lastError = error;
+        emitDebugEvent(callId, 'remote_audio.candidate.commit_status_retry', {
+          generation,
+          attempt,
+          remainingMs: Math.round(deadline - performance.now()),
+          name: (error as DOMException)?.name ?? 'unknown',
+          code: error instanceof CallApiError ? error.code : undefined
+        });
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    }
+
+    return resolveExpiredBrowserPeerPromotion(
+      callId,
+      promotionSessionId,
+      generation,
+      attempt,
+      lastError
+    );
+  }
+
+  function normalizePeerPromotionDecisionTimeoutMs(value: number | null | undefined) {
+    if (!Number.isInteger(value) || (value ?? 0) <= 0) {
+      return PEER_PROMOTION_SWITCH_DECISION_FALLBACK_MS;
+    }
+    return Math.min(
+      PEER_PROMOTION_SWITCH_DECISION_MAX_MS,
+      Math.max(PEER_PROMOTION_SWITCH_DECISION_FALLBACK_MS, value as number)
+    );
+  }
+
+  async function resolveExpiredBrowserPeerPromotion(
+    callId: string,
+    promotionSessionId: string,
+    generation: number,
+    attempt: number,
+    lastError: unknown
+  ) {
+    emitDebugEvent(callId, 'remote_audio.candidate.commit_decision_deadline', {
+      generation,
+      attempt
+    });
+
+    const controller = new AbortController();
+    const timeout = window.setTimeout(
+      () => controller.abort(),
+      PEER_PROMOTION_ATTEMPT_TIMEOUT_MS
+    );
+    try {
+      const promotion = await promoteCallPeer(
+        callId,
+        promotionSessionId,
+        generation,
+        'commit',
+        { signal: controller.signal }
+      );
+      if (
+        promotion.session_id !== promotionSessionId ||
+        promotion.generation !== generation
+      ) {
+        throw new Error('Replacement peer commit returned an invalid acknowledgement');
+      }
+      if (promotion.status === 'committed') {
+        emitDebugEvent(callId, 'remote_audio.candidate.commit_reconciled', {
+          generation,
+          attempt: attempt + 1,
+          result: 'committed_at_decision_deadline'
+        });
+        return;
+      }
+      if (promotion.status === 'failed') {
+        throw new FailedPeerPromotionError();
+      }
+      if (promotion.status === 'rejected') {
+        throw new RejectedPeerPromotionError();
+      }
+      lastError = new Error('Replacement peer commit remained in progress at its deadline');
+    } catch (error) {
+      if (
+        error instanceof CallApiError &&
+        error.code === 'webrtc_peer_already_committed'
+      ) {
+        return;
+      }
+      if (error instanceof FailedPeerPromotionError || peerPromotionProvesNotCommitted(error)) {
+        throw error;
+      }
+      lastError = error;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+
+    const rejection = await rejectBrowserPeerPromotion(
+      callId,
+      promotionSessionId,
+      generation
+    );
+    if (rejection === 'rollback_safe') {
+      throw new RejectedPeerPromotionError();
+    }
+    if (rejection === 'committed') {
+      emitDebugEvent(callId, 'remote_audio.candidate.commit_reconciled', {
+        generation,
+        attempt: attempt + 2,
+        result: 'committed_during_deadline_resolution'
+      });
+      return;
+    }
+    if (rejection === 'failed') {
+      throw new FailedPeerPromotionError();
+    }
+    throw new PeerPromotionDecisionDeadlineError(lastError);
   }
 
   function peerPromotionProvesNotCommitted(error: unknown) {
@@ -717,7 +945,7 @@
     callId: string,
     promotionSessionId: string,
     generation: number
-  ): Promise<boolean> {
+  ): Promise<'rollback_safe' | 'committed' | 'failed' | 'in_progress' | 'ambiguous'> {
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort(), 1000);
     try {
@@ -728,17 +956,32 @@
         'reject',
         { signal: controller.signal }
       );
-      return promotion.status === 'rejected';
+      if (
+        promotion.session_id !== promotionSessionId ||
+        promotion.generation !== generation
+      ) {
+        return 'ambiguous';
+      }
+      if (promotion.status === 'rejected') {
+        return 'rollback_safe';
+      }
+      if (promotion.status === 'committed') {
+        return 'committed';
+      }
+      return promotion.status;
     } catch (error) {
       emitDebugEvent(callId, 'remote_audio.candidate.reject_failed', {
         generation,
         name: (error as DOMException)?.name ?? 'unknown',
         message: (error as Error)?.message ?? ''
       });
-      return !(
+      if (
         error instanceof CallApiError &&
         error.code === 'webrtc_peer_already_committed'
-      );
+      ) {
+        return 'committed';
+      }
+      return peerPromotionProvesNotCommitted(error) ? 'rollback_safe' : 'ambiguous';
     } finally {
       window.clearTimeout(timeout);
     }
@@ -1055,6 +1298,23 @@
         attempt: reconnectAttempt
       });
     } catch (error) {
+      if (error instanceof PeerPromotionDecisionDeadlineError) {
+        emitDebugEvent(debugCallId, 'pc.media_reconnect.peer_decision_deadline', {
+          attempt: reconnectAttempt,
+          name: error.name,
+          message: error.message
+        });
+        emitLocalMicReconnectDiagnostic(debugCallId, {
+          phase: 'peer_decision_deadline',
+          reason,
+          attempt: reconnectAttempt
+        });
+        await failTerminalMediaReconnect(
+          debugCallId,
+          'media_reconnect_peer_decision_deadline'
+        );
+        return;
+      }
       emitDebugEvent(debugCallId, 'pc.media_reconnect.failed', {
         attempt: reconnectAttempt,
         name: (error as DOMException)?.name ?? 'unknown',
