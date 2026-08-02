@@ -9,6 +9,7 @@
     backfillCallReconnectAudio,
     endCall,
     interruptCall,
+    promoteCallPeer,
     recoverCallEvents,
     sendCallOffer as offerCall,
     setCallMuted,
@@ -381,9 +382,21 @@
       resolveCandidateRemoteStream,
       remoteAudioPromoted: false
     };
-    peerConnection = connection;
-    activeBrowserMediaConnection = connectionOwner;
-    eventsChannel = candidateEventsChannel;
+    let candidateDiscarded = false;
+    const ownsCandidateConnection = () =>
+      !candidateDiscarded && (
+        ownsBrowserMediaConnection(connectionOwner) ||
+        (
+          preserveExisting &&
+          connectionOwner.generationId === browserMediaConnectionGeneration &&
+          activeBrowserMediaConnection === previousConnectionOwner
+        )
+      );
+    if (!preserveExisting) {
+      peerConnection = connection;
+      activeBrowserMediaConnection = connectionOwner;
+      eventsChannel = candidateEventsChannel;
+    }
     attachPeerConnectionDebug(connectionOwner, started.call_id);
     attachCallEventChannel(
       candidateEventsChannel,
@@ -401,13 +414,15 @@
         connectionGeneration: connectionOwner.generationId,
         isCurrentPeer: ownsBrowserMediaConnection(connectionOwner)
       });
-      if (!ownsBrowserMediaConnection(connectionOwner)) {
+      if (!ownsCandidateConnection()) {
         event.channel.close();
         return;
       }
       if (event.channel.label === 'rayme-events') {
         connectionOwner.eventsChannel = event.channel;
-        eventsChannel = event.channel;
+        if (!preserveExisting || ownsBrowserMediaConnection(connectionOwner)) {
+          eventsChannel = event.channel;
+        }
         attachCallEventChannel(
           event.channel,
           connectionOwner,
@@ -425,7 +440,7 @@
         connectionGeneration: connectionOwner.generationId,
         isCurrentPeer: ownsBrowserMediaConnection(connectionOwner)
       });
-      if (!ownsBrowserMediaConnection(connectionOwner)) {
+      if (!ownsCandidateConnection()) {
         return;
       }
       const stream = event.streams[0] ?? new MediaStream([event.track]);
@@ -455,6 +470,9 @@
       connection.addTrack(track, localMediaStream);
     }
 
+    let pendingPeerGeneration: number | null = null;
+    let backendPeerCommitted = false;
+    let promotionSessionId = started.session_id || started.call_id;
     try {
       const offer = await connection.createOffer();
       await connection.setLocalDescription(offer);
@@ -470,6 +488,7 @@
       });
       const response = await offerCall(started.call_id, localDescription, started.session_id);
       sessionId = response.session_id || started.session_id || started.call_id;
+      promotionSessionId = sessionId;
       emitDebugEvent(started.call_id, 'pc.answer.received', {
         session_id: sessionId,
         has_answer: Boolean(response.answer),
@@ -487,10 +506,30 @@
         });
       }
       if (preserveExisting) {
+        if (
+          !Number.isInteger(response.peer_generation) ||
+          (response.peer_generation ?? 0) < 1
+        ) {
+          throw new Error('Replacement offer did not include a valid peer generation');
+        }
+        pendingPeerGeneration = response.peer_generation as number;
         await waitForBrowserMediaConnected(connection, started.call_id);
         const candidateRemoteStream =
           connectionOwner.candidateRemoteStream ??
           await waitForBrowserMediaCandidateStream(connectionOwner, started.call_id);
+        const promotion = await promoteCallPeer(
+          started.call_id,
+          promotionSessionId,
+          pendingPeerGeneration,
+          'commit'
+        );
+        if (promotion.status !== 'committed') {
+          throw new Error('Replacement peer promotion was not committed');
+        }
+        backendPeerCommitted = true;
+        peerConnection = connection;
+        activeBrowserMediaConnection = connectionOwner;
+        eventsChannel = connectionOwner.eventsChannel;
         promoteBrowserMediaCandidate(
           connectionOwner,
           candidateRemoteStream,
@@ -503,6 +542,14 @@
       return response;
     } catch (error) {
       if (preserveExisting) {
+        if (pendingPeerGeneration !== null && !backendPeerCommitted) {
+          await rejectBrowserPeerPromotion(
+            started.call_id,
+            promotionSessionId,
+            pendingPeerGeneration
+          );
+        }
+        candidateDiscarded = true;
         discardBrowserMediaCandidate(connectionOwner, started.call_id, error);
         if (peerConnection === connection) {
           peerConnection = previousConnection;
@@ -516,6 +563,32 @@
         connection.close();
       }
       throw error;
+    }
+  }
+
+  async function rejectBrowserPeerPromotion(
+    callId: string,
+    promotionSessionId: string,
+    generation: number
+  ) {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 1000);
+    try {
+      await promoteCallPeer(
+        callId,
+        promotionSessionId,
+        generation,
+        'reject',
+        { signal: controller.signal }
+      );
+    } catch (error) {
+      emitDebugEvent(callId, 'remote_audio.candidate.reject_failed', {
+        generation,
+        name: (error as DOMException)?.name ?? 'unknown',
+        message: (error as Error)?.message ?? ''
+      });
+    } finally {
+      window.clearTimeout(timeout);
     }
   }
 
@@ -577,6 +650,16 @@
         );
       }
       if ((iceConnectionState === 'connected' || iceConnectionState === 'completed') && isBrowserMediaConnected(connection)) {
+        if (mediaReconnecting) {
+          emitMediaReconnectGuardSkip(
+            owner,
+            debugCallId,
+            'disconnected',
+            'recover',
+            ['replacement_pending']
+          );
+          return;
+        }
         handleBrowserMediaRecovered(owner, debugCallId, 'disconnected', 'iceconnectionstatechange');
       }
     });
@@ -605,6 +688,16 @@
         );
       }
       if (connection.connectionState === 'connected' && isBrowserMediaConnected(connection)) {
+        if (mediaReconnecting) {
+          emitMediaReconnectGuardSkip(
+            owner,
+            debugCallId,
+            'failed',
+            'recover',
+            ['replacement_pending']
+          );
+          return;
+        }
         handleBrowserMediaRecovered(owner, debugCallId, 'failed', 'connectionstatechange');
         try {
           if (eventsChannel && (eventsChannel.readyState === 'closed' || eventsChannel.readyState === 'closing')) {

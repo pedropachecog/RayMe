@@ -225,6 +225,8 @@ export interface CallOfferResponse {
   session_id: string;
   answer: RTCSessionDescriptionInit | CallSessionDescription | null;
   event_channel: 'rayme-events' | string;
+  peer_generation?: number | null;
+  peer_commit_timeout_ms?: number | null;
   preparation?: VoicePreparationStatus | null;
 }
 

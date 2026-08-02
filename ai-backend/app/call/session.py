@@ -191,6 +191,7 @@ class _PendingPeerCandidate:
     data_channel: Any | None = None
     timeout_task: asyncio.Task[None] | None = None
     configuration: PeerOfferConfiguration | None = None
+    admission_event: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 @dataclass
@@ -1066,15 +1067,73 @@ class CallSession:
                     and lifecycle.switch_owner is peer_connection
                     and lifecycle.switch_task is not None
                 ):
-                    switch_task = lifecycle.switch_task
+                    admission_waiter = lifecycle.switch_task
+                elif (
+                    lifecycle.candidate is not None
+                    and lifecycle.candidate.peer_connection is peer_connection
+                    and (
+                        generation is None
+                        or generation == lifecycle.candidate.generation
+                    )
+                ):
+                    admission_waiter = lifecycle.candidate.admission_event.wait()
                 else:
                     return False
             try:
-                await asyncio.shield(switch_task)
+                await asyncio.shield(admission_waiter)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 return False
+
+    async def commit_pending_peer_generation(self, generation: int) -> str:
+        """Promote one transport-connected candidate after browser media staging."""
+
+        lifecycle = self._peer_lifecycle
+        if (
+            lifecycle.active_generation == generation
+            and lifecycle.candidate is None
+            and self.peer_connection is not None
+        ):
+            return "committed"
+        candidate = lifecycle.candidate
+        if candidate is None or candidate.generation != generation:
+            return "stale"
+        peer_connection = candidate.peer_connection
+        connection_state = getattr(peer_connection, "connectionState", None)
+        ice_state = getattr(peer_connection, "iceConnectionState", None)
+        if (
+            connection_state != "connected"
+            and ice_state not in {"connected", "completed"}
+        ):
+            return "not_connected"
+        accepted, _ = await self.accept_pending_peer_connection(
+            peer_connection,
+            generation=generation,
+        )
+        if accepted:
+            return "committed"
+        if (
+            self._peer_lifecycle.active_generation == generation
+            and self.peer_connection is peer_connection
+        ):
+            return "committed"
+        return "stale"
+
+    async def reject_pending_peer_generation(self, generation: int) -> str:
+        """Reject one uncommitted candidate without disturbing active media."""
+
+        lifecycle = self._peer_lifecycle
+        if lifecycle.active_generation == generation:
+            return "committed"
+        candidate = lifecycle.candidate
+        if candidate is None or candidate.generation != generation:
+            return "stale"
+        rejected = await self.reject_pending_peer_connection(
+            candidate.peer_connection,
+            generation=generation,
+        )
+        return "rejected" if rejected else "stale"
 
     def set_data_channel_for_peer(
         self,
@@ -1514,6 +1573,7 @@ class CallSession:
             return
         self._cancel_pending_peer_timeout_locked()
         self._peer_lifecycle.candidate = None
+        candidate.admission_event.set()
 
     def _cancel_pending_peer_timeout_locked(self) -> None:
         candidate = self._peer_lifecycle.candidate

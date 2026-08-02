@@ -5100,6 +5100,9 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
         replacement_peer.iceConnectionState = "connected"
         await replacement_peer.handlers["connectionstatechange"]()
 
+        assert session.peer_connection is active_peer
+        assert active_peer.close_calls == 0
+        assert await session.commit_pending_peer_generation(generation) == "committed"
         assert session.peer_connection is replacement_peer
         assert session.state == "speaking"
         assert active_peer.close_calls == 1
@@ -7066,6 +7069,7 @@ def test_reconnect_candidate_timeout_leaves_terminalization_to_reconnect_grace()
 
         assert candidate.close_calls == 1
         assert session._pending_peer_connections == []
+        assert session.peer_connection is active_peer
         assert session.state == "reconnecting"
         assert session.end_reason is None
         assert released_owners == []
@@ -7079,6 +7083,54 @@ def test_reconnect_candidate_timeout_leaves_terminalization_to_reconnect_grace()
     assert session.state == "ended"
     assert session.end_reason == "connection_closed"
     assert released_owners == ["call-session-reconnect-timeout"]
+
+
+@pytest.mark.parametrize(
+    ("action", "expected_admission", "expected_owner"),
+    [
+        ("commit", True, "candidate"),
+        ("reject", False, "active"),
+    ],
+)
+def test_candidate_inbound_media_waits_for_generation_bound_browser_decision(
+    action: str,
+    expected_admission: bool,
+    expected_owner: str,
+) -> None:
+    session, active_peer = _new_session(
+        session_id=f"candidate-media-browser-{action}"
+    )
+    candidate = ScriptedPeerConnection()
+
+    async def scenario() -> bool:
+        generation = await session.mark_peer_connection_pending(
+            candidate,
+            timeout_seconds=60.0,
+        )
+        admission = asyncio.create_task(
+            session.wait_for_peer_media_admission(
+                candidate,
+                generation=generation,
+            )
+        )
+        await asyncio.sleep(0)
+        assert admission.done() is False
+
+        if action == "commit":
+            candidate.connectionState = "connected"
+            assert await session.commit_pending_peer_generation(generation) == "committed"
+        else:
+            assert await session.reject_pending_peer_generation(generation) == "rejected"
+        return await admission
+
+    admitted = _run(scenario())
+
+    assert admitted is expected_admission
+    assert session.peer_connection is (
+        candidate if expected_owner == "candidate" else active_peer
+    )
+    assert active_peer.close_calls == (1 if action == "commit" else 0)
+    assert candidate.close_calls == (0 if action == "commit" else 1)
 
 
 def test_old_candidate_rejection_cannot_terminalize_newer_generation() -> None:

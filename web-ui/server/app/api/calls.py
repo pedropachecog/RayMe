@@ -111,6 +111,14 @@ class CallOfferRequest(BaseModel):
         raise ValueError("offer is required")
 
 
+class PeerPromotionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    session_id: str = Field(min_length=1, max_length=128)
+    generation: int = Field(ge=1)
+    action: Literal["commit", "reject"]
+
+
 class MuteRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -306,6 +314,8 @@ async def create_call_offer(
             "session_id": returned_session_id,
             "answer": response.get("answer"),
             "event_channel": RAYME_EVENTS_CHANNEL,
+            "peer_generation": response.get("peer_generation"),
+            "peer_commit_timeout_ms": response.get("peer_commit_timeout_ms"),
         }
         if voice_preparation.reference_payload is not None:
             result["preparation"] = await _prepare_call_voice(
@@ -319,6 +329,51 @@ async def create_call_offer(
         return result
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except CallServiceError as exc:
+        raise _call_error(exc) from exc
+    except AiBackendClientError as exc:
+        raise _backend_error(exc) from exc
+
+
+@router.post(
+    "/{call_id}/peer-promotion",
+    dependencies=[Depends(enforce_same_origin_for_calls)],
+)
+async def promote_call_peer(
+    call_id: str,
+    payload: PeerPromotionRequest,
+    session: AsyncSession = Depends(get_call_session),
+    runtime_settings: Settings = Depends(get_call_runtime_settings),
+    backend: Any = Depends(get_call_backend_client),
+) -> dict[str, Any]:
+    service = CallService(session)
+    try:
+        session_id = service.session_for_call(call_id)
+        _reject_mismatched_session(session_id, payload.session_id)
+        endpoint_settings = await SettingsService(session, runtime_settings).read()
+        backend_result = await _promote_call_peer(
+            backend,
+            endpoint_settings.ai_backend_url,
+            session_id,
+            payload.generation,
+            payload.action,
+        )
+        expected_status = "committed" if payload.action == "commit" else "rejected"
+        if (
+            backend_result.get("session_id") != session_id
+            or backend_result.get("generation") != payload.generation
+            or backend_result.get("status") != expected_status
+        ):
+            raise AiBackendProcessingError(
+                code="call_control_failed",
+                message="Call control request failed",
+            )
+        return {
+            "call_id": call_id,
+            "session_id": session_id,
+            "generation": payload.generation,
+            "status": expected_status,
+        }
     except CallServiceError as exc:
         raise _call_error(exc) from exc
     except AiBackendClientError as exc:
@@ -940,6 +995,25 @@ async def _create_offer(backend: Any, base_url: str, payload: Mapping[str, Any])
     if not hasattr(backend, "create_webrtc_offer"):
         raise _missing_backend_method("create_webrtc_offer")
     return dict(await backend.create_webrtc_offer(base_url, payload))
+
+
+async def _promote_call_peer(
+    backend: Any,
+    base_url: str,
+    session_id: str,
+    generation: int,
+    action: Literal["commit", "reject"],
+) -> dict[str, Any]:
+    if not hasattr(backend, "promote_call_peer"):
+        raise _missing_backend_method("promote_call_peer")
+    return dict(
+        await backend.promote_call_peer(
+            base_url,
+            session_id,
+            generation,
+            action,
+        )
+    )
 
 
 async def _prepare_call_voice(

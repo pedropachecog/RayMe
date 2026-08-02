@@ -86,12 +86,14 @@ export async function installMockCallMedia(
     controllablePcm?: boolean;
     deferReplacementConnection?: boolean;
     failReplacementConnection?: boolean;
+    suppressReplacementTrack?: boolean;
   } = {}
 ) {
   await page.addInitScript(({
     controllablePcm,
     deferReplacementConnection,
-    failReplacementConnection
+    failReplacementConnection,
+    suppressReplacementTrack
   }) => {
     type MockPeerWindow = Window & {
       __raymeMockPeerConnections?: MockRTCPeerConnection[];
@@ -264,7 +266,9 @@ export async function installMockCallMedia(
 
       async setRemoteDescription(description: RTCSessionDescriptionInit) {
         this.remoteDescription = description;
-        this.dispatchRemoteTrack();
+        if (!(this.id > 1 && suppressReplacementTrack)) {
+          this.dispatchRemoteTrack();
+        }
         if (this.id > 1 && failReplacementConnection) {
           this.connectionState = 'failed';
           this.iceConnectionState = 'failed';

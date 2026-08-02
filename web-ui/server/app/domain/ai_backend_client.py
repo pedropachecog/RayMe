@@ -520,6 +520,29 @@ class AiBackendClient:
             raise _invalid_response()
         return dict(response_payload)
 
+    async def promote_call_peer(
+        self,
+        base_url: str,
+        session_id: str,
+        generation: int,
+        action: Literal["commit", "reject"],
+    ) -> dict[str, Any]:
+        response = await self._request(
+            "POST",
+            _join_endpoint(
+                base_url,
+                f"/webrtc/sessions/{session_id}/peer-promotion",
+            ),
+            json={"generation": generation, "action": action},
+            processing_message=WEBRTC_FAILED_MESSAGE,
+            processing_code="call_control_failed",
+            timeout=self._webrtc_timeout,
+        )
+        response_payload = _json_payload(response)
+        if not isinstance(response_payload, dict):
+            raise _invalid_response()
+        return dict(response_payload)
+
     async def mute_call(self, base_url: str, session_id: str, muted: bool) -> dict[str, Any]:
         response = await self._request(
             "POST",

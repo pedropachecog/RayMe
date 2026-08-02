@@ -1105,10 +1105,49 @@ def test_webrtc_offer_creates_session_answer_and_events_channel(stub_webrtc: Non
     assert isinstance(payload["answer"]["sdp"], str)
     assert payload["answer"]["sdp"].startswith("v=0")
     assert payload["data_channel"]["label"] == "rayme-events"
+    assert payload["peer_generation"] is None
+    assert payload["peer_commit_timeout_ms"] == 8000
     session = client.app.state.call_session_manager.get_session("call-session-1")
     assert session.peer_connection.create_data_channel_calls == 0
     assert session.outbound_audio_track is not None
     assert session.outbound_audio_track.kind == "audio"
+
+
+def test_reconnect_candidate_requires_connected_commit_and_can_be_rejected(
+    stub_webrtc: None,
+) -> None:
+    client = _client()
+    session_id = "reconnect-browser-reject"
+    first = client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+    session = client.app.state.call_session_manager.get_session(session_id)
+    original_peer = session.peer_connection
+
+    replacement = client.post(
+        "/webrtc/offer",
+        json=_offer_payload(session_id=session_id),
+    )
+    generation = replacement.json()["peer_generation"]
+    candidate = session._peer_lifecycle.candidate
+
+    not_connected = client.post(
+        f"/webrtc/sessions/{session_id}/peer-promotion",
+        json={"generation": generation, "action": "commit"},
+    )
+    rejected = client.post(
+        f"/webrtc/sessions/{session_id}/peer-promotion",
+        json={"generation": generation, "action": "reject"},
+    )
+
+    assert first.status_code == 200
+    assert replacement.status_code == 200
+    assert generation == 1
+    assert candidate is not None
+    assert not_connected.status_code == 409
+    assert not_connected.json()["detail"]["code"] == "webrtc_peer_not_connected"
+    assert rejected.status_code == 200
+    assert rejected.json()["status"] == "rejected"
+    assert session.peer_connection is original_peer
+    assert session._peer_lifecycle.candidate is None
 
 
 def test_reconnect_offer_rejects_explicitly_ended_session_before_allocating_media(
@@ -1588,6 +1627,8 @@ def test_inflight_reconnect_offer_does_not_steal_active_session_media(
     assert not thread.is_alive()
     assert errors == []
     assert responses[0].status_code == 200
+    generation = responses[0].json()["peer_generation"]
+    assert generation == 1
     assert session.peer_connection is original_peer
     assert session.outbound_audio_track is original_track
     assert peers[1] in session._pending_peer_connections
@@ -1595,6 +1636,21 @@ def test_inflight_reconnect_offer_does_not_steal_active_session_media(
 
     asyncio.run(peers[1].emit_connected())
 
+    assert session.peer_connection is original_peer
+    assert session.outbound_audio_track is original_track
+    assert original_peer.close_calls == 0
+
+    promoted = client.post(
+        f"/webrtc/sessions/{session_id}/peer-promotion",
+        json={"generation": generation, "action": "commit"},
+    )
+
+    assert promoted.status_code == 200
+    assert promoted.json() == {
+        "session_id": session_id,
+        "generation": generation,
+        "status": "committed",
+    }
     assert session.peer_connection is peers[1]
     assert session.outbound_audio_track is tracks[1]
     assert original_peer.close_calls == 1
@@ -1751,6 +1807,8 @@ def test_retiring_peer_terminal_callback_cannot_steal_switch_ownership(
 
         candidate_peer.connectionState = "connected"
         await candidate_peer.handlers["connectionstatechange"]()
+        assert session.peer_connection is retiring_peer
+        assert await session.commit_pending_peer_generation(generation) == "committed"
         return session, retiring_peer, candidate_peer, generation
 
     session, retiring_peer, candidate_peer, generation = asyncio.run(scenario())

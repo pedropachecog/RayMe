@@ -17,6 +17,7 @@ from app.api.tts import _qwen_error_detail, _qwen_http_status
 from app.api.auth import require_service_auth as _require_service_auth
 from app.call.session import (
     AcceptedSpeechConfiguration,
+    CALL_PEER_REPLACEMENT_TIMEOUT_SECONDS,
     CallSession,
     CallSessionManager,
     PeerSwitchInProgressError,
@@ -82,6 +83,13 @@ class EndControlRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: str = Field(default="hangup", min_length=1, max_length=80)
+
+
+class PeerPromotionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    generation: int = Field(ge=1)
+    action: Literal["commit", "reject"]
 
 
 class SpeakRequest(BaseModel):
@@ -460,6 +468,69 @@ async def create_webrtc_offer_answer(
         "answer": answer,
         "event_channel": RAYME_EVENTS_CHANNEL,
         "data_channel": {"label": RAYME_EVENTS_CHANNEL},
+        "peer_generation": pending_generation,
+        "peer_commit_timeout_ms": int(
+            CALL_PEER_REPLACEMENT_TIMEOUT_SECONDS * 1000
+        ),
+    }
+
+
+@router.post(
+    "/sessions/{session_id}/peer-promotion",
+    dependencies=[Depends(_require_service_auth)],
+)
+async def promote_peer_candidate(
+    request: Request,
+    session_id: str,
+    payload: PeerPromotionRequest,
+) -> dict[str, Any]:
+    session = _session_or_404(request, session_id)
+    if payload.action == "commit":
+        outcome = await session.commit_pending_peer_generation(payload.generation)
+        if outcome == "not_connected":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "webrtc_peer_not_connected",
+                    "message": "Replacement peer transport is not connected",
+                },
+            )
+        if outcome != "committed":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "webrtc_peer_generation_stale",
+                    "message": "Replacement peer generation is no longer pending",
+                },
+            )
+    else:
+        outcome = await session.reject_pending_peer_generation(payload.generation)
+        if outcome == "committed":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "webrtc_peer_already_committed",
+                    "message": "Replacement peer generation was already committed",
+                },
+            )
+        if outcome != "rejected":
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "webrtc_peer_generation_stale",
+                    "message": "Replacement peer generation is no longer pending",
+                },
+            )
+    logger.info(
+        "[rayme-call] peer.pending.%s session=%s generation=%d source=browser_decision",
+        outcome,
+        session.session_id,
+        payload.generation,
+    )
+    return {
+        "session_id": session.session_id,
+        "generation": payload.generation,
+        "status": outcome,
     }
 
 
@@ -1018,30 +1089,6 @@ def _attach_peer_handlers(
 
     keepalive_task: asyncio.Task | None = None
 
-    async def accept_pending_peer_if_connected(source: str) -> None:
-        if not session.is_peer_connection_pending(
-            peer_connection,
-            pending_generation,
-        ):
-            return
-        connection_state = getattr(peer_connection, "connectionState", None)
-        ice_state = getattr(peer_connection, "iceConnectionState", None)
-        if connection_state != "connected" and ice_state not in {"connected", "completed"}:
-            return
-        accepted, _ = await session.accept_pending_peer_connection(
-            peer_connection,
-            generation=pending_generation,
-        )
-        if not accepted:
-            return
-        logger.info(
-            "[rayme-call] peer.pending.accepted session=%s source=%s conn=%s ice=%s",
-            session.session_id,
-            source,
-            connection_state,
-            ice_state,
-        )
-
     async def discard_failed_pending_peer(source: str) -> bool:
         if not session.is_peer_connection_pending(
             peer_connection,
@@ -1162,7 +1209,6 @@ def _attach_peer_handlers(
         )
         if await discard_failed_pending_peer("connectionstatechange"):
             return
-        await accept_pending_peer_if_connected("connectionstatechange")
         if peer_connection is session.peer_connection:
             await session.handle_connection_state_change(
                 peer_connection,
@@ -1179,7 +1225,6 @@ def _attach_peer_handlers(
         )
         if await discard_failed_pending_peer("iceconnectionstatechange"):
             return
-        await accept_pending_peer_if_connected("iceconnectionstatechange")
         if peer_connection is session.peer_connection:
             await session.handle_connection_state_change(
                 peer_connection,
@@ -1337,25 +1382,6 @@ async def _receive_audio_track(
         frame_count += 1
         consecutive_live_recv_errors = 0
         if frame_count == 1:
-            if (
-                peer_connection is not None
-                and session.is_peer_connection_pending(
-                    peer_connection,
-                    pending_generation,
-                )
-            ):
-                accepted, _ = (
-                    await session.accept_pending_peer_connection(
-                        peer_connection,
-                        generation=pending_generation,
-                    )
-                )
-                if not accepted:
-                    break
-                logger.info(
-                    "[rayme-call] peer.pending.accepted session=%s source=first_audio_frame",
-                    session.session_id,
-                )
             if (
                 peer_connection is not None
                 and not await session.wait_for_peer_media_admission(

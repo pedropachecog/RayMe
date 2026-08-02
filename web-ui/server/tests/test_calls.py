@@ -62,6 +62,7 @@ class CallFixture:
 _TEST_VOICE_BLOB_DIR: Path | None = None
 UNSAFE_CALL_ROUTE_SUFFIXES = [
     "/offer",
+    "/peer-promotion",
     "/mute",
     "/interrupt",
     "/turns",
@@ -81,6 +82,8 @@ class ScriptedCallBackend:
         self.readiness_calls = 0
         self.created_sessions: list[dict[str, Any]] = []
         self.offer_calls: list[dict[str, Any]] = []
+        self.offer_peer_generation: int | None = None
+        self.peer_promotion_calls: list[dict[str, Any]] = []
         self.prepare_calls: list[dict[str, Any]] = []
         self.preparation_status_calls = 0
         self.preparation_result: dict[str, Any] | None = None
@@ -126,6 +129,29 @@ class ScriptedCallBackend:
         return {
             "session_id": payload["session_id"],
             "answer": {"type": "answer", "sdp": "v=0\r\n"},
+            "peer_generation": self.offer_peer_generation,
+            "peer_commit_timeout_ms": 8000,
+        }
+
+    async def promote_call_peer(
+        self,
+        base_url: str,
+        session_id: str,
+        generation: int,
+        action: str,
+    ) -> dict[str, Any]:
+        self.peer_promotion_calls.append(
+            {
+                "base_url": base_url,
+                "session_id": session_id,
+                "generation": generation,
+                "action": action,
+            }
+        )
+        return {
+            "session_id": session_id,
+            "generation": generation,
+            "status": "committed" if action == "commit" else "rejected",
         }
 
     async def prepare_call_speech(
@@ -819,6 +845,48 @@ def test_offer_failure_returns_backend_public_detail(call_fixture: CallFixture) 
     assert _public_error_message(response) == "WebRTC offer could not be accepted"
 
 
+@pytest.mark.parametrize("action", ["commit", "reject"])
+def test_peer_promotion_preserves_offer_generation_and_forwards_authenticated_action(
+    call_fixture: CallFixture,
+    action: str,
+) -> None:
+    call_fixture.backend.offer_peer_generation = 7
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+
+    offered = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/offer",
+        json={
+            "session_id": started["session_id"],
+            "offer": {"type": "offer", "sdp": "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"},
+        },
+    )
+    promoted = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/peer-promotion",
+        json={
+            "session_id": started["session_id"],
+            "generation": 7,
+            "action": action,
+        },
+    )
+
+    assert offered.status_code == 200
+    assert offered.json()["peer_generation"] == 7
+    assert offered.json()["peer_commit_timeout_ms"] == 8000
+    assert promoted.status_code == 200
+    assert promoted.json()["status"] == (
+        "committed" if action == "commit" else "rejected"
+    )
+    assert call_fixture.backend.peer_promotion_calls == [
+        {
+            "base_url": "https://127.0.0.1:9443",
+            "session_id": started["session_id"],
+            "generation": 7,
+            "action": action,
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     "invalid_reference",
     [
@@ -1132,6 +1200,7 @@ def test_offer_rejects_missing_backend_method_instead_of_returning_empty_answer(
 @pytest.mark.parametrize(
     ("helper_name", "args", "missing_method"),
     [
+        ("_promote_call_peer", ("session_live", 1, "commit"), "promote_call_peer"),
         ("_mute_call", ("session_live", True), "mute_call"),
         ("_interrupt_call", ("session_live",), "interrupt_call"),
         ("_end_call", ("session_live", "hangup"), "end_call"),
@@ -3130,6 +3199,12 @@ def _unsafe_call_payload(route_suffix: str, session_id: str) -> dict[str, Any]:
         return {
             "session_id": session_id,
             "offer": {"type": "offer", "sdp": "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"},
+        }
+    if route_suffix == "/peer-promotion":
+        return {
+            "session_id": session_id,
+            "generation": 1,
+            "action": "commit",
         }
     if route_suffix == "/mute":
         return {"session_id": session_id, "muted": True}

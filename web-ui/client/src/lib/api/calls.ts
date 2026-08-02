@@ -96,6 +96,25 @@ export async function sendCallOffer(
   return parseCallApiResponse(response, 'RayMe could not connect this call.');
 }
 
+export function promoteCallPeer(
+  callId: string,
+  sessionId: string,
+  generation: number,
+  action: 'commit' | 'reject',
+  options: { signal?: AbortSignal } = {}
+): Promise<{
+  call_id: string;
+  session_id: string;
+  generation: number;
+  status: 'committed' | 'rejected';
+}> {
+  return apiFetch(`/calls/${encodeURIComponent(callId)}/peer-promotion`, {
+    method: 'POST',
+    signal: options.signal,
+    body: JSON.stringify({ session_id: sessionId, generation, action })
+  });
+}
+
 export function submitCallTurn(
   callId: string,
   payload: CallTurnRequest,

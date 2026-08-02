@@ -17,11 +17,18 @@ type ReconnectRouteCounters = {
   turnCount: number;
   endCount: number;
   muteCount: number;
+  peerPromotionCount: number;
+  backendActivePeerId: number | null;
   offers: Array<{ peerId: number | null; sdp: string }>;
   backfills: Array<Record<string, unknown>>;
   recoveredEvents: Array<Record<string, unknown>>;
   turns: Array<Record<string, unknown>>;
   muteRequests: Array<Record<string, unknown>>;
+  peerPromotions: Array<{
+    session_id: string;
+    generation: number;
+    action: 'commit' | 'reject';
+  }>;
   requestOrder: string[];
   debugEvents: Array<{ event: string; detail: Record<string, unknown>; session_id?: string }>;
 };
@@ -357,6 +364,8 @@ test('keeps old audio live while a slow replacement stream stages, then promotes
   expect(staged.audioPlayback.activeStreamId).toBe(initialStreamId);
   expect(staged.audioPlayback.pausedStreamIds).not.toContain(initialStreamId);
   expect(debugEventCount(counters, 'remote_audio.attach')).toBe(1);
+  expect(counters.backendActivePeerId).toBe(staged.peers[0].id);
+  expect(counters.peerPromotions).toEqual([]);
 
   await completeCurrentMockPeerConnection(page);
   await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.ok')).toBe(1);
@@ -372,6 +381,14 @@ test('keeps old audio live while a slow replacement stream stages, then promotes
   expect(promoted.audioPlayback.pausedStreamIds).toContain(initialStreamId);
   expect(debugEventCount(counters, 'remote_audio.attach')).toBe(2);
   expect(debugEventCount(counters, 'remote_audio.candidate.promoted')).toBe(1);
+  expect(counters.backendActivePeerId).toBe(promoted.peers[1].id);
+  expect(counters.peerPromotions).toEqual([
+    {
+      session_id: 'rtc-call-reconnect-01',
+      generation: 1,
+      action: 'commit'
+    }
+  ]);
   assertNoBrowserErrors();
 });
 
@@ -401,6 +418,60 @@ test('discards a failed replacement candidate without touching old audible audio
   expect(rolledBack.audioPlayback.activeStreamId).toBe(initialStreamId);
   expect(rolledBack.audioPlayback.pausedStreamIds).not.toContain(initialStreamId);
   expect(debugEventCount(counters, 'remote_audio.attach')).toBe(1);
+  expect(debugEventCount(counters, 'remote_audio.candidate.promoted')).toBe(0);
+  expect(counters.backendActivePeerId).toBe(rolledBack.peers[0].id);
+  expect(counters.peerPromotions).toEqual([
+    {
+      session_id: 'rtc-call-reconnect-01',
+      generation: 1,
+      action: 'reject'
+    }
+  ]);
+  assertNoBrowserErrors();
+});
+
+test('keeps old backend and browser media authoritative when connected replacement has no track for seven seconds', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page, { suppressReplacementTrack: true });
+  const counters = await installReconnectCallRoutes(page);
+
+  await startReconnectCall(page, counters);
+  const initial = await getMockCallMediaSnapshot(page);
+  const initialStreamId = initial.peers[0].remoteStreamId;
+  expect(initialStreamId).not.toBeNull();
+  await page.clock.install();
+
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await expect.poll(() => counters.offerCount).toBe(2);
+  await expect.poll(async () => (await getMockCallMediaSnapshot(page)).peers[1]?.connectionState)
+    .toBe('connected');
+  const connectedWithoutTrack = await getMockCallMediaSnapshot(page);
+  expect(connectedWithoutTrack.peers[1].remoteStreamId).toBeNull();
+  expect(counters.backendActivePeerId).toBe(connectedWithoutTrack.peers[0].id);
+  expect(counters.peerPromotions).toEqual([]);
+  expect(connectedWithoutTrack.audioPlayback.activeStreamId).toBe(initialStreamId);
+
+  await page.clock.fastForward(7000);
+  await expect.poll(() => debugEventCount(counters, 'remote_audio.candidate.timeout')).toBe(1);
+  await expect.poll(() => counters.peerPromotionCount).toBe(1);
+  await expect.poll(async () => (await getMockCallMediaSnapshot(page)).peers[1]?.closed)
+    .toBe(true);
+
+  const timedOut = await getMockCallMediaSnapshot(page);
+  expect(timedOut.peers[0].closed).toBe(false);
+  expect(timedOut.peers[1].closed).toBe(true);
+  expect(timedOut.audioPlayback.activeStreamId).toBe(initialStreamId);
+  expect(timedOut.audioPlayback.pausedStreamIds).not.toContain(initialStreamId);
+  expect(counters.backendActivePeerId).toBe(timedOut.peers[0].id);
+  expect(counters.peerPromotions).toEqual([
+    {
+      session_id: 'rtc-call-reconnect-01',
+      generation: 1,
+      action: 'reject'
+    }
+  ]);
   expect(debugEventCount(counters, 'remote_audio.candidate.promoted')).toBe(0);
   assertNoBrowserErrors();
 });
@@ -498,7 +569,7 @@ test('retired reconnect generation cannot resume after mute and a newer reconnec
   assertNoBrowserErrors();
 });
 
-test('ignores recovery callbacks from the old peer while its replacement owns reconnect', async ({
+test('ignores recovery callbacks from the old authoritative peer while replacement commit is pending', async ({
   page
 }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
@@ -527,7 +598,9 @@ test('ignores recovery callbacks from the old peer while its replacement owns re
       (entry) =>
         entry.event === 'pc.media_reconnect.guard_skip' &&
         entry.detail.phase === 'recover' &&
-        entry.detail.isCurrentPeer === false
+        entry.detail.isCurrentPeer === true &&
+        Array.isArray(entry.detail.guardSkips) &&
+        entry.detail.guardSkips.includes('replacement_pending')
     )
   ).toBe(true);
   expect(debugEventCount(counters, 'datachannel.recreate')).toBe(0);
@@ -1606,17 +1679,21 @@ async function installReconnectCallRoutes(
     turnCount: 0,
     endCount: 0,
     muteCount: 0,
+    peerPromotionCount: 0,
+    backendActivePeerId: null,
     offers: [],
     backfills: [],
     recoveredEvents: [],
     turns: [],
     muteRequests: [],
+    peerPromotions: [],
     requestOrder: [],
     debugEvents: []
   };
   let authoritativeMuted = false;
   let authoritativeAudioInputEpoch = 0;
   let authoritativeMuteRevision = 0;
+  const pendingPeerIds = new Map<number, number | null>();
   const thread = makeThreadDetail({
     id: threadId,
     character_id: characterId,
@@ -1657,8 +1734,9 @@ async function installReconnectCallRoutes(
     counters.requestOrder.push('offer');
     const payload = route.request().postDataJSON() as { offer?: { sdp?: string } };
     const sdp = payload.offer?.sdp ?? '';
+    const peerId = readMockPeerIdFromSdp(sdp);
     counters.offers.push({
-      peerId: readMockPeerIdFromSdp(sdp),
+      peerId,
       sdp
     });
     if (options.offerDelayMs && counters.offerCount > 1) {
@@ -1676,11 +1754,49 @@ async function installReconnectCallRoutes(
       }, 502);
       return;
     }
+    const peerGeneration = counters.offerCount > 1 ? counters.offerCount - 1 : null;
+    if (peerGeneration === null) {
+      counters.backendActivePeerId = peerId;
+    } else {
+      pendingPeerIds.set(peerGeneration, peerId);
+    }
     await fulfillJson(route, {
       call_id: 'call-reconnect-01',
       session_id: 'rtc-call-reconnect-01',
       answer: { type: 'answer', sdp: 'v=0\r\n' },
-      event_channel: 'rayme-events'
+      event_channel: 'rayme-events',
+      peer_generation: peerGeneration,
+      peer_commit_timeout_ms: 8000
+    });
+  });
+  await page.route('**/api/calls/*/peer-promotion', async (route) => {
+    const payload = route.request().postDataJSON() as {
+      session_id: string;
+      generation: number;
+      action: 'commit' | 'reject';
+    };
+    counters.peerPromotionCount += 1;
+    counters.peerPromotions.push(payload);
+    counters.requestOrder.push(`peer_${payload.action}`);
+    const pendingPeerId = pendingPeerIds.get(payload.generation);
+    if (pendingPeerId === undefined) {
+      await fulfillJson(route, {
+        detail: {
+          code: 'webrtc_peer_generation_stale',
+          message: 'Replacement peer generation is no longer pending'
+        }
+      }, 409);
+      return;
+    }
+    if (payload.action === 'commit') {
+      counters.backendActivePeerId = pendingPeerId;
+    }
+    pendingPeerIds.delete(payload.generation);
+    await fulfillJson(route, {
+      call_id: 'call-reconnect-01',
+      session_id: payload.session_id,
+      generation: payload.generation,
+      status: payload.action === 'commit' ? 'committed' : 'rejected'
     });
   });
   await page.route('**/api/calls/*/reconnect-audio', async (route) => {
