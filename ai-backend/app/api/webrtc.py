@@ -1294,6 +1294,14 @@ async def _receive_audio_track(
                     "[rayme-call] peer.pending.accepted session=%s source=first_audio_frame",
                     session.session_id,
                 )
+            if (
+                peer_connection is not None
+                and not await session.wait_for_peer_media_admission(
+                    peer_connection,
+                    generation=pending_generation,
+                )
+            ):
+                break
             session.start_media_reconnect_grace_if_pending()
             logger.info(
                 "[rayme-call] track.recv.first_frame session=%s sample_rate=%s "
@@ -1309,6 +1317,15 @@ async def _receive_audio_track(
                 frame_count,
                 session.state,
             )
+        if (
+            frame_count > 1
+            and peer_connection is not None
+            and not await session.wait_for_peer_media_admission(
+                peer_connection,
+                generation=pending_generation,
+            )
+        ):
+            break
         await session.handle_inbound_audio_frame(frame)
     logger.info(
         "[rayme-call] track.recv.exit session=%s frames=%d state=%s",

@@ -2461,6 +2461,146 @@ def test_receive_audio_track_media_stream_error_with_live_ice_does_not_fail_sess
     assert recv_calls > 1
 
 
+def test_switching_candidate_audio_waits_for_stable_candidate_configuration() -> None:
+    from app.call.session import CallSession, PeerOfferConfiguration
+    from app.call.tracks import PcmAudioFrame
+
+    class RecordingVad:
+        def __init__(self) -> None:
+            self.frames: list[bytes] = []
+
+        def accept_audio_frame(self, pcm: bytes) -> dict[str, bool]:
+            self.frames.append(pcm)
+            return {
+                "speech_detected": True,
+                "end_of_turn": len(self.frames) >= 2,
+            }
+
+    class RecordingStt:
+        def __init__(self, transcript: str) -> None:
+            self.transcript = transcript
+            self.calls = 0
+
+        def transcribe_pcm(self, *_: Any, **__: Any) -> dict[str, Any]:
+            self.calls += 1
+            return {
+                "status": "accepted",
+                "transcript": self.transcript,
+                "language": "en",
+            }
+
+    class BlockingOldPeer:
+        connectionState = "connected"
+        iceConnectionState = "completed"
+
+        def __init__(self) -> None:
+            self.close_started = asyncio.Event()
+            self.release_close = asyncio.Event()
+
+        async def close(self) -> None:
+            self.close_started.set()
+            await self.release_close.wait()
+
+    class CandidatePeer:
+        connectionState = "connected"
+        iceConnectionState = "completed"
+
+        async def close(self) -> None:
+            return None
+
+    class TwoFrameTrack:
+        kind = "audio"
+        id = "switching-candidate-track"
+
+        def __init__(self) -> None:
+            self.frames = [
+                PcmAudioFrame(np.full(320, 1800, dtype=np.int16).tobytes()),
+                PcmAudioFrame(np.full(320, 2200, dtype=np.int16).tobytes()),
+            ]
+            self.hold = asyncio.Event()
+
+        async def recv(self) -> Any:
+            if self.frames:
+                return self.frames.pop(0)
+            await self.hold.wait()
+            raise RuntimeError("test track released")
+
+    async def scenario() -> None:
+        old_vad = RecordingVad()
+        new_vad = RecordingVad()
+        old_stt = RecordingStt("old-stt")
+        new_stt = RecordingStt("new-stt")
+        events: list[dict[str, Any]] = []
+        old_peer = BlockingOldPeer()
+        new_peer = CandidatePeer()
+        session = CallSession(
+            session_id="candidate-media-config-boundary",
+            thread_id="thread-old",
+            voice_id="voice-old",
+            engine_id="qwen3_1_7b",
+            peer_connection=old_peer,
+            vad_adapter=old_vad,
+            stt_adapter=old_stt,
+            event_sink=events.append,
+        )
+        generation = await session.mark_peer_connection_pending(
+            new_peer,
+            configuration=PeerOfferConfiguration(
+                thread_id="thread-new",
+                voice_id="voice-new",
+                engine_id="f5",
+                prompt_messages=(),
+                vad_adapter=new_vad,
+                stt_adapter=new_stt,
+            ),
+            timeout_seconds=60.0,
+        )
+        acceptance = asyncio.create_task(
+            session.accept_pending_peer_connection(
+                new_peer,
+                generation=generation,
+            )
+        )
+        await old_peer.close_started.wait()
+        assert session._peer_lifecycle.phase == "switching"
+        assert session.peer_connection is old_peer
+        track = TwoFrameTrack()
+        receiver = asyncio.create_task(
+            webrtc_module._receive_audio_track(
+                session,
+                track,
+                new_peer,
+                pending_generation=generation,
+            )
+        )
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert old_vad.frames == []
+        assert old_stt.calls == 0
+        assert new_vad.frames == []
+        assert events == []
+
+        old_peer.release_close.set()
+        accepted, previous = await acceptance
+        assert accepted is True
+        assert previous is old_peer
+        for _ in range(100):
+            if events and events[-1].get("type") == "user_final":
+                break
+            await asyncio.sleep(0.01)
+        assert new_stt.calls == 1
+        assert old_stt.calls == 0
+        assert old_vad.frames == []
+        assert len(new_vad.frames) == 2
+        assert [event["type"] for event in events] == ["state", "user_final"]
+        assert events[-1]["text"] == "new-stt"
+        receiver.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await receiver
+
+    asyncio.run(scenario())
+
+
 def test_receive_audio_track_recovers_from_transient_live_ice_recv_errors() -> None:
     """Transient recv errors while ICE is live must not permanently kill input."""
     import asyncio

@@ -269,6 +269,7 @@ class _PeerSwitchTransaction:
     previous_peer_connection: Any | None
     previous_outbound_audio_track: Any | None
     accepted_outbound_audio_track: Any | None
+    accepted_data_channel: Any | None
     configuration: PeerOfferConfiguration | None
     cancellation: _CapturedTurnCancellation | None
     prompt_lease_releaser: PromptLeaseReleaser | None
@@ -656,7 +657,44 @@ class CallSession:
         return (
             peer_connection is self.peer_connection
             or peer_connection in self._pending_peer_connections
+            or (
+                self._peer_lifecycle.phase == "switching"
+                and self._peer_lifecycle.switch_owner is peer_connection
+            )
         )
+
+    async def wait_for_peer_media_admission(
+        self,
+        peer_connection: Any,
+        *,
+        generation: int | None = None,
+    ) -> bool:
+        """Hold at most the receiver's current frame until its switch commits."""
+
+        while True:
+            async with self._lifecycle_lock:
+                lifecycle = self._peer_lifecycle
+                if self.ended_at is not None or lifecycle.phase == "terminal":
+                    return False
+                if (
+                    peer_connection is self.peer_connection
+                    and lifecycle.phase != "switching"
+                ):
+                    return True
+                if (
+                    lifecycle.phase == "switching"
+                    and lifecycle.switch_owner is peer_connection
+                    and lifecycle.switch_task is not None
+                ):
+                    switch_task = lifecycle.switch_task
+                else:
+                    return False
+            try:
+                await asyncio.shield(switch_task)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                return False
 
     def set_data_channel_for_peer(
         self,
@@ -703,6 +741,7 @@ class CallSession:
         released_prompt_lease: PromptLeaseReleaser | None = None
         previous_outbound_audio_track: Any | None = None
         accepted_outbound_audio_track: Any | None = None
+        accepted_data_channel: Any | None = None
         switch_task: asyncio.Task[tuple[bool, Any | None]] | None = None
         async with self._lifecycle_lock:
             lifecycle = self._peer_lifecycle
@@ -722,14 +761,18 @@ class CallSession:
                 else None
             )
             previous_outbound_audio_track = self.outbound_audio_track
-            self.peer_connection = peer_connection
             if outbound_audio_track is None:
                 outbound_audio_track = candidate.outbound_audio_track
-            if outbound_audio_track is not None:
-                self.outbound_audio_track = outbound_audio_track
-            accepted_outbound_audio_track = self.outbound_audio_track
-            if candidate.data_channel is not None:
-                self.data_channel = candidate.data_channel
+            accepted_outbound_audio_track = (
+                outbound_audio_track
+                if outbound_audio_track is not None
+                else self.outbound_audio_track
+            )
+            accepted_data_channel = (
+                candidate.data_channel
+                if candidate.data_channel is not None
+                else self.data_channel
+            )
             accepted_configuration = candidate.configuration
             if accepted_configuration is not None:
                 selection_changed = (
@@ -769,6 +812,7 @@ class CallSession:
                     previous_peer_connection=previous_peer_connection,
                     previous_outbound_audio_track=previous_outbound_audio_track,
                     accepted_outbound_audio_track=accepted_outbound_audio_track,
+                    accepted_data_channel=accepted_data_channel,
                     configuration=accepted_configuration,
                     cancellation=captured_cancellation,
                     prompt_lease_releaser=released_prompt_lease,
@@ -778,6 +822,9 @@ class CallSession:
                 )
                 lifecycle.switch_task = switch_task
             else:
+                self.peer_connection = peer_connection
+                self.outbound_audio_track = accepted_outbound_audio_track
+                self.data_channel = accepted_data_channel
                 if accepted_configuration is not None:
                     self._apply_peer_configuration_locked(accepted_configuration)
                 self._complete_transport_reconnect_locked()
@@ -805,7 +852,6 @@ class CallSession:
                 lifecycle.phase == "switching"
                 and lifecycle.switch_generation == switch.generation
                 and lifecycle.switch_owner is switch.peer_connection
-                and self.peer_connection is switch.peer_connection
                 and lifecycle.switch_task is asyncio.current_task()
             )
             if not owns_switch:
@@ -835,6 +881,9 @@ class CallSession:
                 )
                 terminal_outcome = self._terminal_outcome
             else:
+                self.peer_connection = switch.peer_connection
+                self.outbound_audio_track = switch.accepted_outbound_audio_track
+                self.data_channel = switch.accepted_data_channel
                 if switch.configuration is not None:
                     self._apply_peer_configuration_locked(switch.configuration)
                 self._complete_transport_reconnect_locked()
