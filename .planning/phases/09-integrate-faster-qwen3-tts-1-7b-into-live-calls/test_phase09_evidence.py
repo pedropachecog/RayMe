@@ -1012,6 +1012,269 @@ def test_core_runner_uses_current_saved_voice_helper_contract(
         asyncio.run(production.open())
 
 
+def test_core_runner_authenticates_canonical_captured_audio_stt_request(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    runner = _runner_module("phase09_runner_stt_canonical_service_auth")
+    service_token = "p" * 32
+    ssl_context = object()
+    captured: dict[str, object] = {}
+
+    class Response:
+        status = 200
+
+        def __enter__(self) -> "Response":
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def read(self) -> bytes:
+            return b'{"status":"accepted","transcript":"hello"}'
+
+    class Opener:
+        def open(self, request: object, *, timeout: float) -> Response:
+            captured["request"] = request
+            captured["timeout"] = timeout
+            return Response()
+
+    def capture_https_handler(*, context: object) -> object:
+        captured["ssl_context"] = context
+        return SimpleNamespace(context=context)
+
+    def capture_opener(*handlers: object) -> Opener:
+        captured["handlers"] = handlers
+        return Opener()
+
+    monkeypatch.setattr(runner, "HTTPSHandler", capture_https_handler)
+    monkeypatch.setattr(runner, "build_opener", capture_opener)
+    production = runner.RayMeProductionPath(
+        manifest=_manifest(),
+        tracer=SimpleNamespace(),
+        expected_commit="a" * 40,
+        selection=SimpleNamespace(),
+        web_base_url="https://rayme.invalid",
+        ai_base_url="https://foreign-config.invalid",
+        work_dir=tmp_path / "work",
+        timeout=1.0,
+    )
+    production.api = SimpleNamespace(
+        ai_base_url="https://ai.invalid",
+        ssl_context=ssl_context,
+        service_auth_token=service_token,
+    )
+    audio_path = tmp_path / "captured.wav"
+    private_audio = b"RIFF captured production audio"
+    audio_path.write_bytes(private_audio)
+
+    result = asyncio.run(production._stt("captured-audio", "hello", audio_path))
+
+    request = captured["request"]
+    assert request.full_url == "https://ai.invalid/stt/transcribe"
+    assert request.get_method() == "POST"
+    assert request.get_header("Authorization") == f"Bearer {service_token}"
+    assert private_audio in request.data
+    assert captured["ssl_context"] is ssl_context
+    assert captured["timeout"] == 1.0
+    assert any(isinstance(handler, runner._NoRedirectHandler) for handler in captured["handlers"])
+    assert result == {"accepted": True, "wer": 0.0, "final_word_pass": True}
+
+
+@pytest.mark.parametrize("redirect_status", [301, 302, 303, 307, 308])
+@pytest.mark.parametrize("foreign_scheme", ["https", "http"])
+def test_core_runner_rejects_stt_redirect_without_foreign_header_or_body(
+    monkeypatch: pytest.MonkeyPatch,
+    redirect_status: int,
+    foreign_scheme: str,
+) -> None:
+    runner = _runner_module(
+        f"phase09_runner_stt_redirect_{foreign_scheme}_{redirect_status}"
+    )
+    service_token = "redirect-secret-" + "x" * 32
+    private_audio = b"RIFF private redirect payload"
+    ssl_context = object()
+    trusted_requests: list[object] = []
+    foreign_requests: list[object] = []
+    foreign_url = f"{foreign_scheme}://attacker.invalid/collect"
+
+    class Opener:
+        def __init__(self, handlers: tuple[object, ...]) -> None:
+            self.handlers = handlers
+
+        def open(self, request: object, *, timeout: float) -> object:
+            assert timeout == 2.0
+            trusted_requests.append(request)
+            redirect_handler = next(
+                handler
+                for handler in self.handlers
+                if isinstance(handler, runner._NoRedirectHandler)
+            )
+            try:
+                redirected = redirect_handler.redirect_request(
+                    request,
+                    None,
+                    redirect_status,
+                    "private redirect response",
+                    {"Location": foreign_url},
+                    foreign_url,
+                )
+            except runner.HTTPError:
+                raise
+            foreign_requests.append(redirected)
+            raise AssertionError("the authenticated request was replayed")
+
+    monkeypatch.setattr(
+        runner,
+        "HTTPSHandler",
+        lambda *, context: SimpleNamespace(context=context),
+    )
+    monkeypatch.setattr(runner, "build_opener", lambda *handlers: Opener(handlers))
+
+    with pytest.raises(runner.EvidenceRunnerError) as raised:
+        runner._multipart_audio_request(
+            url="https://ai.invalid/stt/transcribe",
+            trusted_ai_base_url="https://ai.invalid",
+            audio=private_audio,
+            service_auth_token=service_token,
+            timeout=2.0,
+            ssl_context=ssl_context,
+        )
+
+    assert str(raised.value) == (
+        f"RayMe STT rejected captured production audio (status {redirect_status})"
+    )
+    assert len(trusted_requests) == 1
+    trusted_request = trusted_requests[0]
+    assert trusted_request.full_url == "https://ai.invalid/stt/transcribe"
+    assert trusted_request.get_header("Authorization") == f"Bearer {service_token}"
+    assert private_audio in trusted_request.data
+    assert foreign_requests == []
+    assert service_token not in str(raised.value)
+    assert private_audio.decode() not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("url", "trusted_ai_base_url"),
+    [
+        ("http://ai.invalid/stt/transcribe", "https://ai.invalid"),
+        ("https://attacker.invalid/stt/transcribe", "https://ai.invalid"),
+        ("https://ai.invalid/stt/transcribe", "http://ai.invalid"),
+    ],
+)
+def test_core_runner_rejects_untrusted_initial_stt_destination_before_io(
+    monkeypatch: pytest.MonkeyPatch,
+    url: str,
+    trusted_ai_base_url: str,
+) -> None:
+    runner = _runner_module("phase09_runner_stt_untrusted_initial_destination")
+
+    def unexpected_opener(*_handlers: object) -> object:
+        raise AssertionError("an untrusted STT destination must fail before I/O")
+
+    monkeypatch.setattr(runner, "build_opener", unexpected_opener)
+    with pytest.raises(
+        runner.EvidenceRunnerError,
+        match=r"^RayMe STT destination is not trusted$",
+    ):
+        runner._multipart_audio_request(
+            url=url,
+            trusted_ai_base_url=trusted_ai_base_url,
+            audio=b"RIFF private initial payload",
+            service_auth_token="t" * 32,
+            timeout=1.0,
+            ssl_context=object(),
+        )
+
+
+@pytest.mark.parametrize("service_token", ["", "   ", "x" * 31, f" {'x' * 31} "])
+def test_core_runner_rejects_missing_or_short_stt_identity_before_io(
+    monkeypatch: pytest.MonkeyPatch,
+    service_token: str,
+) -> None:
+    runner = _runner_module("phase09_runner_stt_missing_or_short_identity")
+
+    def unexpected_opener(*_handlers: object) -> object:
+        raise AssertionError("an invalid service identity must fail before I/O")
+
+    monkeypatch.setattr(runner, "build_opener", unexpected_opener)
+    with pytest.raises(
+        runner.EvidenceRunnerError,
+        match=r"^RayMe AI service identity is not configured$",
+    ) as raised:
+        runner._multipart_audio_request(
+            url="https://ai.invalid/stt/transcribe",
+            trusted_ai_base_url="https://ai.invalid",
+            audio=b"RIFF private token payload",
+            service_auth_token=service_token,
+            timeout=1.0,
+            ssl_context=object(),
+        )
+    if service_token.strip():
+        assert service_token.strip() not in str(raised.value)
+
+
+@pytest.mark.parametrize("status", [401, 403, 500])
+def test_core_runner_sanitizes_stt_auth_and_server_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    status: int,
+) -> None:
+    runner = _runner_module(f"phase09_runner_stt_sanitized_{status}")
+    incorrect_token = "incorrect-token-" + "x" * 32
+    private_response = "private transcript and reference response"
+
+    class PrivateResponse:
+        def read(self) -> bytes:
+            raise AssertionError("a rejected private response must not be read")
+
+        def close(self) -> None:
+            return None
+
+    class Opener:
+        def open(self, request: object, *, timeout: float) -> object:
+            assert request.get_header("Authorization") == f"Bearer {incorrect_token}"
+            assert timeout == 1.0
+            raise runner.HTTPError(
+                request.full_url,
+                status,
+                f"{private_response} {incorrect_token}",
+                {},
+                PrivateResponse(),
+            )
+
+    monkeypatch.setattr(
+        runner,
+        "HTTPSHandler",
+        lambda *, context: SimpleNamespace(context=context),
+    )
+    monkeypatch.setattr(runner, "build_opener", lambda *_handlers: Opener())
+
+    with pytest.raises(runner.EvidenceRunnerError) as raised:
+        runner._multipart_audio_request(
+            url="https://ai.invalid/stt/transcribe",
+            trusted_ai_base_url="https://ai.invalid",
+            audio=b"RIFF private rejected payload",
+            service_auth_token=incorrect_token,
+            timeout=1.0,
+            ssl_context=object(),
+        )
+
+    assert str(raised.value) == (
+        f"RayMe STT rejected captured production audio (status {status})"
+    )
+    assert raised.value.__cause__ is None
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+    assert incorrect_token not in str(raised.value)
+    assert private_response not in str(raised.value)
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_runner_main_sanitizes_unexpected_exceptions_without_private_detail(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

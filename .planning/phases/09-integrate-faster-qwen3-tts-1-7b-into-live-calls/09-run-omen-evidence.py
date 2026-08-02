@@ -32,7 +32,8 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Awaitable, Callable, Protocol
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import urlsplit
+from urllib.request import HTTPRedirectHandler, HTTPSHandler, Request, build_opener, urlopen
 
 
 PHASE_DIR = Path(__file__).resolve().parent
@@ -462,13 +463,58 @@ def _json_request(
     return status, value if isinstance(value, dict) else {"value": value}
 
 
+def _normalized_https_origin(value: str) -> tuple[str, str, int]:
+    try:
+        parsed = urlsplit(value.strip())
+        scheme = parsed.scheme.lower()
+        hostname = parsed.hostname
+        port = parsed.port
+    except (AttributeError, ValueError):
+        raise EvidenceRunnerError("RayMe STT destination is not trusted") from None
+    if (
+        scheme != "https"
+        or hostname is None
+        or parsed.username is not None
+        or parsed.password is not None
+    ):
+        raise EvidenceRunnerError("RayMe STT destination is not trusted")
+    return (scheme, hostname.lower().rstrip("."), port or 443)
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(
+        self,
+        _req: Request,
+        _fp: Any,
+        _code: int,
+        _msg: str,
+        _headers: Any,
+        _newurl: str,
+    ) -> Request:
+        raise HTTPError(
+            _req.full_url,
+            _code,
+            "redirect rejected",
+            _headers,
+            _fp,
+        )
+
+
 def _multipart_audio_request(
     *,
     url: str,
+    trusted_ai_base_url: str,
     audio: bytes,
+    service_auth_token: str,
     timeout: float,
     ssl_context: ssl.SSLContext,
 ) -> dict[str, Any]:
+    service_auth_token = service_auth_token.strip()
+    if len(service_auth_token) < 32:
+        raise EvidenceRunnerError("RayMe AI service identity is not configured")
+    if _normalized_https_origin(url) != _normalized_https_origin(trusted_ai_base_url):
+        raise EvidenceRunnerError("RayMe STT destination is not trusted")
+
     boundary = f"----rayme-evidence-{uuid.uuid4().hex}"
     body = b"".join(
         (
@@ -486,24 +532,31 @@ def _multipart_audio_request(
         headers={
             "Content-Type": f"multipart/form-data; boundary={boundary}",
             "Accept": "application/json",
+            "Authorization": f"Bearer {service_auth_token}",
         },
         method="POST",
     )
+    opener = build_opener(
+        HTTPSHandler(context=ssl_context),
+        _NoRedirectHandler(),
+    )
     try:
-        with urlopen(request, timeout=timeout, context=ssl_context) as response:
-            raw = response.read()
+        with opener.open(request, timeout=timeout) as response:
             status = int(response.status)
+            raw = response.read() if 200 <= status < 300 else b""
     except HTTPError as exc:
-        raw = exc.read()
         status = int(exc.code)
-    except (URLError, TimeoutError, OSError) as exc:
-        raise EvidenceRunnerError("RayMe STT request failed") from exc
+        raw = b""
+    except (URLError, TimeoutError, OSError):
+        raise EvidenceRunnerError("RayMe STT request failed") from None
     if not 200 <= status < 300:
-        raise EvidenceRunnerError("RayMe STT rejected captured production audio")
+        raise EvidenceRunnerError(
+            f"RayMe STT rejected captured production audio (status {status})"
+        )
     try:
         value = json.loads(raw.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise EvidenceRunnerError("RayMe STT returned invalid JSON") from exc
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        raise EvidenceRunnerError("RayMe STT returned invalid JSON") from None
     if not isinstance(value, dict):
         raise EvidenceRunnerError("RayMe STT result is invalid")
     return value
@@ -686,10 +739,13 @@ class RayMeProductionPath:
     async def _stt(self, scenario_id: str, target_text: str, path: Path) -> dict[str, Any]:
         if self.api is None:
             raise EvidenceRunnerError("Production session is not open")
+        trusted_ai_base_url = str(self.api.ai_base_url).rstrip("/")
         payload = await asyncio.to_thread(
             _multipart_audio_request,
-            url=f"{self.ai_base_url}{STT_ROUTE}",
+            url=f"{trusted_ai_base_url}{STT_ROUTE}",
+            trusted_ai_base_url=trusted_ai_base_url,
             audio=path.read_bytes(),
+            service_auth_token=str(self.api.service_auth_token),
             timeout=self.timeout,
             ssl_context=self.api.ssl_context,
         )
