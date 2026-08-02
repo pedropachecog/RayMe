@@ -771,11 +771,11 @@ Get-NetTCPConnection -State Listen -LocalPort 8443,9443 |
   Format-Table -AutoSize
 
 Write-Host "== Verifying health"
-$aiHealth = curl.exe --cacert $aiCaBundle -sS https://192.168.1.199:9443/health
+$aiHealth = curl.exe --ssl-no-revoke --cacert $aiCaBundle -sS https://192.168.1.199:9443/health
 if ($LASTEXITCODE -ne 0) { throw "AI backend health request failed" }
-$webHealth = curl.exe --cacert $aiCaBundle -sS https://192.168.1.199:8443/api/settings
+$webHealth = curl.exe --ssl-no-revoke --cacert $aiCaBundle -sS https://192.168.1.199:8443/api/settings
 if ($LASTEXITCODE -ne 0) { throw "Web UI settings request failed" }
-$webCredentialReadiness = curl.exe --fail --cacert $aiCaBundle -sS https://192.168.1.199:8443/api/ai-backend/readiness
+$webCredentialReadiness = curl.exe --fail --ssl-no-revoke --cacert $aiCaBundle -sS https://192.168.1.199:8443/api/ai-backend/readiness
 if ($LASTEXITCODE -ne 0) {
   throw "Web UI could not authenticate with the rotated AI backend credential"
 }
@@ -814,7 +814,7 @@ if (
 ) {
   throw "Pinned Qwen runtime, model identity, or engine availability is not ready"
 }
-$webrtcStatus = curl.exe --cacert $aiCaBundle -sS https://192.168.1.199:9443/webrtc/status
+$webrtcStatus = curl.exe --ssl-no-revoke --cacert $aiCaBundle -sS https://192.168.1.199:9443/webrtc/status
 if ($LASTEXITCODE -ne 0) { throw "AI backend WebRTC readiness request failed" }
 $webrtcStatus = $webrtcStatus | ConvertFrom-Json
 if (
@@ -881,7 +881,7 @@ if ($verifyQwen3) {
   $qwenEvidenceLocalDir = Join-Path $qwenEvidenceDir ".local"
   New-Item -ItemType Directory -Path $qwenEvidenceLocalDir -Force | Out-Null
 
-  $qwenWebRtcStatusRaw = curl.exe --cacert $aiCaBundle -sS https://192.168.1.199:9443/webrtc/status
+  $qwenWebRtcStatusRaw = curl.exe --ssl-no-revoke --cacert $aiCaBundle -sS https://192.168.1.199:9443/webrtc/status
   if ($LASTEXITCODE -ne 0) { throw "Qwen worker memory status request failed" }
   $qwenWebRtcStatus = $qwenWebRtcStatusRaw | ConvertFrom-Json
   $qwenTorchReservedMib = 0.0
@@ -953,8 +953,8 @@ if ($verifyQwen3) {
     }
   }
 
-  $finalAiHealth = (curl.exe --cacert $aiCaBundle -sS https://192.168.1.199:9443/health | ConvertFrom-Json)
-  $finalWebRtcStatus = (curl.exe --cacert $aiCaBundle -sS https://192.168.1.199:9443/webrtc/status | ConvertFrom-Json)
+  $finalAiHealth = (curl.exe --ssl-no-revoke --cacert $aiCaBundle -sS https://192.168.1.199:9443/health | ConvertFrom-Json)
+  $finalWebRtcStatus = (curl.exe --ssl-no-revoke --cacert $aiCaBundle -sS https://192.168.1.199:9443/webrtc/status | ConvertFrom-Json)
   $finalPrompt = $finalWebRtcStatus.selected_voice_prompt
   if (
     $finalAiHealth.resident_tts_engine -ne "qwen3_1_7b" -or

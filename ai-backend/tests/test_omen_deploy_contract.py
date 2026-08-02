@@ -131,7 +131,7 @@ def test_omen_deploy_preflights_phase1_tls_before_teardown_and_token_rotation() 
     assert 'AppData\\Local\\mkcert\\rootCA.pem' not in source
     assert source.index(canonical_qwen_stop) < source.index(token_rotation)
     assert source.index(token_rotation) < source.index(launcher_write)
-    assert "curl.exe --cacert $aiCaBundle" in source
+    assert "curl.exe --ssl-no-revoke --cacert $aiCaBundle" in source
     assert "curl.exe -k" not in source
 
 
@@ -141,9 +141,20 @@ def test_omen_deploy_verifies_rotated_credential_through_web_and_fails_mismatch(
 
     assert readiness in source
     readiness_call = source[source.index(readiness) - 80 : source.index(readiness) + 180]
-    assert "curl.exe --fail --cacert $aiCaBundle" in readiness_call
+    assert "curl.exe --fail --ssl-no-revoke --cacert $aiCaBundle" in readiness_call
     assert "could not authenticate with the rotated AI backend credential" in source
     assert '$webCredentialReadiness.authenticated -ne $true' in source
+
+
+def test_omen_deploy_private_ca_curl_disables_only_schannel_revocation_lookup() -> None:
+    source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    assert source.count("--ssl-no-revoke") == 7
+    assert source.count("--cacert $aiCaBundle") == 7
+    assert "curl.exe --ssl-no-revoke --cacert $aiCaBundle" in source
+    assert "curl.exe --fail --ssl-no-revoke --cacert $aiCaBundle" in source
+    assert "curl.exe -k" not in source
+    assert "--insecure" not in source
 
 
 def test_omen_qwen_probe_validates_actual_pep610_source_identity_after_install() -> None:
