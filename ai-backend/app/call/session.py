@@ -2445,7 +2445,13 @@ class CallSession:
         return dict(entry.result)
 
     async def emit_event(self, event: dict[str, Any]) -> dict[str, Any]:
-        return await self._await_event_commit(self._commit_event(event))
+        entry = self._commit_event(event)
+        if asyncio.current_task() is self._event_delivery_task:
+            # The only delivery worker cannot await an entry queued behind the
+            # event whose sink it is currently invoking. Ownership is already
+            # committed; delivery resumes in order after the sink returns.
+            return dict(event)
+        return await self._await_event_commit(entry)
 
     async def _deliver_event(self, event: dict[str, Any]) -> dict[str, Any]:
         event_type = event.get("type")
@@ -3976,6 +3982,8 @@ class CallSession:
             transaction = outcome.transaction_task if outcome is not None else None
         if outcome is None or transaction is None:
             raise RuntimeError("terminal outcome was not recorded")
+        if asyncio.current_task() is self._event_delivery_task:
+            return self._terminal_event_before_delivery(outcome)
         return await asyncio.shield(transaction)
 
     def _clear_pending_speech_terminal(self) -> None:
@@ -3994,7 +4002,31 @@ class CallSession:
             transaction = outcome.transaction_task if outcome is not None else None
         if outcome is None or transaction is None:
             raise RuntimeError("terminal outcome was not recorded")
+        if asyncio.current_task() is self._event_delivery_task:
+            return self._terminal_event_before_delivery(outcome)
         return await asyncio.shield(transaction)
+
+    def _terminal_event_before_delivery(
+        self,
+        outcome: _TerminalOutcome,
+    ) -> dict[str, Any]:
+        """Return the committed terminal shape to a reentrant event sink."""
+
+        if outcome.event is not None:
+            return dict(outcome.event)
+        if outcome.target_state == "failed":
+            return simple_event(
+                FAILED_EVENT,
+                session_id=self.session_id,
+                code=outcome.reason,
+                message="Call session failed.",
+                retry_allowed=True,
+            )
+        return simple_event(
+            ENDED_EVENT,
+            session_id=self.session_id,
+            reason=outcome.reason,
+        )
 
     def _transition_terminal_locked(
         self,

@@ -1240,6 +1240,115 @@ def test_stt_event_commit_orders_async_delivery_before_terminal(
     _run(scenario())
 
 
+@pytest.mark.parametrize("stt_result", ["accepted", "empty", "error"])
+def test_stt_event_sink_reentrant_session_action_does_not_deadlock(
+    stt_result: str,
+) -> None:
+    delivered: list[tuple[str, str | None]] = []
+    reentrant_results: list[dict[str, Any]] = []
+    session: CallSession
+
+    class OutcomeSttAdapter:
+        def transcribe_pcm(
+            self,
+            pcm_frames: list[bytes],
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            assert pcm_frames
+            if stt_result == "error":
+                raise RuntimeError("simulated reentrant STT failure")
+            return {
+                "status": "accepted" if stt_result == "accepted" else "empty",
+                "transcript": "reentrant transcript" if stt_result == "accepted" else "",
+                "language": "en",
+            }
+
+    async def event_sink(event: dict[str, Any]) -> None:
+        delivered.append((event["type"], event.get("code")))
+        if stt_result == "accepted" and event["type"] == "user_final":
+            reentrant_results.append(
+                await session.end(reason="sink_hangup")
+            )
+        elif (
+            stt_result == "empty"
+            and event["type"] == "failed"
+            and event.get("code") == "call_stt_failed"
+        ):
+            reentrant_results.append(
+                await session.fail(reason="sink_failure")
+            )
+        elif (
+            stt_result == "error"
+            and event["type"] == "failed"
+            and event.get("code") == "call_stt_failed"
+        ):
+            reentrant_results.append(
+                await session.emit_event(
+                    {
+                        "type": "sink_followup",
+                        "session_id": session.session_id,
+                    }
+                )
+            )
+
+    async def scenario() -> None:
+        nonlocal session
+        session, _ = _new_session(
+            vad_adapter=NeverEndingVadAdapter(),
+            stt_adapter=OutcomeSttAdapter(),
+            event_sink=event_sink,
+        )
+        pcm = np.full(320, 1800, dtype=np.int16).tobytes()
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pcm)
+        ) is None
+        result = await asyncio.wait_for(
+            session.finalize_user_turn(),
+            timeout=2.0,
+        )
+        assert result is not None
+        assert result["type"] == (
+            "user_final" if stt_result == "accepted" else "failed"
+        )
+
+        if stt_result in {"accepted", "empty"}:
+            outcome = session._terminal_outcome
+            assert outcome is not None and outcome.transaction_task is not None
+            await asyncio.wait_for(outcome.transaction_task, timeout=2.0)
+            assert session.state == (
+                "ended" if stt_result == "accepted" else "failed"
+            )
+        else:
+            while session._event_outbox:
+                await asyncio.sleep(0)
+            assert session.state == "listening"
+
+        assert len(reentrant_results) == 1
+        if stt_result == "accepted":
+            assert reentrant_results[0]["type"] == "ended"
+            assert delivered == [
+                ("state", None),
+                ("user_final", None),
+                ("ended", None),
+            ]
+        elif stt_result == "empty":
+            assert reentrant_results[0]["type"] == "failed"
+            assert delivered == [
+                ("state", None),
+                ("failed", "call_stt_failed"),
+                ("failed", "sink_failure"),
+            ]
+        else:
+            assert reentrant_results[0]["type"] == "sink_followup"
+            assert delivered == [
+                ("state", None),
+                ("failed", "call_stt_failed"),
+                ("sink_followup", None),
+            ]
+
+    _run(scenario())
+
+
 def test_terminal_session_rejects_late_reconnect_backfill_without_revival() -> None:
     session, _ = _new_session()
     terminal = _run(session.fail(reason="connection_failed"))
