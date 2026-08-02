@@ -2643,6 +2643,146 @@ def test_cancelled_switch_initiator_cannot_strand_owned_transaction(
     _run(scenario())
 
 
+@pytest.mark.parametrize("failed_resource", ["old_peer", "old_track"])
+def test_failed_switch_resource_transfers_to_terminal_cleanup_retry(
+    failed_resource: str,
+) -> None:
+    class FailOncePeer(ScriptedPeerConnection):
+        def __init__(self) -> None:
+            super().__init__()
+            self.successful_closes = 0
+
+        async def close(self) -> None:
+            self.close_calls += 1
+            if failed_resource == "old_peer" and self.close_calls == 1:
+                raise RuntimeError("injected old peer close failure")
+            self.successful_closes += 1
+
+    class FailOnceTrack(ScriptedOutboundAudioTrack):
+        def __init__(self) -> None:
+            super().__init__()
+            self.successful_stops = 0
+
+        async def stop_current(self) -> None:
+            self.stop_calls += 1
+            if failed_resource == "old_track" and self.stop_calls == 1:
+                raise RuntimeError("injected old track stop failure")
+            self.successful_stops += 1
+
+    async def scenario() -> None:
+        old_peer = FailOncePeer()
+        old_track = FailOnceTrack()
+        session = CallSession(
+            session_id=f"switch-resource-transfer-{failed_resource}",
+            peer_connection=old_peer,
+            outbound_audio_track=old_track,
+            voice_id="voice-before",
+            engine_id="qwen3_1_7b",
+        )
+        candidate = ScriptedPeerConnection()
+        generation = await session.mark_peer_connection_pending(
+            candidate,
+            outbound_audio_track=ScriptedOutboundAudioTrack(),
+            configuration=PeerOfferConfiguration(
+                thread_id="thread-after",
+                voice_id="voice-after",
+                engine_id="f5",
+                prompt_messages=(),
+                vad_adapter=None,
+                stt_adapter=None,
+            ),
+            timeout_seconds=60.0,
+        )
+        accepted, _ = await session.accept_pending_peer_connection(
+            candidate,
+            generation=generation,
+        )
+        assert accepted is False
+        assert session.state == "failed"
+        cleanup = session._terminal_cleanup
+        assert cleanup is not None
+        assert cleanup.extra_peers_pending == []
+        assert cleanup.extra_tracks_pending == []
+        assert session._terminal_cleanup_failure_state is None
+        if failed_resource == "old_peer":
+            assert old_peer.close_calls == 2
+            assert old_peer.successful_closes == 1
+        else:
+            assert old_track.stop_calls == 2
+            assert old_track.successful_stops == 1
+
+    _run(scenario())
+
+
+def test_permanently_blocked_old_peer_remains_in_terminal_failure_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        session_module,
+        "CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(
+        session_module,
+        "CALL_TERMINAL_CLEANUP_STEP_TIMEOUT_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(session_module, "CALL_TERMINAL_CLEANUP_RETRY_LIMIT", 2)
+    monkeypatch.setattr(
+        session_module,
+        "CALL_TERMINAL_CLEANUP_RETRY_BASE_SECONDS",
+        0.0,
+    )
+
+    class PermanentlyBlockingPeer(ScriptedPeerConnection):
+        async def close(self) -> None:
+            self.close_calls += 1
+            await asyncio.Event().wait()
+
+    async def scenario() -> None:
+        old_peer = PermanentlyBlockingPeer()
+        session = CallSession(
+            session_id="permanent-old-peer-cleanup",
+            peer_connection=old_peer,
+            outbound_audio_track=ScriptedOutboundAudioTrack(),
+            voice_id="voice-before",
+            engine_id="qwen3_1_7b",
+        )
+        candidate = ScriptedPeerConnection()
+        generation = await session.mark_peer_connection_pending(
+            candidate,
+            outbound_audio_track=ScriptedOutboundAudioTrack(),
+            configuration=PeerOfferConfiguration(
+                thread_id="thread-after",
+                voice_id="voice-after",
+                engine_id="f5",
+                prompt_messages=(),
+                vad_adapter=None,
+                stt_adapter=None,
+            ),
+            timeout_seconds=60.0,
+        )
+        accepted, _ = await session.accept_pending_peer_connection(
+            candidate,
+            generation=generation,
+        )
+        assert accepted is False
+        cleanup_task = session._terminal_cleanup_task
+        assert cleanup_task is not None
+        await asyncio.wait_for(cleanup_task, timeout=0.5)
+        cleanup = session._terminal_cleanup
+        assert cleanup is not None
+        assert cleanup.extra_peers_pending == [old_peer]
+        assert session._terminal_cleanup_failure_state == {
+            "status": "retry_exhausted",
+            "attempts": 2,
+            "pending_steps": ["extra_peer:1"],
+        }
+        assert old_peer.close_calls == 3
+
+    _run(scenario())
+
+
 def test_switching_away_from_qwen_releases_prompt_for_another_session() -> None:
     lease_owner: str | None = "qwen-owner-one"
     releases: list[str] = []

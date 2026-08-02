@@ -218,6 +218,8 @@ class _TerminalCleanup:
     candidate_peer: Any | None
     prompt_lease_releaser: PromptLeaseReleaser | None
     cancel_pending: bool
+    extra_peers_pending: list[Any] = field(default_factory=list)
+    extra_tracks_pending: list[Any] = field(default_factory=list)
     active_peer_pending: bool = True
     candidate_peer_pending: bool = True
     prompt_lease_pending: bool = True
@@ -273,6 +275,13 @@ class _PeerSwitchTransaction:
     configuration: PeerOfferConfiguration | None
     cancellation: _CapturedTurnCancellation | None
     prompt_lease_releaser: PromptLeaseReleaser | None
+
+
+@dataclass
+class _PeerSwitchCleanupResult:
+    errors: list[tuple[str, Exception]] = field(default_factory=list)
+    unresolved_peers: list[Any] = field(default_factory=list)
+    unresolved_tracks: list[Any] = field(default_factory=list)
 
 
 @dataclass
@@ -842,7 +851,7 @@ class CallSession:
     ) -> tuple[bool, Any | None]:
         """Finish one switch independently of its initiating callback."""
 
-        cleanup_errors = await self._run_peer_switch_cleanup(switch)
+        cleanup = await self._run_peer_switch_cleanup(switch)
         terminal_outcome: _TerminalOutcome | None = None
         async with self._lifecycle_lock:
             lifecycle = self._peer_lifecycle
@@ -856,7 +865,7 @@ class CallSession:
             )
             if not owns_switch:
                 return False, switch.previous_peer_connection
-            if not cleanup_errors and switch.prompt_lease_releaser is not None:
+            if not cleanup.errors and switch.prompt_lease_releaser is not None:
                 try:
                     await asyncio.wait_for(
                         self._invoke_tts_prompt_lease_releaser(
@@ -865,19 +874,27 @@ class CallSession:
                         timeout=CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS,
                     )
                 except Exception as exc:
-                    cleanup_errors.append(("prompt_lease", exc))
+                    cleanup.errors.append(("prompt_lease", exc))
                 else:
                     if (
                         self._tts_prompt_lease_releaser
                         is switch.prompt_lease_releaser
                     ):
                         self._tts_prompt_lease_releaser = None
-            if cleanup_errors:
+            if cleanup.errors:
+                # The candidate becomes the terminal active transport only
+                # after the stable switch has been abandoned. Every unresolved
+                # old resource is transferred explicitly into terminal retry.
+                self.peer_connection = switch.peer_connection
+                self.outbound_audio_track = switch.accepted_outbound_audio_track
+                self.data_channel = switch.accepted_data_channel
                 lifecycle.switch_owner = None
                 lifecycle.switch_task = None
                 self._transition_terminal_locked(
                     target_state="failed",
                     reason="engine_switch_failed",
+                    extra_peers=cleanup.unresolved_peers,
+                    extra_tracks=cleanup.unresolved_tracks,
                 )
                 terminal_outcome = self._terminal_outcome
             else:
@@ -891,8 +908,8 @@ class CallSession:
                 lifecycle.switch_task = None
                 if self.state not in {"ended", "failed"}:
                     self.state = "listening"
-        if cleanup_errors:
-            for step, exc in cleanup_errors:
+        if cleanup.errors:
+            for step, exc in cleanup.errors:
                 logger.error(
                     "[rayme-call] peer.switch_cleanup_failed session=%s "
                     "generation=%d step=%s exc=%s",
@@ -912,10 +929,10 @@ class CallSession:
     async def _run_peer_switch_cleanup(
         self,
         switch: _PeerSwitchTransaction,
-    ) -> list[tuple[str, Exception]]:
+    ) -> _PeerSwitchCleanupResult:
         """Run every fallible switch cleanup step without stranding ownership."""
 
-        errors: list[tuple[str, Exception]] = []
+        cleanup = _PeerSwitchCleanupResult()
         stopped_track_ids: set[int] = set()
         for label, track in (
             ("old_playout", switch.previous_outbound_audio_track),
@@ -935,7 +952,8 @@ class CallSession:
                         timeout=CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS,
                     )
             except Exception as exc:
-                errors.append((label, exc))
+                cleanup.errors.append((label, exc))
+                cleanup.unresolved_tracks.append(track)
         self.outbound_audio_buffer.drain()
 
         if switch.previous_peer_connection is not None:
@@ -945,7 +963,10 @@ class CallSession:
                     timeout=CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS,
                 )
             except Exception as exc:
-                errors.append(("old_peer", exc))
+                cleanup.errors.append(("old_peer", exc))
+                cleanup.unresolved_peers.append(
+                    switch.previous_peer_connection
+                )
 
         if switch.cancellation is not None:
             try:
@@ -962,8 +983,8 @@ class CallSession:
                     timeout=CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS,
                 )
             except Exception as exc:
-                errors.append(("cancel", exc))
-        return errors
+                cleanup.errors.append(("cancel", exc))
+        return cleanup
 
     def _apply_peer_configuration_locked(
         self,
@@ -3384,6 +3405,8 @@ class CallSession:
         *,
         target_state: str,
         reason: str,
+        extra_peers: list[Any] | None = None,
+        extra_tracks: list[Any] | None = None,
     ) -> _TerminalCleanup | None:
         if self.ended_at is not None or self._peer_lifecycle.phase == "terminal":
             return None
@@ -3424,6 +3447,8 @@ class CallSession:
                 or self._active_tts_turn_id is not None
                 or self._pending_speech_terminal_turn_id is not None
             ),
+            extra_peers_pending=list(extra_peers or []),
+            extra_tracks_pending=list(extra_tracks or []),
             candidate_peer_pending=(
                 candidate_peer is not None
                 and candidate_peer is not self.peer_connection
@@ -3484,6 +3509,8 @@ class CallSession:
                 cleanup.active_peer_pending,
                 cleanup.candidate_peer_pending,
                 cleanup.prompt_lease_pending,
+                bool(cleanup.extra_peers_pending),
+                bool(cleanup.extra_tracks_pending),
             )
         )
 
@@ -3576,6 +3603,50 @@ class CallSession:
                         )
                     else:
                         cleanup.candidate_peer_pending = False
+                for peer in list(cleanup.extra_peers_pending):
+                    try:
+                        await asyncio.wait_for(
+                            self._close_peer(peer),
+                            timeout=CALL_TERMINAL_CLEANUP_STEP_TIMEOUT_SECONDS,
+                        )
+                    except Exception as exc:
+                        cleanup.last_attempt_timed_out = (
+                            cleanup.last_attempt_timed_out
+                            or isinstance(exc, asyncio.TimeoutError)
+                        )
+                        logger.exception(
+                            "[rayme-call] terminal.cleanup_failed session=%s "
+                            "step=extra_peer exc=%s",
+                            self.session_id,
+                            exc.__class__.__name__,
+                        )
+                    else:
+                        cleanup.extra_peers_pending.remove(peer)
+                for track in list(cleanup.extra_tracks_pending):
+                    stop = getattr(track, "stop_current", None)
+                    if not callable(stop):
+                        cleanup.extra_tracks_pending.remove(track)
+                        continue
+                    try:
+                        result = stop()
+                        if inspect.isawaitable(result):
+                            await asyncio.wait_for(
+                                result,
+                                timeout=CALL_TERMINAL_CLEANUP_STEP_TIMEOUT_SECONDS,
+                            )
+                    except Exception as exc:
+                        cleanup.last_attempt_timed_out = (
+                            cleanup.last_attempt_timed_out
+                            or isinstance(exc, asyncio.TimeoutError)
+                        )
+                        logger.exception(
+                            "[rayme-call] terminal.cleanup_failed session=%s "
+                            "step=extra_track exc=%s",
+                            self.session_id,
+                            exc.__class__.__name__,
+                        )
+                    else:
+                        cleanup.extra_tracks_pending.remove(track)
             finally:
                 if (
                     cleanup.prompt_lease_pending
@@ -3665,6 +3736,10 @@ class CallSession:
             pending.append("candidate_peer")
         if cleanup.prompt_lease_pending:
             pending.append("prompt_lease")
+        if cleanup.extra_peers_pending:
+            pending.append(f"extra_peer:{len(cleanup.extra_peers_pending)}")
+        if cleanup.extra_tracks_pending:
+            pending.append(f"extra_track:{len(cleanup.extra_tracks_pending)}")
         return pending
 
     async def _release_tts_prompt_lease(self) -> None:
