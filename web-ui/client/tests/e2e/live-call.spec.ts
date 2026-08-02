@@ -12,6 +12,11 @@ const canonicalLiveWebRtcStatusUrl = 'https://192.168.1.199:9443/webrtc/status';
 const qwenEngineId = 'qwen3_1_7b';
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../../../..');
 
+type ActiveLiveCall = {
+  callId: string;
+  sessionId: string;
+};
+
 const liveEnabled = process.env.RAYME_ENABLE_LIVE_E2E === '1';
 const liveWebUrl = process.env.RAYME_LIVE_WEB_URL;
 const liveAiHealthUrl = process.env.RAYME_LIVE_AI_HEALTH_URL;
@@ -127,84 +132,109 @@ for (const liveTtsEngine of liveTtsEngines) {
       { timeout: 90_000 }
     );
 
-    await page.goto(`${canonicalLiveWebUrl}/call/${encodeURIComponent(fixture.threadId)}`);
-    await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible({
-      timeout: 60_000
-    });
-    const startPayload = (await startResponsePromise).json();
-    const offerPayload = await (await offerResponsePromise).json();
-    if (liveTtsEngine === qwenEngineId) {
-      expect(offerPayload.preparation).toMatchObject({
-        model: { state: 'resident', engine_id: qwenEngineId },
-        prompt: { state: 'ready' }
+    let activeLiveCall: ActiveLiveCall | null = null;
+    let callEnded = false;
+    let primaryFailure: unknown = null;
+    try {
+      await page.goto(`${canonicalLiveWebUrl}/call/${encodeURIComponent(fixture.threadId)}`);
+      const startPayload = await (await startResponsePromise).json();
+      const startedCallId = String(startPayload.call_id ?? '');
+      const startedSessionId = String(startPayload.session_id ?? '');
+      expect(startedCallId, 'live call id').toBeTruthy();
+      expect(startedSessionId, 'live call session id').toBeTruthy();
+      activeLiveCall = { callId: startedCallId, sessionId: startedSessionId };
+      await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible({
+        timeout: 60_000
       });
-      await expect
-        .poll(() => readQwenReadiness(apiRequest), { timeout: 60_000 })
-        .toEqual({ residentEngine: qwenEngineId, promptEngine: qwenEngineId, promptState: 'ready' });
-    }
+      const offerPayload = await (await offerResponsePromise).json();
+      if (liveTtsEngine === qwenEngineId) {
+        expect(offerPayload.preparation).toMatchObject({
+          model: { state: 'resident', engine_id: qwenEngineId },
+          prompt: { state: 'ready' }
+        });
+        await expect
+          .poll(() => readQwenReadiness(apiRequest), { timeout: 60_000 })
+          .toEqual({ residentEngine: qwenEngineId, promptEngine: qwenEngineId, promptState: 'ready' });
+      }
 
-    await page.getByRole('button', { name: 'Mute' }).click();
-    await expect(page.getByRole('button', { name: 'Unmute' })).toBeVisible({ timeout: 30_000 });
-    await page.waitForTimeout(5_000);
-    await page.getByRole('button', { name: 'Unmute' }).click();
-    await expect(page.getByRole('button', { name: 'Mute' })).toBeVisible({ timeout: 30_000 });
+      await page.getByRole('button', { name: 'Mute' }).click();
+      await expect(page.getByRole('button', { name: 'Unmute' })).toBeVisible({ timeout: 30_000 });
+      await page.waitForTimeout(5_000);
+      await page.getByRole('button', { name: 'Unmute' }).click();
+      await expect(page.getByRole('button', { name: 'Mute' })).toBeVisible({ timeout: 30_000 });
 
-    await expect.poll(() => transcriptTurnCount(page, 'user_speech'), { timeout: 240_000 }).toBeGreaterThanOrEqual(2);
-    await expect.poll(() => transcriptTurnCount(page, 'ai_speech'), { timeout: 300_000 }).toBeGreaterThanOrEqual(2);
-    await expect.poll(() => liveSignals.aiAudioStartedTurnIds.size, { timeout: 300_000 }).toBeGreaterThanOrEqual(2);
-    await expect.poll(() => liveSignals.aiDoneEvents, { timeout: 300_000 }).toBeGreaterThanOrEqual(2);
-    await expect.poll(
-      () => persistedThreadRowCount(apiRequest, fixture.threadId, 'ai_speech'),
-      { timeout: 300_000 }
-    ).toBeGreaterThanOrEqual(2);
+      await expect.poll(() => transcriptTurnCount(page, 'user_speech'), { timeout: 240_000 }).toBeGreaterThanOrEqual(2);
+      await expect.poll(() => transcriptTurnCount(page, 'ai_speech'), { timeout: 300_000 }).toBeGreaterThanOrEqual(2);
+      await expect.poll(() => liveSignals.aiAudioStartedTurnIds.size, { timeout: 300_000 }).toBeGreaterThanOrEqual(2);
+      await expect.poll(() => liveSignals.aiDoneEvents, { timeout: 300_000 }).toBeGreaterThanOrEqual(2);
+      await expect.poll(
+        () => persistedThreadRowCount(apiRequest, fixture.threadId, 'ai_speech'),
+        { timeout: 300_000 }
+      ).toBeGreaterThanOrEqual(2);
 
-    if (liveStabilityMs > 0) {
-      const beforeUserTurns = await transcriptTurnCount(page, 'user_speech');
-      const beforeAiTurns = await transcriptTurnCount(page, 'ai_speech');
-      await page.waitForTimeout(liveStabilityMs);
-      const afterUserTurns = await transcriptTurnCount(page, 'user_speech');
-      const afterAiTurns = await transcriptTurnCount(page, 'ai_speech');
-      console.log(
-        `[live-stability] duration_ms=${liveStabilityMs} before_user=${beforeUserTurns} before_ai=${beforeAiTurns} after_user=${afterUserTurns} after_ai=${afterAiTurns}`
+      if (liveStabilityMs > 0) {
+        const beforeUserTurns = await transcriptTurnCount(page, 'user_speech');
+        const beforeAiTurns = await transcriptTurnCount(page, 'ai_speech');
+        await page.waitForTimeout(liveStabilityMs);
+        const afterUserTurns = await transcriptTurnCount(page, 'user_speech');
+        const afterAiTurns = await transcriptTurnCount(page, 'ai_speech');
+        console.log(
+          `[live-stability] duration_ms=${liveStabilityMs} before_user=${beforeUserTurns} before_ai=${beforeAiTurns} after_user=${afterUserTurns} after_ai=${afterAiTurns}`
+        );
+        expect(afterUserTurns).toBeGreaterThanOrEqual(beforeUserTurns);
+        expect(afterAiTurns).toBeGreaterThanOrEqual(beforeAiTurns);
+      }
+
+      const endResponsePromise = page.waitForResponse(
+        (response) =>
+          /\/api\/calls\/[^/]+\/end$/.test(new URL(response.url()).pathname) &&
+          response.request().method() === 'POST' &&
+          response.ok(),
+        { timeout: 60_000 }
       );
-      expect(afterUserTurns).toBeGreaterThanOrEqual(beforeUserTurns);
-      expect(afterAiTurns).toBeGreaterThanOrEqual(beforeAiTurns);
-    }
+      await page.getByRole('button', { name: 'End Call' }).click();
+      await endResponsePromise;
+      callEnded = true;
+      const returnToThreadButton = page.locator('button', { hasText: 'Return to Thread' });
+      await expect(returnToThreadButton).toBeVisible({ timeout: 60_000 });
+      await returnToThreadButton.click();
+      await expect(page).toHaveURL(new RegExp(`/chat/${escapeRegExp(fixture.threadId)}$`), { timeout: 60_000 });
+      await expect.poll(() => threadRowCount(page, 'call_start'), { timeout: 60_000 }).toBeGreaterThanOrEqual(1);
+      await expect.poll(() => threadRowCount(page, 'user_speech'), { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
+      await expect.poll(() => threadRowCount(page, 'ai_speech'), { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
+      await expect.poll(() => threadRowCount(page, 'call_end'), { timeout: 60_000 }).toBeGreaterThanOrEqual(1);
 
-    const endResponsePromise = page.waitForResponse(
-      (response) =>
-        /\/api\/calls\/[^/]+\/end$/.test(new URL(response.url()).pathname) &&
-        response.request().method() === 'POST' &&
-        response.ok(),
-      { timeout: 60_000 }
-    );
-    await page.getByRole('button', { name: 'End Call' }).click();
-    await endResponsePromise;
-    const returnToThreadButton = page.locator('button', { hasText: 'Return to Thread' });
-    await expect(returnToThreadButton).toBeVisible({ timeout: 60_000 });
-    await returnToThreadButton.click();
-    await expect(page).toHaveURL(new RegExp(`/chat/${escapeRegExp(fixture.threadId)}$`), { timeout: 60_000 });
-    await expect.poll(() => threadRowCount(page, 'call_start'), { timeout: 60_000 }).toBeGreaterThanOrEqual(1);
-    await expect.poll(() => threadRowCount(page, 'user_speech'), { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
-    await expect.poll(() => threadRowCount(page, 'ai_speech'), { timeout: 60_000 }).toBeGreaterThanOrEqual(2);
-    await expect.poll(() => threadRowCount(page, 'call_end'), { timeout: 60_000 }).toBeGreaterThanOrEqual(1);
-
-    const started = await startPayload;
-    expect(started.session_id || started.call_id, 'live call session id').toBeTruthy();
-    if (liveTtsEngine === qwenEngineId) {
-      expect(started.engine_id).toBe(qwenEngineId);
-      expect(started.voice_id).toBe(fixture.voiceId);
+      const started = startPayload;
+      expect(started.session_id || started.call_id, 'live call session id').toBeTruthy();
+      if (liveTtsEngine === qwenEngineId) {
+        expect(started.engine_id).toBe(qwenEngineId);
+        expect(started.voice_id).toBe(fixture.voiceId);
+      }
+      expect(liveEvents).toEqual(
+        expect.arrayContaining([
+          'POST /api/calls/start',
+          expect.stringMatching(/^POST \/api\/calls\/.+\/offer$/),
+          expect.stringMatching(/^POST \/api\/calls\/.+\/mute$/),
+          expect.stringMatching(/^POST \/api\/calls\/.+\/turns$/),
+          expect.stringMatching(/^POST \/api\/calls\/.+\/end$/)
+        ])
+      );
+      assertNoBrowserErrors();
+    } catch (error) {
+      primaryFailure = error;
+      throw error;
+    } finally {
+      if (activeLiveCall && !callEnded) {
+        try {
+          await endLiveCallAfterFailure(apiRequest, activeLiveCall);
+        } catch (cleanupError) {
+          console.error('[live-call-cleanup] failed to end active call', cleanupError);
+          if (!primaryFailure) {
+            throw cleanupError;
+          }
+        }
+      }
     }
-    expect(liveEvents).toEqual(
-      expect.arrayContaining([
-        'POST /api/calls/start',
-        expect.stringMatching(/^POST \/api\/calls\/.+\/offer$/),
-        expect.stringMatching(/^POST \/api\/calls\/.+\/mute$/),
-        expect.stringMatching(/^POST \/api\/calls\/.+\/turns$/),
-        expect.stringMatching(/^POST \/api\/calls\/.+\/end$/)
-      ])
-    );
-    assertNoBrowserErrors();
   });
 }
 
@@ -264,6 +294,22 @@ async function configureLiveSettings(apiRequest: APIRequestContext, liveTtsEngin
     }
   });
   expect(response.ok(), 'configure live endpoint settings').toBe(true);
+}
+
+async function endLiveCallAfterFailure(
+  apiRequest: APIRequestContext,
+  activeCall: ActiveLiveCall
+) {
+  const response = await apiRequest.post(
+    `${canonicalLiveWebUrl}/api/calls/${encodeURIComponent(activeCall.callId)}/end`,
+    {
+      data: { session_id: activeCall.sessionId, reason: 'live_e2e_failure_cleanup' },
+      timeout: 30_000
+    }
+  );
+  if (!response.ok()) {
+    throw new Error(`live call cleanup returned HTTP ${response.status()}`);
+  }
 }
 
 async function createLiveCallFixture(apiRequest: APIRequestContext, liveTtsEngine: string) {

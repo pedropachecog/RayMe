@@ -2726,6 +2726,71 @@ def test_turn_generation_failure_preserves_user_speech_and_returns_fixed_code(
     rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
     assert ("user_speech", "user", "Persist this user speech.") in rows
     assert not any(row[0] == "ai_speech" for row in rows)
+    assert call_fixture.backend.interrupt_calls == [
+        {"base_url": "https://127.0.0.1:9443", "session_id": started["session_id"]}
+    ]
+
+
+def test_turn_times_out_before_first_llm_event_and_recovers_backend(
+    call_fixture: CallFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class DelayedFirstEventCompletion:
+        async def stream_chat_completion_tokens(
+            self,
+            settings: Any,
+            messages: Any,
+        ) -> AsyncIterator[str]:
+            del settings, messages
+            await asyncio.sleep(0.2)
+            yield "This token arrived after the call deadline."
+
+    calls_module = importlib.import_module("app.api.calls")
+    monkeypatch.setattr(
+        calls_module,
+        "CALL_LLM_FIRST_EVENT_TIMEOUT_SECONDS",
+        0.01,
+        raising=False,
+    )
+    call_fixture.app.dependency_overrides[calls_module.get_call_completion_client] = (
+        DelayedFirstEventCompletion
+    )
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+
+    started_at = time.perf_counter()
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-first-event-timeout",
+            "text": "The completion must not hold this live call indefinitely.",
+            "source": "user_final",
+        },
+    )
+    elapsed = time.perf_counter() - started_at
+
+    assert response.status_code == 200
+    assert elapsed < 0.15
+    assert _sse_events(response.text) == [
+        {
+            "type": "error",
+            "turn_id": "turn-first-event-timeout",
+            "code": "call_generation_failed",
+            "message": "AI generation failed",
+        }
+    ]
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert (
+        "user_speech",
+        "user",
+        "The completion must not hold this live call indefinitely.",
+    ) in rows
+    assert not any(row[0] == "ai_speech" for row in rows)
+    assert call_fixture.backend.speak_calls == []
+    assert call_fixture.backend.interrupt_calls == [
+        {"base_url": "https://127.0.0.1:9443", "session_id": started["session_id"]}
+    ]
 
 
 def test_turn_yields_ai_audio_started_event_when_nested_inside_speak_result_event(

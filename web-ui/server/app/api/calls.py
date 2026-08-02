@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import time
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
@@ -31,7 +31,11 @@ from app.domain.call_service import (
     CallSessionNotFoundError,
 )
 from app.domain.llm_stream import ChatCompletionSettings, SSE_DATA_PREFIX, stream_chat_completion
-from app.domain.prompt_builder import SqlAlchemyPromptRepository, build_call_prompt_context
+from app.domain.prompt_builder import (
+    PromptContextMessage,
+    SqlAlchemyPromptRepository,
+    build_call_prompt_context,
+)
 from app.domain.settings_service import SettingsService
 from app.domain.thread_service import CharacterUnavailableError, ThreadNotFoundError
 from app.storage.session import SERVER_ROOT, get_session
@@ -64,6 +68,7 @@ CALL_GENERATION_FAILED = "call_generation_failed"
 RAYME_EVENTS_CHANNEL = "rayme-events"
 CALL_BACKEND_NOT_READY_MESSAGE = "RayMe voice backend is not ready. Check Settings, then try again."
 CALL_TURN_REJOIN_POLL_SECONDS = 0.05
+CALL_LLM_FIRST_EVENT_TIMEOUT_SECONDS = 45.0
 
 CallTurnExistingState = Literal["reserved", "running", "failed", "cancelled"]
 
@@ -610,7 +615,7 @@ async def create_call_turn(
             )
             segmenter = CallTtsSegmenter() if call["engine_id"] == "qwen3_1_7b" else None
             llm_started = time.perf_counter()
-            async for raw_event in stream_chat_completion(
+            async for raw_event in _stream_call_completion_with_first_event_timeout(
                 completion_settings,
                 prompt_messages,
                 client=completion_client,
@@ -658,6 +663,19 @@ async def create_call_turn(
                 if event.get("type") == "error":
                     if speech_turn is not None:
                         await speech_turn.cancel()
+                    try:
+                        await _interrupt_call(
+                            backend,
+                            endpoint_settings.ai_backend_url,
+                            session_id,
+                        )
+                    except AiBackendClientError as exc:
+                        logger.warning(
+                            "[call-turn] generation_failure_interrupt_failed call=%s turn=%s code=%s",
+                            call_id,
+                            payload.turn_id,
+                            exc.code,
+                        )
                     yield _sse(
                         {
                             "type": "error",
@@ -838,6 +856,38 @@ def _turn_existing_event(
         "state": state,
         "recoverable": recoverable,
     }
+
+
+async def _stream_call_completion_with_first_event_timeout(
+    settings: ChatCompletionSettings,
+    messages: Sequence[PromptContextMessage],
+    *,
+    client: object | None,
+) -> AsyncIterator[str]:
+    """Bound only the wait for an LLM stream's first event in a live call."""
+
+    completion_stream = stream_chat_completion(settings, messages, client=client)
+    try:
+        try:
+            first_event = await asyncio.wait_for(
+                anext(completion_stream),
+                timeout=CALL_LLM_FIRST_EVENT_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[call-turn] llm.first_event_timeout timeout_seconds=%s",
+                CALL_LLM_FIRST_EVENT_TIMEOUT_SECONDS,
+            )
+            yield _sse({"type": "error", "message": "LLM first event timed out"})
+            return
+        except StopAsyncIteration:
+            return
+
+        yield first_event
+        async for raw_event in completion_stream:
+            yield raw_event
+    finally:
+        await completion_stream.aclose()
 
 
 @router.post("/{call_id}/reconnect-audio", dependencies=[Depends(enforce_same_origin_for_calls)])
