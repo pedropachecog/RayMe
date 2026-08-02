@@ -173,6 +173,7 @@
   let browserMediaConnectionGeneration = 0;
   let activeBrowserMediaConnection: BrowserMediaConnectionOwner | null = null;
   let mediaReconnectTimer = 0;
+  let mediaReconnectStableTimer = 0;
   let mediaReconnecting = false;
   let mediaReconnectAttempts = 0;
   let localAudioContext: AudioContext | null = null;
@@ -210,6 +211,7 @@
   const MEDIA_RECONNECT_DISCONNECTED_GRACE_MS = 2500;
   const MEDIA_RECONNECT_RETRY_DELAY_MS = 1000;
   const MEDIA_RECONNECT_MAX_ATTEMPTS = 2;
+  const MEDIA_RECONNECT_STABLE_RESET_MS = 10000;
   const MEDIA_RECONNECT_MIC_DIAG_MS = 7000;
   const MEDIA_RECONNECT_MIC_DIAG_INTERVAL_MS = 500;
   const MIC_BACKFILL_SAMPLE_RATE = 16000;
@@ -282,6 +284,7 @@
   }
 
   async function beginCall() {
+    resetBrowserMediaReconnectIncident();
     callState = 'connecting';
     clearEventTimers();
     handledUserFinalTurnIds.clear();
@@ -640,6 +643,7 @@
       emitMediaReconnectGuardSkip(owner, debugCallId, reason, 'schedule', guardSkips);
       return;
     }
+    clearMediaReconnectStableTimer(owner);
     if (mediaReconnectTimer) {
       if (reason === 'failed') {
         clearMediaReconnectTimer(owner);
@@ -754,8 +758,7 @@
         activeBrowserMediaConnection,
         debugCallId,
         reason,
-        'replacement_connected',
-        false
+        'replacement_connected'
       );
       if (
         !ownsReconnectAudioBackfill(backfillGeneration) ||
@@ -984,20 +987,69 @@
     }
   }
 
+  function clearMediaReconnectStableTimer(
+    owner: BrowserMediaConnectionOwner | null = null
+  ) {
+    if (owner && !ownsBrowserMediaConnection(owner)) {
+      return;
+    }
+    if (mediaReconnectStableTimer) {
+      window.clearTimeout(mediaReconnectStableTimer);
+      mediaReconnectStableTimer = 0;
+    }
+  }
+
+  function resetBrowserMediaReconnectIncident() {
+    clearMediaReconnectTimer();
+    clearMediaReconnectStableTimer();
+    mediaReconnectAttempts = 0;
+  }
+
+  function scheduleBrowserMediaReconnectStableBoundary(
+    owner: BrowserMediaConnectionOwner,
+    debugCallId: string,
+    source: string
+  ) {
+    clearMediaReconnectStableTimer(owner);
+    if (mediaReconnectAttempts === 0) {
+      return;
+    }
+    const attemptBudget = mediaReconnectAttempts;
+    const timerId = window.setTimeout(() => {
+      if (
+        !ownsBrowserMediaConnection(owner) ||
+        mediaReconnectStableTimer !== timerId ||
+        mediaReconnecting ||
+        mediaReconnectTimer ||
+        !isBrowserMediaConnected(owner.connection) ||
+        callState === 'ended' ||
+        callState === 'failed'
+      ) {
+        return;
+      }
+      mediaReconnectStableTimer = 0;
+      mediaReconnectAttempts = 0;
+      emitDebugEvent(debugCallId, 'pc.media_reconnect.stable', {
+        source,
+        stableMs: MEDIA_RECONNECT_STABLE_RESET_MS,
+        attempts: attemptBudget,
+        connectionGeneration: owner.generationId
+      });
+    }, MEDIA_RECONNECT_STABLE_RESET_MS);
+    mediaReconnectStableTimer = timerId;
+  }
+
   function handleBrowserMediaRecovered(
     owner: BrowserMediaConnectionOwner | null,
     debugCallId: string,
     reason: MediaReconnectReason,
-    source: string,
-    resetAttemptBudget = true
+    source: string
   ) {
     if (!ownsBrowserMediaConnection(owner)) {
       return;
     }
     clearMediaReconnectTimer(owner);
-    if (resetAttemptBudget) {
-      mediaReconnectAttempts = 0;
-    }
+    scheduleBrowserMediaReconnectStableBoundary(owner, debugCallId, source);
     const generation = activeReconnectAudioBackfill;
     if (generation) {
       beginReconnectAudioBackfillRecoveryDrain(
@@ -3435,7 +3487,7 @@
   }
 
   function stopBrowserMedia() {
-    clearMediaReconnectTimer();
+    resetBrowserMediaReconnectIncident();
     clearInterruptDrainState();
     stopLocalMicReconnectDiagnostics();
     mediaReconnecting = false;

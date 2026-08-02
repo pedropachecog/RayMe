@@ -254,6 +254,8 @@ export async function installMockCallMedia(
         this.dispatchRemoteTrack();
         this.connectionState = 'connected';
         this.iceConnectionState = 'connected';
+        this.dispatchMockEvent('connectionstatechange');
+        this.dispatchMockEvent('iceconnectionstatechange');
       }
 
       addEventListener(eventName: string, handler: (event: Event) => void) {

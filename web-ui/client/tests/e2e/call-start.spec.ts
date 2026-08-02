@@ -928,7 +928,7 @@ test('re-offers when ICE disconnects while aggregate peer state stays connected'
   assertNoBrowserErrors();
 });
 
-test('recovers and ends after the reconnect attempt limit gives up', async ({
+test('bounds three connected peer flaps to two replacement offers before terminal recovery', async ({
   page
 }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
@@ -950,6 +950,15 @@ test('recovers and ends after the reconnect attempt limit gives up', async ({
   await expect.poll(() => counters.recoverCount).toBeGreaterThanOrEqual(1);
   await expect.poll(() => counters.endCount).toBe(1);
   expect(debugEventCount(counters, 'pc.media_reconnect.give_up')).toBe(1);
+  expect(
+    counters.debugEvents
+      .filter((entry) => entry.event === 'pc.media_reconnect.start')
+      .map((entry) => entry.detail.attempt)
+  ).toEqual([1, 2]);
+  expect(counters.requestOrder.indexOf('recover')).toBeGreaterThanOrEqual(0);
+  expect(counters.requestOrder.indexOf('recover')).toBeLessThan(
+    counters.requestOrder.indexOf('end')
+  );
   await expect(page.getByTestId('voice-visualizer')).toHaveCount(0);
   assertNoBrowserErrors();
 });
