@@ -3,8 +3,8 @@
   "critical_gates": [
     "runtime_identity_cuda_one_hot"
   ],
-  "deployed_commit": "288c05b4742dda0aac76050658aa12a44041102e",
-  "generated_at": "2026-08-01T17:17:34.994662Z",
+  "deployed_commit": "37d649692fceb6b7bbc81b95317d76905cfedfcd",
+  "generated_at": "2026-08-02T14:45:51.925156Z",
   "identity": {
     "cpu_fallback_detected": false,
     "cuda_available": true,
@@ -19,7 +19,7 @@
     "resident_tts_count": 1,
     "resident_tts_engine": "qwen3_1_7b",
     "runtime_source_commit": "a70afc0f81f7f5f8801c3227968f1102f43f211c",
-    "system_gpu_mib": 8245.2,
+    "system_gpu_mib": 8246.9,
     "torch_cuda_version": "12.6",
     "torch_reserved_mib": 5690.0,
     "torch_version": "2.10.0+cu126"
