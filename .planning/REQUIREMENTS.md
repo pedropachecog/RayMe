@@ -9,7 +9,7 @@
 - Character export: v2 JSON only in v1; v3 PNG export deferred to v1.x.
 - Voice sample authorization: uploading a voice sample is assumed authorized. No
   reference-source, steward, consent, authorization-basis, use-scope, or
-  authorization-status metadata may become a product or evidence requirement, gate,
+  authorization-status metadata must not become a product or evidence requirement, gate,
   blocker, sidecar, or automatic substitute. The technical contract is governed by
   `.planning/REFERENCE-AUTHORIZATION-PROHIBITION.md`.
 

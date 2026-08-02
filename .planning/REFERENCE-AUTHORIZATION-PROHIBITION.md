@@ -50,3 +50,13 @@ requirements, tests, evidence, or acceptance criteria.
 - The Phase 8 summaries and `08-OMEN-EVIDENCE.md` may use a sanitized
   sample-source label as historical evidence terminology. It is never a RayMe product
   authorization field.
+- Additional exact historical scan matches are immutable and non-normative:
+  `.planning/phases/07-add-voxcpm2-to-the-tts-roster-with-empirical-quality-latency/07-run-call-flow-evidence.py`,
+  `.planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/08-05-SUMMARY.md`,
+  `.planning/phases/08-wire-voxcpm2-streaming-chunks-into-live-rayme-call-playback/08-OMEN-EVIDENCE.md`,
+  `.planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-UI-SPEC.md`
+  (only its explicit prohibition), and the frozen Phase 9 result records
+  `results/qwen3-browser.json`, `results/qwen3-call-flow.json`,
+  `results/qwen3-hardware-tracer.json`, `results/qwen3-operational-handoff.json`,
+  and `results/qwen3-webrtc-status.json`. These records must remain factual history
+  and may not be used to restore a product or evidence policy gate.

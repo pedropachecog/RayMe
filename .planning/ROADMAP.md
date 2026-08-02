@@ -617,15 +617,15 @@ Plans:
 **Wave 5** *(blocked on Wave 4 completion)*
 
 - [x] 09-05-PLAN.md - Alignment, ceilings, prompt cache, protocol, and engine-scoped backend hardening (Wave 5)
-- [x] 09-07-PLAN.md - Exact identity migration, reference authorization, server validation, and readiness bridge (Wave 5)
+- [x] 09-07-PLAN.md - Historical, superseded: exact identity migration, retired reference-authorization work, server validation, and readiness bridge (Wave 5)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
 - [x] 09-06-PLAN.md - Saved-voice delete to AI-backend prompt cancel/invalidate/evict lifecycle (Wave 6)
-- [x] 09-08-PLAN.md - Canonical Settings identity, three-field authorization, row-scoped prepare/test readiness, and call-gate component contracts (Wave 6)
+- [x] 09-08-PLAN.md - Historical, superseded: canonical Settings identity, retired authorization-triad work, row-scoped prepare/test readiness, and call-gate component contracts (Wave 6)
 - [x] 09-11-PLAN.md - Paced end-to-end backpressure, truthful metrics, and complete cancellation controls (Wave 6)
 
-Policy supersession (2026-08-01): the completed 09-07/09-08 authorization work remains historical execution record, but current product behavior treats a completed Voice Lab upload as authorization and exposes no separate reference-source/basis/scope fields.
+Voice Sample Authorization Policy (2026-08-02): `.planning/REFERENCE-AUTHORIZATION-PROHIBITION.md` supersedes every retired reference-authorization scheme. Uploading a voice sample is assumed authorized; no reference-source, steward, consent, authorization-basis, use-scope, or authorization-status form, field, sidecar, gate, blocker, or metadata-driven synthetic/non-person fallback may return. Containment, valid bytes, integrity, matching transcript/acoustic alignment, private handling, and deletion/cache invalidation remain required technical checks. Completed 09-07/09-08 entries above remain immutable historical execution records only.
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
