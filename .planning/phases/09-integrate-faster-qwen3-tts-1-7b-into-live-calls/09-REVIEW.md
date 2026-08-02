@@ -1,9 +1,9 @@
 ---
 phase: 09-integrate-faster-qwen3-tts-1-7b-into-live-calls
-reviewed: 2026-08-02T12:55:37Z
+reviewed: 2026-08-02T13:04:30Z
 depth: deep
-diff_base: b8d79b9cdb1365da2058d80b5e0cf8bd332ee466
-reviewed_head: 614520ee8dc2b4b63d13728bed1e518b3fcd4d62
+diff_base: 93215db04cd81c83569c96adb28960d9aaf49c0c
+reviewed_head: 93215db04cd81c83569c96adb28960d9aaf49c0c+worktree
 files_reviewed: 2
 files_reviewed_list:
   - scripts/deploy-omen.sh
@@ -18,9 +18,9 @@ status: clean
 
 # Phase 09: Code Review Report
 
-**Reviewed:** 2026-08-02T12:55:37Z
+**Reviewed:** 2026-08-02T13:04:30Z
 **Depth:** deep
-**Diff:** `b8d79b9..614520e`
+**Diff:** uncommitted Schannel hotfix over `93215db`
 **Files Reviewed:** 2
 **Status:** clean
 
@@ -28,27 +28,28 @@ status: clean
 
 ### Summary
 
-All reviewed files meet quality standards. No blocker or warning remains in the focused OMEN deployment hotfix.
+All reviewed files meet quality standards. No blocker or warning was found in the focused Windows private-CA curl hotfix.
 
-WR-01 is closed. The canonical script derives the durable Phase 1 certificate, key, CA, and service-token paths once from the checked-out repository's parent. It then requires every TLS artifact to be a leaf file with `Test-Path -LiteralPath ... -PathType Leaf` immediately after checkout identity validation. That gate executes before the stop function is defined and therefore before every process/port teardown, launcher write, firewall mutation, scheduled-task delete/register, and task start.
+All seven canonical Windows probes now pass `--ssl-no-revoke` while retaining the pinned `--cacert $aiCaBundle`. For Schannel, this option disables certificate-revocation lookup only; it is not equivalent to `-k`/`--insecure` and does not disable certificate-chain or hostname verification. This is an appropriate operational exception for RayMe's private Phase 1 CA, which has no reachable Windows revocation service. The serving certificate must still chain to the durable Phase 1 root and match `192.168.1.199`.
 
-The later double-quoted PowerShell here-strings interpolate the already validated absolute paths into both canonical `.cmd` launchers, while the Bash heredoc remains single-quoted and cannot consume those variables. There is one cert/key consumer in each launcher, two token-file consumers, and one Web CA-bundle environment entry. The obsolete `%LOCALAPPDATA%`/mkcert CA path is absent. Token rotation still uses cryptographic randomness, applies the restricted `pmpg`/`SYSTEM` ACL before reading the credential back, and occurs before launcher creation. Every health and readiness request continues to use the derived CA bundle; no insecure `curl -k` path exists.
+Every curl invocation places the Schannel option and CA bundle before the URL. The authenticated readiness probe also retains `--fail`, its exit-code handling, and the explicit `status == ready`/`authenticated == true` checks. AI health, Web settings, WebRTC readiness, deployed-commit identity, Qwen worker memory, final resident-engine state, and selected-prompt identity checks remain unchanged. No probe was omitted, duplicated, or converted to insecure verification.
 
-Scheduled tasks remain limited to `RayMePhase1AI` and `RayMePhase1Web`, each pointing only to its canonical launcher. No ad-hoc task creation, hidden process launcher, or noncanonical OMEN artifact path was introduced.
+The regression contract checks the exact count of both options, the normal and `--fail` command shapes, and the absence of both `-k` and `--insecure`. The pre-existing durable TLS leaf-file gate, token rotation and ACL restriction, launcher interpolation, and canonical task ownership remain intact.
 
 ## Verification Performed
 
-- OMEN deployment contract: `7 passed`.
+- OMEN deployment contract: `8 passed`.
 - `bash -n scripts/deploy-omen.sh`: passed.
-- `git show --check 614520e`: passed.
-- Focused `git diff --check b8d79b9..614520e`: passed.
-- Explicit source-order audit: the leaf-file gate precedes all `13` process/port teardown, launcher-write, firewall, task-mutation, and task-start markers checked.
-- Path/interpolation audit: one state root, one TLS directory, one cert, one key, one CA, one token path, two cert/key launcher consumers, two token consumers, and one Web CA-bundle assignment.
-- Security audit: strict `--cacert` probes remain; obsolete mkcert path, `curl -k`, `schtasks /Create`, and hidden `Start-Process` patterns are absent.
+- Focused `git diff --check`: passed.
+- Probe inventory: exactly `7` `curl.exe` commands, `7` `--ssl-no-revoke` options, and `7` pinned `--cacert $aiCaBundle` options.
+- Per-line safety audit: every curl command carries both options before its HTTPS URL; none contains `-k` or `--insecure`.
+- Readiness/auth audit: the one credential-readiness request retains `--fail`; authenticated readiness validation is unchanged.
+- Evidence audit: live-call readiness, deployed commit, Qwen runtime availability, memory, final engine, and selected prompt assertions are unchanged.
+- Compatibility audit: `--ssl-no-revoke` is the curl Schannel revocation-control option and predates Schannel support for file-based `--cacert`; option ordering is valid.
 - No source files, tests, commits, pushes, launchers, scheduled tasks, deployment state, or remote state were modified by this review.
 
 ---
 
-_Reviewed: 2026-08-02T12:55:37Z_
+_Reviewed: 2026-08-02T13:04:30Z_
 _Reviewer: the agent (gsd-code-reviewer)_
 _Depth: deep_
