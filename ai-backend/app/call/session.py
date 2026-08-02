@@ -204,6 +204,7 @@ class _PeerLifecycle:
     switch_generation: int = 0
     switch_owner: Any | None = None
     switch_task: asyncio.Task[tuple[bool, Any | None]] | None = None
+    switch_transaction: _PeerSwitchTransaction | None = None
     retiring_peer: Any | None = None
     retiring_generation: int | None = None
     terminal_state: str | None = None
@@ -221,6 +222,8 @@ class _TerminalCleanup:
     candidate_peer: Any | None
     prompt_lease_releaser: PromptLeaseReleaser | None
     cancel_pending: bool
+    owned_peer_ids: set[int] = field(default_factory=set)
+    owned_track_ids: set[int] = field(default_factory=set)
     extra_peers_pending: list[Any] = field(default_factory=list)
     extra_tracks_pending: list[Any] = field(default_factory=list)
     active_peer_pending: bool = True
@@ -1004,6 +1007,7 @@ class CallSession:
                     self._finish_peer_switch(switch)
                 )
                 lifecycle.switch_task = switch_task
+                lifecycle.switch_transaction = switch
             else:
                 self.peer_connection = peer_connection
                 lifecycle.active_generation = candidate.generation
@@ -1049,12 +1053,15 @@ class CallSession:
                     and lifecycle.switch_generation == switch.generation
                     and lifecycle.switch_owner is switch.peer_connection
                     and lifecycle.switch_task is asyncio.current_task()
+                    and lifecycle.switch_transaction is switch
                 )
             if not owns_switch:
                 if lifecycle.switch_task is asyncio.current_task():
                     lifecycle.switch_task = None
                 if lifecycle.switch_owner is switch.peer_connection:
                     lifecycle.switch_owner = None
+                if lifecycle.switch_transaction is switch:
+                    lifecycle.switch_transaction = None
                 if lifecycle.retiring_peer is switch.previous_peer_connection:
                     lifecycle.retiring_peer = None
                     lifecycle.retiring_generation = None
@@ -1110,17 +1117,33 @@ class CallSession:
                 self._complete_transport_reconnect_locked()
                 lifecycle.switch_owner = None
                 lifecycle.switch_task = None
+                lifecycle.switch_transaction = None
                 lifecycle.retiring_peer = None
                 lifecycle.retiring_generation = None
                 if self.state not in {"ended", "failed"}:
                     self.state = "listening"
         if not owns_switch:
-            if abandoned_peer is not None and abandoned_peer is not self.peer_connection:
+            terminal_cleanup = self._terminal_cleanup
+            terminal_owns_abandoned_peer = (
+                terminal_cleanup is not None
+                and abandoned_peer is not None
+                and id(abandoned_peer) in terminal_cleanup.owned_peer_ids
+            )
+            terminal_owns_abandoned_track = (
+                terminal_cleanup is not None
+                and abandoned_track is not None
+                and id(abandoned_track) in terminal_cleanup.owned_track_ids
+            )
+            if (
+                abandoned_peer is not None
+                and abandoned_peer is not self.peer_connection
+                and not terminal_owns_abandoned_peer
+            ):
                 self._start_owned_peer_cleanup(
                     abandoned_peer,
                     reason="switch_ownership_lost",
                 )
-            if abandoned_track is not None:
+            if abandoned_track is not None and not terminal_owns_abandoned_track:
                 self._start_owned_track_cleanup(
                     abandoned_track,
                     reason="switch_ownership_lost",
@@ -3686,18 +3709,58 @@ class CallSession:
         if self.ended_at is not None or self._peer_lifecycle.phase == "terminal":
             return None
         lifecycle = self._peer_lifecycle
+        switch = lifecycle.switch_transaction
+        retiring_peer = lifecycle.retiring_peer
+        candidate = lifecycle.candidate
+        candidate_peer = candidate.peer_connection if candidate is not None else None
+        terminal_extra_peers: list[Any] = []
+        terminal_extra_tracks: list[Any] = []
+
+        def add_unique_identity(items: list[Any], value: Any | None) -> None:
+            if value is not None and not any(item is value for item in items):
+                items.append(value)
+
+        for peer in extra_peers or []:
+            add_unique_identity(terminal_extra_peers, peer)
+        for track in extra_tracks or []:
+            add_unique_identity(terminal_extra_tracks, track)
+        add_unique_identity(terminal_extra_peers, retiring_peer)
+        if switch is not None:
+            add_unique_identity(
+                terminal_extra_peers,
+                switch.previous_peer_connection,
+            )
+            add_unique_identity(terminal_extra_peers, switch.peer_connection)
+            add_unique_identity(
+                terminal_extra_tracks,
+                switch.previous_outbound_audio_track,
+            )
+            add_unique_identity(
+                terminal_extra_tracks,
+                switch.accepted_outbound_audio_track,
+            )
+        if candidate is not None:
+            add_unique_identity(
+                terminal_extra_tracks,
+                candidate.outbound_audio_track,
+            )
+        terminal_extra_peers = [
+            peer
+            for peer in terminal_extra_peers
+            if peer is not self.peer_connection and peer is not candidate_peer
+        ]
+
         lifecycle.epoch += 1
         lifecycle.phase = "terminal"
         lifecycle.switch_owner = None
         lifecycle.switch_task = None
+        lifecycle.switch_transaction = None
         lifecycle.retiring_peer = None
         lifecycle.retiring_generation = None
         lifecycle.terminal_state = None
         lifecycle.state_before_reconnect = None
         lifecycle.grace_peer = None
         self._cancel_peer_reconnect_grace_locked()
-        candidate = lifecycle.candidate
-        candidate_peer = candidate.peer_connection if candidate is not None else None
         if candidate is not None:
             self._clear_pending_peer_locked(candidate.peer_connection)
         releaser = self._tts_prompt_lease_releaser
@@ -3718,14 +3781,24 @@ class CallSession:
             active_peer=self.peer_connection,
             candidate_peer=candidate_peer,
             prompt_lease_releaser=releaser,
+            owned_peer_ids={
+                id(peer)
+                for peer in (
+                    self.peer_connection,
+                    candidate_peer,
+                    *terminal_extra_peers,
+                )
+                if peer is not None
+            },
+            owned_track_ids={id(track) for track in terminal_extra_tracks},
             cancel_pending=(
                 self._speech_admission is not None
                 or self.active_turn_task is not None
                 or self._active_tts_turn_id is not None
                 or self._pending_speech_terminal_turn_id is not None
             ),
-            extra_peers_pending=list(extra_peers or []),
-            extra_tracks_pending=list(extra_tracks or []),
+            extra_peers_pending=terminal_extra_peers,
+            extra_tracks_pending=terminal_extra_tracks,
             candidate_peer_pending=(
                 candidate_peer is not None
                 and candidate_peer is not self.peer_connection

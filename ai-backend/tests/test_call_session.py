@@ -2684,6 +2684,84 @@ def test_lost_switch_ownership_closes_candidate_without_orphan_state() -> None:
     _run(scenario())
 
 
+@pytest.mark.parametrize("terminal_action", ["end", "fail"])
+def test_explicit_terminal_adopts_private_switch_candidate_resources(
+    terminal_action: str,
+) -> None:
+    class BlockingRetiringPeer(ScriptedPeerConnection):
+        def __init__(self) -> None:
+            super().__init__()
+            self.close_started = asyncio.Event()
+            self.release_close = asyncio.Event()
+
+        async def close(self) -> None:
+            self.close_calls += 1
+            self.close_started.set()
+            await self.release_close.wait()
+
+    async def scenario() -> None:
+        old_track = ScriptedOutboundAudioTrack()
+        new_track = ScriptedOutboundAudioTrack()
+        session, _ = _new_session(outbound_audio_track=old_track)
+        retiring_peer = BlockingRetiringPeer()
+        candidate_peer = ScriptedPeerConnection()
+        session.peer_connection = retiring_peer
+        session.voice_id = "voice-old"
+        session.engine_id = "qwen3_1_7b"
+        generation = await session.mark_peer_connection_pending(
+            candidate_peer,
+            outbound_audio_track=new_track,
+            configuration=PeerOfferConfiguration(
+                thread_id="thread-new",
+                voice_id="voice-new",
+                engine_id="f5",
+                prompt_messages=(),
+                vad_adapter=None,
+                stt_adapter=None,
+            ),
+            timeout_seconds=60.0,
+        )
+        acceptance = asyncio.create_task(
+            session.accept_pending_peer_connection(
+                candidate_peer,
+                generation=generation,
+            )
+        )
+        await retiring_peer.close_started.wait()
+        terminal = asyncio.create_task(
+            session.end(reason="explicit_hangup")
+            if terminal_action == "end"
+            else session.fail(reason="explicit_failure")
+        )
+        while session.ended_at is None:
+            await asyncio.sleep(0)
+
+        cleanup = session._terminal_cleanup
+        assert cleanup is not None
+        assert any(peer is candidate_peer for peer in cleanup.extra_peers_pending)
+        assert any(track is old_track for track in cleanup.extra_tracks_pending)
+        assert any(track is new_track for track in cleanup.extra_tracks_pending)
+        assert session._peer_lifecycle.switch_transaction is None
+
+        retiring_peer.release_close.set()
+        terminal_event = await terminal
+        accepted, previous_peer = await acceptance
+
+        assert terminal_event["type"] == (
+            "ended" if terminal_action == "end" else "failed"
+        )
+        assert accepted is False
+        assert previous_peer is retiring_peer
+        assert session.peer_connection is retiring_peer
+        assert candidate_peer.close_calls == 1
+        assert old_track.stop_calls >= 1
+        assert new_track.stop_calls >= 1
+        assert session._terminal_cleanup_pending(cleanup) is False
+        assert session._owned_peer_cleanup_failures == []
+
+    _run(scenario())
+
+
 @pytest.mark.parametrize(
     "failed_step",
     ["stop", "old_peer_close", "cancel", "prompt_lease"],
