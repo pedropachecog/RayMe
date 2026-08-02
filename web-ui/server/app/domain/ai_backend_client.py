@@ -711,6 +711,7 @@ class AiBackendClient:
                 request_kwargs["headers"] = headers
             if timeout is not None:
                 request_kwargs["timeout"] = timeout
+            request_kwargs["follow_redirects"] = False
             if self._http_client is not None:
                 response = await self._http_client.request(method, url, **request_kwargs)
             else:
@@ -722,6 +723,8 @@ class AiBackendClient:
         except (httpx.TimeoutException, httpx.NetworkError, httpx.TransportError) as exc:
             raise AiBackendUnavailable(code="unreachable", message=UNREACHABLE_MESSAGE) from exc
 
+        if 300 <= response.status_code < 400:
+            raise AiBackendUnavailable(code="untrusted_origin", message=UNREACHABLE_MESSAGE)
         if response.status_code in {401, 403}:
             raise AiBackendUnavailable(code="unauthorized", message=UNREACHABLE_MESSAGE)
         if response.status_code >= 400 and processing_message and processing_code:

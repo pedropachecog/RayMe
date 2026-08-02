@@ -94,7 +94,10 @@ async def test_ai_backend_client_sends_service_identity_on_webrtc_mutation() -> 
             },
         )
 
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        follow_redirects=True,
+    ) as client:
         ai_client = AiBackendClient(
             http_client=client,
             service_auth_token=token,
@@ -124,7 +127,10 @@ async def test_ai_backend_client_never_authenticates_public_health() -> None:
         requests.append(request)
         return httpx.Response(200, json={"status": "ok"})
 
-    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        follow_redirects=True,
+    ) as client:
         ai_client = AiBackendClient(
             http_client=client,
             service_auth_token=token,
@@ -135,6 +141,66 @@ async def test_ai_backend_client_never_authenticates_public_health() -> None:
     assert result.status == "ok"
     assert len(requests) == 1
     assert "authorization" not in requests[0].headers
+
+
+@pytest.mark.parametrize("redirect_status", [307, 308])
+@pytest.mark.parametrize("request_kind", ["json_reference", "multipart_audio"])
+async def test_ai_backend_client_never_replays_private_body_across_redirect(
+    redirect_status: int,
+    request_kind: str,
+) -> None:
+    token = "service-token-0123456789abcdef0123456789"
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.host == "ai.local":
+            return httpx.Response(
+                redirect_status,
+                headers={"Location": "https://attacker.invalid/collect"},
+            )
+        return httpx.Response(200, json={"status": "stolen"})
+
+    async with httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        follow_redirects=True,
+    ) as client:
+        ai_client = AiBackendClient(
+            http_client=client,
+            service_auth_token=token,
+            trusted_base_url="https://ai.local:9443",
+        )
+        with pytest.raises(AiBackendUnavailable) as raised:
+            if request_kind == "json_reference":
+                await ai_client.synthesize(
+                    "https://ai.local:9443",
+                    {
+                        "text": "private target payload",
+                        "reference_audio_b64": "private-reference-audio",
+                        "reference_transcript": "private reference transcript",
+                    },
+                )
+            else:
+                await ai_client.transcribe_sample(
+                    "https://ai.local:9443",
+                    b"private-multipart-audio",
+                    "private-sample.wav",
+                    "audio/wav",
+                )
+
+    assert raised.value.code == "untrusted_origin"
+    assert len(requests) == 1
+    assert str(requests[0].url).startswith("https://ai.local:9443/")
+    assert requests[0].headers["authorization"] == f"Bearer {token}"
+    if request_kind == "json_reference":
+        assert json.loads(requests[0].content) == {
+            "text": "private target payload",
+            "reference_audio_b64": "private-reference-audio",
+            "reference_transcript": "private reference transcript",
+        }
+    else:
+        assert b"private-multipart-audio" in requests[0].content
+        assert b"private-sample.wav" in requests[0].content
 
 
 @pytest.mark.parametrize(
@@ -190,6 +256,7 @@ async def test_ai_backend_client_verifies_configured_ca_and_rejects_certificate_
     ca_bundle = tmp_path / "rayme-ca.pem"
     ca_bundle.write_text("test CA placeholder", encoding="utf-8")
     observed_verify: list[object] = []
+    observed_follow_redirects: list[object] = []
 
     class CertificateRejectingClient:
         def __init__(self, *, timeout: float, verify: object) -> None:
@@ -203,7 +270,8 @@ async def test_ai_backend_client_verifies_configured_ca_and_rejects_certificate_
             return None
 
         async def request(self, method: str, url: str, **kwargs: object) -> httpx.Response:
-            del method, kwargs
+            del method
+            observed_follow_redirects.append(kwargs.get("follow_redirects"))
             request = httpx.Request("GET", url)
             raise httpx.ConnectError("certificate verify failed", request=request)
 
@@ -215,6 +283,7 @@ async def test_ai_backend_client_verifies_configured_ca_and_rejects_certificate_
 
     assert raised.value.code == "unreachable"
     assert observed_verify == [str(ca_bundle)]
+    assert observed_follow_redirects == [False]
 
 
 @pytest.fixture()
