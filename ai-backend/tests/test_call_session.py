@@ -2898,6 +2898,124 @@ def test_switch_preserves_slow_stt_and_thinking_frame_drop_states() -> None:
     _run(scenario())
 
 
+@pytest.mark.parametrize("stt_result", ["accepted", "empty", "error"])
+def test_admitted_stt_finishes_while_configuration_switch_is_blocked(
+    stt_result: str,
+) -> None:
+    entered_stt = threading.Event()
+    release_stt = threading.Event()
+    events: list[dict[str, Any]] = []
+
+    class BlockingRetiringPeer(ScriptedPeerConnection):
+        def __init__(self) -> None:
+            super().__init__()
+            self.close_started = asyncio.Event()
+            self.release_close = asyncio.Event()
+
+        async def close(self) -> None:
+            self.close_calls += 1
+            self.close_started.set()
+            await self.release_close.wait()
+
+    class SlowOutcomeSttAdapter:
+        def transcribe_pcm(
+            self,
+            pcm_frames: list[bytes],
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            assert pcm_frames
+            entered_stt.set()
+            assert release_stt.wait(timeout=2.0)
+            if stt_result == "error":
+                raise RuntimeError("simulated STT failure during switch")
+            return {
+                "status": "accepted" if stt_result == "accepted" else "empty",
+                "transcript": "owned STT completes" if stt_result == "accepted" else "",
+                "language": "en",
+            }
+
+    async def scenario() -> None:
+        old_vad = NeverEndingVadAdapter()
+        new_vad = NeverEndingVadAdapter()
+        stt = SlowOutcomeSttAdapter()
+        session, _ = _new_session(
+            vad_adapter=old_vad,
+            stt_adapter=stt,
+            outbound_audio_track=ScriptedOutboundAudioTrack(),
+            event_sink=events.append,
+        )
+        retiring_peer = BlockingRetiringPeer()
+        candidate_peer = ScriptedPeerConnection()
+        session.peer_connection = retiring_peer
+        session.voice_id = "voice-old"
+        session.engine_id = "qwen3_1_7b"
+        pcm = np.full(320, 1800, dtype=np.int16).tobytes()
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pcm)
+        ) is None
+        finalized = asyncio.create_task(session.finalize_user_turn())
+        assert await asyncio.to_thread(entered_stt.wait, 1.0)
+        admission = next(iter(session._stt_admissions.values()))
+        assert admission.task is finalized
+        assert session.state == "understanding"
+
+        generation = await session.mark_peer_connection_pending(
+            candidate_peer,
+            outbound_audio_track=ScriptedOutboundAudioTrack(),
+            configuration=PeerOfferConfiguration(
+                thread_id="thread-new",
+                voice_id="voice-new",
+                engine_id="f5",
+                prompt_messages=(),
+                vad_adapter=new_vad,
+                stt_adapter=stt,
+            ),
+            timeout_seconds=60.0,
+        )
+        switching = asyncio.create_task(
+            session.accept_pending_peer_connection(
+                candidate_peer,
+                generation=generation,
+            )
+        )
+        await retiring_peer.close_started.wait()
+        transaction = session._peer_lifecycle.switch_transaction
+        assert transaction is not None
+        assert admission.token in transaction.stt_admission_tokens
+
+        release_stt.set()
+        stt_event = await asyncio.wait_for(finalized, timeout=2.0)
+        assert stt_event is not None
+        assert stt_event["type"] == (
+            "user_final" if stt_result == "accepted" else "failed"
+        )
+        assert session._stt_admissions == {}
+        expected_state = "thinking" if stt_result == "accepted" else "listening"
+        assert session.state == expected_state
+
+        retiring_peer.release_close.set()
+        accepted, _ = await switching
+        assert accepted is True
+        assert session.state == expected_state
+
+        buffered_before = len(session._turn_frames)
+        result = await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pcm)
+        )
+        if stt_result == "accepted":
+            assert result is None
+            assert len(session._turn_frames) == buffered_before
+        else:
+            assert result is None
+            assert len(session._turn_frames) == buffered_before + 1
+        assert [event["type"] for event in events] == [
+            "state",
+            "user_final" if stt_result == "accepted" else "failed",
+        ]
+
+    _run(scenario())
+
+
 def test_stale_prompt_lease_cleanup_retries_transient_release(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -308,6 +308,7 @@ class _PeerSwitchTransaction:
     cancellation: _CapturedTurnCancellation | None
     prompt_lease_releaser: PromptLeaseReleaser | None
     state_before_switch: str
+    stt_admission_tokens: tuple[int, ...]
 
 
 @dataclass
@@ -328,6 +329,7 @@ class _SttTurnAdmission:
     token: int
     lifecycle_epoch: int
     allow_transport_reconnect: bool
+    task: asyncio.Task[Any] | None
 
 
 @dataclass
@@ -1106,6 +1108,7 @@ class CallSession:
                     cancellation=captured_cancellation,
                     prompt_lease_releaser=released_prompt_lease,
                     state_before_switch=self.state,
+                    stt_admission_tokens=tuple(self._stt_admissions),
                 )
                 switch_task = asyncio.create_task(
                     self._finish_peer_switch(switch)
@@ -2055,7 +2058,7 @@ class CallSession:
             return await self._finalize_user_turn_admitted(admission)
         finally:
             async with self._lifecycle_lock:
-                self._stt_admissions.pop(admission.token, None)
+                self._release_stt_admission_locked(admission)
 
     async def _finalize_user_turn_admitted(
         self,
@@ -2231,6 +2234,7 @@ class CallSession:
                 token=self._stt_admission_generation,
                 lifecycle_epoch=lifecycle.epoch,
                 allow_transport_reconnect=allow_transport_reconnect,
+                task=asyncio.current_task(),
             )
             self._stt_admissions[admission.token] = admission
             return admission, None
@@ -2261,13 +2265,44 @@ class CallSession:
             return self._terminal_stt_response_locked()
         if (
             admission.lifecycle_epoch != lifecycle.epoch
-            or lifecycle.phase not in {"stable", "reconnecting"}
+            or (
+                lifecycle.phase not in {"stable", "reconnecting"}
+                and not (
+                    lifecycle.phase == "switching"
+                    and lifecycle.switch_transaction is not None
+                    and admission.token
+                    in lifecycle.switch_transaction.stt_admission_tokens
+                    and admission.task is not None
+                    and not admission.task.done()
+                )
+            )
         ):
             return {
                 "status": "superseded",
                 "state": self.state,
             }
         return None
+
+    def _release_stt_admission_locked(
+        self,
+        admission: _SttTurnAdmission,
+    ) -> None:
+        current = self._stt_admissions.get(admission.token)
+        if current is not admission:
+            return
+        self._stt_admissions.pop(admission.token, None)
+        lifecycle = self._peer_lifecycle
+        if (
+            self.state == "understanding"
+            and self.ended_at is None
+            and lifecycle.phase != "terminal"
+            and not self._stt_admissions
+        ):
+            self.state = (
+                "reconnecting"
+                if lifecycle.phase == "reconnecting"
+                else "listening"
+            )
 
     async def _commit_stt_event(
         self,
