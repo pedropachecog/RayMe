@@ -2271,6 +2271,90 @@ def test_reconnect_audio_backfill_releases_held_replacement_track_after_final_ba
     assert session._reconnect_live_frame_hold_frames == []
 
 
+def test_mute_discards_reconnect_hold_and_rejects_stale_backfill_epoch() -> None:
+    async def scenario() -> None:
+        vad = NeverEndingVadAdapter()
+        stt = ScriptedSttAdapter()
+        settings = AiBackendSettings(call_media_reconnect_grace_ms=5000)
+        session, _ = _new_session(
+            vad_adapter=vad,
+            stt_adapter=stt,
+            settings=settings,
+        )
+        pre_mute_live_pcm = np.full(320, 1800, dtype=np.int16).tobytes()
+        pre_mute_backfill_pcm = np.full(320, 2600, dtype=np.int16).tobytes()
+        post_unmute_pcm = np.full(320, 3400, dtype=np.int16).tobytes()
+
+        session._media_reconnect_grace_pending = True
+        session.start_media_reconnect_grace_if_pending()
+        grace_until = session._media_reconnect_grace_until
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pre_mute_live_pcm)
+        ) is None
+        assert vad.frames == []
+        assert [
+            frame.pcm for frame in session._reconnect_live_frame_hold_frames
+        ] == [pre_mute_live_pcm]
+
+        backfill_admitted = asyncio.Event()
+        release_backfill = asyncio.Event()
+        original_backfill = session._backfill_reconnect_audio_admitted
+
+        async def delay_admitted_backfill(**kwargs: Any) -> dict[str, Any]:
+            backfill_admitted.set()
+            await release_backfill.wait()
+            return await original_backfill(**kwargs)
+
+        session._backfill_reconnect_audio_admitted = delay_admitted_backfill
+        delayed = asyncio.create_task(
+            session.backfill_reconnect_audio(
+                pcm=pre_mute_backfill_pcm,
+                sample_rate=16000,
+                channels=1,
+                backfill_id="pre-mute-delayed-backfill",
+                final=True,
+            )
+        )
+        await asyncio.wait_for(backfill_admitted.wait(), timeout=1.0)
+        stale_admission = next(
+            iter(session._reconnect_backfill_admissions.values())
+        )
+
+        await session.set_muted(True)
+
+        assert stale_admission.audio_input_epoch < session._audio_input_epoch
+        assert session._reconnect_live_frame_hold_frames == []
+        assert session._reconnect_live_frame_hold_until == 0.0
+        assert session._reconnect_live_frame_hold_logged is False
+        assert session._media_reconnect_grace_audio_diag_count == 0
+        assert session._media_reconnect_grace_until == grace_until
+
+        await session.set_muted(False)
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(post_unmute_pcm)
+        ) is None
+        assert vad.frames == [post_unmute_pcm]
+
+        release_backfill.set()
+        stale = await asyncio.wait_for(delayed, timeout=1.0)
+        assert stale["status"] == "skipped"
+        duplicate = await session.backfill_reconnect_audio(
+            pcm=pre_mute_backfill_pcm,
+            sample_rate=16000,
+            channels=1,
+            backfill_id="pre-mute-delayed-backfill",
+            final=True,
+        )
+        assert duplicate["status"] == "duplicate"
+        assert vad.frames == [post_unmute_pcm]
+
+        result = await session.finalize_user_turn()
+        assert result is not None and result["type"] == "user_final"
+        assert stt.calls == [[post_unmute_pcm]]
+
+    _run(scenario())
+
+
 def test_reconnect_audio_backfill_trims_overlap_before_appending() -> None:
     vad = NeverEndingVadAdapter()
     session, _ = _new_session(vad_adapter=vad)

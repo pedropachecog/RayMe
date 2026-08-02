@@ -344,6 +344,7 @@ class _PeerSwitchCleanupResult:
 class _ReconnectBackfillAdmission:
     token: int
     lifecycle_epoch: int
+    audio_input_epoch: int
 
 
 @dataclass
@@ -482,6 +483,7 @@ class CallSession:
             int,
             _ReconnectBackfillAdmission,
         ] = {}
+        self._audio_input_epoch = 0
         self._stt_admission_generation = 0
         self._stt_admissions: dict[int, _SttTurnAdmission] = {}
         self._active_stt_finalization: _SttFinalization | None = None
@@ -1580,6 +1582,7 @@ class CallSession:
             admission = _ReconnectBackfillAdmission(
                 token=self._reconnect_backfill_admission_generation,
                 lifecycle_epoch=self._peer_lifecycle.epoch,
+                audio_input_epoch=self._audio_input_epoch,
             )
             self._reconnect_backfill_admissions[admission.token] = admission
         try:
@@ -1631,6 +1634,24 @@ class CallSession:
         final: bool,
         admission: _ReconnectBackfillAdmission,
     ) -> dict[str, Any]:
+        if admission.audio_input_epoch != self._audio_input_epoch:
+            if backfill_id:
+                self._reconnect_audio_backfill_ids.add(backfill_id)
+            logger.info(
+                "[rayme-call] reconnect_audio.backfill.stale_audio_epoch "
+                "session=%s backfill_id=%s admitted_epoch=%d "
+                "current_epoch=%d",
+                self.session_id,
+                backfill_id or "",
+                admission.audio_input_epoch,
+                self._audio_input_epoch,
+            )
+            return {
+                "status": "skipped",
+                "frames": 0,
+                "duration_ms": 0,
+                "state": self.state,
+            }
         if backfill_id and backfill_id in self._reconnect_audio_backfill_ids:
             logger.info(
                 "[rayme-call] reconnect_audio.backfill.duplicate session=%s "
@@ -2074,6 +2095,23 @@ class CallSession:
                 *self._pcm_frame_rms_peak(frame),
             )
         return True
+
+    def _discard_reconnect_live_frames(self, *, reason: str) -> None:
+        discarded = len(self._reconnect_live_frame_hold_frames)
+        self._reconnect_live_frame_hold_frames.clear()
+        self._reconnect_live_frame_hold_until = 0.0
+        self._reconnect_live_frame_hold_logged = False
+        self._media_reconnect_grace_logged = False
+        self._media_reconnect_grace_audio_diag_count = 0
+        if discarded:
+            logger.info(
+                "[rayme-call] reconnect_audio.live_hold.discard "
+                "session=%s reason=%s held_frames=%d audio_epoch=%d",
+                self.session_id,
+                reason,
+                discarded,
+                self._audio_input_epoch,
+            )
 
     def _release_reconnect_live_frames(self, *, reason: str) -> bool:
         frames = list(self._reconnect_live_frame_hold_frames)
@@ -2683,9 +2721,15 @@ class CallSession:
     async def set_muted(self, muted: bool) -> dict[str, Any]:
         async with self._lifecycle_lock:
             self._ensure_control_mutable_locked()
+            mute_transition = muted and not self.muted
             self.muted = muted
             if muted:
                 self._reset_barge_in_onset()
+                if mute_transition:
+                    self._audio_input_epoch += 1
+                    self._discard_reconnect_live_frames(
+                        reason="mute_transition"
+                    )
                 if not self._speech_seen:
                     self._turn_frames.clear()
                     self._turn_started_at = None
