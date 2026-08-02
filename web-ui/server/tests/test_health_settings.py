@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.api.settings import get_ai_backend_client, get_llm_probe, get_settings_session
 from app.config import Settings
 from app.domain.ai_backend_client import (
+    AiBackendClient,
     AiBackendReadiness,
     AiBackendStatus,
     AiBackendUnavailable,
@@ -94,7 +95,11 @@ async def test_ai_backend_client_sends_service_identity_on_webrtc_mutation() -> 
         )
 
     async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
-        ai_client = AiBackendClient(http_client=client, service_auth_token=token)
+        ai_client = AiBackendClient(
+            http_client=client,
+            service_auth_token=token,
+            trusted_base_url="https://ai.local:9443",
+        )
         result = await ai_client.create_webrtc_offer(
             "https://ai.local:9443",
             {
@@ -107,6 +112,73 @@ async def test_ai_backend_client_sends_service_identity_on_webrtc_mutation() -> 
         )
 
     assert result["session_id"] == "authorized-client"
+
+
+async def test_ai_backend_client_never_authenticates_public_health() -> None:
+    from app.domain.ai_backend_client import AiBackendClient
+
+    token = "service-token-0123456789abcdef0123456789"
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"status": "ok"})
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        ai_client = AiBackendClient(
+            http_client=client,
+            service_auth_token=token,
+            trusted_base_url="https://ai.local:443",
+        )
+        result = await ai_client.get_status("https://AI.LOCAL")
+
+    assert result.status == "ok"
+    assert len(requests) == 1
+    assert "authorization" not in requests[0].headers
+
+
+@pytest.mark.parametrize(
+    "attacker_url",
+    ["http://attacker.invalid", "https://attacker.invalid"],
+)
+async def test_ai_backend_client_rejects_untrusted_origin_before_payload_or_reference_leak(
+    attacker_url: str,
+) -> None:
+    from app.domain.ai_backend_client import AiBackendClient
+
+    requests: list[httpx.Request] = []
+    token = "service-token-0123456789abcdef0123456789"
+    voice_reference = {
+        "reference_audio_b64": "private-reference-audio",
+        "reference_transcript": "private reference transcript",
+        "text": "private target payload",
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(500)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        ai_client = AiBackendClient(
+            http_client=client,
+            service_auth_token=token,
+            trusted_base_url="https://ai.local:9443",
+        )
+        with pytest.raises(AiBackendUnavailable) as raised:
+            await ai_client.synthesize(attacker_url, voice_reference)
+
+    assert raised.value.code == "untrusted_origin"
+    assert requests == []
+
+
+def test_runtime_settings_reject_http_ai_backend_when_service_auth_is_enabled() -> None:
+    token = "service-token-0123456789abcdef0123456789"
+
+    with pytest.raises(ValueError, match="must use HTTPS"):
+        Settings(
+            ai_backend_base_url="http://ai.local:9443",
+            ai_backend_service_token=token,
+        )
 
 
 async def test_ai_backend_client_verifies_configured_ca_and_rejects_certificate_failure(
@@ -201,6 +273,56 @@ def settings_client(tmp_path: Path) -> Iterator[TestClient]:
     asyncio.run(engine.dispose())
 
 
+@pytest.fixture()
+def authenticated_settings_client(
+    tmp_path: Path,
+) -> Iterator[tuple[TestClient, list[httpx.Request]]]:
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'authenticated-settings.sqlite3'}")
+    sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+    requests: list[httpx.Request] = []
+    token = "service-token-0123456789abcdef0123456789"
+    trusted_base_url = "https://192.168.1.199:9443"
+
+    async def setup_database() -> None:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+
+    asyncio.run(setup_database())
+
+    app = create_app(
+        Settings(
+            web_public_url="https://192.168.1.199:8443",
+            ai_backend_base_url=trusted_base_url,
+            ai_backend_service_token=token,
+            ai_backend_ca_bundle=tmp_path / "mkcert-rootCA.pem",
+        ),
+        static_client_dir=None,
+    )
+
+    async def override_session() -> AsyncIterator:
+        async with sessionmaker() as session:
+            yield session
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"status": "ok"})
+
+    transport_client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    app.dependency_overrides[get_settings_session] = override_session
+    app.dependency_overrides[get_ai_backend_client] = lambda: AiBackendClient(
+        http_client=transport_client,
+        service_auth_token=token,
+        trusted_base_url=trusted_base_url,
+        ca_bundle=tmp_path / "mkcert-rootCA.pem",
+    )
+
+    with TestClient(app) as client:
+        yield client, requests
+
+    asyncio.run(transport_client.aclose())
+    asyncio.run(engine.dispose())
+
+
 def test_health_returns_exact_web_ui_payload(settings_client: TestClient) -> None:
     response = settings_client.get("/health")
 
@@ -254,6 +376,40 @@ def test_get_and_patch_settings_persist_values_without_echoing_raw_key(
     assert "llm_api_key" not in fetched.json()
 
 
+@pytest.mark.parametrize(
+    "attacker_url",
+    ["http://attacker.invalid:9443", "https://attacker.invalid:9443"],
+)
+def test_authenticated_settings_patch_rejects_untrusted_ai_origin_without_probe(
+    authenticated_settings_client: tuple[TestClient, list[httpx.Request]],
+    attacker_url: str,
+) -> None:
+    client, requests = authenticated_settings_client
+
+    response = client.patch("/api/settings", json={"ai_backend_url": attacker_url})
+
+    assert response.status_code == 403
+    assert response.json()["detail"]["code"] == "ai_backend_url_operator_managed"
+    assert requests == []
+
+
+def test_authenticated_settings_patch_allows_canonical_omen_origin_and_public_probe(
+    authenticated_settings_client: tuple[TestClient, list[httpx.Request]],
+) -> None:
+    client, requests = authenticated_settings_client
+
+    response = client.patch(
+        "/api/settings",
+        json={"ai_backend_url": "https://192.168.1.199:9443"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["ai_backend_url"] == "https://192.168.1.199:9443"
+    assert len(requests) == 1
+    assert str(requests[0].url) == "https://192.168.1.199:9443/health"
+    assert "authorization" not in requests[0].headers
+
+
 def test_settings_defaults_include_audio_vad_and_ai_backend_status(
     settings_client: TestClient,
 ) -> None:
@@ -270,19 +426,13 @@ def test_settings_defaults_include_audio_vad_and_ai_backend_status(
 def test_settings_rejects_vad_values_outside_call_phase_bounds(
     settings_client: TestClient,
 ) -> None:
+    assert settings_client.patch("/api/settings", json={"vad_threshold": -0.01}).status_code == 422
+    assert settings_client.patch("/api/settings", json={"vad_threshold": 1.01}).status_code == 422
     assert (
-        settings_client.patch("/api/settings", json={"vad_threshold": -0.01}).status_code == 422
+        settings_client.patch("/api/settings", json={"vad_end_silence_ms": 99}).status_code == 422
     )
     assert (
-        settings_client.patch("/api/settings", json={"vad_threshold": 1.01}).status_code == 422
-    )
-    assert (
-        settings_client.patch("/api/settings", json={"vad_end_silence_ms": 99}).status_code
-        == 422
-    )
-    assert (
-        settings_client.patch("/api/settings", json={"vad_end_silence_ms": 3001}).status_code
-        == 422
+        settings_client.patch("/api/settings", json={"vad_end_silence_ms": 3001}).status_code == 422
     )
 
 
@@ -387,6 +537,35 @@ async def test_settings_service_persists_phase2_defaults_with_json_types(tmp_pat
         await engine.dispose()
 
 
+async def test_authenticated_settings_ignore_persisted_untrusted_ai_backend_override(
+    tmp_path: Path,
+) -> None:
+    engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'untrusted-endpoint.sqlite3'}")
+    sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
+    runtime_settings = Settings(
+        ai_backend_base_url="https://192.168.1.199:9443",
+        ai_backend_service_token="service-token-0123456789abcdef0123456789",
+    )
+
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+        async with sessionmaker() as session:
+            session.add(
+                AppSetting(
+                    key=SETTINGS_KEY,
+                    value_json={"ai_backend_url": "https://attacker.invalid:9443"},
+                )
+            )
+            await session.commit()
+
+            settings = await SettingsService(session, runtime_settings).read()
+
+            assert settings.ai_backend_url == "https://192.168.1.199:9443"
+    finally:
+        await engine.dispose()
+
+
 def test_connection_test_routes_return_only_allowed_status_values(
     settings_client: TestClient,
 ) -> None:
@@ -409,8 +588,7 @@ def test_connection_test_routes_return_only_allowed_status_values(
     for status in (CONNECTED, UNREACHABLE, UNAUTHORIZED):
         settings_client.app.dependency_overrides[get_ai_backend_client] = _ai_backend_client(status)
         assert (
-            settings_client.get("/api/settings").json()["ai_backend_url"]
-            == "https://ai.local:9443"
+            settings_client.get("/api/settings").json()["ai_backend_url"] == "https://ai.local:9443"
         )
         response = settings_client.post("/api/settings/test/ai-backend")
         assert response.status_code == 200
@@ -487,9 +665,7 @@ def test_ai_backend_readiness_bridge_fails_closed_on_token_mismatch(
                 message="AI backend is unreachable",
             )
 
-    settings_client.app.dependency_overrides[
-        get_ai_backend_client
-    ] = MismatchedCredentialClient
+    settings_client.app.dependency_overrides[get_ai_backend_client] = MismatchedCredentialClient
 
     response = settings_client.get("/api/ai-backend/readiness")
 
@@ -675,9 +851,7 @@ async def test_llm_probe_posts_openai_compatible_chat_completions_without_leakin
     assert requests[0].headers["authorization"] == "Bearer sk-server-secret"
     assert body["model"] == "configured-model"
     assert body["messages"] == [{"role": "user", "content": "ping"}]
-    assert chat_completions_url("https://llm.local/v1") == (
-        "https://llm.local/v1/chat/completions"
-    )
+    assert chat_completions_url("https://llm.local/v1") == ("https://llm.local/v1/chat/completions")
 
 
 async def test_probes_map_unauthorized_unreachable_and_not_configured() -> None:

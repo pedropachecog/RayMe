@@ -87,6 +87,7 @@ def test_omen_deploy_provisions_service_auth_and_verified_ai_tls() -> None:
 
     assert "RandomNumberGenerator" in source
     assert source.count('set "RAYME_AI_BACKEND_SERVICE_TOKEN=%%T"') == 2
+    assert 'set "RAYME_AI_BACKEND_BASE_URL=https://192.168.1.199:9443"' in source
     assert "icacls.exe $serviceTokenPath /inheritance:r" in source
     assert 'set "RAYME_AI_BACKEND_CA_BUNDLE=$aiCaBundle"' in source
     assert 'mkcert\\rootCA.pem' in source

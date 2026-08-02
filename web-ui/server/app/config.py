@@ -4,11 +4,28 @@ from functools import lru_cache
 import os
 from pathlib import Path
 from typing import Mapping
+from urllib.parse import urlsplit
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 WILDCARD_BIND_HOSTS = {"0.0.0.0", "::", "[::]"}
 DEFAULT_ALLOWED_ORIGINS = ("https://127.0.0.1:8443",)
+
+
+def normalize_http_origin(value: str) -> tuple[str, str, int]:
+    """Return a comparison-safe HTTP origin as scheme, host, and effective port."""
+
+    parsed = urlsplit(value.strip())
+    scheme = parsed.scheme.lower()
+    if scheme not in {"http", "https"} or parsed.hostname is None:
+        raise ValueError("AI backend URL must be an absolute http(s) URL")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("AI backend URL must not contain credentials")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("AI backend URL has an invalid port") from exc
+    return (scheme, parsed.hostname.lower().rstrip("."), port or (443 if scheme == "https" else 80))
 
 
 class Settings(BaseModel, frozen=True):
@@ -71,6 +88,22 @@ class Settings(BaseModel, frozen=True):
         if normalized and len(normalized) < 32:
             raise ValueError("RAYME_AI_BACKEND_SERVICE_TOKEN must be at least 32 characters")
         return normalized
+
+    @model_validator(mode="after")
+    def require_https_ai_backend_for_service_auth(self) -> "Settings":
+        if not self.ai_backend_service_token:
+            return self
+        try:
+            scheme, _host, _port = normalize_http_origin(self.ai_backend_base_url)
+        except ValueError as exc:
+            raise ValueError(
+                "RAYME_AI_BACKEND_BASE_URL must be a valid HTTPS URL when service auth is enabled"
+            ) from exc
+        if scheme != "https":
+            raise ValueError(
+                "RAYME_AI_BACKEND_BASE_URL must use HTTPS when service auth is enabled"
+            )
+        return self
 
     @property
     def host(self) -> str:

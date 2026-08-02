@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import Settings
+from app.config import Settings, normalize_http_origin
 from app.domain.ai_backend_client import AiBackendClient, AiBackendStatus, AiBackendUnavailable
 from app.domain.llm_probe import (
     CONNECTED,
@@ -109,6 +109,7 @@ def get_ai_backend_client(
 ) -> AiBackendClient:
     return AiBackendClient(
         service_auth_token=runtime_settings.ai_backend_service_token,
+        trusted_base_url=runtime_settings.ai_backend_base_url,
         ca_bundle=runtime_settings.ai_backend_ca_bundle,
     )
 
@@ -131,10 +132,35 @@ async def update_settings(
     payload: SettingsPatch,
     service: SettingsService = Depends(get_settings_service),
     client: AiBackendClient = Depends(get_ai_backend_client),
+    runtime_settings: Settings = Depends(get_runtime_settings),
 ) -> dict[str, object]:
+    _enforce_operator_managed_ai_backend_url(payload, runtime_settings)
     updates = payload.model_dump(exclude_unset=True)
     settings = await service.update(updates)
     return await _public_settings(settings, client)
+
+
+def _enforce_operator_managed_ai_backend_url(
+    payload: SettingsPatch,
+    runtime_settings: Settings,
+) -> None:
+    requested_url = payload.ai_backend_url
+    if requested_url is None or not runtime_settings.ai_backend_service_token:
+        return
+    try:
+        requested_origin = normalize_http_origin(requested_url)
+        trusted_origin = normalize_http_origin(runtime_settings.ai_backend_base_url)
+    except ValueError:
+        requested_origin = None
+        trusted_origin = normalize_http_origin(runtime_settings.ai_backend_base_url)
+    if requested_origin != trusted_origin or requested_origin[0] != "https":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ai_backend_url_operator_managed",
+                "message": "The authenticated AI backend origin is managed by the operator.",
+            },
+        )
 
 
 @router.post("/test/web", response_model=ConnectionTestResponse)

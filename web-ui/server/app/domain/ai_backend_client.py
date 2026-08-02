@@ -11,6 +11,7 @@ from typing import Any, Literal
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
+from app.config import normalize_http_origin
 from app.domain.speech_terminal import (
     SpeechTurnTerminal,
     _speech_error_terminal,
@@ -361,6 +362,7 @@ class AiBackendClient:
         webrtc_timeout: float = 30.0,
         backfill_timeout: float | None = None,
         service_auth_token: str = "",
+        trusted_base_url: str | None = None,
         ca_bundle: Path | str | None = None,
     ) -> None:
         self._http_client = http_client
@@ -373,10 +375,21 @@ class AiBackendClient:
             backfill_timeout or transcription_timeout,
         )
         self._service_auth_token = service_auth_token.strip()
+        self._trusted_origin: tuple[str, str, int] | None = None
+        if self._service_auth_token:
+            if trusted_base_url is None:
+                raise ValueError("trusted_base_url is required when service auth is enabled")
+            self._trusted_origin = normalize_http_origin(trusted_base_url)
+            if self._trusted_origin[0] != "https":
+                raise ValueError("trusted_base_url must use HTTPS when service auth is enabled")
         self._tls_verify: bool | str = str(ca_bundle) if ca_bundle else True
 
     async def get_status(self, base_url: str) -> AiBackendStatus:
-        response = await self._request("GET", _join_endpoint(base_url, "/health"))
+        response = await self._request(
+            "GET",
+            _join_endpoint(base_url, "/health"),
+            authenticate=False,
+        )
         payload = _json_payload(response)
         try:
             return AiBackendStatus.model_validate(payload)
@@ -667,13 +680,33 @@ class AiBackendClient:
         processing_message: str | None = None,
         processing_code: str | None = None,
         timeout: float | None = None,
+        authenticate: bool = True,
         **kwargs: Any,
     ) -> httpx.Response:
         try:
             request_kwargs = dict(kwargs)
             headers = dict(request_kwargs.pop("headers", {}))
             if self._service_auth_token:
-                headers["Authorization"] = f"Bearer {self._service_auth_token}"
+                try:
+                    target_origin = normalize_http_origin(url)
+                except ValueError as exc:
+                    raise AiBackendUnavailable(
+                        code="untrusted_origin",
+                        message=UNREACHABLE_MESSAGE,
+                    ) from exc
+                if target_origin[0] != "https" or target_origin != self._trusted_origin:
+                    raise AiBackendUnavailable(
+                        code="untrusted_origin",
+                        message=UNREACHABLE_MESSAGE,
+                    )
+                if authenticate:
+                    headers["Authorization"] = f"Bearer {self._service_auth_token}"
+                else:
+                    headers = {
+                        key: value
+                        for key, value in headers.items()
+                        if key.lower() != "authorization"
+                    }
             if headers:
                 request_kwargs["headers"] = headers
             if timeout is not None:

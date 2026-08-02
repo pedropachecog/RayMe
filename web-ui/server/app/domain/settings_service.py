@@ -7,7 +7,7 @@ from typing import Any, Mapping
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.config import Settings
+from app.config import Settings, normalize_http_origin
 from app.storage.models import AppSetting
 
 SETTINGS_KEY = "endpoint_settings"
@@ -109,11 +109,13 @@ class SettingsService:
         if row is None or not isinstance(row.value_json, dict):
             return {}
 
-        return normalize_endpoint_settings({
-            key: _clean_persisted_setting(key, value)
-            for key, value in row.value_json.items()
-            if key in SETTING_FIELDS
-        })
+        return normalize_endpoint_settings(
+            {
+                key: _clean_persisted_setting(key, value)
+                for key, value in row.value_json.items()
+                if key in SETTING_FIELDS
+            }
+        )
 
     async def _save(self, values: Mapping[str, object]) -> None:
         row = await self._session.get(AppSetting, SETTINGS_KEY)
@@ -139,6 +141,16 @@ class SettingsService:
             "tts_default_engine": "f5",
         }
         values = {**defaults, **persisted}
+        if self._runtime_settings.ai_backend_service_token:
+            candidate_url = str(values["ai_backend_url"])
+            try:
+                candidate_origin = normalize_http_origin(candidate_url)
+                trusted_origin = normalize_http_origin(self._runtime_settings.ai_backend_base_url)
+            except ValueError:
+                candidate_origin = None
+                trusted_origin = normalize_http_origin(self._runtime_settings.ai_backend_base_url)
+            if candidate_origin != trusted_origin or candidate_origin[0] != "https":
+                values["ai_backend_url"] = self._runtime_settings.ai_backend_base_url
         return EndpointSettings(
             web_url=str(values["web_url"]),
             ai_backend_url=str(values["ai_backend_url"]),

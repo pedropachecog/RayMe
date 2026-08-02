@@ -204,6 +204,7 @@ def get_call_backend_client(
 ) -> AiBackendClient:
     return AiBackendClient(
         service_auth_token=runtime_settings.ai_backend_service_token,
+        trusted_base_url=runtime_settings.ai_backend_base_url,
         ca_bundle=runtime_settings.ai_backend_ca_bundle,
     )
 
@@ -463,9 +464,7 @@ async def interrupt_call(
             "session_id": session_id,
             "interrupted": True,
             "cancelled_turn_id": interrupt_result.get("cancelled_turn_id"),
-            "receiver_drain_ms": _safe_receiver_drain_ms(
-                interrupt_result.get("receiver_drain_ms")
-            ),
+            "receiver_drain_ms": _safe_receiver_drain_ms(interrupt_result.get("receiver_drain_ms")),
         }
     except CallServiceError as exc:
         raise _call_error(exc) from exc
@@ -609,9 +608,7 @@ async def create_call_turn(
                 model=endpoint_settings.llm_model,
                 disable_thinking=endpoint_settings.llm_disable_thinking,
             )
-            segmenter = (
-                CallTtsSegmenter() if call["engine_id"] == "qwen3_1_7b" else None
-            )
+            segmenter = CallTtsSegmenter() if call["engine_id"] == "qwen3_1_7b" else None
             llm_started = time.perf_counter()
             async for raw_event in stream_chat_completion(
                 completion_settings,

@@ -21,6 +21,7 @@ def get_ai_backend_client(
 ) -> AiBackendClient:
     return AiBackendClient(
         service_auth_token=runtime_settings.ai_backend_service_token,
+        trusted_base_url=runtime_settings.ai_backend_base_url,
         ca_bundle=runtime_settings.ai_backend_ca_bundle,
     )
 
@@ -37,9 +38,7 @@ async def read_authenticated_ai_backend_readiness(
             detail={"code": "ai_backend_not_configured"},
         )
     try:
-        readiness = await client.get_authenticated_readiness(
-            settings.ai_backend_url
-        )
+        readiness = await client.get_authenticated_readiness(settings.ai_backend_url)
     except AiBackendUnavailable as exc:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -68,8 +67,7 @@ async def read_ai_backend_status(
 
 def compact_ai_backend_status(status: AiBackendStatus) -> dict[str, object]:
     available_engines = [
-        engine.model_dump(exclude_none=True)
-        for engine in status.available_engines
+        engine.model_dump(exclude_none=True) for engine in status.available_engines
     ]
     return {
         "endpoint_status": status.status,

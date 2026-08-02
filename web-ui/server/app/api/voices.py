@@ -135,6 +135,7 @@ def get_voice_processor(settings: Settings = Depends(get_runtime_settings)) -> o
         AiBackendClient(
             synthesis_timeout=settings.ai_backend_synthesis_timeout_seconds,
             service_auth_token=settings.ai_backend_service_token,
+            trusted_base_url=settings.ai_backend_base_url,
             ca_bundle=settings.ai_backend_ca_bundle,
         ),
         settings.ai_backend_base_url,
@@ -215,9 +216,7 @@ async def preview_voice(
     except Exception:
         return JSONResponse(
             status_code=502,
-            content={
-                "error": {"code": "preview_failed", "message": "Preview synthesis failed"}
-            },
+            content={"error": {"code": "preview_failed", "message": "Preview synthesis failed"}},
         )
 
 
@@ -257,7 +256,9 @@ async def read_voice_preparation_status(
 
 
 @router.get("/{voice_id}")
-async def read_voice(voice_id: str, service: VoiceService = Depends(get_voice_service)) -> dict[str, Any]:
+async def read_voice(
+    voice_id: str, service: VoiceService = Depends(get_voice_service)
+) -> dict[str, Any]:
     try:
         return await service.get_voice(voice_id)
     except VoiceNotFoundError as exc:
