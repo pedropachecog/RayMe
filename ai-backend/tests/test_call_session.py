@@ -1655,6 +1655,134 @@ def test_failed_authoritative_stt_delivery_releases_thinking_ownership() -> None
     _run(scenario())
 
 
+@pytest.mark.parametrize(
+    ("stt_outcome", "delivery_outcome"),
+    [
+        ("accepted", "success"),
+        ("empty", "success"),
+        ("accepted", "failure"),
+    ],
+)
+def test_cancelled_finalizer_leaves_stt_settlement_owned_by_outbox(
+    stt_outcome: str,
+    delivery_outcome: str,
+) -> None:
+    delivery_started = asyncio.Event()
+    release_delivery = asyncio.Event()
+    channel = ScriptedDataChannel()
+
+    class OutcomeSttAdapter:
+        def transcribe_pcm(
+            self,
+            pcm_frames: list[bytes],
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            assert pcm_frames
+            return {
+                "status": stt_outcome,
+                "transcript": (
+                    "durably settled transcript"
+                    if stt_outcome == "accepted"
+                    else ""
+                ),
+                "language": "en",
+            }
+
+    async def scenario() -> None:
+        session, _ = _new_session(
+            vad_adapter=NeverEndingVadAdapter(),
+            stt_adapter=OutcomeSttAdapter(),
+            data_channel=channel,
+        )
+        deliver = session._deliver_event
+        expected_event = (
+            "user_final" if stt_outcome == "accepted" else "failed"
+        )
+
+        async def blocked_delivery(event: dict[str, Any]) -> dict[str, Any]:
+            if event["type"] == expected_event:
+                delivery_started.set()
+                await release_delivery.wait()
+                if delivery_outcome == "failure":
+                    raise RuntimeError("authoritative delivery failed")
+            return await deliver(event)
+
+        session._deliver_event = blocked_delivery
+        pcm = np.full(320, 1800, dtype=np.int16).tobytes()
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pcm)
+        ) is None
+        finalized = asyncio.create_task(session.finalize_user_turn())
+        await asyncio.wait_for(delivery_started.wait(), timeout=1.0)
+
+        settlement = session._stt_state_settlement
+        assert settlement is not None and settlement.task is not None
+        expected_pending_state = (
+            "thinking" if stt_outcome == "accepted" else "understanding"
+        )
+        assert session.state == expected_pending_state
+
+        finalized.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await finalized
+        assert session._stt_admissions == {}
+        assert session._stt_state_settlement is settlement
+        assert settlement.task.done() is False
+        assert session.state == expected_pending_state
+
+        dropped_before = session.dropped_audio_frames
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pcm)
+        ) is None
+        assert session.dropped_audio_frames == dropped_before + 1
+        assert session._turn_frames == []
+
+        release_delivery.set()
+        if delivery_outcome == "success":
+            delivered = await asyncio.wait_for(
+                asyncio.shield(settlement.task),
+                timeout=1.0,
+            )
+            assert delivered["type"] == expected_event
+        else:
+            with pytest.raises(
+                RuntimeError,
+                match="authoritative delivery failed",
+            ):
+                await asyncio.wait_for(
+                    asyncio.shield(settlement.task),
+                    timeout=1.0,
+                )
+        await asyncio.sleep(0)
+
+        expected_final_state = (
+            "thinking"
+            if stt_outcome == "accepted" and delivery_outcome == "success"
+            else "listening"
+        )
+        assert session.state == expected_final_state
+        assert settlement.settled is True
+        assert session._stt_state_settlement is None
+        assert session._owned_stt_event_settlement_tasks == set()
+        assert session._event_outbox == []
+        channel_event_types = [
+            json.loads(message)["type"] for message in channel.sent
+        ]
+        assert channel_event_types == (
+            ["state", expected_event]
+            if delivery_outcome == "success"
+            else ["state"]
+        )
+
+        if expected_final_state == "listening":
+            assert await session.handle_inbound_audio_frame(
+                ScriptedInboundAudioFrame(pcm)
+            ) is None
+            assert len(session._turn_frames) == 1
+
+    _run(scenario())
+
+
 def test_terminal_session_rejects_late_reconnect_backfill_without_revival() -> None:
     session, _ = _new_session()
     terminal = _run(session.fail(reason="connection_failed"))

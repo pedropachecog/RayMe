@@ -283,6 +283,16 @@ class _EventOutboxEntry:
     done: asyncio.Event = field(default_factory=asyncio.Event)
 
 
+@dataclass
+class _SttEventSettlement:
+    admission_token: int
+    entry: _EventOutboxEntry
+    pending_state: str
+    success_state: str
+    task: asyncio.Task[dict[str, Any]] | None = None
+    settled: bool = False
+
+
 @dataclass(frozen=True)
 class _CapturedTurnCancellation:
     active_task: Any | None
@@ -445,6 +455,10 @@ class CallSession:
         self._event_outbox: list[_EventOutboxEntry] = []
         self._event_delivery_task: asyncio.Task[None] | None = None
         self._event_sink_failures: list[dict[str, Any]] = []
+        self._stt_state_settlement: _SttEventSettlement | None = None
+        self._owned_stt_event_settlement_tasks: set[
+            asyncio.Task[dict[str, Any]]
+        ] = set()
         self._media_reconnect_grace_pending = False
         self._media_reconnect_grace_until = 0.0
         self._media_reconnect_grace_logged = False
@@ -2354,10 +2368,7 @@ class CallSession:
         self._stt_admissions.pop(admission.token, None)
         lifecycle = self._peer_lifecycle
         if (
-            (
-                self.state == "understanding"
-                or self.state == admission.state_ownership
-            )
+            self.state == admission.state_ownership
             and self.ended_at is None
             and lifecycle.phase != "terminal"
             and not self._stt_admissions
@@ -2382,13 +2393,65 @@ class CallSession:
             if stale_response is not None:
                 return None, stale_response
             entry = self._commit_event(event)
-            self.state = next_state
-            admission.state_ownership = next_state
-        result = await self._await_event_commit(entry)
-        async with self._lifecycle_lock:
-            if self._stt_admissions.get(admission.token) is admission:
-                admission.state_ownership = None
-        return result, None
+            pending_state = (
+                "thinking"
+                if next_state == "thinking"
+                else self.state
+            )
+            self.state = pending_state
+            admission.state_ownership = None
+            settlement = _SttEventSettlement(
+                admission_token=admission.token,
+                entry=entry,
+                pending_state=pending_state,
+                success_state=next_state,
+            )
+            task = asyncio.create_task(
+                self._settle_stt_event(settlement)
+            )
+            settlement.task = task
+            self._stt_state_settlement = settlement
+            self._owned_stt_event_settlement_tasks.add(task)
+            task.add_done_callback(self._finish_stt_event_settlement_task)
+        return await asyncio.shield(task), None
+
+    async def _settle_stt_event(
+        self,
+        settlement: _SttEventSettlement,
+    ) -> dict[str, Any]:
+        delivery_succeeded = False
+        try:
+            result = await self._await_event_commit(settlement.entry)
+            delivery_succeeded = True
+            return result
+        finally:
+            async with self._lifecycle_lock:
+                if self._stt_state_settlement is settlement:
+                    lifecycle = self._peer_lifecycle
+                    if (
+                        self.ended_at is None
+                        and lifecycle.phase != "terminal"
+                        and self.state == settlement.pending_state
+                    ):
+                        self.state = (
+                            settlement.success_state
+                            if delivery_succeeded
+                            else (
+                                "reconnecting"
+                                if lifecycle.phase == "reconnecting"
+                                else "listening"
+                            )
+                        )
+                    self._stt_state_settlement = None
+                settlement.settled = True
+
+    def _finish_stt_event_settlement_task(
+        self,
+        task: asyncio.Task[dict[str, Any]],
+    ) -> None:
+        self._owned_stt_event_settlement_tasks.discard(task)
+        if not task.cancelled():
+            task.exception()
 
     def _terminal_stt_response_locked(self) -> dict[str, Any]:
         return {
