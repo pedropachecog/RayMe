@@ -2582,7 +2582,6 @@ class CallSession:
         async with self._lifecycle_lock:
             self._ensure_control_mutable_locked()
             self.muted = muted
-            self.state = "muted" if muted else "listening"
             event = simple_event(
                 MUTED_EVENT,
                 session_id=self.session_id,

@@ -680,6 +680,176 @@ def test_muted_raw_bytes_drop_returns_false_without_vad_or_stt() -> None:
     assert session.stats()["dropped_audio_frames"] == 1
 
 
+def test_mute_is_orthogonal_to_slow_stt_turn_ownership() -> None:
+    entered_stt = threading.Event()
+    release_stt = threading.Event()
+    events: list[dict[str, Any]] = []
+
+    class SlowSttAdapter:
+        def transcribe_pcm(
+            self,
+            pcm_frames: list[bytes],
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            assert pcm_frames
+            entered_stt.set()
+            release_stt.wait()
+            return {
+                "status": "accepted",
+                "transcript": "mute preserves this turn",
+                "language": "en",
+            }
+
+    async def scenario() -> None:
+        vad = NeverEndingVadAdapter()
+        session, _ = _new_session(
+            vad_adapter=vad,
+            stt_adapter=SlowSttAdapter(),
+            event_sink=events.append,
+        )
+        pcm = np.full(320, 1800, dtype=np.int16).tobytes()
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pcm)
+        ) is None
+        finalized = asyncio.create_task(session.finalize_user_turn())
+        try:
+            assert await asyncio.to_thread(entered_stt.wait, 1.0)
+            admission = next(iter(session._stt_admissions.values()))
+            assert session.state == "understanding"
+
+            await session.set_muted(True)
+            assert session.muted is True
+            assert session.state == "understanding"
+            assert session._stt_admissions[admission.token] is admission
+            dropped_before = session.dropped_audio_frames
+            assert await session.handle_inbound_audio_frame(
+                ScriptedInboundAudioFrame(pcm)
+            ) is None
+            assert session.dropped_audio_frames == dropped_before + 1
+            assert session._turn_frames == []
+
+            await session.set_muted(False)
+            assert session.muted is False
+            assert session.state == "understanding"
+            assert session._stt_admissions[admission.token] is admission
+            assert await session.handle_inbound_audio_frame(
+                ScriptedInboundAudioFrame(pcm)
+            ) is None
+            assert session.dropped_audio_frames == dropped_before + 2
+            assert session._turn_frames == []
+            assert len(vad.frames) == 1
+        finally:
+            release_stt.set()
+
+        result = await asyncio.wait_for(finalized, timeout=1.0)
+        assert result is not None and result["type"] == "user_final"
+        assert session._stt_admissions == {}
+        assert session.state == "thinking"
+
+    _run(scenario())
+
+    assert [event["type"] for event in events] == [
+        "state",
+        "muted",
+        "muted",
+        "user_final",
+    ]
+
+
+def test_mute_is_orthogonal_to_active_streaming_tts_ownership(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
+    monkeypatch.setattr(
+        session_module,
+        "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS",
+        0.0,
+    )
+    events: list[dict[str, Any]] = []
+
+    async def scenario() -> None:
+        adapter = ScriptedStreamingTtsAdapter()
+        track = ObservableStreamingOutboundAudioTrack()
+        session, _ = _new_session(
+            vad_adapter=NeverEndingVadAdapter(),
+            tts_adapter=adapter,
+            outbound_audio_track=track,
+            event_sink=events.append,
+        )
+        turn_id = "turn-streaming-mute"
+        speech = asyncio.create_task(
+            session.speak_text(
+                turn_id,
+                "Playback stays live through mute controls.",
+                "voice-1",
+                "voxcpm2",
+                final_chunk=True,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="Real VoxCPM2 reference text.",
+                reference_audio_content_type="audio/wav",
+            )
+        )
+        try:
+            await _wait_for_async_event_or_task(
+                track.first_chunk_enqueued,
+                speech,
+                label="first streaming playback before mute",
+            )
+            while session.state != "speaking" and not speech.done():
+                await asyncio.sleep(0)
+            assert session.state == "speaking"
+            assert adapter.stream_completed.is_set() is False
+            admission = session._speech_admission
+            assert admission is not None
+            request_id = session._active_tts_request_id
+            assert session._active_tts_turn_id == turn_id
+
+            await session.set_muted(True)
+            assert session.muted is True
+            assert session.state == "speaking"
+            assert session._speech_admission is admission
+            assert session._active_tts_request_id == request_id
+            dropped_before = session.dropped_audio_frames
+            pcm = np.full(320, 2200, dtype=np.int16).tobytes()
+            assert await session.handle_inbound_audio_frame(
+                ScriptedInboundAudioFrame(pcm)
+            ) is None
+            assert session.dropped_audio_frames == dropped_before + 1
+            assert session._barge_in_frames == []
+            assert session._turn_frames == []
+
+            await session.set_muted(False)
+            assert session.muted is False
+            assert session.state == "speaking"
+            assert session._speech_admission is admission
+            assert session._active_tts_request_id == request_id
+            silence = np.zeros(320, dtype=np.int16).tobytes()
+            assert await session.handle_inbound_audio_frame(
+                ScriptedInboundAudioFrame(silence)
+            ) is None
+            assert session._speech_admission is admission
+            assert session._active_tts_turn_id == turn_id
+            assert session._turn_frames == []
+            assert speech.done() is False
+        finally:
+            adapter.release_second_chunk.set()
+
+        terminal = await asyncio.wait_for(speech, timeout=1.0)
+        assert terminal["type"] == "ai_done"
+        assert session.state == "listening"
+        assert session._speech_admission is None
+        assert session._active_tts_turn_id is None
+
+    _run(scenario())
+
+    assert [event["type"] for event in events] == [
+        "ai_audio_started",
+        "muted",
+        "muted",
+        "ai_done",
+    ]
+
+
 def test_inbound_audio_emits_user_final_after_vad_end() -> None:
     vad = ScriptedVadAdapter()
     stt = ScriptedSttAdapter()
