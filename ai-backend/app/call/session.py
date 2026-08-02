@@ -681,7 +681,12 @@ class CallSession:
     async def handle_inbound_audio_frame(self, frame: Any) -> dict[str, Any] | bool | None:
         self.incoming_audio_frames += 1
         was_raw_bytes = isinstance(frame, bytes)
-        if self.muted or self.state in {"ended", "failed", "rehearsing"}:
+        if (
+            self.ended_at is not None
+            or self._peer_lifecycle.phase == "terminal"
+            or self.muted
+            or self.state in {"ended", "failed", "rehearsing"}
+        ):
             self.dropped_audio_frames += 1
             if self.incoming_audio_frames % 100 == 0:
                 logger.info(
@@ -2537,34 +2542,56 @@ class CallSession:
         return events
 
     async def set_muted(self, muted: bool) -> dict[str, Any]:
-        self.muted = muted
-        self.state = "muted" if muted else "listening"
-        return await self.emit_event(
-            simple_event(
+        async with self._lifecycle_lock:
+            self._ensure_control_mutable_locked()
+            self.muted = muted
+            self.state = "muted" if muted else "listening"
+            event = simple_event(
                 MUTED_EVENT,
                 session_id=self.session_id,
                 muted=muted,
             )
-        )
+            entry = self._commit_event(event)
+        if asyncio.current_task() is self._event_delivery_task:
+            return event
+        return await self._await_event_commit(entry)
 
     async def interrupt(self, *, cause: str = "button_interrupt") -> dict[str, Any]:
-        self.interrupted = True
-        cancel_context = await self.cancel_ai_turn(cause=cause)
-        self.state = "interrupted"
-        event = await self.emit_event(
-            simple_event(
+        async with self._lifecycle_lock:
+            self._ensure_control_mutable_locked()
+            self.interrupted = True
+            captured = self._capture_turn_cancellation_locked()
+        cancel_context = await self.cancel_ai_turn(
+            cause=cause,
+            captured=captured,
+        )
+        async with self._lifecycle_lock:
+            self._ensure_control_mutable_locked()
+            self.state = "interrupted"
+            event_payload = simple_event(
                 INTERRUPTED_EVENT,
                 session_id=self.session_id,
                 receiver_drain_ms=CALL_INTERRUPT_RECEIVER_DRAIN_MS,
                 **cancel_context,
             )
-        )
-        self.state = "listening"
+            entry = self._commit_event(event_payload)
+        if asyncio.current_task() is self._event_delivery_task:
+            event = event_payload
+        else:
+            event = await self._await_event_commit(entry)
+        async with self._lifecycle_lock:
+            if (
+                self.ended_at is None
+                and self._peer_lifecycle.phase != "terminal"
+                and self.state == "interrupted"
+            ):
+                self.state = "listening"
         return event
 
     async def cancel_speech_turn(self, turn_id: str) -> dict[str, Any]:
         """Cancel one web-owned speech turn exactly once, even across retries."""
         async with self._lifecycle_lock:
+            self._ensure_control_mutable_locked()
             cancel_task = self._speech_turn_cancel_tasks.get(turn_id)
             if cancel_task is None:
                 cancel_task = asyncio.create_task(
@@ -2575,6 +2602,7 @@ class CallSession:
 
     async def _cancel_speech_turn_once(self, turn_id: str) -> dict[str, Any]:
         async with self._lifecycle_lock:
+            self._ensure_control_mutable_locked()
             owns_active_speech = (
                 self._active_tts_turn_id == turn_id
                 or self._pending_speech_terminal_turn_id == turn_id
@@ -2592,7 +2620,8 @@ class CallSession:
                 "control_cause": "web_turn_cancel",
                 "cancelled_turn_id": turn_id,
             }
-        if self.state not in {"ended", "failed"}:
+        async with self._lifecycle_lock:
+            self._ensure_control_mutable_locked()
             self.state = "listening"
         return cancel_context
 
@@ -2602,18 +2631,41 @@ class CallSession:
         voice_id: str | None,
         engine_id: str | None,
     ) -> None:
-        changed = voice_id != self.voice_id or engine_id != self.engine_id
-        if changed and (
-            self._speech_admission is not None
-            or self.active_turn_task is not None
-            or self._active_tts_turn_id is not None
-            or self._pending_speech_terminal_turn_id is not None
-        ):
-            await self.cancel_ai_turn(cause="engine_switch")
-            if self.state not in {"ended", "failed"}:
+        async with self._lifecycle_lock:
+            self._ensure_control_mutable_locked()
+            changed = voice_id != self.voice_id or engine_id != self.engine_id
+            cancel_selection = changed and (
+                self._speech_admission is not None
+                or self.active_turn_task is not None
+                or self._active_tts_turn_id is not None
+                or self._pending_speech_terminal_turn_id is not None
+            )
+            captured = (
+                self._capture_turn_cancellation_locked()
+                if cancel_selection
+                else None
+            )
+        if captured is not None:
+            await self.cancel_ai_turn(
+                cause="engine_switch",
+                captured=captured,
+            )
+        async with self._lifecycle_lock:
+            self._ensure_control_mutable_locked()
+            if captured is not None:
                 self.state = "listening"
-        self.voice_id = voice_id
-        self.engine_id = engine_id
+            self.voice_id = voice_id
+            self.engine_id = engine_id
+
+    def _ensure_control_mutable_locked(self) -> None:
+        if (
+            self.ended_at is not None
+            or self._peer_lifecycle.phase == "terminal"
+            or self.state in {"ended", "failed"}
+        ):
+            raise TerminalCallSessionError(
+                "cannot mutate controls on a terminal call"
+            )
 
     async def complete_speech_turn(
         self,

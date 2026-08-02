@@ -26,6 +26,7 @@ from app.call.session import (
     SpeechSegmentConflictError,
     SpeechSessionSelectionError,
     SpeechTurnTerminalError,
+    TerminalCallSessionError,
 )
 from app.models.tts_registry import TtsAudioChunk
 
@@ -5962,3 +5963,69 @@ def test_stats_returns_session_state_and_audio_counters() -> None:
         "dropped_audio_frames": 1,
         "late_tts_event_discard_count": 0,
     }
+
+
+def test_terminal_controls_and_audio_stay_closed_before_and_after_delivery() -> None:
+    terminal_delivery_started = asyncio.Event()
+    allow_terminal_delivery = asyncio.Event()
+    delivered_events: list[dict[str, Any]] = []
+
+    async def event_sink(event: dict[str, Any]) -> None:
+        if event["type"] == "ended":
+            terminal_delivery_started.set()
+            await allow_terminal_delivery.wait()
+        delivered_events.append(event)
+
+    session, _ = _new_session(
+        session_id="call-session-terminal-controls",
+        event_sink=event_sink,
+    )
+
+    async def assert_controls_rejected() -> None:
+        for muted in (True, False):
+            with pytest.raises(TerminalCallSessionError):
+                await session.set_muted(muted)
+        with pytest.raises(TerminalCallSessionError):
+            await session.interrupt()
+        with pytest.raises(TerminalCallSessionError):
+            await session.update_call_selection(
+                voice_id="late-voice",
+                engine_id="late-engine",
+            )
+        with pytest.raises(TerminalCallSessionError):
+            await session.cancel_speech_turn("late-turn")
+
+    async def scenario() -> None:
+        ending = asyncio.create_task(session.end(reason="hangup"))
+        await asyncio.wait_for(terminal_delivery_started.wait(), timeout=1.0)
+
+        assert session.ended_at is not None
+        assert session._peer_lifecycle.phase == "terminal"
+        assert session.state == "ended"
+        await assert_controls_rejected()
+        assert session.muted is False
+        assert session.interrupted is False
+        assert (session.voice_id, session.engine_id) == (None, None)
+
+        # Media admission uses terminal ownership, not the display state. This
+        # remains fail closed even if some unrelated bug corrupts that label.
+        session.state = "listening"
+        assert await session.handle_inbound_audio_frame(b"late-pcm") is False
+        assert session.dropped_audio_frames == 1
+        assert session._turn_frames == []
+        session.state = "ended"
+
+        allow_terminal_delivery.set()
+        terminal = await asyncio.wait_for(ending, timeout=1.0)
+        assert terminal["type"] == "ended"
+
+        await assert_controls_rejected()
+        assert await session.handle_inbound_audio_frame(b"later-pcm") is False
+
+    _run(scenario())
+
+    assert [event["type"] for event in delivered_events] == ["ended"]
+    assert session.state == "ended"
+    assert session.muted is False
+    assert session.interrupted is False
+    assert session.dropped_audio_frames == 2

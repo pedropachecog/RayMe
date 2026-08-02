@@ -478,6 +478,8 @@ async def mute_session(
             state=session.state,
             muted=session.muted,
         )
+    except TerminalCallSessionError as exc:
+        raise _terminal_control_error(session) from exc
     except Exception as exc:
         raise _control_error() from exc
 
@@ -498,6 +500,8 @@ async def interrupt_session(request: Request, session_id: str) -> CallControlRes
             cancelled_turn_id=event.get("cancelled_turn_id"),
             receiver_drain_ms=int(event["receiver_drain_ms"]),
         )
+    except TerminalCallSessionError as exc:
+        raise _terminal_control_error(session) from exc
     except Exception as exc:
         raise _control_error() from exc
 
@@ -521,6 +525,8 @@ async def cancel_session_speech_turn(
             "status": "cancelled",
             **cancellation,
         }
+    except TerminalCallSessionError as exc:
+        raise _terminal_control_error(session) from exc
     except Exception as exc:
         raise _control_error() from exc
 
@@ -836,6 +842,23 @@ def _control_error() -> HTTPException:
         detail={
             "code": "call_control_failed",
             "message": "Call control request failed",
+        },
+    )
+
+
+def _terminal_control_error(session: CallSession) -> HTTPException:
+    failed = session.state == "failed"
+    return HTTPException(
+        status_code=(
+            status.HTTP_409_CONFLICT
+            if failed
+            else status.HTTP_410_GONE
+        ),
+        detail={
+            "code": "call_session_terminal",
+            "message": "Call session is terminal; start a new call",
+            "state": "failed" if failed else "ended",
+            "reason": session.end_reason,
         },
     )
 

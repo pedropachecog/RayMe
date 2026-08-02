@@ -1874,6 +1874,78 @@ def test_webrtc_interrupt_control_returns_session_state(stub_webrtc: None) -> No
     assert payload["receiver_drain_ms"] == 250
 
 
+@pytest.mark.parametrize(
+    ("terminal_state", "expected_status", "reason"),
+    [
+        ("ended", 410, "hangup"),
+        ("failed", 409, "route_failure"),
+    ],
+)
+@pytest.mark.parametrize(
+    ("control", "path_template", "payload"),
+    [
+        ("mute", MUTE_ROUTE_TEMPLATE, {"muted": True}),
+        ("unmute", MUTE_ROUTE_TEMPLATE, {"muted": False}),
+        ("interrupt", INTERRUPT_ROUTE_TEMPLATE, None),
+        (
+            "cancel",
+            "/webrtc/sessions/{session_id}/turns/late-turn/cancel",
+            None,
+        ),
+    ],
+)
+def test_webrtc_terminal_controls_return_stable_status_without_reviving_call(
+    stub_webrtc: None,
+    terminal_state: str,
+    expected_status: int,
+    reason: str,
+    control: str,
+    path_template: str,
+    payload: dict[str, bool] | None,
+) -> None:
+    client = _client()
+    session_id = f"call-session-terminal-{terminal_state}-{control}"
+    client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+    session = client.app.state.call_session_manager.get_session(session_id)
+    assert session is not None
+
+    if control == "unmute":
+        muted = client.post(
+            MUTE_ROUTE_TEMPLATE.format(session_id=session_id),
+            json={"muted": True},
+        )
+        assert muted.status_code == 200
+
+    if terminal_state == "ended":
+        terminal = client.post(
+            END_ROUTE_TEMPLATE.format(session_id=session_id),
+            json={"reason": reason},
+        )
+        assert terminal.status_code == 200
+    else:
+        terminal_event = asyncio.run(session.fail(reason=reason))
+        assert terminal_event["type"] == "failed"
+
+    muted_before = session.muted
+    response = client.post(
+        path_template.format(session_id=session_id),
+        json=payload,
+    )
+
+    assert response.status_code == expected_status
+    assert response.json()["detail"] == {
+        "code": "call_session_terminal",
+        "message": "Call session is terminal; start a new call",
+        "state": terminal_state,
+        "reason": reason,
+    }
+    assert session.state == terminal_state
+    assert session.ended_at is not None
+    assert session._peer_lifecycle.phase == "terminal"
+    assert session.muted is muted_before
+    assert session.interrupted is False
+
+
 def test_webrtc_reoffer_engine_switch_cancels_exact_active_qwen_request(
     stub_webrtc: None,
 ) -> None:
