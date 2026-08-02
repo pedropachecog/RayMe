@@ -1833,7 +1833,10 @@ def test_failed_authoritative_stt_delivery_releases_thinking_ownership() -> None
     _run(scenario())
 
 
-def test_concurrent_turn_finalizers_share_one_stt_admission_and_outcome() -> None:
+@pytest.mark.parametrize("stt_outcome", ["accepted", "empty", "error"])
+def test_concurrent_turn_finalizers_share_one_stt_admission_and_outcome(
+    stt_outcome: str,
+) -> None:
     entered_stt = threading.Event()
     release_stt = threading.Event()
     events: list[dict[str, Any]] = []
@@ -1850,9 +1853,13 @@ def test_concurrent_turn_finalizers_share_one_stt_admission_and_outcome() -> Non
             self.calls.append(list(pcm_frames))
             entered_stt.set()
             assert release_stt.wait(timeout=2.0)
+            if stt_outcome == "error":
+                raise RuntimeError("shared transcription failed")
             return {
-                "status": "accepted",
-                "transcript": "one claimed turn",
+                "status": stt_outcome,
+                "transcript": (
+                    "one claimed turn" if stt_outcome == "accepted" else ""
+                ),
                 "language": "en",
             }
 
@@ -1874,8 +1881,11 @@ def test_concurrent_turn_finalizers_share_one_stt_admission_and_outcome() -> Non
         await asyncio.sleep(0)
 
         assert len(session._stt_admissions) == 1
-        assert session._active_stt_finalization is not None
-        assert session._active_stt_finalization.admission.task is owner
+        finalization = session._active_stt_finalization
+        assert finalization is not None and finalization.task is not None
+        assert finalization.admission.task is finalization.task
+        assert finalization.task is not owner
+        assert finalization.task is not joiner
         assert joiner.done() is False
 
         release_stt.set()
@@ -1883,14 +1893,137 @@ def test_concurrent_turn_finalizers_share_one_stt_admission_and_outcome() -> Non
 
         assert joined_result == owner_result
         assert owner_result is not None
-        assert owner_result["type"] == "user_final"
+        expected_event = (
+            "user_final" if stt_outcome == "accepted" else "failed"
+        )
+        assert owner_result["type"] == expected_event
         assert stt.calls == [[pcm]]
         assert session._stt_admissions == {}
         assert session._active_stt_finalization is None
 
     _run(scenario())
 
-    assert [event["type"] for event in events] == ["state", "user_final"]
+    expected_event = "user_final" if stt_outcome == "accepted" else "failed"
+    assert [event["type"] for event in events] == ["state", expected_event]
+
+
+@pytest.mark.parametrize("stt_outcome", ["accepted", "empty", "error"])
+@pytest.mark.parametrize("cancelled_caller", ["first", "joiner"])
+def test_caller_cancellation_cannot_cancel_owned_stt_finalization(
+    stt_outcome: str,
+    cancelled_caller: str,
+) -> None:
+    entered_stt = threading.Event()
+    release_stt = threading.Event()
+    events: list[dict[str, Any]] = []
+
+    class ConcurrentTrackingSttAdapter:
+        def __init__(self) -> None:
+            self.calls: list[list[bytes]] = []
+            self.active_calls = 0
+            self.max_concurrent_calls = 0
+            self.lock = threading.Lock()
+
+        def transcribe_pcm(
+            self,
+            pcm_frames: list[bytes],
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            with self.lock:
+                self.calls.append(list(pcm_frames))
+                call_number = len(self.calls)
+                self.active_calls += 1
+                self.max_concurrent_calls = max(
+                    self.max_concurrent_calls,
+                    self.active_calls,
+                )
+            try:
+                if call_number == 1:
+                    entered_stt.set()
+                    assert release_stt.wait(timeout=2.0)
+                if stt_outcome == "error":
+                    raise RuntimeError("owned transcription failed")
+                return {
+                    "status": stt_outcome,
+                    "transcript": (
+                        "durable shared turn"
+                        if stt_outcome == "accepted"
+                        else ""
+                    ),
+                    "language": "en",
+                }
+            finally:
+                with self.lock:
+                    self.active_calls -= 1
+
+    async def scenario() -> None:
+        stt = ConcurrentTrackingSttAdapter()
+        session, _ = _new_session(
+            vad_adapter=NeverEndingVadAdapter(),
+            stt_adapter=stt,
+            event_sink=events.append,
+        )
+        first_pcm = np.full(320, 1800, dtype=np.int16).tobytes()
+        blocked_pcm = np.full(320, 2600, dtype=np.int16).tobytes()
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(first_pcm)
+        ) is None
+
+        first = asyncio.create_task(session.finalize_user_turn())
+        assert await asyncio.to_thread(entered_stt.wait, 1.0)
+        joiner = asyncio.create_task(session.finalize_user_turn())
+        await asyncio.sleep(0)
+        finalization = session._active_stt_finalization
+        assert finalization is not None and finalization.task is not None
+        owned_task = finalization.task
+
+        cancelled = first if cancelled_caller == "first" else joiner
+        survivor = joiner if cancelled_caller == "first" else first
+        cancelled.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await cancelled
+
+        assert owned_task.done() is False
+        assert owned_task.cancelled() is False
+        assert session._active_stt_finalization is finalization
+        assert len(session._stt_admissions) == 1
+        assert session.state == "understanding"
+        dropped_before = session.dropped_audio_frames
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(blocked_pcm)
+        ) is None
+        assert session.dropped_audio_frames == dropped_before + 1
+        assert session._turn_frames == []
+
+        release_stt.set()
+        result = await asyncio.wait_for(survivor, timeout=1.0)
+        expected_event = (
+            "user_final" if stt_outcome == "accepted" else "failed"
+        )
+        assert result is not None and result["type"] == expected_event
+        assert stt.calls == [[first_pcm]]
+        assert stt.max_concurrent_calls == 1
+        assert finalization.done.is_set()
+        assert session._active_stt_finalization is None
+        assert session._stt_admissions == {}
+
+        if stt_outcome != "accepted":
+            assert session.state == "listening"
+            assert await session.handle_inbound_audio_frame(
+                ScriptedInboundAudioFrame(blocked_pcm)
+            ) is None
+            second = await session.finalize_user_turn()
+            assert second is not None and second["type"] == "failed"
+            assert stt.calls == [[first_pcm], [blocked_pcm]]
+            assert stt.max_concurrent_calls == 1
+
+    _run(scenario())
+
+    expected_event = "user_final" if stt_outcome == "accepted" else "failed"
+    expected_types = ["state", expected_event]
+    if stt_outcome != "accepted":
+        expected_types.extend(["state", "failed"])
+    assert [event["type"] for event in events] == expected_types
 
 
 def test_overlapping_live_and_reconnect_finalizers_join_one_stt_outcome() -> None:
@@ -2028,6 +2161,8 @@ def test_cancelled_finalizer_leaves_stt_settlement_owned_by_outbox(
 
         settlement = session._stt_state_settlement
         assert settlement is not None and settlement.task is not None
+        finalization = session._active_stt_finalization
+        assert finalization is not None and finalization.task is not None
         expected_pending_state = (
             "thinking" if stt_outcome == "accepted" else "understanding"
         )
@@ -2036,7 +2171,9 @@ def test_cancelled_finalizer_leaves_stt_settlement_owned_by_outbox(
         finalized.cancel()
         with pytest.raises(asyncio.CancelledError):
             await finalized
-        assert session._stt_admissions == {}
+        assert len(session._stt_admissions) == 1
+        assert session._active_stt_finalization is finalization
+        assert finalization.task.done() is False
         assert session._stt_state_settlement is settlement
         assert settlement.task.done() is False
         assert session.state == expected_pending_state
@@ -2065,6 +2202,7 @@ def test_cancelled_finalizer_leaves_stt_settlement_owned_by_outbox(
                     timeout=1.0,
                 )
         await asyncio.sleep(0)
+        await asyncio.wait_for(finalization.done.wait(), timeout=1.0)
 
         expected_final_state = (
             "thinking"
@@ -2073,6 +2211,8 @@ def test_cancelled_finalizer_leaves_stt_settlement_owned_by_outbox(
         )
         assert session.state == expected_final_state
         assert settlement.settled is True
+        assert session._stt_admissions == {}
+        assert session._active_stt_finalization is None
         assert session._stt_state_settlement is None
         assert session._owned_stt_event_settlement_tasks == set()
         assert session._event_outbox == []
@@ -3894,7 +4034,10 @@ def test_admitted_stt_finishes_while_configuration_switch_is_blocked(
         finalized = asyncio.create_task(session.finalize_user_turn())
         assert await asyncio.to_thread(entered_stt.wait, 1.0)
         admission = next(iter(session._stt_admissions.values()))
-        assert admission.task is finalized
+        finalization = session._active_stt_finalization
+        assert finalization is not None and finalization.task is not None
+        assert admission.task is finalization.task
+        assert admission.task is not finalized
         assert session.state == "understanding"
 
         generation = await session.mark_peer_connection_pending(

@@ -363,6 +363,7 @@ class _SttFinalization:
     admission: _SttTurnAdmission
     frames: tuple[PcmAudioFrame, ...]
     started_at: str
+    task: asyncio.Task[dict[str, Any] | None] | None = None
     outcome: dict[str, Any] | None = None
     error: BaseException | None = None
     done: asyncio.Event = field(default_factory=asyncio.Event)
@@ -2169,21 +2170,22 @@ class CallSession:
         *,
         backfill_admission: _ReconnectBackfillAdmission | None = None,
     ) -> dict[str, Any] | None:
-        finalization, owns_finalization, stale_response = (
-            await self._claim_stt_finalization(
-                allow_transport_reconnect=backfill_admission is not None
-            )
+        finalization, stale_response = await self._claim_stt_finalization(
+            allow_transport_reconnect=backfill_admission is not None
         )
         if stale_response is not None:
             return stale_response
         if finalization is None:
             return None
-        if not owns_finalization:
-            await asyncio.shield(finalization.done.wait())
-            if finalization.error is not None:
-                raise finalization.error
-            return finalization.outcome
+        task = finalization.task
+        if task is None:
+            raise RuntimeError("STT finalization was claimed without task ownership")
+        return await asyncio.shield(task)
 
+    async def _run_stt_finalization(
+        self,
+        finalization: _SttFinalization,
+    ) -> dict[str, Any] | None:
         admission = finalization.admission
         outcome: dict[str, Any] | None = None
         error: BaseException | None = None
@@ -2201,6 +2203,13 @@ class CallSession:
                 if self._active_stt_finalization is finalization:
                     self._active_stt_finalization = None
                 finalization.done.set()
+
+    @staticmethod
+    def _finish_stt_finalization_task(
+        task: asyncio.Task[dict[str, Any] | None],
+    ) -> None:
+        if not task.cancelled():
+            task.exception()
 
     async def _finalize_user_turn_admitted(
         self,
@@ -2349,13 +2358,12 @@ class CallSession:
         allow_transport_reconnect: bool,
     ) -> tuple[
         _SttFinalization | None,
-        bool,
         dict[str, Any] | None,
     ]:
         async with self._lifecycle_lock:
             active = self._active_stt_finalization
             if active is not None:
-                return active, False, None
+                return active, None
 
             lifecycle = self._peer_lifecycle
             if (
@@ -2363,16 +2371,16 @@ class CallSession:
                 or lifecycle.phase == "terminal"
                 or self.state in {"ended", "failed"}
             ):
-                return None, False, self._terminal_stt_response_locked()
+                return None, self._terminal_stt_response_locked()
             if not self._turn_frames:
-                return None, False, None
+                return None, None
 
             self._stt_admission_generation += 1
             admission = _SttTurnAdmission(
                 token=self._stt_admission_generation,
                 lifecycle_epoch=lifecycle.epoch,
                 allow_transport_reconnect=allow_transport_reconnect,
-                task=asyncio.current_task(),
+                task=None,
                 state_ownership="understanding",
             )
             finalization = _SttFinalization(
@@ -2389,7 +2397,13 @@ class CallSession:
             self.state = "understanding"
             self._stt_admissions[admission.token] = admission
             self._active_stt_finalization = finalization
-            return finalization, True, None
+            task = asyncio.create_task(
+                self._run_stt_finalization(finalization)
+            )
+            finalization.task = task
+            admission.task = task
+            task.add_done_callback(self._finish_stt_finalization_task)
+            return finalization, None
 
     async def _stale_stt_turn_response(
         self,
