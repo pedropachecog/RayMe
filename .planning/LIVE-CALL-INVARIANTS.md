@@ -11,9 +11,11 @@ VAD, WebRTC, reconnect, and call UI change must preserve that product shape.
 - Smoothness fixes may use bounded jitter/startup buffering only. The buffer
   must have an explicit upper bound and tests that prove it does not become
   full-response generate-then-play.
-- Calls must remain interruptible. Barge-in, hangup, mute, and reconnect fixes
-  must not strand the UI in fake `Listening`, endless `Rehearsing`, or a dead
-  call surface.
+- Calls must remain safely controllable. Explicit hangup, mute, and reconnect
+  fixes must not strand the UI in fake `Listening`, endless `Rehearsing`, or a
+  dead call surface. Automatic spoken barge-in is deliberately deferred: while
+  assistant playback is active, inbound microphone frames must not invoke VAD,
+  interrupt playback, or start a replacement user turn.
 - Immediate first-audio metrics and final playback metrics must stay separate.
   First-audio evidence cannot stand in for smooth-playback evidence.
 

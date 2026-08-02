@@ -270,9 +270,10 @@ test('streams two user to AI cycles in one call and reaches the ended state', as
   await page.getByRole('button', { name: 'Start call' }).click();
 
   await expect(page.getByText('First user turn.')).toBeVisible();
-  await expect(page.getByText('First AI answer.')).toBeVisible();
+  await expect(page.getByText('First AI answer.')).toHaveCount(1);
   await expect(page.getByText('Second user turn.')).toBeVisible();
-  await expect(page.getByText('Second AI answer.')).toBeVisible();
+  await expect(page.getByText('Second AI answer.')).toHaveCount(1);
+  await expect(page.locator('.turn.streaming')).toHaveCount(0);
   await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
 
   await page.getByRole('button', { name: 'End Call' }).click();

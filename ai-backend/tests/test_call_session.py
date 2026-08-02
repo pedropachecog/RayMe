@@ -895,10 +895,9 @@ def test_mute_discards_only_unconfirmed_ordinary_vad_onset() -> None:
     confirmed_frame = normalize_inbound_audio_frame(
         ScriptedInboundAudioFrame(pcm)
     )
-    confirmed._begin_barge_in_turn(
-        [confirmed_frame],
-        started_at="2026-08-02T00:00:00Z",
-    )
+    confirmed._turn_frames.append(confirmed_frame)
+    confirmed._turn_started_at = "2026-08-02T00:00:00Z"
+    confirmed._speech_seen = True
     confirmed_frames = list(confirmed._turn_frames)
 
     _run(confirmed.set_muted(True))
@@ -908,6 +907,81 @@ def test_mute_discards_only_unconfirmed_ordinary_vad_onset() -> None:
     assert confirmed._turn_started_at == "2026-08-02T00:00:00Z"
 
 
+def test_speaking_drops_microphone_frames_without_automatic_barge_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
+    monkeypatch.setattr(
+        session_module,
+        "CALL_TTS_STREAM_START_MIN_AUDIO_SECONDS",
+        0.0,
+    )
+    class VADMustNotRun:
+        def accept_audio_frame(self, _pcm: bytes) -> dict[str, bool]:
+            raise AssertionError("VAD must not run while assistant playback is active")
+
+    async def scenario() -> tuple[CallSession, list[dict[str, Any]]]:
+        events: list[dict[str, Any]] = []
+        adapter = ScriptedStreamingTtsAdapter()
+        track = ObservableStreamingOutboundAudioTrack()
+        session, _ = _new_session(
+            vad_adapter=VADMustNotRun(),
+            tts_adapter=adapter,
+            outbound_audio_track=track,
+            event_sink=events.append,
+        )
+        speech = asyncio.create_task(
+            session.speak_text(
+                "turn-deferred-barge-in",
+                "Assistant playback must complete without microphone interruption.",
+                "voice-1",
+                "voxcpm2",
+                final_chunk=True,
+                reference_audio_b64="cmVhbC1zYW1wbGU=",
+                reference_transcript="Real VoxCPM2 reference text.",
+                reference_audio_content_type="audio/wav",
+            )
+        )
+        try:
+            await _wait_for_async_event_or_task(
+                track.first_chunk_enqueued,
+                speech,
+                label="first streaming playback before deferred microphone input",
+            )
+            while session.state != "speaking" and not speech.done():
+                await asyncio.sleep(0)
+            assert session.state == "speaking"
+            assert adapter.stream_completed.is_set() is False
+
+            speaking_pcm = np.full(320, 4000, dtype=np.int16).tobytes()
+            assert await session.handle_inbound_audio_frame(
+                ScriptedInboundAudioFrame(speaking_pcm)
+            ) is None
+            assert session.state == "speaking"
+            assert session.dropped_audio_frames == 1
+            assert session._turn_frames == []
+            assert speech.done() is False
+        finally:
+            adapter.release_second_chunk.set()
+
+        terminal = await asyncio.wait_for(speech, timeout=1.0)
+        assert terminal["type"] == "ai_done"
+        assert session.state == "listening"
+        assert [event["type"] for event in events] == ["ai_audio_started", "ai_done"]
+        return session, events
+
+    session, events = _run(scenario())
+
+    session.vad_adapter = ScriptedVadAdapter()
+    listening_pcm = np.full(320, 4000, dtype=np.int16).tobytes()
+    assert _run(
+        session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(listening_pcm))
+    ) is None
+    assert len(session._turn_frames) == 1
+    assert all(event["type"] != "interrupted" for event in events)
+
+
+@pytest.mark.skip(reason="Automatic spoken barge-in is deferred from live calls.")
 @pytest.mark.parametrize(
     ("post_unmute_frames", "expect_interrupt"),
     [
@@ -5133,7 +5207,7 @@ def test_switching_away_from_qwen_releases_prompt_for_another_session() -> None:
     [False, True],
     ids=["complete-workflow", "forced-rendezvous-failure"],
 )
-def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
+def test_qwen_long_turn_reconnect_and_explicit_interrupt_preserve_live_call(
     monkeypatch: Any,
     force_reconnect_rendezvous_failure: bool,
 ) -> None:
@@ -5374,17 +5448,9 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
             assert all(seconds == pytest.approx(4.0) for seconds in audio_clock.advances)
             assert replacement_track.chunks
 
-            user_pcm = np.full(320, 4_000, dtype=np.int16).tobytes()
-            onset_frames = (session_module.CALL_BARGE_IN_MIN_SPEECH_MS + 19) // 20
-            interrupted = None
-            for _ in range(onset_frames):
-                interrupted = await session.handle_inbound_audio_frame(
-                    ScriptedInboundAudioFrame(user_pcm)
-                )
-
-            assert interrupted is not None
+            interrupted = await session.interrupt(cause="button_interrupt")
             assert interrupted["type"] == "interrupted"
-            assert interrupted["control_cause"] == "vad_barge_in"
+            assert interrupted["control_cause"] == "button_interrupt"
             try:
                 await long_speech
             except asyncio.CancelledError:
@@ -5396,7 +5462,7 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
             assert released_prompt_leases == []
 
             recovery = await session.speak_text(
-                "turn-qwen-after-reconnect-barge",
+                "turn-qwen-after-reconnect-interrupt",
                 "The recovered live call completes exactly once.",
                 "voice-qwen",
                 "qwen3_1_7b",
@@ -5989,6 +6055,7 @@ def test_qwen_cancel_preserves_adapter_ownership_until_terminal_then_recovers(
     )
 
 
+@pytest.mark.skip(reason="Automatic spoken barge-in is deferred from live calls.")
 def test_qwen_spoken_vad_barge_in_preserves_mic_turn_and_silences_real_playout(
     monkeypatch: Any,
 ) -> None:
@@ -6261,7 +6328,6 @@ def test_qwen_spoken_vad_barge_in_preserves_mic_turn_and_silences_real_playout(
     ("control_cause", "expected_state", "expected_terminal"),
     [
         ("button_interrupt", "listening", "interrupted"),
-        ("vad_barge_in", "listening", "interrupted"),
         ("hangup", "ended", "ended"),
         ("engine_switch", "listening", None),
         ("connection_failure", "failed", "failed"),

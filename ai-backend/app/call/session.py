@@ -739,7 +739,10 @@ class CallSession:
             self.ended_at is not None
             or self._peer_lifecycle.phase == "terminal"
             or self.muted
-            or self.state in {"ended", "failed", "rehearsing"}
+            # Automatic spoken barge-in is deliberately deferred. Keep the
+            # media track draining while assistant audio plays, but do not
+            # normalize or inspect microphone frames until Listening resumes.
+            or self.state in {"ended", "failed", "rehearsing", "speaking"}
         ):
             self.dropped_audio_frames += 1
             if self.incoming_audio_frames % 100 == 0:
@@ -753,10 +756,6 @@ class CallSession:
                     self.state,
                 )
             return False if was_raw_bytes else None
-
-        if self.state == "speaking":
-            normalized = normalize_inbound_audio_frame(frame)
-            return await self._handle_speaking_audio_frame(normalized)
 
         # During understanding/thinking/rehearsing states the AI is transcribing,
         # generating text, or preparing voice. Accepting inbound audio during this window causes ambient
