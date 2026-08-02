@@ -4435,9 +4435,34 @@ class CallSession:
                         cleanup.owned_prompt_cleanups_pending.remove(
                             owned_cleanup
                         )
+                        continue
+                    if task is None:
+                        continue
+                    if not task.done():
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.shield(task),
+                                timeout=CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS,
+                            )
+                        except asyncio.TimeoutError:
+                            cleanup.last_attempt_timed_out = True
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            pass
+                    if owned_cleanup.released:
+                        cleanup.owned_prompt_cleanups_pending.remove(
+                            owned_cleanup
+                        )
                 for handoff in list(cleanup.owned_prompt_handoffs_pending):
                     task = handoff.task
                     release_cleanup = handoff.release_cleanup
+                    if (
+                        task is not None
+                        and task.done()
+                        and not task.cancelled()
+                    ):
+                        task.exception()
                     if handoff.installed or (
                         release_cleanup is not None
                         and release_cleanup.released
@@ -4458,6 +4483,8 @@ class CallSession:
                             raise
                         except Exception:
                             pass
+                    if task.done() and not task.cancelled():
+                        task.exception()
                     release_cleanup = handoff.release_cleanup
                     if handoff.installed or (
                         release_cleanup is not None
@@ -4465,22 +4492,15 @@ class CallSession:
                     ):
                         cleanup.owned_prompt_handoffs_pending.remove(handoff)
                         continue
-                    if task is None:
-                        continue
-                    if not task.done():
-                        try:
-                            await asyncio.wait_for(
-                                asyncio.shield(task),
-                                timeout=CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS,
+                    if (
+                        task.done()
+                        and release_cleanup is not None
+                    ):
+                        if release_cleanup not in cleanup.owned_prompt_cleanups_pending:
+                            cleanup.owned_prompt_cleanups_pending.append(
+                                release_cleanup
                             )
-                        except asyncio.TimeoutError:
-                            cleanup.last_attempt_timed_out = True
-                        except asyncio.CancelledError:
-                            raise
-                    if owned_cleanup.released:
-                        cleanup.owned_prompt_cleanups_pending.remove(
-                            owned_cleanup
-                        )
+                        cleanup.owned_prompt_handoffs_pending.remove(handoff)
         return dict(cleanup.cancel_context)
 
     async def _retry_terminal_cleanup_until_resolved(

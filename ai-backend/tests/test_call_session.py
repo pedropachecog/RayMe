@@ -3338,6 +3338,94 @@ def test_stale_prompt_lease_caller_cancellation_cannot_cancel_owned_release() ->
 
 
 @pytest.mark.parametrize(
+    "release_outcome",
+    ["transient", "permanent", "blocking"],
+)
+def test_terminal_adopts_prompt_handoff_without_suppressing_terminal_event(
+    monkeypatch: pytest.MonkeyPatch,
+    release_outcome: str,
+) -> None:
+    monkeypatch.setattr(session_module, "CALL_PROMPT_LEASE_CLEANUP_RETRY_LIMIT", 2)
+    monkeypatch.setattr(session_module, "CALL_TERMINAL_CLEANUP_RETRY_LIMIT", 3)
+    monkeypatch.setattr(
+        session_module,
+        "CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS",
+        0.01,
+    )
+    monkeypatch.setattr(
+        session_module,
+        "CALL_TERMINAL_CLEANUP_RETRY_BASE_SECONDS",
+        0.0,
+    )
+    events: list[dict[str, Any]] = []
+
+    async def scenario() -> None:
+        session, _ = _new_session(
+            session_id=f"terminal-handoff-{release_outcome}",
+            event_sink=events.append,
+        )
+        attempts = 0
+
+        async def release(_owner: str) -> None:
+            nonlocal attempts
+            attempts += 1
+            if release_outcome == "transient" and attempts == 1:
+                raise RuntimeError("transient release failure")
+            if release_outcome == "permanent":
+                raise RuntimeError("permanent release failure")
+            if release_outcome == "blocking":
+                await asyncio.Event().wait()
+
+        async with session._lifecycle_lock:
+            ending = asyncio.create_task(session.end(reason="explicit_hangup"))
+            await asyncio.sleep(0)
+            handoff = session.start_prompt_lease_handoff(release)
+            await asyncio.sleep(0)
+            assert session.ended_at is None
+
+        while session.ended_at is None:
+            await asyncio.sleep(0)
+        terminal_cleanup = session._terminal_cleanup
+        assert terminal_cleanup is not None
+        assert handoff in terminal_cleanup.owned_prompt_handoffs_pending
+
+        terminal = await asyncio.wait_for(ending, timeout=1.0)
+        assert terminal["type"] == "ended"
+        assert session._terminal_outcome is not None
+        assert session._terminal_outcome.event == terminal
+        assert session._terminal_outcome.error is None
+
+        assert handoff.task is not None
+        assert await asyncio.wait_for(
+            asyncio.shield(handoff.task),
+            timeout=1.0,
+        ) is False
+        release_cleanup = handoff.release_cleanup
+        assert release_cleanup is not None
+        terminal_retry = session._terminal_cleanup_task
+        if terminal_retry is not None:
+            await asyncio.wait_for(terminal_retry, timeout=1.0)
+
+        assert attempts == 2
+        if release_outcome == "transient":
+            assert release_cleanup.released is True
+            assert terminal_cleanup.owned_prompt_handoffs_pending == []
+            assert terminal_cleanup.owned_prompt_cleanups_pending == []
+        else:
+            assert release_cleanup.released is False
+            assert (
+                handoff in terminal_cleanup.owned_prompt_handoffs_pending
+                or release_cleanup
+                in terminal_cleanup.owned_prompt_cleanups_pending
+            )
+            assert session._terminal_cleanup_failure_state is not None
+
+    _run(scenario())
+
+    assert [event["type"] for event in events] == ["ended"]
+
+
+@pytest.mark.parametrize(
     "failed_step",
     ["stop", "old_peer_close", "cancel", "prompt_lease"],
 )
