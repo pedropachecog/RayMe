@@ -17,6 +17,7 @@ type ReconnectRouteCounters = {
   turnCount: number;
   endCount: number;
   muteCount: number;
+  interruptCount: number;
   peerPromotionCount: number;
   backendActivePeerId: number | null;
   backendActivePeerGeneration: number | null;
@@ -33,6 +34,7 @@ type ReconnectRouteCounters = {
   recoveredEvents: Array<Record<string, unknown>>;
   turns: Array<Record<string, unknown>>;
   muteRequests: Array<Record<string, unknown>>;
+  interruptRequests: Array<Record<string, unknown>>;
   peerPromotions: Array<{
     session_id: string;
     generation: number;
@@ -65,6 +67,7 @@ type ReconnectRouteOptions = {
   selectionChangingPeerCommitReleaseStatus?: 'committed' | 'failed' | 'in_progress';
   failRecover?: boolean;
   hangRecover?: boolean;
+  recoverGate?: Promise<void>;
   failEnd?: boolean;
   hangEnd?: boolean;
   abortEnd?: boolean;
@@ -670,6 +673,75 @@ test('standalone terminal reconnect bounds held recovery and end after immediate
   await page.waitForTimeout(1200);
   expect(counters.offerCount).toBe(3);
   expectBrowserMediaStopped(await getMockCallMediaSnapshot(page), initialStreamId);
+  assertNoBrowserErrors();
+});
+
+test('held terminal recovery rejects queued mute and interrupt controls', async ({ page }) => {
+  test.setTimeout(20_000);
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  let releaseRecovery = () => undefined;
+  const recoverGate = new Promise<void>((resolve) => {
+    releaseRecovery = resolve;
+  });
+  const counters = await installReconnectCallRoutes(page, { recoverGate });
+
+  await startReconnectCall(page, counters);
+  await emitLatestMockDataChannelEvent(page, {
+    type: 'ai_audio_started',
+    session_id: 'rtc-call-reconnect-01',
+    turn_id: 'terminal-control-turn',
+    text: 'This transcript must remain unchanged.'
+  });
+  await expect(page.getByTestId('voice-visualizer').getByText('Speaking')).toBeVisible();
+  const transcriptBefore = await page.getByLabel('Call transcript').innerText();
+  await page.getByRole('button', { name: 'More call options' }).click();
+  await expect(page.getByRole('button', { name: 'Interrupt' })).toBeVisible();
+
+  await page.evaluate(() => {
+    const mute = document.querySelector<HTMLButtonElement>('button[aria-label="Mute"]');
+    const end = document.querySelector<HTMLButtonElement>('button[aria-label="End Call"]');
+    const interrupt = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => button.textContent?.trim() === 'Interrupt');
+    if (!mute || !end || !interrupt) {
+      throw new Error('Expected terminal control buttons were not rendered');
+    }
+    end.click();
+    mute.disabled = false;
+    mute.click();
+    interrupt.disabled = false;
+    interrupt.click();
+  });
+
+  await expect.poll(() => counters.recoverCount).toBe(1);
+  await expect(page.getByRole('button', { name: 'Mute' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'End Call' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'More call options' })).toBeDisabled();
+  await page.waitForTimeout(100);
+  expect(counters.muteCount).toBe(0);
+  expect(counters.interruptCount).toBe(0);
+  expect(debugEventCount(counters, 'remote_audio.interrupt_drain.started')).toBe(0);
+  expect(debugEventCount(counters, 'call.terminal.start')).toBe(1);
+  expect(await page.getByLabel('Call transcript').innerText()).toBe(transcriptBefore);
+  await expect(page.getByTestId('voice-visualizer').getByText('Speaking')).toBeVisible();
+
+  releaseRecovery();
+  await expect(page.getByRole('status').getByText('Call ended')).toBeVisible();
+  await expect.poll(() => counters.endCount).toBe(1);
+  expect(counters.recoverCount).toBe(1);
+  expect(debugEventCount(counters, 'call.terminal.start')).toBe(1);
+  expect(debugEventCount(counters, 'call.terminal.ui_committed')).toBe(1);
+  const terminalUiEvent = counters.debugEvents.find(
+    (entry) => entry.event === 'call.terminal.ui_committed'
+  );
+  expect(terminalUiEvent?.detail).toMatchObject({
+    ownerGeneration: 1,
+    state: 'ended',
+    hasMuteController: false,
+    hasInterruptController: false,
+    hasInterruptDrainTimer: false,
+    hasInterruptedStateTimer: false
+  });
   assertNoBrowserErrors();
 });
 
@@ -2235,6 +2307,7 @@ async function installReconnectCallRoutes(
     turnCount: 0,
     endCount: 0,
     muteCount: 0,
+    interruptCount: 0,
     peerPromotionCount: 0,
     backendActivePeerId: null,
     backendActivePeerGeneration: null,
@@ -2251,6 +2324,7 @@ async function installReconnectCallRoutes(
     recoveredEvents: [],
     turns: [],
     muteRequests: [],
+    interruptRequests: [],
     peerPromotions: [],
     requestOrder: [],
     debugEvents: []
@@ -2498,6 +2572,9 @@ async function installReconnectCallRoutes(
   await page.route('**/api/calls/*/events/recover', async (route) => {
     counters.recoverCount += 1;
     counters.requestOrder.push('recover');
+    if (options.recoverGate) {
+      await options.recoverGate;
+    }
     if (options.hangRecover) {
       await new Promise<void>(() => undefined);
       return;
@@ -2544,6 +2621,18 @@ async function installReconnectCallRoutes(
       muted: authoritativeMuted,
       audio_input_epoch: authoritativeAudioInputEpoch,
       mute_revision: authoritativeMuteRevision
+    });
+  });
+  await page.route('**/api/calls/*/interrupt', async (route) => {
+    counters.interruptCount += 1;
+    counters.interruptRequests.push(
+      route.request().postDataJSON() as Record<string, unknown>
+    );
+    await fulfillJson(route, {
+      call_id: 'call-reconnect-01',
+      session_id: 'rtc-call-reconnect-01',
+      interrupted: true,
+      receiver_drain_ms: 250
     });
   });
   await page.route('**/api/calls/*/turns', async (route) => {

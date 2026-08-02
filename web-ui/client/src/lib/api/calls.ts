@@ -193,7 +193,8 @@ export function setCallMuted(
 
 export function interruptCall(
   callId: string,
-  sessionId: string
+  sessionId: string,
+  options: { signal?: AbortSignal } = {}
 ): Promise<{
   call_id: string;
   session_id: string;
@@ -203,6 +204,7 @@ export function interruptCall(
 }> {
   return apiFetch(`/calls/${encodeURIComponent(callId)}/interrupt`, {
     method: 'POST',
+    signal: options.signal,
     body: JSON.stringify({ session_id: sessionId, reason: 'interrupt' })
   });
 }

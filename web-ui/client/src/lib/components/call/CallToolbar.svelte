@@ -59,13 +59,26 @@
   }
 
   function handleEnd() {
+    if (disabled || !endEnabled) {
+      return;
+    }
     menuOpen = false;
     onEnd();
   }
 
   function handleInterrupt() {
+    if (disabled || !interruptEnabled) {
+      return;
+    }
     menuOpen = false;
     onInterrupt();
+  }
+
+  function toggleMenu() {
+    if (disabled) {
+      return;
+    }
+    menuOpen = !menuOpen;
   }
 </script>
 
@@ -95,7 +108,7 @@
     <button
       class="icon-control destructive"
       type="button"
-      disabled={!endEnabled}
+      disabled={disabled || !endEnabled}
       aria-label="End Call"
       title="End Call"
       on:click={handleEnd}
@@ -106,10 +119,11 @@
     <button
       class="icon-control"
       type="button"
+      disabled={disabled}
       aria-expanded={menuOpen}
       aria-label="More call options"
       title="More call options"
-      on:click={() => (menuOpen = !menuOpen)}
+      on:click={toggleMenu}
     >
       <MoreHorizontal size={21} strokeWidth={1.9} aria-hidden="true" />
     </button>

@@ -258,7 +258,7 @@
   let reconnectAudioBackfillGeneration = 0;
   let activeReconnectAudioBackfill: ReconnectAudioBackfillGeneration | null = null;
   let terminalCallTransactionGeneration = 0;
-  let activeTerminalCallTransaction: TerminalCallTransactionOwner | null = null;
+  let activeTerminalCallTransaction = $state.raw<TerminalCallTransactionOwner | null>(null);
   const terminalEndRequestLedger = new Map<string, Promise<void>>();
   let localMicMeterFrame = 0;
   let localMicRawRms: number | null = null;
@@ -280,6 +280,7 @@
   let interruptDrainGeneration = 0;
   let callMediaLifecycle = 0;
   let activeInterruptDrain: InterruptDrainGeneration | null = null;
+  let activeInterruptRequest: AbortController | null = null;
   let latestAiTurnId: string | null = null;
   const handledInterruptedTurnKeys = new Set<string>();
 
@@ -377,6 +378,8 @@
     muteSynchronizationFailed = false;
     activeMuteRequest?.abortController.abort();
     activeMuteRequest = null;
+    activeInterruptRequest?.abort();
+    activeInterruptRequest = null;
     retireReconnectAudioBackfill(activeReconnectAudioBackfill);
 
     try {
@@ -3994,7 +3997,7 @@
   }
 
   async function applyMuteTarget(targetMuted: boolean) {
-    if (muteRequestPending || !callId || !sessionId) {
+    if (terminalControlsBlocked() || muteRequestPending || !callId || !sessionId) {
       return;
     }
 
@@ -4057,27 +4060,35 @@
   }
 
   async function toggleMute() {
-    if (muteSynchronizationFailed) {
+    if (terminalControlsBlocked() || muteSynchronizationFailed) {
       return;
     }
     await applyMuteTarget(!serverMuted);
   }
 
   async function retryMuteSynchronization() {
-    if (!muteSynchronizationFailed || muteRequestPending) {
+    if (terminalControlsBlocked() || !muteSynchronizationFailed || muteRequestPending) {
       return;
     }
     await applyMuteTarget(true);
   }
 
   async function interrupt() {
+    if (terminalControlsBlocked() || !callId || !sessionId) {
+      return;
+    }
     const interruptedTurnId = latestAiTurnId ?? activeTurnResponseGuard?.turnId ?? null;
     cancelActiveTurnStream();
     markLastAiTurnInterrupted();
     const generation = beginRemoteAudioInterruptDrain(interruptedTurnId);
-    if (callId && sessionId) {
-      try {
-        const result = await interruptCall(callId, sessionId);
+    const requestController = new AbortController();
+    activeInterruptRequest?.abort();
+    activeInterruptRequest = requestController;
+    try {
+      const result = await interruptCall(callId, sessionId, {
+        signal: requestController.signal
+      });
+      if (!requestController.signal.aborted) {
         acknowledgeInterruptDrain(
           generation,
           'http',
@@ -4085,10 +4096,18 @@
           result.cancelled_turn_id ?? null,
           result.receiver_drain_ms
         );
-      } catch {
-        // The visual state still returns to listening; raw control failures stay out of UI copy.
+      }
+    } catch {
+      // The visual state still returns to listening; raw control failures stay out of UI copy.
+    } finally {
+      if (activeInterruptRequest === requestController) {
+        activeInterruptRequest = null;
       }
     }
+  }
+
+  function terminalControlsBlocked(): boolean {
+    return ending || Boolean(activeTerminalCallTransaction);
   }
 
   function cancelActiveTurnStream() {
@@ -4336,6 +4355,7 @@
     if (activeTerminalCallTransaction !== owner) {
       return;
     }
+    retireCallControlOwners();
     if (owner.kind === 'media_reconnect_failure') {
       applyCallState('failed');
       blockingPanel = {
@@ -4361,7 +4381,10 @@
       stagedMediaOwners: stagedBrowserMediaConnections.size,
       hasActiveMediaOwner: Boolean(activeBrowserMediaConnection),
       hasReconnectBackfillController: Boolean(activeReconnectAudioBackfill),
-      hasMuteController: Boolean(activeMuteRequest)
+      hasMuteController: Boolean(activeMuteRequest),
+      hasInterruptController: Boolean(activeInterruptRequest),
+      hasInterruptDrainTimer: Boolean(remoteAudioInterruptDrainTimer),
+      hasInterruptedStateTimer: Boolean(interruptedStateTimer)
     });
   }
 
@@ -4611,12 +4634,9 @@
     invalidateBrowserMediaLifecycle(candidateReason);
     mediaReconnectOperationGeneration += 1;
     resetBrowserMediaReconnectIncident();
-    clearInterruptDrainState();
+    retireCallControlOwners();
     stopLocalMicReconnectDiagnostics();
     mediaReconnecting = false;
-    activeMuteRequest?.abortController.abort();
-    activeMuteRequest = null;
-    muteRequestPending = false;
     const localContextClose = stopLocalMicMeter(options);
     detachRemoteAudio();
     const closingRemoteAudioContext = remoteAudioContext;
@@ -4661,6 +4681,15 @@
       contextClosures.push(closingRemoteAudioContext.close().catch(() => undefined));
     }
     await Promise.allSettled(contextClosures);
+  }
+
+  function retireCallControlOwners() {
+    activeMuteRequest?.abortController.abort();
+    activeMuteRequest = null;
+    muteRequestPending = false;
+    activeInterruptRequest?.abort();
+    activeInterruptRequest = null;
+    clearInterruptDrainState();
   }
 
   function attachRemoteAudio(stream: MediaStream, debugCallId = '') {
@@ -4936,11 +4965,11 @@
       <CallToolbar
         muted={serverMuted}
         stateLabel={callControlStateLabel}
-        ready={callState === 'listening' && canUseToolbar}
-        disabled={!canUseToolbar}
+        ready={callState === 'listening' && canUseToolbar && !ending && !activeTerminalCallTransaction}
+        disabled={!canUseToolbar || ending || Boolean(activeTerminalCallTransaction)}
         muteDisabled={muteRequestPending || muteSynchronizationFailed}
         interruptEnabled={callState === 'understanding' || callState === 'thinking' || callState === 'rehearsing' || callState === 'speaking'}
-        endEnabled={!ending}
+        endEnabled={!ending && !activeTerminalCallTransaction}
         inputPickerSupported={false}
         outputPickerSupported={false}
         onMuteToggle={toggleMute}
@@ -4953,12 +4982,16 @@
           <div class="mute-recovery-actions">
             <button
               type="button"
-              disabled={muteRequestPending}
+              disabled={muteRequestPending || ending || Boolean(activeTerminalCallTransaction)}
               onclick={retryMuteSynchronization}
             >
               Retry microphone sync
             </button>
-            <button type="button" disabled={ending} onclick={hangup}>End call now</button>
+            <button
+              type="button"
+              disabled={ending || Boolean(activeTerminalCallTransaction)}
+              onclick={hangup}
+            >End call now</button>
           </div>
         </div>
       {/if}
