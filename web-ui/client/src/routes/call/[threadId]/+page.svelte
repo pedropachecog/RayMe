@@ -139,6 +139,16 @@
     mute_revision: number;
   }
 
+  class AmbiguousPeerPromotionError extends Error {
+    readonly lastError: unknown;
+
+    constructor(lastError: unknown) {
+      super('Replacement peer commit acknowledgement remained ambiguous');
+      this.name = 'AmbiguousPeerPromotionError';
+      this.lastError = lastError;
+    }
+  }
+
   type MediaReconnectReason = 'failed' | 'disconnected';
 
   let thread = $state<ThreadDetail | null>(null);
@@ -219,6 +229,9 @@
   const MEDIA_RECONNECT_STABLE_RESET_MS = 10000;
   const MEDIA_RECONNECT_MIC_DIAG_MS = 7000;
   const MEDIA_RECONNECT_MIC_DIAG_INTERVAL_MS = 500;
+  const PEER_PROMOTION_RECONCILIATION_TIMEOUT_MS = 2500;
+  const PEER_PROMOTION_ATTEMPT_TIMEOUT_MS = 750;
+  const PEER_PROMOTION_RETRY_DELAY_MS = 100;
   const MIC_BACKFILL_SAMPLE_RATE = 16000;
   const MIC_BACKFILL_ROLLING_MS = 180000;
   const MIC_BACKFILL_RECONNECT_PREROLL_MS = 30000;
@@ -517,15 +530,11 @@
         const candidateRemoteStream =
           connectionOwner.candidateRemoteStream ??
           await waitForBrowserMediaCandidateStream(connectionOwner, started.call_id);
-        const promotion = await promoteCallPeer(
+        await commitBrowserPeerPromotion(
           started.call_id,
           promotionSessionId,
-          pendingPeerGeneration,
-          'commit'
+          pendingPeerGeneration
         );
-        if (promotion.status !== 'committed') {
-          throw new Error('Replacement peer promotion was not committed');
-        }
         backendPeerCommitted = true;
         peerConnection = connection;
         activeBrowserMediaConnection = connectionOwner;
@@ -542,6 +551,14 @@
       return response;
     } catch (error) {
       if (preserveExisting) {
+        if (error instanceof AmbiguousPeerPromotionError) {
+          emitDebugEvent(started.call_id, 'remote_audio.candidate.commit_ambiguous', {
+            generation: pendingPeerGeneration,
+            name: (error.lastError as DOMException)?.name ?? 'unknown',
+            message: (error.lastError as Error)?.message ?? ''
+          });
+          throw error;
+        }
         if (pendingPeerGeneration !== null && !backendPeerCommitted) {
           await rejectBrowserPeerPromotion(
             started.call_id,
@@ -564,6 +581,94 @@
       }
       throw error;
     }
+  }
+
+  async function commitBrowserPeerPromotion(
+    callId: string,
+    promotionSessionId: string,
+    generation: number
+  ) {
+    const deadline = performance.now() + PEER_PROMOTION_RECONCILIATION_TIMEOUT_MS;
+    let attempt = 0;
+    let lastError: unknown = new Error('Replacement peer commit was not attempted');
+
+    while (performance.now() < deadline) {
+      attempt += 1;
+      const controller = new AbortController();
+      const attemptTimeout = Math.max(
+        1,
+        Math.min(PEER_PROMOTION_ATTEMPT_TIMEOUT_MS, deadline - performance.now())
+      );
+      const timeout = window.setTimeout(() => controller.abort(), attemptTimeout);
+      try {
+        const promotion = await promoteCallPeer(
+          callId,
+          promotionSessionId,
+          generation,
+          'commit',
+          { signal: controller.signal }
+        );
+        if (
+          promotion.session_id !== promotionSessionId ||
+          promotion.generation !== generation ||
+          promotion.status !== 'committed'
+        ) {
+          throw new Error('Replacement peer commit returned an invalid acknowledgement');
+        }
+        if (attempt > 1) {
+          emitDebugEvent(callId, 'remote_audio.candidate.commit_reconciled', {
+            generation,
+            attempt,
+            result: 'committed'
+          });
+        }
+        return;
+      } catch (error) {
+        if (
+          error instanceof CallApiError &&
+          error.code === 'webrtc_peer_already_committed'
+        ) {
+          emitDebugEvent(callId, 'remote_audio.candidate.commit_reconciled', {
+            generation,
+            attempt,
+            result: 'already_committed'
+          });
+          return;
+        }
+        if (peerPromotionProvesNotCommitted(error)) {
+          throw error;
+        }
+        lastError = error;
+        const remainingMs = deadline - performance.now();
+        if (remainingMs <= 0) {
+          break;
+        }
+        emitDebugEvent(callId, 'remote_audio.candidate.commit_retry', {
+          generation,
+          attempt,
+          remainingMs: Math.round(remainingMs),
+          name: (error as DOMException)?.name ?? 'unknown',
+          code: error instanceof CallApiError ? error.code : undefined
+        });
+        await delay(Math.min(PEER_PROMOTION_RETRY_DELAY_MS, remainingMs));
+      } finally {
+        window.clearTimeout(timeout);
+      }
+    }
+
+    throw new AmbiguousPeerPromotionError(lastError);
+  }
+
+  function peerPromotionProvesNotCommitted(error: unknown) {
+    if (!(error instanceof CallApiError)) {
+      return false;
+    }
+    return (
+      error.code === 'webrtc_peer_generation_stale' ||
+      error.code === 'webrtc_peer_not_connected' ||
+      error.code === 'call_session_not_found' ||
+      error.code === 'call_session_terminal'
+    );
   }
 
   async function rejectBrowserPeerPromotion(

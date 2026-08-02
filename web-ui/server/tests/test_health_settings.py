@@ -887,6 +887,38 @@ async def test_ai_backend_client_preserves_sanitized_webrtc_offer_failure_detail
     }
 
 
+async def test_ai_backend_client_preserves_peer_commit_reconciliation_status() -> None:
+    from app.domain.ai_backend_client import AiBackendClient, AiBackendProcessingError
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/peer-promotion"):
+            return httpx.Response(
+                409,
+                json={
+                    "detail": {
+                        "code": "webrtc_peer_already_committed",
+                        "message": r"private backend path C:\\models\\peer",
+                    }
+                },
+            )
+        return httpx.Response(404)
+
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        ai_client = AiBackendClient(http_client=client)
+        with pytest.raises(AiBackendProcessingError) as failed:
+            await ai_client.promote_call_peer(
+                "https://ai.local:9443",
+                "rtc-call-1",
+                1,
+                "commit",
+            )
+
+    assert failed.value.to_public_dict() == {
+        "code": "webrtc_peer_already_committed",
+        "message": "Replacement peer generation was already committed",
+    }
+
+
 async def test_ai_backend_client_uses_stt_timeout_for_reconnect_audio_backfill() -> None:
     from app.domain.ai_backend_client import AiBackendClient
 

@@ -223,6 +223,7 @@ export async function installMockCallMedia(
       remoteDescription: RTCSessionDescriptionInit | null = null;
       createdOfferCount = 0;
       closed = false;
+      closeCount = 0;
       dataChannels: MockRTCDataChannel[] = [];
       remoteStream: MediaStream | null = null;
       ondatachannel: ((event: RTCDataChannelEvent) => void) | null = null;
@@ -312,6 +313,7 @@ export async function installMockCallMedia(
         }
 
         this.closed = true;
+        this.closeCount += 1;
         for (const channel of this.dataChannels) {
           channel.close();
         }

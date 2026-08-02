@@ -19,6 +19,9 @@ type ReconnectRouteCounters = {
   muteCount: number;
   peerPromotionCount: number;
   backendActivePeerId: number | null;
+  backendActivePeerGeneration: number | null;
+  backendOldPeerRetirementCount: number;
+  abortedPeerCommitResponses: number;
   offers: Array<{ peerId: number | null; sdp: string }>;
   backfills: Array<Record<string, unknown>>;
   recoveredEvents: Array<Record<string, unknown>>;
@@ -49,6 +52,8 @@ type ReconnectRouteOptions = {
   failOfferFrom?: number;
   turnStreamGate?: Promise<void>;
   turnStreamEvents?: Array<Record<string, unknown>>;
+  abortFirstPeerCommitResponse?: boolean;
+  reconcileCommittedAsConflict?: boolean;
 };
 
 type StartupRouteCounters = {
@@ -72,6 +77,7 @@ type MockCallMediaSnapshot = {
     iceConnectionState: RTCIceConnectionState;
     createdOfferCount: number;
     closed: boolean;
+    closeCount: number;
     localDescriptionType: string | null;
     remoteDescriptionType: string | null;
     dataChannelIds: number[];
@@ -391,6 +397,73 @@ test('keeps old audio live while a slow replacement stream stages, then promotes
   ]);
   assertNoBrowserErrors();
 });
+
+for (const reconciliation of [
+  { label: 'duplicate committed response', asConflict: false },
+  { label: 'structured already_committed response', asConflict: true }
+] as const) {
+  test(`reconciles a lost peer commit acknowledgement through a ${reconciliation.label}`, async ({
+    page
+  }) => {
+    const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+      allowConsoleErrors: [
+        /Failed to load resource: net::ERR_FAILED/,
+        /Failed to load resource: the server responded with a status of 502/
+      ]
+    });
+    await installMockCallMedia(page);
+    const counters = await installReconnectCallRoutes(page, {
+      abortFirstPeerCommitResponse: true,
+      reconcileCommittedAsConflict: reconciliation.asConflict
+    });
+
+    await startReconnectCall(page, counters);
+    const initial = await getMockCallMediaSnapshot(page);
+    const initialStreamId = initial.peers[0].remoteStreamId;
+    expect(initialStreamId).not.toBeNull();
+
+    await setCurrentMockPeerState(page, 'failed', 'disconnected');
+    await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.ok')).toBe(1);
+    await expect.poll(() => debugEventCount(counters, 'remote_audio.candidate.commit_reconciled'))
+      .toBe(1);
+
+    const reconciled = await getMockCallMediaSnapshot(page);
+    const candidateStreamId = reconciled.peers[1].remoteStreamId;
+    expect(candidateStreamId).not.toBeNull();
+    expect(counters.peerPromotions).toEqual([
+      {
+        session_id: 'rtc-call-reconnect-01',
+        generation: 1,
+        action: 'commit'
+      },
+      {
+        session_id: 'rtc-call-reconnect-01',
+        generation: 1,
+        action: 'commit'
+      }
+    ]);
+    expect(counters.abortedPeerCommitResponses).toBe(1);
+    expect(counters.backendActivePeerGeneration).toBe(1);
+    expect(counters.backendActivePeerId).toBe(reconciled.peers[1].id);
+    expect(counters.backendOldPeerRetirementCount).toBe(1);
+    expect(reconciled.peers[0]).toMatchObject({ closed: true, closeCount: 1 });
+    expect(reconciled.peers[1]).toMatchObject({
+      connectionState: 'connected',
+      iceConnectionState: 'connected',
+      closed: false,
+      closeCount: 0
+    });
+    expect(reconciled.audioPlayback.activeStreamId).toBe(candidateStreamId);
+    expect(reconciled.audioPlayback.pausedStreamIds).toContain(initialStreamId);
+    expect(debugEventCount(counters, 'remote_audio.candidate.promoted')).toBe(1);
+    expect(debugEventCount(counters, 'remote_audio.candidate.discarded')).toBe(0);
+    expect(debugEventCount(counters, 'pc.media_reconnect.failed')).toBe(0);
+    expect(debugEventCount(counters, 'pc.media_reconnect.give_up')).toBe(0);
+    expect(counters.endCount).toBe(0);
+    await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+    assertNoBrowserErrors();
+  });
+}
 
 test('discards a failed replacement candidate without touching old audible audio', async ({
   page
@@ -1461,6 +1534,7 @@ async function getMockCallMediaSnapshot(page: Page): Promise<MockCallMediaSnapsh
         iceConnectionState: RTCIceConnectionState;
         createdOfferCount: number;
         closed: boolean;
+        closeCount: number;
         localDescription: RTCSessionDescriptionInit | null;
         remoteDescription: RTCSessionDescriptionInit | null;
         dataChannels: Array<{ id: number }>;
@@ -1489,6 +1563,7 @@ async function getMockCallMediaSnapshot(page: Page): Promise<MockCallMediaSnapsh
         iceConnectionState: peer.iceConnectionState,
         createdOfferCount: peer.createdOfferCount,
         closed: peer.closed,
+        closeCount: peer.closeCount,
         localDescriptionType: peer.localDescription?.type ?? null,
         remoteDescriptionType: peer.remoteDescription?.type ?? null,
         dataChannelIds: peer.dataChannels.map((channel) => channel.id),
@@ -1681,6 +1756,9 @@ async function installReconnectCallRoutes(
     muteCount: 0,
     peerPromotionCount: 0,
     backendActivePeerId: null,
+    backendActivePeerGeneration: null,
+    backendOldPeerRetirementCount: 0,
+    abortedPeerCommitResponses: 0,
     offers: [],
     backfills: [],
     recoveredEvents: [],
@@ -1779,6 +1857,24 @@ async function installReconnectCallRoutes(
     counters.peerPromotions.push(payload);
     counters.requestOrder.push(`peer_${payload.action}`);
     const pendingPeerId = pendingPeerIds.get(payload.generation);
+    if (counters.backendActivePeerGeneration === payload.generation) {
+      if (options.reconcileCommittedAsConflict || payload.action === 'reject') {
+        await fulfillJson(route, {
+          detail: {
+            code: 'webrtc_peer_already_committed',
+            message: 'Replacement peer generation was already committed'
+          }
+        }, 502);
+        return;
+      }
+      await fulfillJson(route, {
+        call_id: 'call-reconnect-01',
+        session_id: payload.session_id,
+        generation: payload.generation,
+        status: 'committed'
+      });
+      return;
+    }
     if (pendingPeerId === undefined) {
       await fulfillJson(route, {
         detail: {
@@ -1789,9 +1885,22 @@ async function installReconnectCallRoutes(
       return;
     }
     if (payload.action === 'commit') {
+      if (counters.backendActivePeerId !== pendingPeerId) {
+        counters.backendOldPeerRetirementCount += 1;
+      }
       counters.backendActivePeerId = pendingPeerId;
+      counters.backendActivePeerGeneration = payload.generation;
     }
     pendingPeerIds.delete(payload.generation);
+    if (
+      payload.action === 'commit' &&
+      options.abortFirstPeerCommitResponse &&
+      counters.abortedPeerCommitResponses === 0
+    ) {
+      counters.abortedPeerCommitResponses += 1;
+      await route.abort('failed');
+      return;
+    }
     await fulfillJson(route, {
       call_id: 'call-reconnect-01',
       session_id: payload.session_id,

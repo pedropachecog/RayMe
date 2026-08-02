@@ -45,6 +45,9 @@ SAFE_PROCESSING_MESSAGES = {
     "call_tts_prepare_unavailable": "Voice preparation is unavailable",
     "call_tts_prepare_failed": "Voice preparation failed",
     "webrtc_offer_failed": WEBRTC_OFFER_FAILED_MESSAGE,
+    "webrtc_peer_already_committed": "Replacement peer generation was already committed",
+    "webrtc_peer_generation_stale": "Replacement peer generation is no longer pending",
+    "webrtc_peer_not_connected": "Replacement peer transport is not connected",
 }
 
 

@@ -1644,6 +1644,14 @@ def test_inflight_reconnect_offer_does_not_steal_active_session_media(
         f"/webrtc/sessions/{session_id}/peer-promotion",
         json={"generation": generation, "action": "commit"},
     )
+    duplicate_commit = client.post(
+        f"/webrtc/sessions/{session_id}/peer-promotion",
+        json={"generation": generation, "action": "commit"},
+    )
+    reject_after_commit = client.post(
+        f"/webrtc/sessions/{session_id}/peer-promotion",
+        json={"generation": generation, "action": "reject"},
+    )
 
     assert promoted.status_code == 200
     assert promoted.json() == {
@@ -1651,9 +1659,17 @@ def test_inflight_reconnect_offer_does_not_steal_active_session_media(
         "generation": generation,
         "status": "committed",
     }
+    assert duplicate_commit.status_code == 200
+    assert duplicate_commit.json() == promoted.json()
+    assert reject_after_commit.status_code == 409
+    assert reject_after_commit.json()["detail"] == {
+        "code": "webrtc_peer_already_committed",
+        "message": "Replacement peer generation was already committed",
+    }
     assert session.peer_connection is peers[1]
     assert session.outbound_audio_track is tracks[1]
     assert original_peer.close_calls == 1
+    assert peers[1].close_calls == 0
     assert session.thread_id == "accepted-thread"
     assert session.voice_id == "accepted-voice"
     assert session.engine_id == "voxcpm2"

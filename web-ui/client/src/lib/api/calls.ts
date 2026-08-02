@@ -96,23 +96,30 @@ export async function sendCallOffer(
   return parseCallApiResponse(response, 'RayMe could not connect this call.');
 }
 
-export function promoteCallPeer(
+export interface CallPeerPromotionResponse {
+  call_id: string;
+  session_id: string;
+  generation: number;
+  status: 'committed' | 'rejected';
+}
+
+export async function promoteCallPeer(
   callId: string,
   sessionId: string,
   generation: number,
   action: 'commit' | 'reject',
   options: { signal?: AbortSignal } = {}
-): Promise<{
-  call_id: string;
-  session_id: string;
-  generation: number;
-  status: 'committed' | 'rejected';
-}> {
-  return apiFetch(`/calls/${encodeURIComponent(callId)}/peer-promotion`, {
-    method: 'POST',
-    signal: options.signal,
-    body: JSON.stringify({ session_id: sessionId, generation, action })
-  });
+): Promise<CallPeerPromotionResponse> {
+  const response = await fetch(
+    toApiPath(`/calls/${encodeURIComponent(callId)}/peer-promotion`),
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      signal: options.signal,
+      body: JSON.stringify({ session_id: sessionId, generation, action })
+    }
+  );
+  return parseCallApiResponse(response, 'RayMe could not reconcile replacement call media.');
 }
 
 export function submitCallTurn(

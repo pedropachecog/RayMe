@@ -84,6 +84,7 @@ class ScriptedCallBackend:
         self.offer_calls: list[dict[str, Any]] = []
         self.offer_peer_generation: int | None = None
         self.peer_promotion_calls: list[dict[str, Any]] = []
+        self.peer_promotion_error_code: str | None = None
         self.prepare_calls: list[dict[str, Any]] = []
         self.preparation_status_calls = 0
         self.preparation_result: dict[str, Any] | None = None
@@ -148,6 +149,11 @@ class ScriptedCallBackend:
                 "action": action,
             }
         )
+        if self.peer_promotion_error_code is not None:
+            raise AiBackendProcessingError(
+                code=self.peer_promotion_error_code,
+                message="Replacement peer generation was already committed",
+            )
         return {
             "session_id": session_id,
             "generation": generation,
@@ -885,6 +891,37 @@ def test_peer_promotion_preserves_offer_generation_and_forwards_authenticated_ac
             "action": action,
         }
     ]
+
+
+def test_peer_promotion_preserves_structured_already_committed_status(
+    call_fixture: CallFixture,
+) -> None:
+    call_fixture.backend.offer_peer_generation = 7
+    call_fixture.backend.peer_promotion_error_code = "webrtc_peer_already_committed"
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/offer",
+        json={
+            "session_id": started["session_id"],
+            "offer": {"type": "offer", "sdp": "v=0\r\nm=audio 9 UDP/TLS/RTP/SAVPF 111\r\n"},
+        },
+    )
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/peer-promotion",
+        json={
+            "session_id": started["session_id"],
+            "generation": 7,
+            "action": "commit",
+        },
+    )
+
+    assert response.status_code == 502
+    assert response.json()["detail"] == {
+        "code": "webrtc_peer_already_committed",
+        "message": "Replacement peer generation was already committed",
+    }
 
 
 @pytest.mark.parametrize(
