@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
+import json
 import sys
 import threading
 from io import BytesIO
@@ -1346,6 +1347,140 @@ def test_stt_event_sink_reentrant_session_action_does_not_deadlock(
                 ("failed", "call_stt_failed"),
                 ("sink_followup", None),
             ]
+
+    _run(scenario())
+
+
+@pytest.mark.parametrize("sink_outcome", ["exception", "cancelled"])
+def test_accepted_stt_sink_failure_preserves_authoritative_delivery(
+    sink_outcome: str,
+) -> None:
+    observed_types: list[str] = []
+    channel = ScriptedDataChannel()
+    track = ScriptedOutboundAudioTrack()
+
+    class AcceptedSttAdapter:
+        def transcribe_pcm(
+            self,
+            pcm_frames: list[bytes],
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            assert pcm_frames
+            return {
+                "status": "accepted",
+                "transcript": "observer failure stays recoverable",
+                "language": "en",
+            }
+
+    async def event_sink(event: dict[str, Any]) -> None:
+        observed_types.append(event["type"])
+        if event["type"] != "user_final":
+            return
+        if sink_outcome == "exception":
+            raise RuntimeError("observer is offline")
+        raise asyncio.CancelledError("observer callback cancelled")
+
+    async def scenario() -> None:
+        session, _ = _new_session(
+            vad_adapter=NeverEndingVadAdapter(),
+            stt_adapter=AcceptedSttAdapter(),
+            tts_adapter=ScriptedTtsAdapter(),
+            outbound_audio_track=track,
+            data_channel=channel,
+            event_sink=event_sink,
+        )
+        pcm = np.full(320, 1800, dtype=np.int16).tobytes()
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pcm)
+        ) is None
+
+        result = await asyncio.wait_for(
+            session.finalize_user_turn(),
+            timeout=1.0,
+        )
+
+        assert result is not None and result["type"] == "user_final"
+        assert session._stt_admissions == {}
+        assert session.state == "thinking"
+        assert session._event_sink_failures == [
+            {
+                "event_type": "user_final",
+                "error": (
+                    "RuntimeError"
+                    if sink_outcome == "exception"
+                    else "CancelledError"
+                ),
+            }
+        ]
+        assert [json.loads(message)["type"] for message in channel.sent] == [
+            "state",
+            "user_final",
+        ]
+        assert session.drain_undelivered_events() == []
+
+        # The authoritative recipient can continue the delivered turn even
+        # though the optional observer failed.
+        terminal = await session.speak_text(
+            "ai-turn-after-observer-failure",
+            "The call continues.",
+            "voice-1",
+            "f5",
+            final_chunk=True,
+        )
+        assert terminal["type"] == "ai_done"
+        assert session.state == "listening"
+
+    _run(scenario())
+
+    assert observed_types == [
+        "state",
+        "user_final",
+        "ai_audio_started",
+        "ai_done",
+    ]
+
+
+def test_failed_authoritative_stt_delivery_releases_thinking_ownership() -> None:
+    class AcceptedSttAdapter:
+        def transcribe_pcm(
+            self,
+            pcm_frames: list[bytes],
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            assert pcm_frames
+            return {
+                "status": "accepted",
+                "transcript": "delivery cannot complete",
+                "language": "en",
+            }
+
+    async def scenario() -> None:
+        session, _ = _new_session(
+            vad_adapter=NeverEndingVadAdapter(),
+            stt_adapter=AcceptedSttAdapter(),
+        )
+        deliver = session._deliver_event
+
+        async def fail_user_final(event: dict[str, Any]) -> dict[str, Any]:
+            if event["type"] == "user_final":
+                raise RuntimeError("authoritative delivery failed")
+            return await deliver(event)
+
+        session._deliver_event = fail_user_final
+        pcm = np.full(320, 1800, dtype=np.int16).tobytes()
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pcm)
+        ) is None
+
+        with pytest.raises(RuntimeError, match="authoritative delivery failed"):
+            await session.finalize_user_turn()
+
+        assert session._stt_admissions == {}
+        assert session.state == "listening"
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pcm)
+        ) is None
+        assert len(session._turn_frames) == 1
 
     _run(scenario())
 

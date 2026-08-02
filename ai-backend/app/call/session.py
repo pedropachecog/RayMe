@@ -342,6 +342,7 @@ class _SttTurnAdmission:
     lifecycle_epoch: int
     allow_transport_reconnect: bool
     task: asyncio.Task[Any] | None
+    state_ownership: str | None = None
 
 
 @dataclass
@@ -443,6 +444,7 @@ class CallSession:
         self._event_commit_sequence = 0
         self._event_outbox: list[_EventOutboxEntry] = []
         self._event_delivery_task: asyncio.Task[None] | None = None
+        self._event_sink_failures: list[dict[str, Any]] = []
         self._media_reconnect_grace_pending = False
         self._media_reconnect_grace_until = 0.0
         self._media_reconnect_grace_logged = False
@@ -2158,6 +2160,7 @@ class CallSession:
         turn_id = f"user-turn-{self._turn_index}"
         if self.ended_at is None:
             self.state = "understanding"
+            admission.state_ownership = "understanding"
             await self.emit_event(
                 simple_event("state", session_id=self.session_id, turn_id=turn_id, state="understanding")
             )
@@ -2351,7 +2354,10 @@ class CallSession:
         self._stt_admissions.pop(admission.token, None)
         lifecycle = self._peer_lifecycle
         if (
-            self.state == "understanding"
+            (
+                self.state == "understanding"
+                or self.state == admission.state_ownership
+            )
             and self.ended_at is None
             and lifecycle.phase != "terminal"
             and not self._stt_admissions
@@ -2377,7 +2383,12 @@ class CallSession:
                 return None, stale_response
             entry = self._commit_event(event)
             self.state = next_state
-        return await self._await_event_commit(entry), None
+            admission.state_ownership = next_state
+        result = await self._await_event_commit(entry)
+        async with self._lifecycle_lock:
+            if self._stt_admissions.get(admission.token) is admission:
+                admission.state_ownership = None
+        return result, None
 
     def _terminal_stt_response_locked(self) -> dict[str, Any]:
         return {
@@ -2480,9 +2491,35 @@ class CallSession:
             return {"status": "discarded", "turn_id": event_turn_id}
 
         if self.event_sink is not None:
-            result = self.event_sink(event)
-            if inspect.isawaitable(result):
-                await result
+            try:
+                result = self.event_sink(event)
+                if inspect.isawaitable(result):
+                    await result
+            except asyncio.CancelledError as exc:
+                self._event_sink_failures.append(
+                    {
+                        "event_type": event_type,
+                        "error": exc.__class__.__name__,
+                    }
+                )
+                logger.warning(
+                    "[rayme-call] event.sink_cancelled session=%s type=%s",
+                    self.session_id,
+                    event_type,
+                )
+            except Exception as exc:
+                self._event_sink_failures.append(
+                    {
+                        "event_type": event_type,
+                        "error": exc.__class__.__name__,
+                    }
+                )
+                logger.exception(
+                    "[rayme-call] event.sink_failed session=%s type=%s exc=%s",
+                    self.session_id,
+                    event_type,
+                    exc.__class__.__name__,
+                )
 
         channel = self.data_channel
         ready_state = getattr(channel, "readyState", None) if channel is not None else None
