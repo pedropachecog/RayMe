@@ -242,10 +242,11 @@ async def prepare_session_speech(
         )
         release_lease = getattr(model_manager, "release_tts_prompt_lease", None)
         if callable(release_lease):
-            installed = await session.install_or_release_tts_prompt_lease(
+            lease_handoff = session.start_prompt_lease_handoff(
                 release_lease,
                 accepted_configuration=accepted_configuration,
             )
+            installed = await session.wait_prompt_lease_handoff(lease_handoff)
             if not installed:
                 raise _terminal_session_prepare_error()
     except SpeechSessionSelectionError as exc:

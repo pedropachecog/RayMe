@@ -228,6 +228,9 @@ class _TerminalCleanup:
     owned_prompt_cleanups_pending: list[_OwnedPromptLeaseCleanup] = field(
         default_factory=list
     )
+    owned_prompt_handoffs_pending: list[_OwnedPromptLeaseHandoff] = field(
+        default_factory=list
+    )
     extra_peers_pending: list[Any] = field(default_factory=list)
     extra_tracks_pending: list[Any] = field(default_factory=list)
     active_peer_pending: bool = True
@@ -259,6 +262,15 @@ class _OwnedPromptLeaseCleanup:
     released: bool = False
     failure_state: dict[str, Any] | None = None
     task: asyncio.Task[None] | None = None
+
+
+@dataclass
+class _OwnedPromptLeaseHandoff:
+    releaser: PromptLeaseReleaser
+    accepted_configuration: AcceptedSpeechConfiguration | None
+    task: asyncio.Task[bool] | None = None
+    installed: bool = False
+    release_cleanup: _OwnedPromptLeaseCleanup | None = None
 
 
 @dataclass
@@ -461,6 +473,8 @@ class CallSession:
         self._owned_prompt_lease_cleanups: list[_OwnedPromptLeaseCleanup] = []
         self._owned_prompt_lease_cleanup_tasks: set[asyncio.Task[None]] = set()
         self._owned_prompt_lease_cleanup_failures: list[dict[str, Any]] = []
+        self._owned_prompt_lease_handoffs: list[_OwnedPromptLeaseHandoff] = []
+        self._owned_prompt_lease_handoff_tasks: set[asyncio.Task[bool]] = set()
 
     @property
     def _pending_peer_connections(self) -> list[Any]:
@@ -485,13 +499,50 @@ class CallSession:
         *,
         accepted_configuration: AcceptedSpeechConfiguration | None = None,
     ) -> bool:
+        handoff = self.start_prompt_lease_handoff(
+            releaser,
+            accepted_configuration=accepted_configuration,
+        )
+        return await self.wait_prompt_lease_handoff(handoff)
+
+    def start_prompt_lease_handoff(
+        self,
+        releaser: PromptLeaseReleaser,
+        *,
+        accepted_configuration: AcceptedSpeechConfiguration | None = None,
+    ) -> _OwnedPromptLeaseHandoff:
+        """Synchronously own a model-granted lease before any caller await."""
+
+        handoff = _OwnedPromptLeaseHandoff(
+            releaser=releaser,
+            accepted_configuration=accepted_configuration,
+        )
+        task = asyncio.create_task(self._run_prompt_lease_handoff(handoff))
+        handoff.task = task
+        self._owned_prompt_lease_handoffs.append(handoff)
+        self._owned_prompt_lease_handoff_tasks.add(task)
+        task.add_done_callback(self._owned_prompt_lease_handoff_tasks.discard)
+        return handoff
+
+    async def wait_prompt_lease_handoff(
+        self,
+        handoff: _OwnedPromptLeaseHandoff,
+    ) -> bool:
+        if handoff.task is None:
+            raise RuntimeError("owned prompt lease handoff has no task")
+        return await asyncio.shield(handoff.task)
+
+    async def _run_prompt_lease_handoff(
+        self,
+        handoff: _OwnedPromptLeaseHandoff,
+    ) -> bool:
         selection_error: SpeechSessionSelectionError | None = None
         owned_cleanup: _OwnedPromptLeaseCleanup | None = None
         async with self._lifecycle_lock:
-            if accepted_configuration is not None:
+            if handoff.accepted_configuration is not None:
                 try:
                     self._validate_accepted_speech_configuration_locked(
-                        accepted_configuration
+                        handoff.accepted_configuration
                     )
                 except SpeechSessionSelectionError as exc:
                     selection_error = exc
@@ -500,16 +551,18 @@ class CallSession:
                 and self.ended_at is None
                 and self.state not in {"ended", "failed"}
             ):
-                self._tts_prompt_lease_releaser = releaser
+                self._tts_prompt_lease_releaser = handoff.releaser
+                handoff.installed = True
                 return True
             owned_cleanup = self._start_owned_prompt_lease_cleanup_locked(
-                releaser,
+                handoff.releaser,
                 reason=(
                     "stale_prepare_selection"
                     if selection_error is not None
                     else "terminal_prepare_result"
                 ),
             )
+            handoff.release_cleanup = owned_cleanup
         if owned_cleanup.task is None:
             raise RuntimeError("owned prompt lease cleanup has no task")
         await asyncio.shield(owned_cleanup.task)
@@ -4015,6 +4068,15 @@ class CallSession:
             for cleanup in self._owned_prompt_lease_cleanups
             if not cleanup.released
         ]
+        owned_prompt_handoffs = [
+            handoff
+            for handoff in self._owned_prompt_lease_handoffs
+            if not handoff.installed
+            and not (
+                handoff.release_cleanup is not None
+                and handoff.release_cleanup.released
+            )
+        ]
         self.ended_at = datetime.now(timezone.utc)
         self.end_reason = reason
         self.state = target_state
@@ -4042,6 +4104,7 @@ class CallSession:
             },
             owned_track_ids={id(track) for track in terminal_extra_tracks},
             owned_prompt_cleanups_pending=owned_prompt_cleanups,
+            owned_prompt_handoffs_pending=owned_prompt_handoffs,
             cancel_pending=(
                 self._speech_admission is not None
                 or self.active_turn_task is not None
@@ -4112,6 +4175,7 @@ class CallSession:
                 cleanup.candidate_peer_pending,
                 cleanup.prompt_lease_pending,
                 bool(cleanup.owned_prompt_cleanups_pending),
+                bool(cleanup.owned_prompt_handoffs_pending),
                 bool(cleanup.extra_peers_pending),
                 bool(cleanup.extra_tracks_pending),
             )
@@ -4287,6 +4351,35 @@ class CallSession:
                         cleanup.owned_prompt_cleanups_pending.remove(
                             owned_cleanup
                         )
+                for handoff in list(cleanup.owned_prompt_handoffs_pending):
+                    task = handoff.task
+                    release_cleanup = handoff.release_cleanup
+                    if handoff.installed or (
+                        release_cleanup is not None
+                        and release_cleanup.released
+                    ):
+                        cleanup.owned_prompt_handoffs_pending.remove(handoff)
+                        continue
+                    if task is None:
+                        continue
+                    if not task.done():
+                        try:
+                            await asyncio.wait_for(
+                                asyncio.shield(task),
+                                timeout=CALL_SWITCH_CLEANUP_STEP_TIMEOUT_SECONDS,
+                            )
+                        except asyncio.TimeoutError:
+                            cleanup.last_attempt_timed_out = True
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception:
+                            pass
+                    release_cleanup = handoff.release_cleanup
+                    if handoff.installed or (
+                        release_cleanup is not None
+                        and release_cleanup.released
+                    ):
+                        cleanup.owned_prompt_handoffs_pending.remove(handoff)
                         continue
                     if task is None:
                         continue
@@ -4373,6 +4466,11 @@ class CallSession:
             pending.append(
                 "owned_prompt_lease:"
                 f"{len(cleanup.owned_prompt_cleanups_pending)}"
+            )
+        if cleanup.owned_prompt_handoffs_pending:
+            pending.append(
+                "prompt_lease_handoff:"
+                f"{len(cleanup.owned_prompt_handoffs_pending)}"
             )
         if cleanup.extra_peers_pending:
             pending.append(f"extra_peer:{len(cleanup.extra_peers_pending)}")

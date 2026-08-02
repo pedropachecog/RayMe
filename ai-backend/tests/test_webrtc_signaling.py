@@ -798,6 +798,107 @@ def test_webrtc_slow_qwen_prepare_retries_stale_lease_after_engine_switch(
     ] * (release_failures + 1)
 
 
+def test_webrtc_cancelled_prepare_owns_lease_before_lifecycle_lock(
+    stub_webrtc: None,
+) -> None:
+    from app.call.session import SpeechSessionSelectionError
+
+    class LockBlockedHandoffManager(ScriptedPreparingModelManager):
+        def __init__(self) -> None:
+            super().__init__(ScriptedQwenStreamingTtsAdapter())
+            self.prepare_started = asyncio.Event()
+            self.allow_prepare_return = asyncio.Event()
+            self.owners: set[str] = set()
+            self.release_calls: list[str] = []
+
+        async def prepare_tts_engine(
+            self,
+            engine_id: str,
+            **kwargs: Any,
+        ) -> dict[str, Any]:
+            self.prepare_started.set()
+            await self.allow_prepare_return.wait()
+            self.owners.add(kwargs["prompt_lease_owner"])
+            return {
+                "engine_id": engine_id,
+                "model_state": "resident",
+                "prompt_state": "ready",
+                "voice_key": kwargs["voice_key"],
+            }
+
+        async def release_tts_prompt_lease(self, owner: str) -> bool:
+            self.release_calls.append(owner)
+            self.owners.discard(owner)
+            return True
+
+    async def scenario() -> None:
+        manager = LockBlockedHandoffManager()
+        app = create_app(
+            AiBackendSettings(service_auth_token=SERVICE_AUTH_TOKEN)
+        )
+        app.state.model_manager = manager
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport,
+            base_url="http://testserver",
+            headers=SERVICE_AUTH_HEADERS,
+        ) as client:
+            session_id = "cancelled-prepare-before-lifecycle-validation"
+            offered = await client.post(
+                "/webrtc/offer",
+                json={
+                    **_offer_payload(session_id=session_id),
+                    "voice_id": "voice-qwen",
+                    "engine_id": "qwen3_1_7b",
+                },
+            )
+            assert offered.status_code == 200
+            session = app.state.call_session_manager.get_session(session_id)
+            assert session is not None
+            prepare = asyncio.create_task(
+                client.post(
+                    f"/webrtc/sessions/{session_id}/prepare",
+                    json={
+                        "voice_id": "voice-qwen",
+                        "engine_id": "qwen3_1_7b",
+                        "reference_audio_b64": "cmVhbC1zYW1wbGU=",
+                        "reference_transcript": "The exact reference transcript.",
+                    },
+                )
+            )
+            await manager.prepare_started.wait()
+
+            await session._lifecycle_lock.acquire()
+            try:
+                session._peer_lifecycle.epoch += 1
+                session.voice_id = "voice-f5"
+                session.engine_id = "f5"
+                manager.allow_prepare_return.set()
+                while not session._owned_prompt_lease_handoffs:
+                    await asyncio.sleep(0)
+                handoff = session._owned_prompt_lease_handoffs[-1]
+                assert handoff.task is not None and not handoff.task.done()
+                assert manager.owners == {session_id}
+
+                prepare.cancel()
+                with pytest.raises(asyncio.CancelledError):
+                    await prepare
+                assert handoff.task is not None and not handoff.task.done()
+                assert manager.release_calls == []
+            finally:
+                session._lifecycle_lock.release()
+
+            with pytest.raises(SpeechSessionSelectionError):
+                await handoff.task
+            assert manager.owners == set()
+            assert manager.release_calls == [session_id]
+            assert handoff.release_cleanup is not None
+            assert handoff.release_cleanup.released is True
+            assert session._tts_prompt_lease_releaser is None
+
+    asyncio.run(scenario())
+
+
 def test_webrtc_prepare_rejects_terminal_session_before_model_acquires_lease(
     stub_webrtc: None,
 ) -> None:
