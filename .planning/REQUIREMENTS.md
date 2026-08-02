@@ -7,6 +7,11 @@
 - Lorebook / world-info data from imported cards is **preserved but not injected** in v1 (no silent data loss; edit/injection = v1.x).
 - PWA manifest + icons in v1 — the LAN-on-phone use case is core value, and add-to-home-screen is cheap.
 - Character export: v2 JSON only in v1; v3 PNG export deferred to v1.x.
+- Voice sample authorization: uploading a voice sample is assumed authorized. No
+  reference-source, steward, consent, authorization-basis, use-scope, or
+  authorization-status metadata may become a product or evidence requirement, gate,
+  blocker, sidecar, or automatic substitute. The technical contract is governed by
+  `.planning/REFERENCE-AUTHORIZATION-PROHIBITION.md`.
 
 **Status legend**: `[v1]` = must ship. `[v1.x]` = add after v1 validates. `[v2+]` = future consideration.
 
@@ -44,11 +49,11 @@
 
 ### Voice Lab & Voice Library
 
-- **REQ-20** `[v1]` — Voice Lab accepts a short audio sample upload (WAV / MP3 / FLAC). Recommended length 6–15 s, mono; warnings surfaced on clips outside that envelope.
+- **REQ-20** `[v1]` — Voice Lab accepts an assumed-authorized short audio sample upload (WAV / MP3 / FLAC) without policy metadata. Recommended length 6–15 s, mono; warnings surfaced on clips outside that envelope.
   - *Source*: PROJECT.md Active.
-- **REQ-21** `[v1]` — Uploaded samples are transcribed by the STT engine into an editable reference transcript. User can edit before saving — the stored transcript is what F5-TTS and Qwen3-TTS consume (XTTS v2 does not require a transcript, but the same editable transcript is still captured for portability between engines).
+- **REQ-21** `[v1]` — Uploaded samples are transcribed by the STT engine into an editable reference transcript. User can edit before saving — the stored matching transcript is the technical input that F5-TTS and Qwen3-TTS consume (XTTS v2 does not require a transcript, but the same editable transcript is still captured for portability between engines); no authorization metadata is required.
   - *Source*: PROJECT.md Active (F5 and Qwen3 require transcript, STT auto-generates).
-- **REQ-22** `[v1]` — Voice save captures: name, engine (**F5-TTS**, **XTTS v2**, or **Qwen3-TTS** — user-selected per voice), sample audio path, reference transcript, timestamps. Qwen3-TTS uses the pinned `faster-qwen3-tts==0.3.2` runtime with `Qwen/Qwen3-TTS-12Hz-1.7B-Base`; its ICL cloning path requires a reference transcript that matches the saved sample. The former `0.6B-Base` experimental identifier is compatibility-only and must not silently load the old model.
+- **REQ-22** `[v1]` — Voice save captures: name, engine (**F5-TTS**, **XTTS v2**, or **Qwen3-TTS** — user-selected per voice), contained sample audio path, reference transcript, timestamps, and technical integrity data only. Qwen3-TTS uses the pinned `faster-qwen3-tts==0.3.2` runtime with exact identity `Qwen/Qwen3-TTS-12Hz-1.7B-Base`; its ICL cloning path requires a nonblank reference transcript that matches the saved sample. The former `0.6B-Base` experimental identifier is compatibility-only and must not silently load the old model. Authorization metadata is not a save, preview, test-play, preparation, or call requirement.
   - *Source*: PROJECT.md Active + Key Decisions; amended 2026-07-31 after Spikes 004a/004b/005/006 and product-owner listening acceptance selected 1.7B.
 - **REQ-23** `[v1]` — Voice Library supports list / rename / delete / test-play. Test-play synthesizes a stock phrase (and optional custom text) using the voice, routed to the configured output device.
 - **REQ-24** `[v1]` — Deleting a voice that is referenced by a character default or chat override must not leave dangling references. Either cascade-reassign to a default or block with a clear error listing referents.

@@ -39,6 +39,7 @@ fix; it turns RayMe into generated-audio playback and violates the core value.
 - [ ] STT is fast and accurate for accented English (Spanish-accented English specifically)
 - [ ] TTS supports F5-TTS, XTTS v2, VoxCPM2, and Faster Qwen3-TTS 1.7B Base, selectable per voice
 - [ ] Voice Lab: upload a voice sample, STT auto-generates the reference transcript, user can edit and save the voice
+- [ ] Voice sample upload is assumed authorized; the technical sample contract remains asset containment, valid bytes and integrity, matching transcript/acoustic alignment where an engine needs it, private handling, and deletion/cache invalidation. See `.planning/REFERENCE-AUTHORIZATION-PROHIBITION.md`.
 - [ ] Character creator/editor supports the SillyTavern character-card field set plus a picture
 - [ ] Character importer accepts SillyTavern v2 and v3 card formats (JSON and PNG-embedded)
 - [ ] A character has a default voice, but each chat can override which voice is used
@@ -61,6 +62,11 @@ fix; it turns RayMe into generated-audio playback and violates the core value.
 - Managed TTS/STT APIs (OpenAI Realtime, ElevenLabs streaming, etc.) — self-hosted engines only; keeps it a "your hardware" product
 - Tool-using agent characters — conversational personas only, not task agents
 - Cloud deployment / internet-facing hosting — designed for LAN
+- Reference authorization metadata — no reference-source, steward, consent,
+  authorization-basis, use-scope, or authorization-status product/evidence field,
+  gate, blocker, sidecar, or metadata-driven substitute belongs in RayMe. Upload is
+  assumed authorized; the canonical boundary is
+  `.planning/REFERENCE-AUTHORIZATION-PROHIBITION.md`.
 
 ## Context
 

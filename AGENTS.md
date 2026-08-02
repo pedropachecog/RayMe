@@ -47,6 +47,17 @@ RayMe is a live phone-call simulator, not a generated-audio player.
 - Scheduled tasks `RayMePhase1AI` and `RayMePhase1Web` must point to those `.cmd` files only
 - If `deploy-omen.sh` is missing functionality, fix the script — do not work around it
 
+## Voice Sample Authorization
+
+Before any voice sample, cloning, Voice Lab, saved-voice, acceptance, or evidence work,
+read `.planning/REFERENCE-AUTHORIZATION-PROHIBITION.md`. Uploading a voice sample is
+assumed authorized. Do not add reference-source, steward, consent,
+authorization-basis, use-scope, or authorization-status forms, fields, or sidecars;
+do not make them a gate or blocker; and do not use an automatic synthetic or
+non-person fallback because they are absent. RayMe must still enforce technical
+checks for asset containment, valid bytes, integrity hashes, transcript matching and
+acoustic alignment where required, private handling, and deletion/cache invalidation.
+
 ## Subagent Sequencing
 
 When a task is delegated to a subagent, the parent agent must stop working on
