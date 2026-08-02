@@ -26,6 +26,7 @@ type ReconnectRouteCounters = {
 
 type ReconnectRouteOptions = {
   backfillDelayMs?: number;
+  firstBackfillGate?: Promise<void>;
   failBackfill?: boolean;
   hangBackfillFrom?: number;
   recoverEvents?: Array<Record<string, unknown>>;
@@ -349,6 +350,61 @@ test('reconnect backfill after mute contains only post-unmute capture epoch PCM'
   expect(selectedValues.has(3333)).toBe(true);
   expect(selectedValues.has(1111)).toBe(false);
   expect(selectedValues.has(2222)).toBe(false);
+  assertNoBrowserErrors();
+});
+
+test('retired reconnect generation cannot resume after mute and a newer reconnect', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  let releaseRetiredBatch = () => undefined;
+  const retiredBatchGate = new Promise<void>((resolve) => {
+    releaseRetiredBatch = resolve;
+  });
+  await installMockCallMedia(page, { controllablePcm: true });
+  const counters = await installReconnectCallRoutes(page, {
+    firstBackfillGate: retiredBatchGate
+  });
+
+  await startReconnectCall(page, counters);
+  await emitMockPcm(page, 1111, 400_000);
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await expect.poll(() => counters.backfillCount).toBe(1);
+  const retiredBaseId = String(counters.backfills[0].backfill_id).replace(/-batch-1$/, '');
+
+  await page.getByRole('button', { name: 'Mute' }).click();
+  await expect(page.getByRole('button', { name: 'Unmute' })).toBeVisible();
+  await page.getByRole('button', { name: 'Unmute' }).click();
+  await expect(page.getByRole('button', { name: 'Mute' })).toBeVisible();
+  await emitMockPcm(page, 3333);
+
+  await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.ok')).toBe(1);
+  await page.waitForTimeout(100);
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await expect.poll(() => counters.backfillCount).toBeGreaterThan(1);
+  const currentBaseId = String(counters.backfills[1].backfill_id).replace(/-batch-1$/, '');
+  expect(currentBaseId).not.toBe(retiredBaseId);
+
+  releaseRetiredBatch();
+  await page.waitForTimeout(250);
+
+  const retiredBatches = counters.backfills.filter((entry) =>
+    String(entry.backfill_id).startsWith(retiredBaseId)
+  );
+  const currentBatches = counters.backfills.filter((entry) =>
+    String(entry.backfill_id).startsWith(currentBaseId)
+  );
+  expect(retiredBatches).toHaveLength(1);
+  expect(retiredBatches[0]).toMatchObject({ batch_index: 1, audio_input_epoch: 0 });
+  expect(currentBatches.length).toBeGreaterThan(0);
+  expect(currentBatches.every((entry) => entry.audio_input_epoch === 1)).toBe(true);
+  expect(
+    counters.debugEvents.filter(
+      (entry) =>
+        entry.event === 'mic.reconnect_backfill.sent' &&
+        entry.detail.baseBackfillId === retiredBaseId
+    )
+  ).toHaveLength(0);
   assertNoBrowserErrors();
 });
 
@@ -891,16 +947,16 @@ async function emitLatestMockDataChannelEvent(page: Page, event: Record<string, 
   }, event);
 }
 
-async function emitMockPcm(page: Page, sample: number) {
-  await page.evaluate((sample) => {
+async function emitMockPcm(page: Page, sample: number, sampleCount = 320) {
+  await page.evaluate(({ sample, sampleCount }) => {
     const target = window as Window & {
       __raymeEmitMockPcm?: (sample: number, sampleCount?: number) => void;
     };
     if (!target.__raymeEmitMockPcm) {
       throw new Error('Controllable mock PCM recorder is unavailable');
     }
-    target.__raymeEmitMockPcm(sample, 320);
-  }, sample);
+    target.__raymeEmitMockPcm(sample, sampleCount);
+  }, { sample, sampleCount });
 }
 
 function decodePcmValues(pcmBase64: string) {
@@ -1205,6 +1261,9 @@ async function installReconnectCallRoutes(
     counters.backfillCount += 1;
     counters.requestOrder.push('backfill');
     counters.backfills.push(route.request().postDataJSON() as Record<string, unknown>);
+    if (options.firstBackfillGate && counters.backfillCount === 1) {
+      await options.firstBackfillGate;
+    }
     if (options.backfillDelayMs && counters.backfillCount === 1) {
       await new Promise((resolve) => setTimeout(resolve, options.backfillDelayMs));
     }

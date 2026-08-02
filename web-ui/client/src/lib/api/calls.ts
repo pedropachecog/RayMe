@@ -111,7 +111,8 @@ export function submitCallTurn(
 
 export function backfillCallReconnectAudio(
   callId: string,
-  payload: CallReconnectAudioBackfillRequest
+  payload: CallReconnectAudioBackfillRequest,
+  options: { signal?: AbortSignal } = {}
 ): Promise<{
   call_id: string;
   session_id: string;
@@ -122,6 +123,7 @@ export function backfillCallReconnectAudio(
 }> {
   return apiFetch(`/calls/${encodeURIComponent(callId)}/reconnect-audio`, {
     method: 'POST',
+    signal: options.signal,
     body: JSON.stringify(payload)
   });
 }

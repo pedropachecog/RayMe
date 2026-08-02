@@ -83,6 +83,25 @@
     acknowledgements: Set<'data-channel' | 'http'>;
   }
 
+  interface ReconnectAudioBackfillProgress {
+    batchIndex: number;
+    lastEndMs: number;
+    flushPromise: Promise<void> | null;
+    finalPromise: Promise<void> | null;
+    promotedState: boolean;
+    awaitingFinalResponse: boolean;
+  }
+
+  interface ReconnectAudioBackfillGeneration {
+    readonly generationId: number;
+    readonly backfillId: string;
+    readonly captureEpoch: number;
+    readonly startMs: number;
+    readonly reason: MediaReconnectReason;
+    readonly abortController: AbortController;
+    readonly progress: ReconnectAudioBackfillProgress;
+  }
+
   type MediaReconnectReason = 'failed' | 'disconnected';
 
   let thread = $state<ThreadDetail | null>(null);
@@ -124,16 +143,8 @@
   let localMicRecorderProcessor: ScriptProcessorNode | null = null;
   let localMicRecorderGain: GainNode | null = null;
   let localMicPcmBuffer: LocalMicPcmChunk[] = [];
-  let reconnectAudioBackfillStartMs = -1;
-  let reconnectAudioBackfillLastEndMs = 0;
-  let reconnectAudioBackfillBatchIndex = 0;
-  let reconnectAudioBackfillId = '';
-  let reconnectAudioBackfillEpoch = 0;
-  let reconnectAudioBackfillReason: MediaReconnectReason | null = null;
-  let reconnectAudioBackfillFlushPromise: Promise<void> | null = null;
-  let reconnectAudioBackfillFinalPromise: Promise<void> | null = null;
-  let reconnectAudioBackfillPromotedState = false;
-  let reconnectAudioBackfillAwaitingFinalResponse = false;
+  let reconnectAudioBackfillGeneration = 0;
+  let activeReconnectAudioBackfill: ReconnectAudioBackfillGeneration | null = null;
   let terminalReconnectCleanupPromise: Promise<void> | null = null;
   let localMicMeterFrame = 0;
   let localMicRawRms: number | null = null;
@@ -235,7 +246,7 @@
     clearEventTimers();
     handledUserFinalTurnIds.clear();
     localMicAudioEpoch = 0;
-    reconnectAudioBackfillEpoch = 0;
+    retireReconnectAudioBackfill(activeReconnectAudioBackfill);
 
     try {
       localMediaStream = await requestCallMicrophone();
@@ -435,8 +446,7 @@
       if ((iceConnectionState === 'connected' || iceConnectionState === 'completed') && isBrowserMediaConnected(connection)) {
         clearMediaReconnectTimer();
         mediaReconnectAttempts = 0;
-        clearReconnectAudioBackfill();
-        restoreReconnectBackfillPromotedState();
+        retireReconnectAudioBackfill(activeReconnectAudioBackfill);
         emitLocalMicReconnectDiagnostic(debugCallId, {
           phase: 'recovered',
           reason: 'disconnected',
@@ -465,8 +475,7 @@
       if (connection.connectionState === 'connected' && isBrowserMediaConnected(connection)) {
         clearMediaReconnectTimer();
         mediaReconnectAttempts = 0;
-        clearReconnectAudioBackfill();
-        restoreReconnectBackfillPromotedState();
+        retireReconnectAudioBackfill(activeReconnectAudioBackfill);
         emitLocalMicReconnectDiagnostic(debugCallId, {
           phase: 'recovered',
           reason: 'failed',
@@ -574,8 +583,7 @@
     mediaReconnectTimer = window.setTimeout(() => {
       mediaReconnectTimer = 0;
       if (isBrowserMediaConnected(connection)) {
-        clearReconnectAudioBackfill();
-        restoreReconnectBackfillPromotedState();
+        retireReconnectAudioBackfill(activeReconnectAudioBackfill);
         emitLocalMicReconnectDiagnostic(debugCallId, {
           phase: 'schedule_cancelled_connected',
           reason,
@@ -619,7 +627,7 @@
     mediaReconnecting = true;
     mediaReconnectAttempts += 1;
     const reconnectAttempt = mediaReconnectAttempts;
-    startReconnectAudioBackfill(debugCallId, reason);
+    const backfillGeneration = startReconnectAudioBackfill(debugCallId, reason);
     emitDebugEvent(debugCallId, 'pc.media_reconnect.start', {
       reason,
       attempt: reconnectAttempt
@@ -636,12 +644,19 @@
         {
           preserveExistingUntilConnected: true,
           beforeRemoteDescription: () =>
-            flushReconnectAudioBackfill(debugCallId, reason, reconnectAttempt)
+            flushReconnectAudioBackfill(
+              debugCallId,
+              reason,
+              reconnectAttempt,
+              {},
+              backfillGeneration
+            )
         }
       );
       if (
-        !reconnectAudioBackfillPromotedState ||
-        !reconnectAudioBackfillAwaitingFinalResponse ||
+        !ownsReconnectAudioBackfill(backfillGeneration) ||
+        !backfillGeneration.progress.promotedState ||
+        !backfillGeneration.progress.awaitingFinalResponse ||
         callState !== 'understanding'
       ) {
         applyCallState('listening');
@@ -723,8 +738,7 @@
         return;
       }
       if (isBrowserMediaConnected(connection)) {
-        clearReconnectAudioBackfill();
-        restoreReconnectBackfillPromotedState();
+        retireReconnectAudioBackfill(activeReconnectAudioBackfill);
         emitLocalMicReconnectDiagnostic(debugCallId, {
           phase: 'retry_cancelled_connected',
           reason,
@@ -760,7 +774,7 @@
       try {
         await waitForTerminalReconnectAudioBackfill(
           debugCallId,
-          reconnectAudioBackfillReason ?? 'failed',
+          activeReconnectAudioBackfill?.reason ?? 'failed',
           Math.max(mediaReconnectAttempts, 1),
           'connection_failed'
         );
@@ -795,11 +809,16 @@
     attempt: number,
     phase: string
   ) {
+    const generation = activeReconnectAudioBackfill;
+    if (!generation) {
+      return;
+    }
     const flushResult = flushReconnectAudioBackfill(
       debugCallId,
       reason,
       attempt,
-      { awaitFinal: true }
+      { awaitFinal: true },
+      generation
     ).then(
       () => ({ status: 'done' as const }),
       (error) => ({ status: 'failed' as const, error })
@@ -816,13 +835,16 @@
     if (timeoutId) {
       window.clearTimeout(timeoutId);
     }
+    if (!ownsReconnectAudioBackfill(generation)) {
+      return;
+    }
     if (result.status === 'timeout') {
       emitDebugEvent(debugCallId, 'mic.reconnect_backfill.terminal_timeout', {
         reason,
         attempt,
         phase,
         timeoutMs: TERMINAL_RECONNECT_BACKFILL_WAIT_MS,
-        backfillId: reconnectAudioBackfillId
+        backfillId: generation.backfillId
       });
       return;
     }
@@ -916,53 +938,96 @@
     localMicReconnectDiagTick = 0;
   }
 
-  function startReconnectAudioBackfill(debugCallId: string, reason: MediaReconnectReason) {
-    if (muteRequestPending || serverMuted || reconnectAudioBackfillStartMs >= 0) {
-      return;
+  function startReconnectAudioBackfill(
+    debugCallId: string,
+    reason: MediaReconnectReason
+  ): ReconnectAudioBackfillGeneration | null {
+    if (muteRequestPending || serverMuted) {
+      return null;
+    }
+    if (activeReconnectAudioBackfill) {
+      return activeReconnectAudioBackfill;
     }
     const nowMs = performance.now();
-    reconnectAudioBackfillStartMs = Math.max(0, nowMs - MIC_BACKFILL_RECONNECT_PREROLL_MS);
-    reconnectAudioBackfillLastEndMs = 0;
-    reconnectAudioBackfillBatchIndex = 0;
-    reconnectAudioBackfillId = `${debugCallId || 'call'}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    reconnectAudioBackfillEpoch = localMicAudioEpoch;
-    reconnectAudioBackfillReason = reason;
+    const startMs = Math.max(0, nowMs - MIC_BACKFILL_RECONNECT_PREROLL_MS);
+    const generation = Object.freeze<ReconnectAudioBackfillGeneration>({
+      generationId: ++reconnectAudioBackfillGeneration,
+      backfillId: `${debugCallId || 'call'}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+      captureEpoch: localMicAudioEpoch,
+      startMs,
+      reason,
+      abortController: new AbortController(),
+      progress: {
+        batchIndex: 0,
+        lastEndMs: 0,
+        flushPromise: null,
+        finalPromise: null,
+        promotedState: false,
+        awaitingFinalResponse: false
+      }
+    });
+    activeReconnectAudioBackfill = generation;
     if (callState === 'listening') {
       applyCallState('understanding');
-      reconnectAudioBackfillPromotedState = true;
+      generation.progress.promotedState = true;
     }
     emitDebugEvent(debugCallId, 'mic.reconnect_backfill.start', {
       reason,
-      backfillId: reconnectAudioBackfillId,
-      startOffsetMs: Math.round(nowMs - reconnectAudioBackfillStartMs),
+      generation: generation.generationId,
+      backfillId: generation.backfillId,
+      audioInputEpoch: generation.captureEpoch,
+      startOffsetMs: Math.round(nowMs - generation.startMs),
       bufferedChunks: localMicPcmBuffer.length
     });
+    return generation;
   }
 
-  function clearReconnectAudioBackfill(backfillId?: string) {
-    if (backfillId && reconnectAudioBackfillId && reconnectAudioBackfillId !== backfillId) {
-      return;
+  function ownsReconnectAudioBackfill(
+    generation: ReconnectAudioBackfillGeneration | null
+  ): generation is ReconnectAudioBackfillGeneration {
+    return Boolean(
+      generation &&
+      activeReconnectAudioBackfill === generation &&
+      !generation.abortController.signal.aborted
+    );
+  }
+
+  function canSendReconnectAudioBackfill(
+    generation: ReconnectAudioBackfillGeneration | null
+  ): generation is ReconnectAudioBackfillGeneration {
+    return Boolean(
+      ownsReconnectAudioBackfill(generation) &&
+      !muteRequestPending &&
+      !serverMuted &&
+      generation.captureEpoch === localMicAudioEpoch
+    );
+  }
+
+  function retireReconnectAudioBackfill(
+    generation: ReconnectAudioBackfillGeneration | null
+  ): boolean {
+    if (!ownsReconnectAudioBackfill(generation)) {
+      return false;
     }
-    reconnectAudioBackfillStartMs = -1;
-    reconnectAudioBackfillLastEndMs = 0;
-    reconnectAudioBackfillBatchIndex = 0;
-    reconnectAudioBackfillId = '';
-    reconnectAudioBackfillReason = null;
-    reconnectAudioBackfillFlushPromise = null;
-    reconnectAudioBackfillFinalPromise = null;
-  }
-
-  function restoreReconnectBackfillPromotedState() {
-    if (reconnectAudioBackfillPromotedState && callState === 'understanding') {
+    generation.abortController.abort();
+    activeReconnectAudioBackfill = null;
+    if (generation.progress.promotedState && callState === 'understanding') {
       applyCallState('listening');
     }
-    reconnectAudioBackfillPromotedState = false;
-    reconnectAudioBackfillAwaitingFinalResponse = false;
+    generation.progress.promotedState = false;
+    generation.progress.awaitingFinalResponse = false;
+    return true;
   }
 
-  function finishReconnectBackfillFinalResponse(hasEvent: boolean) {
-    reconnectAudioBackfillAwaitingFinalResponse = false;
-    reconnectAudioBackfillPromotedState = false;
+  function finishReconnectBackfillFinalResponse(
+    generation: ReconnectAudioBackfillGeneration,
+    hasEvent: boolean
+  ) {
+    if (!ownsReconnectAudioBackfill(generation)) {
+      return;
+    }
+    generation.progress.awaitingFinalResponse = false;
+    generation.progress.promotedState = false;
     if (!hasEvent && callState === 'understanding') {
       applyCallState('listening');
     }
@@ -972,71 +1037,100 @@
     debugCallId: string,
     reason: MediaReconnectReason,
     attempt: number,
-    options: { awaitFinal?: boolean } = {}
+    options: { awaitFinal?: boolean } = {},
+    generation = activeReconnectAudioBackfill
   ) {
-    if (muteRequestPending || serverMuted) {
+    if (!canSendReconnectAudioBackfill(generation)) {
       return;
     }
-    if (reconnectAudioBackfillFlushPromise) {
-      await reconnectAudioBackfillFlushPromise;
-      if (options.awaitFinal && reconnectAudioBackfillFinalPromise) {
-        await reconnectAudioBackfillFinalPromise;
+    if (generation.progress.flushPromise) {
+      const flushPromise = generation.progress.flushPromise;
+      await flushPromise;
+      if (!canSendReconnectAudioBackfill(generation)) {
+        return;
+      }
+      if (options.awaitFinal && generation.progress.finalPromise) {
+        const finalPromise = generation.progress.finalPromise;
+        await finalPromise;
+        if (!ownsReconnectAudioBackfill(generation)) {
+          return;
+        }
       }
       return;
     }
-    if (options.awaitFinal && reconnectAudioBackfillFinalPromise) {
-      await reconnectAudioBackfillFinalPromise;
+    if (options.awaitFinal && generation.progress.finalPromise) {
+      const finalPromise = generation.progress.finalPromise;
+      await finalPromise;
+      if (!ownsReconnectAudioBackfill(generation)) {
+        return;
+      }
       return;
     }
-    const flushPromise = flushReconnectAudioBackfillOnce(debugCallId, reason, attempt, options);
+    const flushPromise = flushReconnectAudioBackfillOnce(
+      generation,
+      debugCallId,
+      reason,
+      attempt,
+      options
+    );
     const trackedFlushPromise = flushPromise.finally(() => {
-      if (reconnectAudioBackfillFlushPromise === trackedFlushPromise) {
-        reconnectAudioBackfillFlushPromise = null;
+      if (
+        ownsReconnectAudioBackfill(generation) &&
+        generation.progress.flushPromise === trackedFlushPromise
+      ) {
+        generation.progress.flushPromise = null;
       }
     });
-    reconnectAudioBackfillFlushPromise = trackedFlushPromise;
+    generation.progress.flushPromise = trackedFlushPromise;
     await trackedFlushPromise;
+    if (!ownsReconnectAudioBackfill(generation)) {
+      return;
+    }
   }
 
   async function flushReconnectAudioBackfillOnce(
+    generation: ReconnectAudioBackfillGeneration,
     debugCallId: string,
     reason: MediaReconnectReason,
     attempt: number,
     options: { awaitFinal?: boolean } = {}
   ) {
-    if (!callId || !sessionId || reconnectAudioBackfillStartMs < 0) {
+    if (!callId || !sessionId || !canSendReconnectAudioBackfill(generation)) {
       return;
     }
     const requestCallId = callId;
     const requestSessionId = sessionId;
-    const reconnectStartMs = reconnectAudioBackfillStartMs;
-    const baseBackfillId = reconnectAudioBackfillId;
-    const backfillReason = reconnectAudioBackfillReason ?? reason;
-    const selection = selectReconnectAudioBackfill(performance.now());
+    const selection = selectReconnectAudioBackfill(generation, performance.now());
     if (!selection) {
       emitDebugEvent(debugCallId, 'mic.reconnect_backfill.skip', {
         reason,
         attempt,
-        backfillId: baseBackfillId,
+        generation: generation.generationId,
+        backfillId: generation.backfillId,
         cause: 'empty',
         bufferedChunks: localMicPcmBuffer.length
       });
-      reconnectAudioBackfillBatchIndex += 1;
-      reconnectAudioBackfillAwaitingFinalResponse = true;
-      const finalPromise = trackReconnectAudioBackfillFinalPromise(sendReconnectAudioBackfillBatch({
+      if (!canSendReconnectAudioBackfill(generation)) {
+        return;
+      }
+      generation.progress.batchIndex += 1;
+      generation.progress.awaitingFinalResponse = true;
+      const finalPromise = trackReconnectAudioBackfillFinalPromise(generation, sendReconnectAudioBackfillBatch({
+        generation,
         debugCallId,
         requestCallId,
         requestSessionId,
-        baseBackfillId,
-        reconnectStartMs,
-        reason: backfillReason,
+        reason: generation.reason,
         attempt,
-        batchIndex: reconnectAudioBackfillBatchIndex,
+        batchIndex: generation.progress.batchIndex,
         final: true,
         selection: null
-      }).finally(() => clearReconnectAudioBackfill(baseBackfillId)));
+      }).finally(() => retireReconnectAudioBackfill(generation)));
       if (options.awaitFinal) {
         await finalPromise;
+        if (!ownsReconnectAudioBackfill(generation)) {
+          return;
+        }
       } else {
         void finalPromise;
       }
@@ -1044,118 +1138,148 @@
     }
 
     for (const chunk of splitReconnectAudioBackfillSelection(selection)) {
-      reconnectAudioBackfillBatchIndex += 1;
+      if (!canSendReconnectAudioBackfill(generation)) {
+        return;
+      }
+      generation.progress.batchIndex += 1;
       await sendReconnectAudioBackfillBatch({
+        generation,
         debugCallId,
         requestCallId,
         requestSessionId,
-        baseBackfillId,
-        reconnectStartMs,
-        reason: backfillReason,
+        reason: generation.reason,
         attempt,
-        batchIndex: reconnectAudioBackfillBatchIndex,
+        batchIndex: generation.progress.batchIndex,
         final: false,
         selection: chunk
       });
-      reconnectAudioBackfillLastEndMs = chunk.endMs;
+      if (!canSendReconnectAudioBackfill(generation)) {
+        return;
+      }
+      generation.progress.lastEndMs = chunk.endMs;
     }
 
     const tailSelection = selectReconnectAudioBackfill(
+      generation,
       performance.now(),
-      reconnectAudioBackfillLastEndMs,
+      generation.progress.lastEndMs,
       { limitToMaxWindow: false }
     );
     const tailChunks = tailSelection ? splitReconnectAudioBackfillSelection(tailSelection) : [];
-    reconnectAudioBackfillAwaitingFinalResponse = true;
-    const finalPromise = trackReconnectAudioBackfillFinalPromise((async () => {
+    if (!canSendReconnectAudioBackfill(generation)) {
+      return;
+    }
+    generation.progress.awaitingFinalResponse = true;
+    const finalPromise = trackReconnectAudioBackfillFinalPromise(generation, (async () => {
       if (tailChunks.length === 0) {
-        reconnectAudioBackfillBatchIndex += 1;
+        if (!canSendReconnectAudioBackfill(generation)) {
+          return;
+        }
+        generation.progress.batchIndex += 1;
         await sendReconnectAudioBackfillBatch({
+          generation,
           debugCallId,
           requestCallId,
           requestSessionId,
-          baseBackfillId,
-          reconnectStartMs,
-          reason: backfillReason,
+          reason: generation.reason,
           attempt,
-          batchIndex: reconnectAudioBackfillBatchIndex,
+          batchIndex: generation.progress.batchIndex,
           final: true,
           selection: null
         });
+        if (!ownsReconnectAudioBackfill(generation)) {
+          return;
+        }
         return;
       }
 
       for (let index = 0; index < tailChunks.length; index += 1) {
+        if (!canSendReconnectAudioBackfill(generation)) {
+          return;
+        }
         const chunk = tailChunks[index];
-        reconnectAudioBackfillBatchIndex += 1;
+        generation.progress.batchIndex += 1;
         await sendReconnectAudioBackfillBatch({
+          generation,
           debugCallId,
           requestCallId,
           requestSessionId,
-          baseBackfillId,
-          reconnectStartMs,
-          reason: backfillReason,
+          reason: generation.reason,
           attempt,
-          batchIndex: reconnectAudioBackfillBatchIndex,
+          batchIndex: generation.progress.batchIndex,
           final: index === tailChunks.length - 1,
           selection: chunk
         });
-        reconnectAudioBackfillLastEndMs = chunk.endMs;
+        if (!canSendReconnectAudioBackfill(generation)) {
+          return;
+        }
+        generation.progress.lastEndMs = chunk.endMs;
       }
-    })().finally(() => clearReconnectAudioBackfill(baseBackfillId)));
+    })().finally(() => retireReconnectAudioBackfill(generation)));
     if (options.awaitFinal) {
       await finalPromise;
+      if (!ownsReconnectAudioBackfill(generation)) {
+        return;
+      }
     } else {
       void finalPromise;
     }
   }
 
-  function trackReconnectAudioBackfillFinalPromise(promise: Promise<void>) {
+  function trackReconnectAudioBackfillFinalPromise(
+    generation: ReconnectAudioBackfillGeneration,
+    promise: Promise<void>
+  ) {
     const trackedPromise = promise.finally(() => {
-      if (reconnectAudioBackfillFinalPromise === trackedPromise) {
-        reconnectAudioBackfillFinalPromise = null;
+      if (
+        ownsReconnectAudioBackfill(generation) &&
+        generation.progress.finalPromise === trackedPromise
+      ) {
+        generation.progress.finalPromise = null;
       }
     });
-    reconnectAudioBackfillFinalPromise = trackedPromise;
+    if (ownsReconnectAudioBackfill(generation)) {
+      generation.progress.finalPromise = trackedPromise;
+    }
     return trackedPromise;
   }
 
   async function sendReconnectAudioBackfillBatch({
+    generation,
     debugCallId,
     requestCallId,
     requestSessionId,
-    baseBackfillId,
-    reconnectStartMs,
     reason,
     attempt,
     batchIndex,
     final,
     selection
   }: {
+    generation: ReconnectAudioBackfillGeneration;
     debugCallId: string;
     requestCallId: string;
     requestSessionId: string;
-    baseBackfillId: string;
-    reconnectStartMs: number;
     reason: MediaReconnectReason;
     attempt: number;
     batchIndex: number;
     final: boolean;
     selection: LocalMicPcmSelection | null;
   }) {
-    if (muteRequestPending || serverMuted) {
+    if (!canSendReconnectAudioBackfill(generation)) {
       return;
     }
-    const batchBackfillId = `${baseBackfillId}-batch-${batchIndex}`;
+    const batchBackfillId = `${generation.backfillId}-batch-${batchIndex}`;
     const selectedStartOffsetMs =
-      selection ? Math.round(selection.startMs - reconnectStartMs) : null;
+      selection ? Math.round(selection.startMs - generation.startMs) : null;
     const selectedEndOffsetMs =
-      selection ? Math.round(selection.endMs - reconnectStartMs) : null;
+      selection ? Math.round(selection.endMs - generation.startMs) : null;
     emitDebugEvent(debugCallId, 'mic.reconnect_backfill.sending', {
       reason,
       attempt,
+      generation: generation.generationId,
       backfillId: batchBackfillId,
-      baseBackfillId,
+      baseBackfillId: generation.backfillId,
+      audioInputEpoch: generation.captureEpoch,
       batchIndex,
       final,
       selectedStartOffsetMs,
@@ -1172,18 +1296,22 @@
         sample_rate: MIC_BACKFILL_SAMPLE_RATE,
         channels: 1,
         backfill_id: batchBackfillId,
-        audio_input_epoch: reconnectAudioBackfillEpoch,
+        audio_input_epoch: generation.captureEpoch,
         reason,
         attempt,
         duration_ms: selection?.durationMs ?? 0,
         batch_index: batchIndex,
         final
-      });
+      }, { signal: generation.abortController.signal });
+      if (!ownsReconnectAudioBackfill(generation)) {
+        return;
+      }
       emitDebugEvent(debugCallId, 'mic.reconnect_backfill.sent', {
         reason,
         attempt,
+        generation: generation.generationId,
         backfillId: batchBackfillId,
-        baseBackfillId,
+        baseBackfillId: generation.backfillId,
         batchIndex,
         final,
         selectedStartOffsetMs,
@@ -1198,16 +1326,26 @@
       });
       if (response.event) {
         await handleCallDataEvent(response.event);
+        if (!ownsReconnectAudioBackfill(generation)) {
+          return;
+        }
       }
       if (final) {
-        finishReconnectBackfillFinalResponse(Boolean(response.event));
+        finishReconnectBackfillFinalResponse(generation, Boolean(response.event));
       }
     } catch (error) {
+      if (
+        !ownsReconnectAudioBackfill(generation) ||
+        (error as DOMException)?.name === 'AbortError'
+      ) {
+        return;
+      }
       emitDebugEvent(debugCallId, 'mic.reconnect_backfill.failed', {
         reason,
         attempt,
+        generation: generation.generationId,
         backfillId: batchBackfillId,
-        baseBackfillId,
+        baseBackfillId: generation.backfillId,
         batchIndex,
         final,
         selectedStartOffsetMs,
@@ -1218,9 +1356,12 @@
         message: (error as Error)?.message ?? ''
       });
       await recoverMissedCallEvents(debugCallId, 'reconnect_backfill_failed');
+      if (!ownsReconnectAudioBackfill(generation)) {
+        return;
+      }
       queueMissedCallEventsRecovery(debugCallId, 'reconnect_backfill_failed_retry');
       if (final) {
-        finishReconnectBackfillFinalResponse(false);
+        finishReconnectBackfillFinalResponse(generation, false);
       }
     }
   }
@@ -1255,8 +1396,9 @@
   }
 
   function selectReconnectAudioBackfill(
+    generation: ReconnectAudioBackfillGeneration,
     endMs: number,
-    startMsOverride = reconnectAudioBackfillStartMs,
+    startMsOverride = generation.startMs,
     options: { limitToMaxWindow?: boolean } = {}
   ): LocalMicPcmSelection | null {
     const selection = selectReconnectAudioBackfillFromChunks(localMicPcmBuffer, {
@@ -1264,7 +1406,7 @@
       startMs: startMsOverride,
       maxDurationMs: MIC_BACKFILL_MAX_MS,
       sampleRate: MIC_BACKFILL_SAMPLE_RATE,
-      audioInputEpoch: reconnectAudioBackfillEpoch,
+      audioInputEpoch: generation.captureEpoch,
       limitToMaxWindow: options.limitToMaxWindow ?? true
     });
     if (!selection || startMsOverride <= 0 || selection.startMs <= startMsOverride) {
@@ -1664,7 +1806,7 @@
     localMicRawRms = null;
     localMicRawPeak = null;
     localMicPcmBuffer = [];
-    clearReconnectAudioBackfill();
+    retireReconnectAudioBackfill(activeReconnectAudioBackfill);
   }
 
   function waitForIceGathering(connection: RTCPeerConnection): Promise<void> {
@@ -2167,8 +2309,10 @@
       }
     ];
     activeAiText = '';
-    reconnectAudioBackfillPromotedState = false;
-    reconnectAudioBackfillAwaitingFinalResponse = false;
+    if (activeReconnectAudioBackfill) {
+      activeReconnectAudioBackfill.progress.promotedState = false;
+      activeReconnectAudioBackfill.progress.awaitingFinalResponse = false;
+    }
     applyCallState('thinking');
   }
 
@@ -2387,8 +2531,7 @@
       if (!previousMuted && confirmedMuted) {
         localMicAudioEpoch += 1;
         localMicPcmBuffer = [];
-        clearReconnectAudioBackfill();
-        restoreReconnectBackfillPromotedState();
+        retireReconnectAudioBackfill(activeReconnectAudioBackfill);
       }
     } catch {
       serverMuted = previousMuted;
@@ -2580,15 +2723,16 @@
   }
 
   async function drainReconnectAudioBackfillBeforeHangup() {
-    if (!callId || !sessionId || reconnectAudioBackfillStartMs < 0) {
+    const generation = activeReconnectAudioBackfill;
+    if (!callId || !sessionId || !generation) {
       return;
     }
-    const reason = reconnectAudioBackfillReason ?? 'disconnected';
+    const reason = generation.reason;
     const attempt = Math.max(mediaReconnectAttempts, 1);
     emitDebugEvent(callId, 'mic.reconnect_backfill.hangup_flush', {
       reason,
       attempt,
-      backfillId: reconnectAudioBackfillId,
+      backfillId: generation.backfillId,
       bufferedChunks: localMicPcmBuffer.length
     });
     try {
