@@ -124,6 +124,18 @@
     readonly abortController: AbortController;
   }
 
+  type TerminalCallKind = 'hangup' | 'media_reconnect_failure';
+
+  interface TerminalCallTransactionOwner {
+    readonly generationId: number;
+    readonly kind: TerminalCallKind;
+    readonly debugCallId: string;
+    readonly reason: string;
+    readonly requestCallId: string;
+    readonly requestSessionId: string;
+    readonly promise: Promise<void>;
+  }
+
   interface MuteRequestOwner {
     readonly requestId: number;
     readonly callId: string;
@@ -236,6 +248,7 @@
   let mediaReconnectStableTimer = 0;
   let mediaReconnecting = false;
   let mediaReconnectAttempts = 0;
+  let mediaReconnectOperationGeneration = 0;
   let localAudioContext: AudioContext | null = null;
   let localMicSource: MediaStreamAudioSourceNode | null = null;
   let localMicAnalyser: AnalyserNode | null = null;
@@ -244,7 +257,9 @@
   let localMicPcmBuffer: LocalMicPcmChunk[] = [];
   let reconnectAudioBackfillGeneration = 0;
   let activeReconnectAudioBackfill: ReconnectAudioBackfillGeneration | null = null;
-  let terminalReconnectCleanupPromise: Promise<void> | null = null;
+  let terminalCallTransactionGeneration = 0;
+  let activeTerminalCallTransaction: TerminalCallTransactionOwner | null = null;
+  const terminalEndRequestLedger = new Map<string, Promise<void>>();
   let localMicMeterFrame = 0;
   let localMicRawRms: number | null = null;
   let localMicRawPeak: number | null = null;
@@ -288,11 +303,9 @@
   const MUTE_ACKNOWLEDGEMENT_TIMEOUT_MS = 1500;
   const MUTE_COMPENSATION_TIMEOUT_MS = 1000;
   const TERMINAL_RECONNECT_BACKFILL_WAIT_MS = 2000;
-  const TERMINAL_RECONNECT_ACTIVE_RESPONSE_WAIT_MS = 120000;
-  const TERMINAL_RECONNECT_RESPONSE_VISIBLE_GRACE_MS = 1500;
-  const TERMINAL_RECONNECT_RESPONSE_PLAYBACK_MAX_MS = 60000;
-  const HANGUP_RECOVERY_DEADLINE_MS = 2500;
-  const HANGUP_END_DEADLINE_MS = 5000;
+  const TERMINAL_ACTIVE_RESPONSE_DRAIN_MS = 2500;
+  const TERMINAL_RECOVERY_DEADLINE_MS = 2500;
+  const TERMINAL_END_DEADLINE_MS = 5000;
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'RayMe');
@@ -351,6 +364,9 @@
   }
 
   async function beginCall() {
+    activeTerminalCallTransaction = null;
+    terminalEndRequestLedger.clear();
+    ending = false;
     resetBrowserMediaReconnectIncident();
     callState = 'connecting';
     clearEventTimers();
@@ -1350,6 +1366,9 @@
     if (mediaReconnecting) {
       guardSkips.push('already_reconnecting');
     }
+    if (ending || activeTerminalCallTransaction) {
+      guardSkips.push('terminal_transaction_started');
+    }
     if (!ownsBrowserMediaConnection(owner)) {
       guardSkips.push('stale_peer');
     }
@@ -1409,7 +1428,12 @@
     });
     startLocalMicReconnectDiagnostics(debugCallId, reason);
     const timerId = window.setTimeout(() => {
-      if (!ownsBrowserMediaConnection(owner) || mediaReconnectTimer !== timerId) {
+      if (
+        !ownsBrowserMediaConnection(owner) ||
+        mediaReconnectTimer !== timerId ||
+        ending ||
+        activeTerminalCallTransaction
+      ) {
         return;
       }
       mediaReconnectTimer = 0;
@@ -1432,6 +1456,9 @@
     if (mediaReconnecting) {
       guardSkips.push('already_reconnecting');
     }
+    if (ending || activeTerminalCallTransaction) {
+      guardSkips.push('terminal_transaction_started');
+    }
     if (!ownsBrowserMediaConnection(failedOwner)) {
       guardSkips.push('stale_peer');
     }
@@ -1453,6 +1480,8 @@
     }
 
     mediaReconnecting = true;
+    const reconnectOperationGeneration = ++mediaReconnectOperationGeneration;
+    const reconnectLifecycleSignal = failedOwner.lifecycleSignal;
     mediaReconnectAttempts += 1;
     const reconnectAttempt = mediaReconnectAttempts;
     const backfillGeneration = startReconnectAudioBackfill(debugCallId, reason);
@@ -1481,6 +1510,19 @@
             )
         }
       );
+      if (
+        !canContinueBrowserMediaReconnect(
+          reconnectOperationGeneration,
+          reconnectLifecycleSignal
+        )
+      ) {
+        emitDebugEvent(debugCallId, 'pc.media_reconnect.retired', {
+          attempt: reconnectAttempt,
+          phase: 'success',
+          reason: 'terminal_or_obsolete'
+        });
+        return;
+      }
       handleBrowserMediaRecovered(
         activeBrowserMediaConnection,
         debugCallId,
@@ -1504,6 +1546,21 @@
         attempt: reconnectAttempt
       });
     } catch (error) {
+      if (
+        error instanceof ObsoleteBrowserMediaContinuationError ||
+        !canContinueBrowserMediaReconnect(
+          reconnectOperationGeneration,
+          reconnectLifecycleSignal
+        )
+      ) {
+        emitDebugEvent(debugCallId, 'pc.media_reconnect.retired', {
+          attempt: reconnectAttempt,
+          phase: 'failure',
+          reason: 'terminal_or_obsolete',
+          name: (error as DOMException)?.name ?? 'unknown'
+        });
+        return;
+      }
       if (error instanceof PeerPromotionDecisionDeadlineError) {
         emitDebugEvent(debugCallId, 'pc.media_reconnect.peer_decision_deadline', {
           attempt: reconnectAttempt,
@@ -1543,8 +1600,26 @@
         );
       }
     } finally {
-      mediaReconnecting = false;
+      if (mediaReconnectOperationGeneration === reconnectOperationGeneration) {
+        mediaReconnecting = false;
+      }
     }
+  }
+
+  function canContinueBrowserMediaReconnect(
+    operationGeneration: number,
+    lifecycleSignal: AbortSignal
+  ) {
+    return Boolean(
+      operationGeneration === mediaReconnectOperationGeneration &&
+      lifecycleSignal === browserMediaLifecycle.abortController.signal &&
+      !lifecycleSignal.aborted &&
+      !ending &&
+      !activeTerminalCallTransaction &&
+      localMediaStream &&
+      callState !== 'ended' &&
+      callState !== 'failed'
+    );
   }
 
   function scheduleBrowserMediaReconnectRetry(
@@ -1576,7 +1651,12 @@
       attempts: mediaReconnectAttempts
     });
     const timerId = window.setTimeout(() => {
-      if (!ownsBrowserMediaConnection(owner) || mediaReconnectTimer !== timerId) {
+      if (
+        !ownsBrowserMediaConnection(owner) ||
+        mediaReconnectTimer !== timerId ||
+        ending ||
+        activeTerminalCallTransaction
+      ) {
         return;
       }
       mediaReconnectTimer = 0;
@@ -1593,6 +1673,9 @@
       }
       if (callState === 'ended' || callState === 'failed') {
         guardSkips.push(`terminal_state_${callState}`);
+      }
+      if (ending || activeTerminalCallTransaction) {
+        guardSkips.push('terminal_transaction_started');
       }
       if (guardSkips.length > 0) {
         emitDebugEvent(debugCallId, 'pc.media_reconnect.retry_skip', {
@@ -1612,60 +1695,7 @@
   }
 
   async function failTerminalMediaReconnect(debugCallId: string, reason: string) {
-    await cleanupTerminalFailedCall(debugCallId, reason);
-    await stopBrowserMedia(
-      debugCallId,
-      new Error(`Terminal media reconnect cleanup: ${reason}`)
-    );
-    applyCallState('failed');
-    blockingPanel = {
-      body: 'The call ended because the connection dropped. Your transcript so far was saved.',
-      action: 'Return to Thread',
-      tone: 'danger'
-    };
-  }
-
-  async function cleanupTerminalFailedCall(debugCallId: string, reason: string) {
-    if (!callId || !sessionId) {
-      return;
-    }
-    if (terminalReconnectCleanupPromise) {
-      await terminalReconnectCleanupPromise;
-      return;
-    }
-    const requestCallId = callId;
-    const requestSessionId = sessionId;
-    terminalReconnectCleanupPromise = (async () => {
-      try {
-        await waitForTerminalReconnectAudioBackfill(
-          debugCallId,
-          activeReconnectAudioBackfill?.reason ?? 'failed',
-          Math.max(mediaReconnectAttempts, 1),
-          'connection_failed'
-        );
-      } catch {
-        // Recovery below still has a chance to drain already-queued events.
-      }
-      await waitForActiveTurnResponseBeforeTerminalCleanup(
-        debugCallId,
-        reason,
-        'before_recover'
-      );
-      await recoverMissedCallEvents(debugCallId, reason);
-      await waitForActiveTurnResponseBeforeTerminalCleanup(
-        debugCallId,
-        reason,
-        'after_recover'
-      );
-      try {
-        await endCall(requestCallId, requestSessionId, 'connection_failed');
-      } catch {
-        // The failed panel remains visible; cleanup failures are diagnostic-only here.
-      }
-    })().finally(() => {
-      terminalReconnectCleanupPromise = null;
-    });
-    await terminalReconnectCleanupPromise;
+    await terminalizeCall('media_reconnect_failure', debugCallId, reason);
   }
 
   async function waitForTerminalReconnectAudioBackfill(
@@ -2390,16 +2420,23 @@
     debugCallId: string,
     reason: string,
     generation: ReconnectAudioBackfillGeneration | null = null,
-    options: { signal?: AbortSignal; throwOnFailure?: boolean } = {}
+    options: {
+      signal?: AbortSignal;
+      throwOnFailure?: boolean;
+      requestCallId?: string;
+      requestSessionId?: string;
+    } = {}
   ) {
     if (generation && !ownsReconnectAudioBackfill(generation)) {
       return;
     }
-    if (!callId || !sessionId) {
+    const recoveryCallId = options.requestCallId ?? callId;
+    const recoverySessionId = options.requestSessionId ?? sessionId;
+    if (!recoveryCallId || !recoverySessionId) {
       return;
     }
     try {
-      const response = await recoverCallEvents(callId, sessionId, {
+      const response = await recoverCallEvents(recoveryCallId, recoverySessionId, {
         signal: options.signal
       });
       emitDebugEvent(debugCallId, 'call.events_recover.done', {
@@ -4109,69 +4146,6 @@
     }
   }
 
-  async function waitForActiveTurnResponseBeforeTerminalCleanup(
-    debugCallId: string,
-    reason: string,
-    phase: string
-  ) {
-    const guard = activeTurnResponseGuard;
-    if (!guard) {
-      return;
-    }
-    emitDebugEvent(debugCallId, 'call.turn_response.terminal_wait.start', {
-      reason,
-      phase,
-      turnId: guard.turnId,
-      elapsedMs: Math.round(performance.now() - guard.startedAt)
-    });
-
-    let timeoutId = 0;
-    const timeoutResult = new Promise<{ status: 'timeout' }>((resolve) => {
-      timeoutId = window.setTimeout(
-        () => resolve({ status: 'timeout' }),
-        TERMINAL_RECONNECT_ACTIVE_RESPONSE_WAIT_MS
-      );
-    });
-    const result = await Promise.race([
-      guard.promise.then((value) => ({ status: 'done' as const, value })),
-      timeoutResult
-    ]);
-    if (timeoutId) {
-      window.clearTimeout(timeoutId);
-    }
-
-    if (result.status === 'timeout') {
-      emitDebugEvent(debugCallId, 'call.turn_response.terminal_wait.timeout', {
-        reason,
-        phase,
-        turnId: guard.turnId,
-        timeoutMs: TERMINAL_RECONNECT_ACTIVE_RESPONSE_WAIT_MS
-      });
-      return;
-    }
-
-    const playbackGraceMs = result.value.delivered
-      ? Math.min(
-          Math.max(
-            result.value.audioDurationMs,
-            TERMINAL_RECONNECT_RESPONSE_VISIBLE_GRACE_MS
-          ),
-          TERMINAL_RECONNECT_RESPONSE_PLAYBACK_MAX_MS
-        )
-      : 0;
-    emitDebugEvent(debugCallId, 'call.turn_response.terminal_wait.done', {
-      reason,
-      phase,
-      turnId: guard.turnId,
-      delivered: result.value.delivered,
-      audioDurationMs: result.value.audioDurationMs,
-      playbackGraceMs
-    });
-    if (playbackGraceMs > 0) {
-      await delay(playbackGraceMs);
-    }
-  }
-
   function delay(ms: number) {
     return new Promise<void>((resolve) => {
       window.setTimeout(resolve, ms);
@@ -4200,7 +4174,7 @@
     });
   }
 
-  async function runHangupRequestWithDeadline<T>(
+  async function runTerminalRequestWithDeadline<T>(
     requestName: 'recovery' | 'end',
     timeoutMs: number,
     request: (signal: AbortSignal) => Promise<T>
@@ -4208,7 +4182,7 @@
     const abortController = new AbortController();
     const timeoutId = window.setTimeout(() => {
       abortController.abort(
-        new DOMException(`Hangup ${requestName} request timed out`, 'TimeoutError')
+        new DOMException(`Terminal ${requestName} request timed out`, 'TimeoutError')
       );
     }, timeoutMs);
     try {
@@ -4234,83 +4208,243 @@
   }
 
   async function hangup() {
+    await terminalizeCall('hangup', callId, 'hangup');
+  }
+
+  function terminalizeCall(
+    kind: TerminalCallKind,
+    debugCallId: string,
+    reason: string
+  ): Promise<void> {
+    const existingOwner = activeTerminalCallTransaction;
+    if (existingOwner) {
+      emitDebugEvent(debugCallId || existingOwner.debugCallId, 'call.terminal.join', {
+        requestedKind: kind,
+        requestedReason: reason,
+        ownerGeneration: existingOwner.generationId,
+        ownerKind: existingOwner.kind,
+        ownerReason: existingOwner.reason
+      });
+      return existingOwner.promise;
+    }
+
+    let resolveTransaction = () => undefined;
+    const promise = new Promise<void>((resolve) => {
+      resolveTransaction = resolve;
+    });
+    const owner: TerminalCallTransactionOwner = {
+      generationId: ++terminalCallTransactionGeneration,
+      kind,
+      debugCallId,
+      reason,
+      requestCallId: callId,
+      requestSessionId: sessionId,
+      promise
+    };
+    activeTerminalCallTransaction = owner;
     ending = true;
     clearEventTimers();
-    cancelActiveTurnStream();
-    let hangupFailure: unknown = null;
-    const rememberHangupFailure = (error: unknown) => {
-      hangupFailure ??= error;
-    };
-    const reconnectDrain = drainReconnectAudioBackfillBeforeHangup();
-    const browserMediaTeardown = stopBrowserMedia(
-      callId,
-      new Error('Browser media stopped for hangup'),
-      { preserveReconnectBackfill: true }
-    ).catch((error) => {
-      rememberHangupFailure(error);
+    if (kind === 'hangup') {
+      cancelActiveTurnStream();
+    }
+    emitDebugEvent(debugCallId, 'call.terminal.start', {
+      ownerGeneration: owner.generationId,
+      kind,
+      reason
     });
+    const reconnectDrain = drainReconnectAudioBackfillBeforeTerminal(kind);
+    const browserMediaTeardown = stopBrowserMedia(
+      debugCallId,
+      new Error(`Browser media stopped for terminal ${kind}: ${reason}`),
+      { preserveReconnectBackfill: true }
+    );
+
+    void executeTerminalCallTransaction(
+      owner,
+      reconnectDrain,
+      browserMediaTeardown
+    ).catch((error) => {
+      emitDebugEvent(owner.debugCallId, 'call.terminal.unexpected_failure', {
+        ownerGeneration: owner.generationId,
+        kind: owner.kind,
+        reason: owner.reason,
+        name: (error as Error)?.name ?? 'unknown',
+        message: (error as Error)?.message ?? ''
+      });
+      if (activeTerminalCallTransaction === owner) {
+        showBlockingPanel(error);
+        ending = false;
+      }
+    }).finally(resolveTransaction);
+    return promise;
+  }
+
+  async function executeTerminalCallTransaction(
+    owner: TerminalCallTransactionOwner,
+    reconnectDrain: Promise<void>,
+    browserMediaTeardown: Promise<void>
+  ) {
+    let terminalFailure: unknown = null;
+    const rememberTerminalFailure = (error: unknown) => {
+      terminalFailure ??= error;
+    };
 
     try {
       try {
         await reconnectDrain;
       } catch (error) {
-        rememberHangupFailure(error);
+        rememberTerminalFailure(error);
       } finally {
         localMicPcmBuffer = [];
         retireReconnectAudioBackfill(activeReconnectAudioBackfill);
       }
-      if (callId && sessionId) {
+      if (owner.kind === 'media_reconnect_failure') {
+        await waitForTerminalActiveResponse(owner, 'before_recover');
+      }
+      if (owner.requestCallId && owner.requestSessionId) {
         try {
-          await runHangupRequestWithDeadline(
+          await runTerminalRequestWithDeadline(
             'recovery',
-            HANGUP_RECOVERY_DEADLINE_MS,
-            (signal) => recoverMissedCallEvents(callId, 'hangup', null, {
+            TERMINAL_RECOVERY_DEADLINE_MS,
+            (signal) => recoverMissedCallEvents(owner.debugCallId, owner.reason, null, {
               signal,
-              throwOnFailure: true
+              throwOnFailure: true,
+              requestCallId: owner.requestCallId,
+              requestSessionId: owner.requestSessionId
             })
           );
         } catch (error) {
-          rememberHangupFailure(error);
+          rememberTerminalFailure(error);
+        }
+        if (owner.kind === 'media_reconnect_failure') {
+          await waitForTerminalActiveResponse(owner, 'after_recover');
         }
         try {
-          await runHangupRequestWithDeadline(
-            'end',
-            HANGUP_END_DEADLINE_MS,
-            (signal) => endCall(callId, sessionId, 'hangup', { signal })
-          );
+          await endTerminalCallOnce(owner);
         } catch (error) {
-          rememberHangupFailure(error);
+          rememberTerminalFailure(error);
         }
       }
     } finally {
-      await browserMediaTeardown;
+      try {
+        await browserMediaTeardown;
+      } catch (error) {
+        rememberTerminalFailure(error);
+      }
     }
 
-    if (hangupFailure) {
-      showBlockingPanel(hangupFailure);
+    if (activeTerminalCallTransaction !== owner) {
+      return;
+    }
+    if (owner.kind === 'media_reconnect_failure') {
+      applyCallState('failed');
+      blockingPanel = {
+        body: 'The call ended because the connection dropped. Your transcript so far was saved.',
+        action: 'Return to Thread',
+        tone: 'danger'
+      };
+    } else if (terminalFailure) {
+      showBlockingPanel(terminalFailure);
     } else {
       callState = 'ended';
     }
     ending = false;
+    emitDebugEvent(owner.debugCallId, 'call.terminal.ui_committed', {
+      ownerGeneration: owner.generationId,
+      kind: owner.kind,
+      reason: owner.reason,
+      failed: Boolean(terminalFailure),
+      state: callState,
+      hasReconnectTimer: Boolean(mediaReconnectTimer),
+      hasReconnectStableTimer: Boolean(mediaReconnectStableTimer),
+      mediaReconnecting,
+      stagedMediaOwners: stagedBrowserMediaConnections.size,
+      hasActiveMediaOwner: Boolean(activeBrowserMediaConnection),
+      hasReconnectBackfillController: Boolean(activeReconnectAudioBackfill),
+      hasMuteController: Boolean(activeMuteRequest)
+    });
   }
 
-  async function drainReconnectAudioBackfillBeforeHangup() {
+  async function waitForTerminalActiveResponse(
+    owner: TerminalCallTransactionOwner,
+    phase: 'before_recover' | 'after_recover'
+  ) {
+    const guard = activeTurnResponseGuard;
+    if (!guard) {
+      return;
+    }
+    emitDebugEvent(owner.debugCallId, 'call.turn_response.terminal_drain.start', {
+      ownerGeneration: owner.generationId,
+      phase,
+      turnId: guard.turnId,
+      timeoutMs: TERMINAL_ACTIVE_RESPONSE_DRAIN_MS
+    });
+    let timeoutId = 0;
+    const result = await Promise.race([
+      guard.promise.then(() => 'done' as const),
+      new Promise<'timeout'>((resolve) => {
+        timeoutId = window.setTimeout(() => resolve('timeout'), TERMINAL_ACTIVE_RESPONSE_DRAIN_MS);
+      })
+    ]);
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+    }
+    emitDebugEvent(owner.debugCallId, 'call.turn_response.terminal_drain.done', {
+      ownerGeneration: owner.generationId,
+      phase,
+      turnId: guard.turnId,
+      result
+    });
+    if (result === 'timeout' && activeTurnResponseGuard === guard) {
+      cancelActiveTurnStream();
+    }
+  }
+
+  function endTerminalCallOnce(owner: TerminalCallTransactionOwner) {
+    const ledgerKey = `${owner.requestCallId}\u0000${owner.requestSessionId}`;
+    const existingRequest = terminalEndRequestLedger.get(ledgerKey);
+    if (existingRequest) {
+      return existingRequest;
+    }
+    const endReason = owner.kind === 'hangup' ? 'hangup' : 'connection_failed';
+    const request = runTerminalRequestWithDeadline(
+      'end',
+      TERMINAL_END_DEADLINE_MS,
+      (signal) => endCall(
+        owner.requestCallId,
+        owner.requestSessionId,
+        endReason,
+        { signal }
+      )
+    );
+    terminalEndRequestLedger.set(ledgerKey, request);
+    return request;
+  }
+
+  async function drainReconnectAudioBackfillBeforeTerminal(kind: TerminalCallKind) {
     const generation = activeReconnectAudioBackfill;
     if (!callId || !sessionId || !generation) {
       return;
     }
     const reason = generation.reason;
     const attempt = Math.max(mediaReconnectAttempts, 1);
-    emitDebugEvent(callId, 'mic.reconnect_backfill.hangup_flush', {
-      reason,
-      attempt,
-      backfillId: generation.backfillId,
-      bufferedChunks: localMicPcmBuffer.length
-    });
+    const phase = kind === 'hangup' ? 'hangup' : 'connection_failed';
+    emitDebugEvent(
+      callId,
+      kind === 'hangup'
+        ? 'mic.reconnect_backfill.hangup_flush'
+        : 'mic.reconnect_backfill.terminal_flush',
+      {
+        reason,
+        attempt,
+        backfillId: generation.backfillId,
+        bufferedChunks: localMicPcmBuffer.length
+      }
+    );
     try {
-      await waitForTerminalReconnectAudioBackfill(callId, reason, attempt, 'hangup');
+      await waitForTerminalReconnectAudioBackfill(callId, reason, attempt, phase);
     } catch {
-      // Hangup must still recover/end when reconnect backfill itself fails.
+      // Terminalization must still recover/end when reconnect backfill itself fails.
     }
   }
 
@@ -4475,6 +4609,7 @@
     options: { preserveReconnectBackfill?: boolean } = {}
   ) {
     invalidateBrowserMediaLifecycle(candidateReason);
+    mediaReconnectOperationGeneration += 1;
     resetBrowserMediaReconnectIncident();
     clearInterruptDrainState();
     stopLocalMicReconnectDiagnostics();

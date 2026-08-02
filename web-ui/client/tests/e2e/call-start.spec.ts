@@ -23,6 +23,7 @@ type ReconnectRouteCounters = {
   backendOldPeerRetirementCount: number;
   abortedPeerCommitResponses: number;
   peerPromotionInProgressCount: number;
+  peerCommitReleaseCount: number;
   backendVoiceId: string;
   backendEngineId: string;
   backendPromptLeaseOwner: string | null;
@@ -61,6 +62,7 @@ type ReconnectRouteOptions = {
   reconcileCommittedAsConflict?: boolean;
   selectionChangingPeerCommitDelayMs?: number;
   selectionChangingPeerCommitGate?: Promise<void>;
+  selectionChangingPeerCommitReleaseStatus?: 'committed' | 'failed' | 'in_progress';
   failRecover?: boolean;
   hangRecover?: boolean;
   failEnd?: boolean;
@@ -622,6 +624,55 @@ test('hard peer-switch deadline tears down every local browser media owner', asy
   assertNoBrowserErrors();
 });
 
+test('standalone terminal reconnect bounds held recovery and end after immediate teardown', async ({
+  page
+}) => {
+  test.setTimeout(25_000);
+  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+    allowConsoleErrors: [/Failed to load resource: the server responded with a status of 502/]
+  });
+  await installMockCallMedia(page);
+  const counters = await installReconnectCallRoutes(page, {
+    failOfferFrom: 2,
+    hangRecover: true,
+    hangEnd: true
+  });
+
+  await startReconnectCall(page, counters);
+  const initial = await getMockCallMediaSnapshot(page);
+  const initialStreamId = initial.peers[0].remoteStreamId;
+  expect(initialStreamId).not.toBeNull();
+
+  const failureStartedAt = Date.now();
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await expect.poll(() => counters.recoverCount, { timeout: 8000 }).toBe(1);
+  expect(counters.endCount).toBe(0);
+  await expect.poll(async () => browserMediaIsStopped(
+    await getMockCallMediaSnapshot(page)
+  )).toBe(true);
+  expectBrowserMediaStopped(await getMockCallMediaSnapshot(page), initialStreamId);
+  await expect(page.getByRole('alert')).toHaveCount(0);
+
+  await expect.poll(() => counters.endCount, { timeout: 5000 }).toBe(1);
+  await expect(
+    page.getByRole('alert').getByText(TERMINAL_CONNECTION_DROPPED_COPY)
+  ).toBeVisible({ timeout: 7000 });
+  expect(Date.now() - failureStartedAt).toBeLessThan(11_000);
+
+  const terminal = await getMockCallMediaSnapshot(page);
+  expectBrowserMediaStopped(terminal, initialStreamId);
+  expect(counters.offerCount).toBe(3);
+  expect(counters.recoverCount).toBe(1);
+  expect(counters.endCount).toBe(1);
+  expect(debugEventCount(counters, 'call.terminal.start')).toBe(1);
+  expect(debugEventCount(counters, 'call.terminal.ui_committed')).toBe(1);
+  expect(debugEventCount(counters, 'pc.media_reconnect.failed')).toBe(2);
+  await page.waitForTimeout(1200);
+  expect(counters.offerCount).toBe(3);
+  expectBrowserMediaStopped(await getMockCallMediaSnapshot(page), initialStreamId);
+  assertNoBrowserErrors();
+});
+
 for (const failureCase of [
   {
     label: 'recovery 502 and end success',
@@ -717,6 +768,84 @@ for (const failureCase of [
     await page.waitForTimeout(50);
     expectBrowserMediaStopped(await getMockCallMediaSnapshot(page), initialStreamId);
     await expect(failurePanel.getByText(TERMINAL_CONNECTION_DROPPED_COPY)).toBeVisible();
+    assertNoBrowserErrors();
+  });
+}
+
+for (const releaseStatus of ['committed', 'failed', 'in_progress'] as const) {
+  test(`late ${releaseStatus} peer promotion cannot reclaim media after End Call`, async ({
+    page
+  }) => {
+    test.setTimeout(25_000);
+    const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+      allowConsoleErrors: [/Failed to load resource: net::ERR_FAILED/]
+    });
+    await installMockCallMedia(page);
+    let releasePeerCommit = () => undefined;
+    const heldPeerCommit = new Promise<void>((resolve) => {
+      releasePeerCommit = resolve;
+    });
+    const counters = await installReconnectCallRoutes(page, {
+      selectionChangingPeerCommitGate: heldPeerCommit,
+      selectionChangingPeerCommitReleaseStatus: releaseStatus
+    });
+
+    await startReconnectCall(page, counters);
+    const initial = await getMockCallMediaSnapshot(page);
+    const initialStreamId = initial.peers[0].remoteStreamId;
+    expect(initialStreamId).not.toBeNull();
+
+    await setCurrentMockPeerState(page, 'failed', 'disconnected');
+    await expect.poll(() => counters.peerPromotionCount).toBeGreaterThan(0);
+    await expect.poll(async () => (await getMockCallMediaSnapshot(page)).peers.length).toBe(2);
+    await page.getByRole('button', { name: 'End Call' }).click();
+
+    await expect.poll(async () => browserMediaIsStopped(
+      await getMockCallMediaSnapshot(page)
+    )).toBe(true);
+    expect(counters.peerCommitReleaseCount).toBe(0);
+    expect(counters.endCount).toBeLessThanOrEqual(1);
+
+    releasePeerCommit();
+    await expect.poll(() => counters.peerCommitReleaseCount).toBe(1);
+    await expect(page.getByRole('status').getByText('Call ended')).toBeVisible({
+      timeout: 12_000
+    });
+    await expect.poll(() => counters.endCount).toBe(1);
+    await page.waitForTimeout(1200);
+
+    const terminal = await getMockCallMediaSnapshot(page);
+    expectBrowserMediaStopped(terminal, initialStreamId);
+    expect(terminal.peers).toHaveLength(2);
+    expect(terminal.channels).toHaveLength(2);
+    expect(counters.recoverCount).toBe(1);
+    expect(counters.endCount).toBe(1);
+    expect(counters.offerCount).toBe(2);
+    expect(debugEventCount(counters, 'call.terminal.start')).toBe(1);
+    expect(debugEventCount(counters, 'call.terminal.ui_committed')).toBe(1);
+    expect(debugEventCount(counters, 'remote_audio.candidate.promoted')).toBe(0);
+    expect(debugEventCount(counters, 'remote_audio.candidate.discarded')).toBe(1);
+    expect(debugEventCount(counters, 'pc.media_reconnect.retired')).toBe(1);
+    expect(debugEventCount(counters, 'pc.media_reconnect.retry_scheduled')).toBe(0);
+    expect(debugEventCount(counters, 'pc.media_reconnect.failed')).toBe(0);
+    await expect(page.getByRole('alert')).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'End Call' })).toHaveCount(0);
+
+    const terminalUiEvent = counters.debugEvents.find(
+      (entry) => entry.event === 'call.terminal.ui_committed'
+    );
+    expect(terminalUiEvent?.detail).toMatchObject({
+      ownerGeneration: 1,
+      kind: 'hangup',
+      state: 'ended',
+      hasReconnectTimer: false,
+      hasReconnectStableTimer: false,
+      mediaReconnecting: false,
+      stagedMediaOwners: 0,
+      hasActiveMediaOwner: false,
+      hasReconnectBackfillController: false,
+      hasMuteController: false
+    });
     assertNoBrowserErrors();
   });
 }
@@ -1195,10 +1324,9 @@ test('sends reconnect backfill tail without omitting the 35256-69467ms missing-c
       entry.detail.final === true
   );
   expect(finalSendingIndex).toBeGreaterThanOrEqual(0);
-  const remoteDescriptionIndex = counters.debugEvents.findIndex(
+  await expect.poll(() => counters.debugEvents.some(
     (entry, index) => index > finalSendingIndex && entry.event === 'pc.setRemoteDescription.done'
-  );
-  expect(remoteDescriptionIndex).toBeGreaterThanOrEqual(0);
+  )).toBe(true);
   assertNoBrowserErrors();
 });
 
@@ -1489,7 +1617,7 @@ test('recovers queued turn and ends when terminal media reconnect fails', async 
   assertNoBrowserErrors();
 });
 
-test('keeps recovered turn response live when terminal reconnect offer fails before audio starts', async ({
+test('keeps recovered turn response live while terminal reconnect tears browser media down', async ({
   page
 }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page, {
@@ -1523,6 +1651,8 @@ test('keeps recovered turn response live when terminal reconnect offer fails bef
   });
 
   await startReconnectCall(page, counters);
+  const initialStreamId = (await getMockCallMediaSnapshot(page)).peers[0].remoteStreamId;
+  expect(initialStreamId).not.toBeNull();
 
   await setCurrentMockPeerState(page, 'failed', 'disconnected');
   await expect.poll(() => counters.offerCount).toBe(2);
@@ -1540,14 +1670,12 @@ test('keeps recovered turn response live when terminal reconnect offer fails bef
   await setCurrentMockPeerState(page, 'failed', 'disconnected');
   await expect.poll(() => counters.offerCount).toBe(3);
   await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.failed')).toBe(1);
-  await page.waitForTimeout(100);
+  await expect.poll(async () => browserMediaIsStopped(
+    await getMockCallMediaSnapshot(page)
+  )).toBe(true);
 
   const heldResponseMedia = await getMockCallMediaSnapshot(page);
-  expect(
-    heldResponseMedia.peers.some(
-      (peer) => peer.remoteDescriptionType === 'answer' && !peer.closed
-    )
-  ).toBe(true);
+  expectTerminalBrowserMediaAfterPriorPromotion(heldResponseMedia, initialStreamId);
   expect(counters.endCount).toBe(0);
   await expect(page.getByRole('alert')).toHaveCount(0);
 
@@ -1557,9 +1685,13 @@ test('keeps recovered turn response live when terminal reconnect offer fails bef
   const responseIndex = counters.requestOrder.indexOf('turn_response');
   expect(responseIndex).toBeGreaterThan(counters.requestOrder.indexOf('turn'));
   const endIndex = counters.requestOrder.indexOf('end');
-  if (endIndex >= 0) {
-    expect(endIndex).toBeGreaterThan(responseIndex);
-  }
+  await expect.poll(() => counters.endCount).toBe(1);
+  expect(endIndex < 0 ? counters.requestOrder.indexOf('end') : endIndex)
+    .toBeGreaterThan(responseIndex);
+  expectTerminalBrowserMediaAfterPriorPromotion(
+    await getMockCallMediaSnapshot(page),
+    initialStreamId
+  );
   assertNoBrowserErrors();
 });
 
@@ -1921,6 +2053,24 @@ function browserMediaIsStopped(snapshot: MockCallMediaSnapshot) {
   );
 }
 
+function expectTerminalBrowserMediaAfterPriorPromotion(
+  snapshot: MockCallMediaSnapshot,
+  initialStreamId: string | null
+) {
+  expect(browserMediaIsStopped(snapshot)).toBe(true);
+  expect(snapshot.peers.every((peer) => peer.closeCount === 1)).toBe(true);
+  expect(snapshot.channels.every((channel) => channel.closeCount === 1)).toBe(true);
+  expect(
+    snapshot.applicationAudioContexts.every(
+      (context) =>
+        context.state === 'closed' &&
+        context.closeCount === 1 &&
+        context.sourceDisconnectCount >= 1
+    )
+  ).toBe(true);
+  expect(snapshot.audioPlayback.pausedStreamIds).toContain(initialStreamId);
+}
+
 function debugEventCount(counters: ReconnectRouteCounters, event: string) {
   return counters.debugEvents.filter((entry) => entry.event === event).length;
 }
@@ -2091,6 +2241,7 @@ async function installReconnectCallRoutes(
     backendOldPeerRetirementCount: 0,
     abortedPeerCommitResponses: 0,
     peerPromotionInProgressCount: 0,
+    peerCommitReleaseCount: 0,
     backendVoiceId: 'voice-before',
     backendEngineId: 'qwen3_1_7b',
     backendPromptLeaseOwner: 'rtc-call-reconnect-01',
@@ -2265,9 +2416,25 @@ async function installReconnectCallRoutes(
           setTimeout(resolve, options.selectionChangingPeerCommitDelayMs)
         );
       }
-      commitBackendPeer(payload.generation, pendingPeerId);
-      counters.abortedPeerCommitResponses += 1;
-      await route.abort('failed').catch(() => undefined);
+      counters.peerCommitReleaseCount += 1;
+      const releaseStatus = options.selectionChangingPeerCommitReleaseStatus;
+      if (!releaseStatus) {
+        commitBackendPeer(payload.generation, pendingPeerId);
+        counters.abortedPeerCommitResponses += 1;
+        await route.abort('failed').catch(() => undefined);
+        return;
+      }
+      if (releaseStatus === 'committed') {
+        commitBackendPeer(payload.generation, pendingPeerId);
+      } else if (releaseStatus === 'failed') {
+        switchingPeerGeneration = null;
+      }
+      await fulfillJson(route, {
+        call_id: 'call-reconnect-01',
+        session_id: payload.session_id,
+        generation: payload.generation,
+        status: releaseStatus
+      }).catch(() => undefined);
       return;
     }
     if (payload.action === 'commit') {
