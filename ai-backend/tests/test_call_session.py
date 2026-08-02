@@ -42,12 +42,25 @@ def _scripted_wav_bytes(*, sample_count: int = 2880) -> bytes:
 SCRIPTED_WAV_BYTES = _scripted_wav_bytes()
 QWEN_STREAM_CHUNK_WAV_BYTES = _scripted_wav_bytes(sample_count=7680)
 LONG_QWEN_STREAM_CHUNK_WAV_BYTES = _scripted_wav_bytes(sample_count=96_000)
+THREAD_EVENT_RENDEZVOUS_TIMEOUT_SECONDS = 5.0
 
 
 def _run(value: Any) -> Any:
     if asyncio.iscoroutine(value):
         return asyncio.run(value)
     return value
+
+
+async def _wait_for_thread_event(
+    event: threading.Event,
+    *,
+    label: str,
+) -> None:
+    ready = await asyncio.to_thread(
+        event.wait,
+        THREAD_EVENT_RENDEZVOUS_TIMEOUT_SECONDS,
+    )
+    assert ready, f"timed out waiting for {label}"
 
 
 class ScriptedPeerConnection:
@@ -721,7 +734,7 @@ def test_mute_is_orthogonal_to_slow_stt_turn_ownership() -> None:
         ) is None
         finalized = asyncio.create_task(session.finalize_user_turn())
         try:
-            assert await asyncio.to_thread(entered_stt.wait, 1.0)
+            await _wait_for_thread_event(entered_stt, label="mute STT admission")
             admission = next(iter(session._stt_admissions.values()))
             assert session.state == "understanding"
 
@@ -1371,16 +1384,21 @@ def test_slow_reconnect_stt_defers_transport_terminal_and_returns_usable_user_fi
                 final=True,
             )
         )
-        assert await asyncio.to_thread(entered_stt.wait, 1.0)
-        await session._begin_transport_reconnect(peer, "failed")
-        epoch = session._peer_lifecycle.epoch
-        assert await session.resolve_deferred_connection_state(
-            epoch=epoch,
-            peer_connection=peer,
-        ) is False
-        assert session.ended_at is None
+        try:
+            await _wait_for_thread_event(
+                entered_stt,
+                label="slow reconnect STT admission",
+            )
+            await session._begin_transport_reconnect(peer, "failed")
+            epoch = session._peer_lifecycle.epoch
+            assert await session.resolve_deferred_connection_state(
+                epoch=epoch,
+                peer_connection=peer,
+            ) is False
+            assert session.ended_at is None
+        finally:
+            release_stt.set()
 
-        release_stt.set()
         result = await asyncio.wait_for(backfill_task, timeout=2.0)
         assert result["event"]["type"] == "user_final"
         assert result["event"]["text"] == "recovered after slow transcription"
@@ -1435,7 +1453,10 @@ def test_explicit_terminal_suppresses_admitted_slow_backfill_user_final(
                 final=True,
             )
         )
-        assert await asyncio.to_thread(entered_stt.wait, 1.0)
+        await _wait_for_thread_event(
+            entered_stt,
+            label="explicit terminal backfill STT admission",
+        )
         if terminal_state == "ended":
             terminal = await session.end(reason="explicit_hangup")
         else:
@@ -1507,7 +1528,10 @@ def test_explicit_terminal_suppresses_every_slow_ordinary_stt_outcome(
                 ScriptedInboundAudioFrame(final_pcm)
             )
         )
-        assert await asyncio.to_thread(entered_stt.wait, 1.0)
+        await _wait_for_thread_event(
+            entered_stt,
+            label="explicit terminal ordinary STT admission",
+        )
 
         if terminal_state == "ended":
             terminal = await session.end(reason="explicit_hangup")
@@ -1884,7 +1908,10 @@ def test_concurrent_turn_finalizers_share_one_stt_admission_and_outcome(
         ) is None
 
         owner = asyncio.create_task(session.finalize_user_turn())
-        assert await asyncio.to_thread(entered_stt.wait, 1.0)
+        await _wait_for_thread_event(
+            entered_stt,
+            label="shared STT finalization admission",
+        )
         joiner = asyncio.create_task(session.finalize_user_turn())
         await asyncio.sleep(0)
 
@@ -1978,7 +2005,10 @@ def test_caller_cancellation_cannot_cancel_owned_stt_finalization(
         ) is None
 
         first = asyncio.create_task(session.finalize_user_turn())
-        assert await asyncio.to_thread(entered_stt.wait, 1.0)
+        await _wait_for_thread_event(
+            entered_stt,
+            label="owned STT finalization admission",
+        )
         joiner = asyncio.create_task(session.finalize_user_turn())
         await asyncio.sleep(0)
         finalization = session._active_stt_finalization
@@ -2962,7 +2992,10 @@ def test_voxcpm2_streaming_speak_buffers_bounded_startup_chunks_without_final_me
             )
         )
         try:
-            assert await asyncio.to_thread(adapter.first_chunk_yielded.wait, 1.0)
+            await _wait_for_thread_event(
+                adapter.first_chunk_yielded,
+                label="first streaming TTS chunk",
+            )
             assert track.chunks == []
             adapter.release_second_chunk.set()
 
@@ -3593,7 +3626,10 @@ def test_engine_switch_silences_old_and_new_tracks_before_cancel_ack() -> None:
                 reference_transcript="The exact reference transcript.",
             )
         )
-        assert await asyncio.to_thread(adapter.stream_blocked.wait, 1.0)
+        await _wait_for_thread_event(
+            adapter.stream_blocked,
+            label="blocked replacement TTS stream",
+        )
         old_chunk_count = len(old_track.chunks)
         assert old_chunk_count == 2
 
@@ -3616,7 +3652,10 @@ def test_engine_switch_silences_old_and_new_tracks_before_cancel_ack() -> None:
                 generation=generation,
             )
         )
-        assert await asyncio.to_thread(adapter.cancel_entered.wait, 1.0)
+        await _wait_for_thread_event(
+            adapter.cancel_entered,
+            label="replacement TTS cancellation",
+        )
 
         assert old_track.stop_calls == 1
         assert new_track.stop_calls == 1
@@ -4058,7 +4097,10 @@ def test_switch_preserves_slow_stt_and_thinking_frame_drop_states() -> None:
             ScriptedInboundAudioFrame(pcm)
         ) is None
         transcription = asyncio.create_task(session.finalize_user_turn())
-        assert await asyncio.to_thread(entered_stt.wait, 1.0)
+        await _wait_for_thread_event(
+            entered_stt,
+            label="peer replacement STT admission",
+        )
         assert session.state == "understanding"
 
         generation = await session.mark_peer_connection_pending(
@@ -4154,7 +4196,10 @@ def test_admitted_stt_finishes_while_configuration_switch_is_blocked(
             ScriptedInboundAudioFrame(pcm)
         ) is None
         finalized = asyncio.create_task(session.finalize_user_turn())
-        assert await asyncio.to_thread(entered_stt.wait, 1.0)
+        await _wait_for_thread_event(
+            entered_stt,
+            label="cancel-shielded STT admission",
+        )
         admission = next(iter(session._stt_admissions.values()))
         finalization = session._active_stt_finalization
         assert finalization is not None and finalization.task is not None
@@ -5123,14 +5168,6 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
             self.release_for_cancel.set()
             return self.first_stream_drained.wait(timeout=1.0)
 
-    async def wait_thread_event(
-        event: threading.Event,
-        *,
-        label: str,
-    ) -> None:
-        ready = await asyncio.to_thread(event.wait, 1.0)
-        assert ready, f"timed out waiting for {label}"
-
     async def scenario() -> tuple[
         IncidentQwenAdapter,
         CallbackPeer,
@@ -5178,7 +5215,7 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
         )
         await asyncio.wait_for(first_audio.wait(), timeout=1.0)
         assert adapter.first_stream_completed.is_set() is False
-        await wait_thread_event(adapter.reconnect_pause, label="reconnect pause")
+        await _wait_for_thread_event(adapter.reconnect_pause, label="reconnect pause")
         assert active_track.chunks
 
         generation = await session.mark_peer_connection_pending(
@@ -5212,7 +5249,10 @@ def test_qwen_long_turn_reconnect_barge_in_and_recovery_preserve_live_call(
         assert released_prompt_leases == []
 
         adapter.resume_after_reconnect.set()
-        await wait_thread_event(adapter.ready_for_barge_in, label="post-reconnect audio")
+        await _wait_for_thread_event(
+            adapter.ready_for_barge_in,
+            label="post-reconnect audio",
+        )
         for _ in range(100):
             if audio_clock.elapsed_seconds >= 40.0:
                 break
@@ -5327,7 +5367,10 @@ def test_voxcpm2_slow_stream_starts_playback_before_stream_completion(monkeypatc
             )
         )
         try:
-            assert await asyncio.to_thread(adapter.second_chunk_yielded.wait, 1.0)
+            await _wait_for_thread_event(
+                adapter.second_chunk_yielded,
+                label="second VoxCPM2 streaming chunk",
+            )
             await _wait_for_async_event_or_task(
                 audio_started,
                 speech,
@@ -5397,7 +5440,10 @@ def test_qwen_slow_stream_starts_playback_before_stream_completion() -> None:
             )
         )
         try:
-            assert await asyncio.to_thread(adapter.second_chunk_yielded.wait, 1.0)
+            await _wait_for_thread_event(
+                adapter.second_chunk_yielded,
+                label="second Qwen streaming chunk",
+            )
             await _wait_for_async_event_or_task(
                 audio_started,
                 speech,
@@ -5461,7 +5507,10 @@ def test_qwen_capacity_two_bridge_blocks_producer_without_dropping_chunks(
                 speech,
                 label="Qwen first enqueue enters slow playout",
             )
-            assert await asyncio.to_thread(adapter.fourth_yield_attempted.wait, 1.0)
+            await _wait_for_thread_event(
+                adapter.fourth_yield_attempted,
+                label="fourth Qwen streaming yield attempt",
+            )
             await asyncio.sleep(0.05)
             assert adapter.completed_yields == 3
             assert not adapter.stream_completed.is_set()
@@ -5639,7 +5688,10 @@ def test_qwen_termination_cancels_exact_request_and_rejects_normal_completion(
             )
         )
         try:
-            assert await asyncio.to_thread(adapter.stream_started.wait, 1.0)
+            await _wait_for_thread_event(
+                adapter.stream_started,
+                label="cancellable Qwen stream start",
+            )
             if yield_before_cancel:
                 await _wait_for_async_event_or_task(
                     track.first_chunk_enqueued,
@@ -5962,7 +6014,10 @@ def test_qwen_spoken_vad_barge_in_preserves_mic_turn_and_silences_real_playout(
                     ScriptedInboundAudioFrame(user_pcm)
                 )
             )
-            assert await asyncio.to_thread(adapter.cancel_started.wait, 1.0)
+            await _wait_for_thread_event(
+                adapter.cancel_started,
+                label="Qwen barge-in cancellation",
+            )
             while track.pending_samples > 0:
                 await asyncio.sleep(0)
             assert not barge_in.done()
