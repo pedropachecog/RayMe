@@ -61,6 +61,7 @@ type ReconnectRouteOptions = {
   reconcileCommittedAsConflict?: boolean;
   selectionChangingPeerCommitDelayMs?: number;
   selectionChangingPeerCommitGate?: Promise<void>;
+  failEnd?: boolean;
 };
 
 type StartupRouteCounters = {
@@ -98,12 +99,28 @@ type MockCallMediaSnapshot = {
     closeCount: number;
     sentMessages: string[];
   }>;
-  remoteStreams: Array<{ id: string; audioTracks: number }>;
+  remoteStreams: Array<{
+    id: string;
+    audioTracks: number;
+    audioTrackStates: Array<{
+      enabled: boolean;
+      readyState: MediaStreamTrackState;
+    }>;
+  }>;
   audioPlayback: {
     activeStreamId: string | null;
     playedStreamIds: string[];
     pausedStreamIds: string[];
   };
+  localAudioTracks: Array<{
+    enabled: boolean;
+    readyState: MediaStreamTrackState;
+  }>;
+  applicationAudioContexts: Array<{
+    state: AudioContextState;
+    closeCount: number;
+    sourceDisconnectCount: number;
+  }>;
 };
 
 test('starts a call from the thread header Start call control', async ({ page }) => {
@@ -543,6 +560,89 @@ test('keeps a long selection-changing peer switch outside reconnect retry budget
   expect(debugEventCount(counters, 'pc.media_reconnect.give_up')).toBe(0);
   expect(counters.endCount).toBe(0);
   await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  assertNoBrowserErrors();
+});
+
+test('hard peer-switch deadline tears down every local browser media owner', async ({
+  page
+}) => {
+  test.setTimeout(45_000);
+  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+    allowConsoleErrors: [
+      /Failed to load resource: net::ERR_FAILED/,
+      /Failed to load resource: the server responded with a status of 502/
+    ]
+  });
+  await installMockCallMedia(page);
+  const heldSelectionSwitch = new Promise<void>(() => undefined);
+  const counters = await installReconnectCallRoutes(page, {
+    selectionChangingPeerCommitGate: heldSelectionSwitch,
+    failEnd: true
+  });
+
+  await startReconnectCall(page, counters);
+  const initial = await getMockCallMediaSnapshot(page);
+  const initialStreamId = initial.peers[0].remoteStreamId;
+  expect(initialStreamId).not.toBeNull();
+  await expect.poll(
+    async () => (await getMockCallMediaSnapshot(page)).applicationAudioContexts.length
+  ).toBe(2);
+
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await expect.poll(() => counters.peerPromotionInProgressCount).toBeGreaterThan(0);
+  await expect(
+    page.getByRole('alert').getByText(TERMINAL_CONNECTION_DROPPED_COPY)
+  ).toBeVisible({ timeout: 25_000 });
+  await expect.poll(() => counters.endCount).toBe(1);
+
+  const terminal = await getMockCallMediaSnapshot(page);
+  expect(counters.offerCount).toBe(2);
+  expect(debugEventCount(counters, 'pc.media_reconnect.start')).toBe(1);
+  expect(debugEventCount(counters, 'pc.media_reconnect.failed')).toBe(0);
+  expect(debugEventCount(counters, 'pc.media_reconnect.give_up')).toBe(0);
+  expect(debugEventCount(counters, 'pc.media_reconnect.peer_decision_deadline')).toBe(1);
+  expect(counters.endCount).toBe(1);
+  expect(terminal.peers).toHaveLength(2);
+  expect(terminal.peers.every((peer) => peer.closed && peer.closeCount === 1)).toBe(true);
+  expect(terminal.channels).toHaveLength(2);
+  expect(
+    terminal.channels.every(
+      (channel) => channel.readyState === 'closed' && channel.closeCount === 1
+    )
+  ).toBe(true);
+  expect(terminal.localAudioTracks).toHaveLength(1);
+  expect(terminal.localAudioTracks[0]).toEqual({
+    enabled: false,
+    readyState: 'ended'
+  });
+  expect(terminal.applicationAudioContexts).toHaveLength(2);
+  expect(
+    terminal.applicationAudioContexts.every(
+      (context) =>
+        context.state === 'closed' &&
+        context.closeCount === 1 &&
+        context.sourceDisconnectCount === 1
+    )
+  ).toBe(true);
+  expect(
+    terminal.remoteStreams.every((stream) =>
+      stream.audioTrackStates.every(
+        (track) => !track.enabled && track.readyState === 'ended'
+      )
+    )
+  ).toBe(true);
+  expect(terminal.audioPlayback.activeStreamId).toBeNull();
+  expect(terminal.audioPlayback.pausedStreamIds).toContain(initialStreamId);
+  expect(debugEventCount(counters, 'remote_audio.candidate.discarded')).toBe(1);
+  expect(debugEventCount(counters, 'remote_audio.candidate.promoted')).toBe(0);
+  expect(
+    counters.debugEvents.some(
+      (entry) => entry.event === 'mic.keep_live' && entry.detail.nextState === 'failed'
+    )
+  ).toBe(false);
+  await expect(page.getByRole('alert').getByRole('button', { name: 'Return to Thread' }))
+    .toBeVisible();
+  await expect(page.getByTestId('voice-visualizer')).toHaveCount(0);
   assertNoBrowserErrors();
 });
 
@@ -1635,6 +1735,12 @@ async function getMockCallMediaSnapshot(page: Page): Promise<MockCallMediaSnapsh
         playedStreamIds: string[];
         pausedStreamIds: string[];
       };
+      __raymeMockLocalMediaStream?: MediaStream;
+      __raymeMockApplicationAudioContexts?: Array<{
+        context: AudioContext;
+        closeCount: number;
+        sourceDisconnectCount: number;
+      }>;
     };
 
     return {
@@ -1660,13 +1766,27 @@ async function getMockCallMediaSnapshot(page: Page): Promise<MockCallMediaSnapsh
       })),
       remoteStreams: (target.__raymeMockRemoteAudioStreams ?? []).map((stream) => ({
         id: stream.id,
-        audioTracks: stream.getAudioTracks().length
+        audioTracks: stream.getAudioTracks().length,
+        audioTrackStates: stream.getAudioTracks().map((track) => ({
+          enabled: track.enabled,
+          readyState: track.readyState
+        }))
       })),
       audioPlayback: {
         activeStreamId: target.__raymeMockAudioPlayback?.activeStreamId ?? null,
         playedStreamIds: [...(target.__raymeMockAudioPlayback?.playedStreamIds ?? [])],
         pausedStreamIds: [...(target.__raymeMockAudioPlayback?.pausedStreamIds ?? [])]
-      }
+      },
+      localAudioTracks: (target.__raymeMockLocalMediaStream?.getAudioTracks() ?? []).map(
+        (track) => ({ enabled: track.enabled, readyState: track.readyState })
+      ),
+      applicationAudioContexts: (target.__raymeMockApplicationAudioContexts ?? []).map(
+        (record) => ({
+          state: record.context.state,
+          closeCount: record.closeCount,
+          sourceDisconnectCount: record.sourceDisconnectCount
+        })
+      )
     };
   });
 }
@@ -2136,6 +2256,15 @@ async function installReconnectCallRoutes(
     counters.requestOrder.push('end');
     while (hangingBackfillResolvers.length > 0) {
       hangingBackfillResolvers.shift()?.();
+    }
+    if (options.failEnd) {
+      await fulfillJson(route, {
+        detail: {
+          code: 'call_end_failed',
+          message: 'Call end acknowledgement failed'
+        }
+      }, 502);
+      return;
     }
     await fulfillJson(route, { call_id: 'call-reconnect-01', session_id: 'rtc-call-reconnect-01', reason: 'hangup' });
   });

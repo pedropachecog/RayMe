@@ -95,6 +95,11 @@ export async function installMockCallMedia(
     failReplacementConnection,
     suppressReplacementTrack
   }) => {
+    type MockApplicationAudioContext = {
+      context: AudioContext;
+      closeCount: number;
+      sourceDisconnectCount: number;
+    };
     type MockPeerWindow = Window & {
       __raymeMockPeerConnections?: MockRTCPeerConnection[];
       __raymeMockDataChannels?: MockRTCDataChannel[];
@@ -105,11 +110,43 @@ export async function installMockCallMedia(
         pausedStreamIds: string[];
       };
       __raymeMockLocalMediaStream?: MediaStream;
+      __raymeMockApplicationAudioContexts?: MockApplicationAudioContext[];
       __raymeMockPcmProcessors?: Array<{
         onaudioprocess: ((event: AudioProcessingEvent) => void) | null;
       }>;
       __raymeEmitMockPcm?: (sample: number, sampleCount?: number) => void;
     };
+
+    if (typeof AudioContext !== 'undefined') {
+      const target = window as MockPeerWindow;
+      const records: MockApplicationAudioContext[] = [];
+      target.__raymeMockApplicationAudioContexts = records;
+      const prototype = AudioContext.prototype;
+      const originalCreateMediaStreamSource = prototype.createMediaStreamSource;
+      const originalClose = prototype.close;
+      const recordFor = (context: AudioContext) => {
+        let record = records.find((candidate) => candidate.context === context);
+        if (!record) {
+          record = { context, closeCount: 0, sourceDisconnectCount: 0 };
+          records.push(record);
+        }
+        return record;
+      };
+      prototype.createMediaStreamSource = function createMediaStreamSource(stream) {
+        const record = recordFor(this);
+        const source = originalCreateMediaStreamSource.call(this, stream);
+        const originalDisconnect = source.disconnect.bind(source);
+        source.disconnect = (() => {
+          record.sourceDisconnectCount += 1;
+          originalDisconnect();
+        }) as typeof source.disconnect;
+        return source;
+      };
+      prototype.close = function close() {
+        recordFor(this).closeCount += 1;
+        return originalClose.call(this);
+      };
+    }
 
     if (controllablePcm && typeof AudioContext !== 'undefined') {
       const prototype = AudioContext.prototype as AudioContext & {

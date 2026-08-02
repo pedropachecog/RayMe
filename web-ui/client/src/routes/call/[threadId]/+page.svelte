@@ -209,6 +209,7 @@
   let eventsChannel: RTCDataChannel | null = null;
   let browserMediaConnectionGeneration = 0;
   let activeBrowserMediaConnection: BrowserMediaConnectionOwner | null = null;
+  const stagedBrowserMediaConnections = new Set<BrowserMediaConnectionOwner>();
   let mediaReconnectTimer = 0;
   let mediaReconnectStableTimer = 0;
   let mediaReconnecting = false;
@@ -291,7 +292,7 @@
     callPreparationPollToken += 1;
     clearEventTimers();
     cancelActiveTurnStream();
-    stopBrowserMedia();
+    void stopBrowserMedia();
   });
 
   async function initializeCall() {
@@ -419,6 +420,9 @@
       resolveCandidateRemoteStream,
       remoteAudioPromoted: false
     };
+    if (preserveExisting) {
+      stagedBrowserMediaConnections.add(connectionOwner);
+    }
     let candidateDiscarded = false;
     const ownsCandidateConnection = () =>
       !candidateDiscarded && (
@@ -561,6 +565,7 @@
           response.peer_commit_timeout_ms
         );
         backendPeerCommitted = true;
+        stagedBrowserMediaConnections.delete(connectionOwner);
         peerConnection = connection;
         activeBrowserMediaConnection = connectionOwner;
         eventsChannel = connectionOwner.eventsChannel;
@@ -1407,6 +1412,10 @@
 
   async function failTerminalMediaReconnect(debugCallId: string, reason: string) {
     await cleanupTerminalFailedCall(debugCallId, reason);
+    await stopBrowserMedia(
+      debugCallId,
+      new Error(`Terminal media reconnect cleanup: ${reason}`)
+    );
     applyCallState('failed');
     blockingPanel = {
       body: 'The call ended because the connection dropped. Your transcript so far was saved.',
@@ -2370,7 +2379,7 @@
   async function failCallStartup(error: unknown) {
     clearEventTimers();
     cancelActiveTurnStream();
-    stopBrowserMedia();
+    await stopBrowserMedia();
     showBlockingPanel(error);
 
     if (!callId || !sessionId) {
@@ -2630,7 +2639,7 @@
     return btoa(binary);
   }
 
-  function stopLocalMicMeter() {
+  function stopLocalMicMeter(): Promise<void> {
     if (localMicMeterFrame) {
       cancelAnimationFrame(localMicMeterFrame);
       localMicMeterFrame = 0;
@@ -2642,7 +2651,7 @@
     }
     localMicSource?.disconnect();
     localMicAnalyser?.disconnect();
-    localAudioContext?.close().catch(() => undefined);
+    const closingLocalAudioContext = localAudioContext;
     localMicSource = null;
     localMicAnalyser = null;
     localMicRecorderProcessor = null;
@@ -2652,6 +2661,10 @@
     localMicRawPeak = null;
     localMicPcmBuffer = [];
     retireReconnectAudioBackfill(activeReconnectAudioBackfill);
+    if (!closingLocalAudioContext || closingLocalAudioContext.state === 'closed') {
+      return Promise.resolve();
+    }
+    return closingLocalAudioContext.close().catch(() => undefined);
   }
 
   function waitForIceGathering(connection: RTCPeerConnection): Promise<void> {
@@ -2784,6 +2797,7 @@
       throw new Error('Replacement media ownership changed before audio promotion');
     }
     attachRemoteAudio(stream, debugCallId);
+    stagedBrowserMediaConnections.delete(owner);
     owner.remoteAudioPromoted = true;
     owner.candidateRemoteStream = null;
     emitDebugEvent(debugCallId, 'remote_audio.candidate.promoted', {
@@ -2797,11 +2811,16 @@
     debugCallId: string,
     error: unknown
   ) {
+    stagedBrowserMediaConnections.delete(owner);
     const stream = owner.candidateRemoteStream;
     owner.candidateRemoteStream = null;
     if (!stream || owner.remoteAudioPromoted) {
       return;
     }
+    stream.getTracks().forEach((track) => {
+      track.enabled = false;
+      track.stop();
+    });
     emitDebugEvent(debugCallId, 'remote_audio.candidate.discarded', {
       stream_id: stream.id,
       connectionGeneration: owner.generationId,
@@ -2886,7 +2905,13 @@
       }
       const prevState = callState;
       callState = normalized;
-      keepMicrophoneSenderLive(prevState, normalized);
+      if (nextIsTerminal) {
+        if (localMediaStream) {
+          setCallMicrophoneTracksEnabled(localMediaStream, false);
+        }
+      } else {
+        keepMicrophoneSenderLive(prevState, normalized);
+      }
       syncRemoteAudioAudibility();
     } else {
       if (callState === 'ended' || callState === 'failed' || ending) {
@@ -3923,7 +3948,7 @@
         await recoverMissedCallEvents(callId, 'hangup');
         await endCall(callId, sessionId);
       }
-      stopBrowserMedia();
+      await stopBrowserMedia();
       callState = 'ended';
     } catch {
       callState = 'failed';
@@ -4113,7 +4138,10 @@
     void returnToThread();
   }
 
-  function stopBrowserMedia() {
+  async function stopBrowserMedia(
+    debugCallId = callId,
+    candidateReason: unknown = new Error('Browser media stopped')
+  ) {
     resetBrowserMediaReconnectIncident();
     clearInterruptDrainState();
     stopLocalMicReconnectDiagnostics();
@@ -4121,19 +4149,50 @@
     activeMuteRequest?.abortController.abort();
     activeMuteRequest = null;
     muteRequestPending = false;
-    stopLocalMicMeter();
+    const localContextClose = stopLocalMicMeter();
     detachRemoteAudio();
-    remoteAudioContext?.close().catch(() => undefined);
+    const closingRemoteAudioContext = remoteAudioContext;
     remoteAudioContext = null;
-    const closingEventsChannel = eventsChannel;
-    const closingPeerConnection = peerConnection;
+    const stagedOwners = [...stagedBrowserMediaConnections];
+    const closingOwners = new Set<BrowserMediaConnectionOwner>(stagedOwners);
+    if (activeBrowserMediaConnection) {
+      closingOwners.add(activeBrowserMediaConnection);
+    }
+    for (const owner of stagedOwners) {
+      discardBrowserMediaCandidate(owner, debugCallId, candidateReason);
+    }
+    const closingEventsChannels = new Set<RTCDataChannel>();
+    const closingPeerConnections = new Set<RTCPeerConnection>();
+    if (eventsChannel) {
+      closingEventsChannels.add(eventsChannel);
+    }
+    if (peerConnection) {
+      closingPeerConnections.add(peerConnection);
+    }
+    for (const owner of closingOwners) {
+      closingEventsChannels.add(owner.eventsChannel);
+      closingPeerConnections.add(owner.connection);
+    }
+    stagedBrowserMediaConnections.clear();
     activeBrowserMediaConnection = null;
     eventsChannel = null;
     peerConnection = null;
-    closingEventsChannel?.close?.();
-    closingPeerConnection?.close?.();
-    localMediaStream?.getTracks().forEach((track) => track.stop());
+    for (const channel of closingEventsChannels) {
+      channel.close();
+    }
+    for (const connection of closingPeerConnections) {
+      connection.close();
+    }
+    localMediaStream?.getTracks().forEach((track) => {
+      track.enabled = false;
+      track.stop();
+    });
     localMediaStream = null;
+    const contextClosures: Promise<unknown>[] = [localContextClose];
+    if (closingRemoteAudioContext && closingRemoteAudioContext.state !== 'closed') {
+      contextClosures.push(closingRemoteAudioContext.close().catch(() => undefined));
+    }
+    await Promise.allSettled(contextClosures);
   }
 
   function attachRemoteAudio(stream: MediaStream, debugCallId = '') {
@@ -4303,9 +4362,17 @@
     remoteAudioNonZeroLogged = false;
   
     if (remoteAudioElement) {
+      const remoteStream =
+        remoteAudioElement.srcObject instanceof MediaStream
+          ? remoteAudioElement.srcObject
+          : null;
       remoteAudioElement.pause();
       remoteAudioElement.srcObject = null;
       remoteAudioElement = null;
+      remoteStream?.getTracks().forEach((track) => {
+        track.enabled = false;
+        track.stop();
+      });
     }
   }
   
