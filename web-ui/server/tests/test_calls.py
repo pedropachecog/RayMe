@@ -1510,6 +1510,88 @@ def test_qwen_normal_multi_segment_turn_persists_once_after_one_normal_terminal(
     ]
 
 
+@pytest.mark.parametrize("queued_status", ["queued", "normal"])
+@pytest.mark.parametrize(
+    "playout_final",
+    [
+        {},
+        {"playout_wait_completed": False},
+        {"playout_wait_completed": 1},
+        {"playout_wait_completed": "true"},
+    ],
+    ids=["missing", "false", "integer", "string"],
+)
+def test_qwen_nonfinal_ai_done_never_bypasses_literal_playout_proof(
+    call_fixture: CallFixture,
+    queued_status: str,
+    playout_final: dict[str, Any],
+) -> None:
+    class MalformedIntermediateBackend(ScriptedCallBackend):
+        async def speak_call(
+            self,
+            base_url: str,
+            session_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            self.speak_calls.append(
+                {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
+            )
+            if not payload["final_chunk"]:
+                return {
+                    "session_id": session_id,
+                    "event": {
+                        "type": "ai_done",
+                        "status": queued_status,
+                        "turn_id": payload["turn_id"],
+                        "tts_playback_final": dict(playout_final),
+                    },
+                }
+            return {
+                "session_id": session_id,
+                "event": {
+                    "type": "ai_done",
+                    "turn_id": payload["turn_id"],
+                    "tts_playback_final": {"playout_wait_completed": True},
+                },
+            }
+
+    visible_text = "The first sentence is valid. The final tail remains"
+    call_fixture.completion.token_sequences = [
+        ["The first sentence is valid.", " The final tail remains"]
+    ]
+    thread_id, _ = asyncio.run(
+        _insert_qwen_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    calls_module = importlib.import_module("app.api.calls")
+    backend = MalformedIntermediateBackend()
+    call_fixture.app.dependency_overrides[calls_module.get_call_backend_client] = lambda: backend
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-qwen-malformed-intermediate",
+            "text": "Reject malformed intermediate terminal.",
+            "source": "user_final",
+        },
+    )
+
+    assert response.status_code == 200
+    assert [call["payload"]["final_chunk"] for call in backend.speak_calls] == [False]
+    events = _sse_events(response.text)
+    assert not any(event.get("type") == "ai_done" for event in events)
+    assert events[-1] == {
+        "type": "error",
+        "turn_id": "turn-qwen-malformed-intermediate",
+        "code": "call_tts_failed",
+        "message": "Speech playback failed",
+    }
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert [row for row in rows if row[0] == "ai_speech"] == []
+    assert visible_text not in response.text
+
+
 def test_concurrent_duplicate_completed_turn_is_reserved_and_persisted_once(
     call_fixture: CallFixture,
 ) -> None:
