@@ -4,12 +4,18 @@ import { selectReconnectAudioBackfill, type LocalMicPcmChunk } from '../../src/l
 
 const sampleRate = 16000;
 
-function chunk(startMs: number, endMs: number, sample: number): LocalMicPcmChunk {
+function chunk(
+  startMs: number,
+  endMs: number,
+  sample: number,
+  audioInputEpoch = 0
+): LocalMicPcmChunk {
   const sampleCount = Math.round((endMs - startMs) * sampleRate / 1000);
   return {
     startMs,
     endMs,
-    samples: new Int16Array(sampleCount).fill(sample)
+    samples: new Int16Array(sampleCount).fill(sample),
+    audioInputEpoch
   };
 }
 
@@ -41,7 +47,8 @@ describe('reconnect backfill selection', () => {
       endMs: 99412,
       startMs: 35256,
       maxDurationMs: 30000,
-      sampleRate
+      sampleRate,
+      audioInputEpoch: 0
     });
 
     expect(selection?.startMs).toBe(35256);
@@ -58,11 +65,32 @@ describe('reconnect backfill selection', () => {
       endMs: 35256,
       startMs: 0,
       maxDurationMs: 30000,
-      sampleRate
+      sampleRate,
+      audioInputEpoch: 0
     });
 
     expect(selection?.startMs).toBe(5000);
     expect(selection?.endMs).toBe(36000);
     expect(selection?.durationMs).toBe(31000);
+  });
+
+  it('selects only post-unmute chunks from the active capture epoch', () => {
+    const chunks = [
+      chunk(30000, 40000, 1111, 0),
+      chunk(40000, 45000, 2222, 0),
+      chunk(45000, 46000, 3333, 1)
+    ];
+
+    const selection = selectReconnectAudioBackfill(chunks, {
+      endMs: 46000,
+      startMs: 30000,
+      maxDurationMs: 30000,
+      sampleRate,
+      audioInputEpoch: 1
+    });
+
+    expect(selection?.startMs).toBe(45000);
+    expect(selection?.endMs).toBe(46000);
+    expect(new Set(selection?.samples)).toEqual(new Set([3333]));
   });
 });

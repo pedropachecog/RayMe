@@ -80,13 +80,59 @@ export async function installCallDebugEventRoute(
   });
 }
 
-export async function installMockCallMedia(page: Page) {
-  await page.addInitScript(() => {
+export async function installMockCallMedia(
+  page: Page,
+  options: { controllablePcm?: boolean } = {}
+) {
+  await page.addInitScript(({ controllablePcm }) => {
     type MockPeerWindow = Window & {
       __raymeMockPeerConnections?: MockRTCPeerConnection[];
       __raymeMockDataChannels?: MockRTCDataChannel[];
       __raymeMockRemoteAudioStreams?: MediaStream[];
+      __raymeMockPcmProcessors?: Array<{
+        onaudioprocess: ((event: AudioProcessingEvent) => void) | null;
+      }>;
+      __raymeEmitMockPcm?: (sample: number, sampleCount?: number) => void;
     };
+
+    if (controllablePcm && typeof AudioContext !== 'undefined') {
+      const prototype = AudioContext.prototype as AudioContext & {
+        createScriptProcessor: (
+          bufferSize?: number,
+          numberOfInputChannels?: number,
+          numberOfOutputChannels?: number
+        ) => ScriptProcessorNode;
+      };
+      prototype.createScriptProcessor = function createScriptProcessor() {
+        const processor = {
+          onaudioprocess: null,
+          connect(destination: AudioNode) {
+            return destination;
+          },
+          disconnect() {}
+        } as unknown as ScriptProcessorNode;
+        const target = window as MockPeerWindow;
+        target.__raymeMockPcmProcessors = target.__raymeMockPcmProcessors ?? [];
+        target.__raymeMockPcmProcessors.push(processor);
+        return processor;
+      };
+      (window as MockPeerWindow).__raymeEmitMockPcm = (
+        sample: number,
+        sampleCount = 320
+      ) => {
+        const input = new Float32Array(sampleCount).fill(sample / 32767);
+        const event = {
+          inputBuffer: {
+            sampleRate: 16000,
+            getChannelData: () => input
+          }
+        } as unknown as AudioProcessingEvent;
+        for (const processor of
+          (window as MockPeerWindow).__raymeMockPcmProcessors ?? []) {
+          processor.onaudioprocess?.(event);
+        }
+      };
+    }
 
     const mediaDevices = {
       async getUserMedia() {
@@ -310,7 +356,7 @@ export async function installMockCallMedia(page: Page) {
       configurable: true,
       value: MockRTCPeerConnection
     });
-  });
+  }, options);
 }
 
 export async function installBlockedCallMicrophone(page: Page) {

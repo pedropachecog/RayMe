@@ -91,6 +91,7 @@
   let callId = $state('');
   let sessionId = $state('');
   let serverMuted = $state(false);
+  let muteRequestPending = false;
   let localMicAudioEpoch = 0;
   let listeningRms = $state<number | null>(null);
   let speakingRms = $state<number | null>(null);
@@ -916,7 +917,7 @@
   }
 
   function startReconnectAudioBackfill(debugCallId: string, reason: MediaReconnectReason) {
-    if (reconnectAudioBackfillStartMs >= 0) {
+    if (muteRequestPending || serverMuted || reconnectAudioBackfillStartMs >= 0) {
       return;
     }
     const nowMs = performance.now();
@@ -973,6 +974,9 @@
     attempt: number,
     options: { awaitFinal?: boolean } = {}
   ) {
+    if (muteRequestPending || serverMuted) {
+      return;
+    }
     if (reconnectAudioBackfillFlushPromise) {
       await reconnectAudioBackfillFlushPromise;
       if (options.awaitFinal && reconnectAudioBackfillFinalPromise) {
@@ -1139,6 +1143,9 @@
     final: boolean;
     selection: LocalMicPcmSelection | null;
   }) {
+    if (muteRequestPending || serverMuted) {
+      return;
+    }
     const batchBackfillId = `${baseBackfillId}-batch-${batchIndex}`;
     const selectedStartOffsetMs =
       selection ? Math.round(selection.startMs - reconnectStartMs) : null;
@@ -1257,6 +1264,7 @@
       startMs: startMsOverride,
       maxDurationMs: MIC_BACKFILL_MAX_MS,
       sampleRate: MIC_BACKFILL_SAMPLE_RATE,
+      audioInputEpoch: reconnectAudioBackfillEpoch,
       limitToMaxWindow: options.limitToMaxWindow ?? true
     });
     if (!selection || startMsOverride <= 0 || selection.startMs <= startMsOverride) {
@@ -1553,7 +1561,8 @@
         appendLocalMicPcmChunk({
           startMs: endMs - sourceDurationMs,
           endMs,
-          samples
+          samples,
+          audioInputEpoch: localMicAudioEpoch
         });
       };
       source.connect(processor);
@@ -1568,7 +1577,12 @@
   }
 
   function appendLocalMicPcmChunk(chunk: LocalMicPcmChunk) {
-    if (!chunk.samples.length) {
+    if (
+      muteRequestPending ||
+      serverMuted ||
+      chunk.audioInputEpoch !== localMicAudioEpoch ||
+      !chunk.samples.length
+    ) {
       return;
     }
     localMicPcmBuffer.push(chunk);
@@ -2359,6 +2373,7 @@
 
     const previousMuted = serverMuted;
     const nextMuted = !previousMuted;
+    muteRequestPending = true;
     serverMuted = nextMuted;
 
     try {
@@ -2371,9 +2386,14 @@
       serverMuted = confirmedMuted;
       if (!previousMuted && confirmedMuted) {
         localMicAudioEpoch += 1;
+        localMicPcmBuffer = [];
+        clearReconnectAudioBackfill();
+        restoreReconnectBackfillPromotedState();
       }
     } catch {
       serverMuted = previousMuted;
+    } finally {
+      muteRequestPending = false;
     }
   }
 

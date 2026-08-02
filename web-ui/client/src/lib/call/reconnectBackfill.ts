@@ -2,6 +2,7 @@ export interface LocalMicPcmChunk {
   startMs: number;
   endMs: number;
   samples: Int16Array;
+  audioInputEpoch: number;
 }
 
 export interface LocalMicPcmSelection {
@@ -20,12 +21,14 @@ export function selectReconnectAudioBackfill(
     startMs,
     maxDurationMs,
     sampleRate,
+    audioInputEpoch,
     limitToMaxWindow
   }: {
     endMs: number;
     startMs: number;
     maxDurationMs: number;
     sampleRate: number;
+    audioInputEpoch: number;
     limitToMaxWindow?: boolean;
   }
 ): LocalMicPcmSelection | null {
@@ -33,7 +36,10 @@ export function selectReconnectAudioBackfill(
   const boundedStartMs =
     shouldLimitToMaxWindow ? Math.max(startMs, endMs - maxDurationMs) : startMs;
   const selectedChunks = chunks.filter(
-    (chunk) => chunk.endMs > boundedStartMs && chunk.startMs < endMs
+    (chunk) =>
+      chunk.audioInputEpoch === audioInputEpoch &&
+      chunk.endMs > boundedStartMs &&
+      chunk.startMs < endMs
   );
   const sampleCount = selectedChunks.reduce((total, chunk) => total + chunk.samples.length, 0);
   if (sampleCount <= 0) {

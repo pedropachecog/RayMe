@@ -393,6 +393,42 @@ def test_reconnect_audio_backfill_forwards_to_backend_without_persistence(
     assert not any(row[0] in {"user_speech", "ai_speech"} for row in rows)
 
 
+def test_post_unmute_pcm_marker_crosses_web_proxy_without_relabeling(
+    call_fixture: CallFixture,
+) -> None:
+    thread_id = asyncio.run(
+        _insert_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post(
+        "/api/calls/start",
+        json={"thread_id": thread_id},
+    ).json()
+    post_unmute_pcm = (3333).to_bytes(2, "little", signed=True) * 320
+    encoded = base64.b64encode(post_unmute_pcm).decode("ascii")
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/reconnect-audio",
+        json={
+            "session_id": started["session_id"],
+            "pcm_b64": encoded,
+            "sample_rate": 16000,
+            "channels": 1,
+            "backfill_id": "post-unmute-marker",
+            "audio_input_epoch": 1,
+            "final": True,
+        },
+    )
+
+    assert response.status_code == 200
+    forwarded = call_fixture.backend.backfill_calls[-1]["payload"]
+    assert forwarded["pcm_b64"] == encoded
+    assert forwarded["audio_input_epoch"] == 1
+    assert set(
+        int.from_bytes(post_unmute_pcm[offset : offset + 2], "little", signed=True)
+        for offset in range(0, len(post_unmute_pcm), 2)
+    ) == {3333}
+
+
 @pytest.mark.parametrize(
     "requests",
     [

@@ -314,6 +314,44 @@ test('re-offers with a new peer instead of ending when browser peer connection f
   assertNoBrowserErrors();
 });
 
+test('reconnect backfill after mute contains only post-unmute capture epoch PCM', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page, { controllablePcm: true });
+  const counters = await installReconnectCallRoutes(page);
+
+  await startReconnectCall(page, counters);
+  await emitMockPcm(page, 1111);
+
+  const muteResponse = page.waitForResponse((response) =>
+    response.url().includes('/mute')
+  );
+  await page.getByRole('button', { name: 'Mute' }).click();
+  await muteResponse;
+  await expect(page.getByRole('button', { name: 'Unmute' })).toBeVisible();
+  await emitMockPcm(page, 2222);
+
+  const unmuteResponse = page.waitForResponse((response) =>
+    response.url().includes('/mute')
+  );
+  await page.getByRole('button', { name: 'Unmute' }).click();
+  await unmuteResponse;
+  await expect(page.getByRole('button', { name: 'Mute' })).toBeVisible();
+  await emitMockPcm(page, 3333);
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+
+  await expect.poll(() => counters.backfillCount).toBeGreaterThan(0);
+  expect(counters.backfills.every((entry) => entry.audio_input_epoch === 1)).toBe(true);
+  const selectedValues = new Set(
+    counters.backfills.flatMap((entry) => decodePcmValues(String(entry.pcm_b64 ?? '')))
+  );
+  expect(selectedValues.has(3333)).toBe(true);
+  expect(selectedValues.has(1111)).toBe(false);
+  expect(selectedValues.has(2222)).toBe(false);
+  assertNoBrowserErrors();
+});
+
 test('retries when the first replacement offer fails during media reconnect', async ({
   page
 }) => {
@@ -853,6 +891,27 @@ async function emitLatestMockDataChannelEvent(page: Page, event: Record<string, 
   }, event);
 }
 
+async function emitMockPcm(page: Page, sample: number) {
+  await page.evaluate((sample) => {
+    const target = window as Window & {
+      __raymeEmitMockPcm?: (sample: number, sampleCount?: number) => void;
+    };
+    if (!target.__raymeEmitMockPcm) {
+      throw new Error('Controllable mock PCM recorder is unavailable');
+    }
+    target.__raymeEmitMockPcm(sample, 320);
+  }, sample);
+}
+
+function decodePcmValues(pcmBase64: string) {
+  const bytes = Buffer.from(pcmBase64, 'base64');
+  const values: number[] = [];
+  for (let offset = 0; offset + 1 < bytes.length; offset += 2) {
+    values.push(bytes.readInt16LE(offset));
+  }
+  return values;
+}
+
 async function getMockCallMediaSnapshot(page: Page): Promise<MockCallMediaSnapshot> {
   return page.evaluate(() => {
     const target = window as Window & {
@@ -1181,6 +1240,10 @@ async function installReconnectCallRoutes(
       session_id: 'rtc-call-reconnect-01',
       events
     });
+  });
+  await page.route('**/api/calls/*/mute', async (route) => {
+    const payload = route.request().postDataJSON() as { muted?: boolean };
+    await fulfillJson(route, { muted: payload.muted === true });
   });
   await page.route('**/api/calls/*/turns', async (route) => {
     counters.turnCount += 1;

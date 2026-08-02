@@ -2732,6 +2732,67 @@ def test_webrtc_reconnect_audio_requires_anonymous_epoch_after_mute(
     assert session._turn_frames == []
 
 
+def test_webrtc_post_unmute_marker_is_only_pcm_reaching_vad_and_stt(
+    stub_webrtc: None,
+) -> None:
+    class MarkerVadAdapter:
+        def __init__(self) -> None:
+            self.frames: list[bytes] = []
+
+        def accept_audio_frame(self, pcm: bytes) -> dict[str, bool]:
+            self.frames.append(pcm)
+            return {"speech_detected": True, "end_of_turn": False}
+
+    class MarkerSttAdapter:
+        def __init__(self) -> None:
+            self.calls: list[list[bytes]] = []
+
+        def transcribe_pcm(
+            self,
+            pcm_frames: list[bytes],
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            self.calls.append(list(pcm_frames))
+            return {
+                "status": "accepted",
+                "transcript": "post mute marker",
+                "language": "en",
+            }
+
+    client = _client()
+    session_id = "call-session-post-mute-marker"
+    client.post("/webrtc/offer", json=_offer_payload(session_id=session_id))
+    session = client.app.state.call_session_manager.get_session(session_id)
+    vad = MarkerVadAdapter()
+    stt = MarkerSttAdapter()
+    session.vad_adapter = vad
+    session.stt_adapter = stt
+    asyncio.run(session.set_muted(True))
+    asyncio.run(session.set_muted(False))
+    post_unmute_pcm = np.full(320, 3333, dtype=np.int16).tobytes()
+
+    response = client.post(
+        RECONNECT_AUDIO_ROUTE_TEMPLATE.format(session_id=session_id),
+        json={
+            "pcm_b64": base64.b64encode(post_unmute_pcm).decode("ascii"),
+            "sample_rate": 16000,
+            "channels": 1,
+            "backfill_id": "post-unmute-marker",
+            "audio_input_epoch": 1,
+            "final": False,
+        },
+    )
+    transcription = asyncio.run(session.finalize_user_turn())
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "accepted"
+    assert [
+        set(np.frombuffer(frame, dtype=np.int16).tolist()) for frame in vad.frames
+    ] == [{3333}]
+    assert transcription is not None and transcription["type"] == "user_final"
+    assert stt.calls == [[post_unmute_pcm]]
+
+
 def test_webrtc_events_drain_returns_undelivered_user_final(stub_webrtc: None) -> None:
     client = _client()
     session_id = "call-session-1"
