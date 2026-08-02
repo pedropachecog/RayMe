@@ -1219,7 +1219,9 @@ def test_silero_silence_gap_finalizes_turn_even_with_loud_ambient_noise() -> Non
 def test_call_vad_tolerates_short_false_silero_silence_during_continuous_speech() -> None:
     frame_samples = 320  # 20 ms at 16 kHz
     speech_pcm = np.full(frame_samples, 2000, dtype=np.int16).tobytes()
-    vad = FlakySileroVadAdapter(false_silence_calls=set(range(11, 46)))
+    # VAD is sampled every 100 ms after its immediate initial decision. Keep a
+    # 700-ms false-negative interval so this remains a time-based regression.
+    vad = FlakySileroVadAdapter(false_silence_calls=set(range(3, 10)))
     stt = ScriptedSttAdapter()
     session, _ = _new_session(vad_adapter=vad, stt_adapter=stt)
 
@@ -1241,7 +1243,8 @@ def test_call_vad_reconnect_grace_preserves_turn_until_speech_resumes(
 
     frame_samples = 320  # 20 ms at 16 kHz
     speech_pcm = np.full(frame_samples, 2000, dtype=np.int16).tobytes()
-    vad = FlakySileroVadAdapter(false_silence_calls=set(range(2, 42)))
+    # Eight 100-ms VAD decisions model the original 800-ms false-negative gap.
+    vad = FlakySileroVadAdapter(false_silence_calls=set(range(2, 10)))
     stt = ScriptedSttAdapter()
     settings = AiBackendSettings(
         call_vad_end_silence_ms=700,
@@ -6104,10 +6107,15 @@ def test_qwen_spoken_vad_barge_in_preserves_mic_turn_and_silences_real_playout(
             assert session.state == "listening"
 
             user_final = None
-            for _ in range(25):
-                user_final = await session.handle_inbound_audio_frame(
+            # The bounded VAD scheduler may make the end decision up to one
+            # 100-ms analysis cadence after the 500-ms silence threshold.
+            for _ in range(30):
+                result = await session.handle_inbound_audio_frame(
                     ScriptedInboundAudioFrame(silence_pcm)
                 )
+                if result is not None:
+                    user_final = result
+                    break
             assert user_final is not None
             assert user_final["type"] == "user_final"
             assert user_final["text"] == "hello from mic"
@@ -6579,6 +6587,26 @@ def test_silero_vad_analysis_window_stays_bounded_after_five_seconds() -> None:
     assert len(session._turn_frames) == 300, "STT still needs the full turn buffer"
     assert vad.calls
     assert max(vad.calls) <= 16000 * 3
+
+
+def test_silero_vad_analysis_is_cadenced_for_a_long_live_turn() -> None:
+    """A live 20-ms input stream must not synchronously invoke Silero 50 times/s."""
+    settings = AiBackendSettings(vad_end_silence_ms=700, vad_max_turn_ms=30000)
+    vad = ScriptedSileroVadAdapter(sampling_rate=16000)
+    session = CallSession(session_id="vad-cadence", settings=settings, vad_adapter=vad)
+    pcm = np.full(320, 2000, dtype=np.int16).tobytes()
+
+    for _ in range(1600):  # 32 seconds at 20 ms/frame.
+        frame = PcmAudioFrame(pcm=pcm, sample_rate=16000, channels=1)
+        session._turn_frames.append(frame)
+        result = session._accept_vad_frame(frame)
+        assert result["end_of_turn"] is False
+
+    assert len(session._turn_frames) == 1600, "STT must retain the full user turn"
+    assert vad.calls
+    assert max(vad.calls) <= 16000 * 3
+    assert len(vad.calls) <= 321, "Silero analysis must be no more frequent than every 100 ms"
+    assert session._vad_recent_sample_count <= 16000 * 3
 
 
 def test_speak_text_generic_adapter_uses_real_reference_audio() -> None:

@@ -8,6 +8,7 @@ import inspect
 import json
 import logging
 import time
+from collections import deque
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -71,6 +72,7 @@ CALL_STT_TRAILING_SILENCE_KEEP_MS = 400
 CALL_BARGE_IN_MIN_SPEECH_MS = 120
 CALL_BARGE_IN_MAX_ONSET_BUFFER_MS = 1000
 CALL_BARGE_IN_MIN_RMS = 200.0
+CALL_VAD_ANALYSIS_INTERVAL_MS = 100
 CALL_RECOVERABLE_EVENT_TYPES = {"user_final", "failed"}
 CALL_ENDED_EVENT_RECOVERY_GRACE_SECONDS = 60.0
 CALL_PEER_RECONNECT_GRACE_SECONDS = 8.0
@@ -455,6 +457,10 @@ class CallSession:
         self._speech_seen = False
         self._silence_ms = 0
         self._speech_start_frame: int | None = None
+        self._vad_recent_samples: deque[np.ndarray] = deque()
+        self._vad_recent_sample_count = 0
+        self._vad_analysis_elapsed_ms = 0
+        self._vad_analysis_has_run = False
         self._barge_in_frames: list[PcmAudioFrame] = []
         self._barge_in_buffered_ms = 0
         self._barge_in_speech_ms = 0
@@ -2626,6 +2632,7 @@ class CallSession:
             self._speech_seen = False
             self._silence_ms = 0
             self._speech_start_frame = None
+            self._reset_vad_analysis_window()
             self._media_reconnect_grace_audio_diag_count = 0
             self.state = "understanding"
             self._stt_admissions[admission.token] = admission
@@ -2983,6 +2990,7 @@ class CallSession:
                     self._turn_started_at = None
                     self._silence_ms = 0
                     self._speech_start_frame = None
+                    self._reset_vad_analysis_window()
             event = simple_event(
                 MUTED_EVENT,
                 session_id=self.session_id,
@@ -5273,24 +5281,45 @@ class CallSession:
             )
 
         if adapter is not None and hasattr(adapter, "speech_timestamps"):
-            buffered_samples = self._buffered_turn_samples()
-            buf_rms = float(np.sqrt(np.mean(np.square(buffered_samples)))) if buffered_samples.size else 0.0
-            buf_peak = float(np.max(np.abs(buffered_samples))) if buffered_samples.size else 0.0
+            sampling_rate = int(getattr(adapter, "sampling_rate", 16000)) or 16000
+            normalized_samples = samples / float(np.iinfo(np.int16).max)
+            self._append_vad_analysis_samples(
+                normalized_samples,
+                max_samples=self._vad_analysis_window_limit(sampling_rate),
+            )
+            self._vad_analysis_elapsed_ms += frame_ms
+            max_turn_ms = self._call_max_turn_ms()
+            turn_duration_ms = frame_idx * frame_ms
+            forced_end = turn_duration_ms >= max_turn_ms
+            if (
+                self._vad_analysis_has_run
+                and self._vad_analysis_elapsed_ms < CALL_VAD_ANALYSIS_INTERVAL_MS
+            ):
+                return {
+                    "speech_detected": self._speech_seen,
+                    "end_of_turn": forced_end,
+                }
+
+            analyzed_elapsed_ms = self._vad_analysis_elapsed_ms
+            self._vad_analysis_elapsed_ms = 0
+            self._vad_analysis_has_run = True
+            vad_samples = self._vad_analysis_samples()
+            buf_rms = float(np.sqrt(np.mean(np.square(vad_samples)))) if vad_samples.size else 0.0
+            buf_peak = float(np.max(np.abs(vad_samples))) if vad_samples.size else 0.0
 
             if frame_idx == 10:
                 logger.info(
                     "[rayme-call] vad.bufdiag session=%s buf_samples=%d "
                     "buf_rms=%.4f buf_peak=%.4f dur_ms=%d",
                     self.session_id,
-                    len(buffered_samples),
+                    len(vad_samples),
                     buf_rms,
                     buf_peak,
-                    int(len(buffered_samples) * 1000 / max(
+                    int(len(vad_samples) * 1000 / max(
                         getattr(adapter, "sampling_rate", 16000), 1
                     )),
                 )
 
-            vad_samples = self._recent_vad_samples(buffered_samples, adapter)
             timestamps = list(adapter.speech_timestamps(vad_samples))
             if frame_idx == 10:
                 logger.info(
@@ -5310,7 +5339,6 @@ class CallSession:
                         timestamps[0].get("start", "?"),
                         timestamps[0].get("end", "?"),
                     )
-            sampling_rate = int(getattr(adapter, "sampling_rate", 16000)) or 16000
             if timestamps:
                 self._speech_seen = True
                 if self._speech_start_frame is None:
@@ -5319,7 +5347,7 @@ class CallSession:
                 silence_samples = max(len(vad_samples) - last_end_sample, 0)
                 self._silence_ms = int(silence_samples * 1000 / sampling_rate)
             elif self._speech_seen:
-                self._silence_ms += frame_ms
+                self._silence_ms += analyzed_elapsed_ms
             if reconnect_diag_frame is not None:
                 last_end_sample = (
                     int(timestamps[-1].get("end", 0)) if timestamps else None
@@ -5348,10 +5376,6 @@ class CallSession:
 
             # Max turn duration safety net: force end if Silero keeps
             # classifying everything as continuous speech beyond the call cap.
-            max_turn_ms = self._call_max_turn_ms()
-            turn_duration_ms = frame_idx * frame_ms
-            forced_end = turn_duration_ms >= max_turn_ms
-
             silence_end = self._speech_seen and self._silence_ms >= end_silence_ms
             reconnect_grace = silence_end and self._in_media_reconnect_grace()
 
@@ -5401,25 +5425,40 @@ class CallSession:
             or (silence_end and not reconnect_grace),
         }
 
-    def _buffered_turn_samples(self) -> np.ndarray:
-        chunks: list[np.ndarray] = []
-        for frame in self._turn_frames:
-            if len(frame.pcm) < 2 or len(frame.pcm) % 2 != 0:
-                continue
-            samples = np.frombuffer(frame.pcm, dtype=np.int16).astype(np.float32)
-            chunks.append(samples / float(np.iinfo(np.int16).max))
-        if not chunks:
-            return np.asarray([], dtype=np.float32)
-        return np.concatenate(chunks).astype(np.float32, copy=False)
-
-    def _recent_vad_samples(self, samples: np.ndarray, adapter: Any) -> np.ndarray:
-        sampling_rate = int(getattr(adapter, "sampling_rate", 16000)) or 16000
+    def _vad_analysis_window_limit(self, sampling_rate: int) -> int:
         end_silence_ms = self._call_end_silence_ms()
         window_seconds = max(2.0, (end_silence_ms + 500) / 1000.0)
-        max_samples = max(int(sampling_rate * window_seconds), 1)
-        if len(samples) <= max_samples:
-            return samples
-        return samples[-max_samples:]
+        return max(int(sampling_rate * window_seconds), 1)
+
+    def _append_vad_analysis_samples(
+        self,
+        samples: np.ndarray,
+        *,
+        max_samples: int,
+    ) -> None:
+        if samples.size:
+            self._vad_recent_samples.append(samples.astype(np.float32, copy=False))
+            self._vad_recent_sample_count += len(samples)
+        while self._vad_recent_samples and self._vad_recent_sample_count > max_samples:
+            overflow = self._vad_recent_sample_count - max_samples
+            oldest = self._vad_recent_samples[0]
+            if len(oldest) <= overflow:
+                self._vad_recent_samples.popleft()
+                self._vad_recent_sample_count -= len(oldest)
+                continue
+            self._vad_recent_samples[0] = oldest[overflow:]
+            self._vad_recent_sample_count -= overflow
+
+    def _vad_analysis_samples(self) -> np.ndarray:
+        if not self._vad_recent_samples:
+            return np.asarray([], dtype=np.float32)
+        return np.concatenate(tuple(self._vad_recent_samples)).astype(np.float32, copy=False)
+
+    def _reset_vad_analysis_window(self) -> None:
+        self._vad_recent_samples.clear()
+        self._vad_recent_sample_count = 0
+        self._vad_analysis_elapsed_ms = 0
+        self._vad_analysis_has_run = False
 
     def _call_end_silence_ms(self) -> int:
         return int(
