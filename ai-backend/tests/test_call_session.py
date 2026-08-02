@@ -1833,6 +1833,139 @@ def test_failed_authoritative_stt_delivery_releases_thinking_ownership() -> None
     _run(scenario())
 
 
+def test_concurrent_turn_finalizers_share_one_stt_admission_and_outcome() -> None:
+    entered_stt = threading.Event()
+    release_stt = threading.Event()
+    events: list[dict[str, Any]] = []
+
+    class BlockingSttAdapter:
+        def __init__(self) -> None:
+            self.calls: list[list[bytes]] = []
+
+        def transcribe_pcm(
+            self,
+            pcm_frames: list[bytes],
+            **_kwargs: Any,
+        ) -> dict[str, Any]:
+            self.calls.append(list(pcm_frames))
+            entered_stt.set()
+            assert release_stt.wait(timeout=2.0)
+            return {
+                "status": "accepted",
+                "transcript": "one claimed turn",
+                "language": "en",
+            }
+
+    async def scenario() -> None:
+        stt = BlockingSttAdapter()
+        session, _ = _new_session(
+            vad_adapter=NeverEndingVadAdapter(),
+            stt_adapter=stt,
+            event_sink=events.append,
+        )
+        pcm = np.full(320, 1800, dtype=np.int16).tobytes()
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(pcm)
+        ) is None
+
+        owner = asyncio.create_task(session.finalize_user_turn())
+        assert await asyncio.to_thread(entered_stt.wait, 1.0)
+        joiner = asyncio.create_task(session.finalize_user_turn())
+        await asyncio.sleep(0)
+
+        assert len(session._stt_admissions) == 1
+        assert session._active_stt_finalization is not None
+        assert session._active_stt_finalization.admission.task is owner
+        assert joiner.done() is False
+
+        release_stt.set()
+        owner_result, joined_result = await asyncio.gather(owner, joiner)
+
+        assert joined_result == owner_result
+        assert owner_result is not None
+        assert owner_result["type"] == "user_final"
+        assert stt.calls == [[pcm]]
+        assert session._stt_admissions == {}
+        assert session._active_stt_finalization is None
+
+    _run(scenario())
+
+    assert [event["type"] for event in events] == ["state", "user_final"]
+
+
+def test_overlapping_live_and_reconnect_finalizers_join_one_stt_outcome() -> None:
+    events: list[dict[str, Any]] = []
+
+    class EndingVadAdapter:
+        def __init__(self) -> None:
+            self.frames: list[bytes] = []
+
+        def accept_audio_frame(self, pcm: bytes) -> dict[str, bool]:
+            self.frames.append(pcm)
+            return {"speech_detected": True, "end_of_turn": True}
+
+    async def scenario() -> None:
+        vad = EndingVadAdapter()
+        stt = ScriptedSttAdapter()
+        session, _ = _new_session(
+            vad_adapter=vad,
+            stt_adapter=stt,
+            event_sink=events.append,
+        )
+        live_pcm = np.full(320, 1800, dtype=np.int16).tobytes()
+        reconnect_pcm = np.full(320, 3200, dtype=np.int16).tobytes()
+        original_finalize = session.finalize_user_turn
+        arrivals = 0
+        both_finalizers_arrived = asyncio.Event()
+        release_finalizers = asyncio.Event()
+
+        async def overlap_finalize(
+            *,
+            backfill_admission: Any | None = None,
+        ) -> dict[str, Any] | None:
+            nonlocal arrivals
+            arrivals += 1
+            if arrivals == 2:
+                both_finalizers_arrived.set()
+            await release_finalizers.wait()
+            return await original_finalize(
+                backfill_admission=backfill_admission
+            )
+
+        session.finalize_user_turn = overlap_finalize
+        live = asyncio.create_task(
+            session.handle_inbound_audio_frame(
+                ScriptedInboundAudioFrame(live_pcm)
+            )
+        )
+        await asyncio.sleep(0)
+        reconnect = asyncio.create_task(
+            session.backfill_reconnect_audio(
+                pcm=reconnect_pcm,
+                sample_rate=16000,
+                channels=1,
+                backfill_id="overlapping-finalizer",
+                final=True,
+            )
+        )
+
+        await asyncio.wait_for(both_finalizers_arrived.wait(), timeout=1.0)
+        release_finalizers.set()
+        live_result, reconnect_result = await asyncio.gather(live, reconnect)
+
+        assert live_result is not None
+        assert live_result["type"] == "user_final"
+        assert reconnect_result["status"] == "accepted"
+        assert reconnect_result["event"] == live_result
+        assert stt.calls == [[live_pcm, reconnect_pcm]]
+        assert session._stt_admissions == {}
+        assert session._active_stt_finalization is None
+
+    _run(scenario())
+
+    assert [event["type"] for event in events] == ["state", "user_final"]
+
+
 @pytest.mark.parametrize(
     ("stt_outcome", "delivery_outcome"),
     [

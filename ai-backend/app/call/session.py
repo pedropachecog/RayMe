@@ -356,6 +356,18 @@ class _SttTurnAdmission:
 
 
 @dataclass
+class _SttFinalization:
+    """One atomic claim of the current microphone turn."""
+
+    admission: _SttTurnAdmission
+    frames: tuple[PcmAudioFrame, ...]
+    started_at: str
+    outcome: dict[str, Any] | None = None
+    error: BaseException | None = None
+    done: asyncio.Event = field(default_factory=asyncio.Event)
+
+
+@dataclass
 class _TtsSegmentLedgerEntry:
     segment_id: str
     ordinal: int
@@ -472,6 +484,7 @@ class CallSession:
         ] = {}
         self._stt_admission_generation = 0
         self._stt_admissions: dict[int, _SttTurnAdmission] = {}
+        self._active_stt_finalization: _SttFinalization | None = None
         self._reconnect_live_frame_hold_until = 0.0
         self._reconnect_live_frame_hold_logged = False
         self._reconnect_live_frame_hold_frames: list[PcmAudioFrame] = []
@@ -2118,32 +2131,49 @@ class CallSession:
         *,
         backfill_admission: _ReconnectBackfillAdmission | None = None,
     ) -> dict[str, Any] | None:
-        if not self._turn_frames:
-            return None
-
-        admission, stale_response = await self._admit_stt_turn(
-            allow_transport_reconnect=backfill_admission is not None
+        finalization, owns_finalization, stale_response = (
+            await self._claim_stt_finalization(
+                allow_transport_reconnect=backfill_admission is not None
+            )
         )
         if stale_response is not None:
             return stale_response
-        if admission is None:
-            raise RuntimeError("STT turn was admitted without lifecycle ownership")
+        if finalization is None:
+            return None
+        if not owns_finalization:
+            await asyncio.shield(finalization.done.wait())
+            if finalization.error is not None:
+                raise finalization.error
+            return finalization.outcome
+
+        admission = finalization.admission
+        outcome: dict[str, Any] | None = None
+        error: BaseException | None = None
         try:
-            return await self._finalize_user_turn_admitted(admission)
+            outcome = await self._finalize_user_turn_admitted(finalization)
+            return outcome
+        except BaseException as exc:
+            error = exc
+            raise
         finally:
             async with self._lifecycle_lock:
+                finalization.outcome = outcome
+                finalization.error = error
                 self._release_stt_admission_locked(admission)
+                if self._active_stt_finalization is finalization:
+                    self._active_stt_finalization = None
+                finalization.done.set()
 
     async def _finalize_user_turn_admitted(
         self,
-        admission: _SttTurnAdmission,
+        finalization: _SttFinalization,
     ) -> dict[str, Any] | None:
-        if not self._turn_frames:
-            return None
-
+        admission = finalization.admission
         turn_id = f"user-turn-{self._turn_index + 1}"
-        frames = self._trim_trailing_silence_for_stt(list(self._turn_frames))
-        started_at = self._turn_started_at or utc_timestamp()
+        frames = self._trim_trailing_silence_for_stt(
+            list(finalization.frames)
+        )
+        started_at = finalization.started_at
         ended_at = utc_timestamp()
         total_pcm_bytes = sum(len(f.pcm) for f in frames)
         audio_stats = self._turn_audio_stats(frames)
@@ -2161,20 +2191,10 @@ class CallSession:
                 audio_stats["peak"],
                 float(self.settings.call_min_turn_rms),
             )
-            self._turn_frames.clear()
-            self._turn_started_at = None
-            self._speech_seen = False
-            self._silence_ms = 0
-            self._speech_start_frame = None
-            self._media_reconnect_grace_audio_diag_count = 0
-            if self.ended_at is None:
-                self.state = "listening"
             return None
         self._turn_index += 1
         turn_id = f"user-turn-{self._turn_index}"
         if self.ended_at is None:
-            self.state = "understanding"
-            admission.state_ownership = "understanding"
             await self.emit_event(
                 simple_event("state", session_id=self.session_id, turn_id=turn_id, state="understanding")
             )
@@ -2189,12 +2209,6 @@ class CallSession:
             f"{audio_stats['peak']:.1f}" if audio_stats is not None else "unknown",
         )
         stt_started = time.perf_counter()
-        self._turn_frames.clear()
-        self._turn_started_at = None
-        self._speech_seen = False
-        self._silence_ms = 0
-        self._speech_start_frame = None
-        self._media_reconnect_grace_audio_diag_count = 0
 
         transcription: dict[str, Any] | None = None
         transcription_error: Exception | None = None
@@ -2291,28 +2305,53 @@ class CallSession:
             "text": event["text"],
         }
 
-    async def _admit_stt_turn(
+    async def _claim_stt_finalization(
         self,
         *,
         allow_transport_reconnect: bool,
-    ) -> tuple[_SttTurnAdmission | None, dict[str, Any] | None]:
+    ) -> tuple[
+        _SttFinalization | None,
+        bool,
+        dict[str, Any] | None,
+    ]:
         async with self._lifecycle_lock:
+            active = self._active_stt_finalization
+            if active is not None:
+                return active, False, None
+
             lifecycle = self._peer_lifecycle
             if (
                 self.ended_at is not None
                 or lifecycle.phase == "terminal"
                 or self.state in {"ended", "failed"}
             ):
-                return None, self._terminal_stt_response_locked()
+                return None, False, self._terminal_stt_response_locked()
+            if not self._turn_frames:
+                return None, False, None
+
             self._stt_admission_generation += 1
             admission = _SttTurnAdmission(
                 token=self._stt_admission_generation,
                 lifecycle_epoch=lifecycle.epoch,
                 allow_transport_reconnect=allow_transport_reconnect,
                 task=asyncio.current_task(),
+                state_ownership="understanding",
             )
+            finalization = _SttFinalization(
+                admission=admission,
+                frames=tuple(self._turn_frames),
+                started_at=self._turn_started_at or utc_timestamp(),
+            )
+            self._turn_frames.clear()
+            self._turn_started_at = None
+            self._speech_seen = False
+            self._silence_ms = 0
+            self._speech_start_frame = None
+            self._media_reconnect_grace_audio_diag_count = 0
+            self.state = "understanding"
             self._stt_admissions[admission.token] = admission
-            return admission, None
+            self._active_stt_finalization = finalization
+            return finalization, True, None
 
     async def _stale_stt_turn_response(
         self,
