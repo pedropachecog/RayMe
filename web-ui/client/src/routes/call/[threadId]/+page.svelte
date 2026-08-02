@@ -102,6 +102,12 @@
     readonly progress: ReconnectAudioBackfillProgress;
   }
 
+  interface BrowserMediaConnectionOwner {
+    readonly generationId: number;
+    readonly connection: RTCPeerConnection;
+    eventsChannel: RTCDataChannel;
+  }
+
   interface MuteRequestOwner {
     readonly requestId: number;
     readonly callId: string;
@@ -149,6 +155,8 @@
   let localMediaStream: MediaStream | null = null;
   let peerConnection: RTCPeerConnection | null = null;
   let eventsChannel: RTCDataChannel | null = null;
+  let browserMediaConnectionGeneration = 0;
+  let activeBrowserMediaConnection: BrowserMediaConnectionOwner | null = null;
   let mediaReconnectTimer = 0;
   let mediaReconnecting = false;
   let mediaReconnectAttempts = 0;
@@ -327,27 +335,51 @@
     }
 
     const previousConnection = peerConnection;
+    const previousConnectionOwner = activeBrowserMediaConnection;
     const previousEventsChannel = eventsChannel;
     const preserveExisting =
       options.preserveExistingUntilConnected === true && previousConnection !== null;
+
+    const connection = new RTCPeerConnection();
+    const candidateEventsChannel = connection.createDataChannel('rayme-events');
+    const connectionOwner: BrowserMediaConnectionOwner = {
+      generationId: ++browserMediaConnectionGeneration,
+      connection,
+      eventsChannel: candidateEventsChannel
+    };
+    peerConnection = connection;
+    activeBrowserMediaConnection = connectionOwner;
+    eventsChannel = candidateEventsChannel;
+    attachPeerConnectionDebug(connectionOwner, started.call_id);
+    attachCallEventChannel(
+      candidateEventsChannel,
+      connectionOwner,
+      started.call_id,
+      'browser-created'
+    );
     if (!preserveExisting) {
       previousConnection?.close();
     }
-
-    const connection = new RTCPeerConnection();
-    peerConnection = connection;
-    attachPeerConnectionDebug(connection, started.call_id);
-    const candidateEventsChannel = connection.createDataChannel('rayme-events');
-    eventsChannel = candidateEventsChannel;
-    attachCallEventChannel(candidateEventsChannel, started.call_id, 'browser-created');
     connection.ondatachannel = (event) => {
       emitDebugEvent(started.call_id, 'pc.ondatachannel', {
         label: event.channel.label,
-        readyState: event.channel.readyState
+        readyState: event.channel.readyState,
+        connectionGeneration: connectionOwner.generationId,
+        isCurrentPeer: ownsBrowserMediaConnection(connectionOwner)
       });
+      if (!ownsBrowserMediaConnection(connectionOwner)) {
+        event.channel.close();
+        return;
+      }
       if (event.channel.label === 'rayme-events') {
+        connectionOwner.eventsChannel = event.channel;
         eventsChannel = event.channel;
-        attachCallEventChannel(event.channel, started.call_id, 'remote-attached');
+        attachCallEventChannel(
+          event.channel,
+          connectionOwner,
+          started.call_id,
+          'remote-attached'
+        );
       }
     };
     connection.ontrack = (event) => {
@@ -355,8 +387,13 @@
         kind: event.track.kind,
         id: event.track.id,
         readyState: event.track.readyState,
-        streams: event.streams.length
+        streams: event.streams.length,
+        connectionGeneration: connectionOwner.generationId,
+        isCurrentPeer: ownsBrowserMediaConnection(connectionOwner)
       });
+      if (!ownsBrowserMediaConnection(connectionOwner)) {
+        return;
+      }
       const stream = event.streams[0] ?? new MediaStream([event.track]);
       attachRemoteAudio(stream, started.call_id);
     };
@@ -415,6 +452,9 @@
         if (peerConnection === connection) {
           peerConnection = previousConnection;
         }
+        if (activeBrowserMediaConnection === connectionOwner) {
+          activeBrowserMediaConnection = previousConnectionOwner;
+        }
         if (eventsChannel === candidateEventsChannel) {
           eventsChannel = previousEventsChannel;
         }
@@ -448,21 +488,41 @@
     }
   }
 
-  function attachPeerConnectionDebug(connection: RTCPeerConnection, debugCallId: string) {
+  function ownsBrowserMediaConnection(
+    owner: BrowserMediaConnectionOwner | null
+  ): owner is BrowserMediaConnectionOwner {
+    return Boolean(
+      owner &&
+      activeBrowserMediaConnection === owner &&
+      peerConnection === owner.connection
+    );
+  }
+
+  function attachPeerConnectionDebug(
+    owner: BrowserMediaConnectionOwner,
+    debugCallId: string
+  ) {
+    const { connection } = owner;
     connection.addEventListener('iceconnectionstatechange', () => {
       const iceConnectionState = connection.iceConnectionState;
       emitDebugEvent(debugCallId, 'pc.iceconnectionstatechange', {
-        iceConnectionState
+        iceConnectionState,
+        connectionGeneration: owner.generationId,
+        isCurrentPeer: ownsBrowserMediaConnection(owner)
       });
+      if (!ownsBrowserMediaConnection(owner)) {
+        emitMediaReconnectGuardSkip(owner, debugCallId, 'disconnected', 'recover', ['stale_peer']);
+        return;
+      }
       if (iceConnectionState === 'failed' || iceConnectionState === 'disconnected') {
         scheduleBrowserMediaReconnect(
-          connection,
+          owner,
           debugCallId,
           iceConnectionState === 'failed' ? 'failed' : 'disconnected'
         );
       }
       if ((iceConnectionState === 'connected' || iceConnectionState === 'completed') && isBrowserMediaConnected(connection)) {
-        clearMediaReconnectTimer();
+        clearMediaReconnectTimer(owner);
         mediaReconnectAttempts = 0;
         retireReconnectAudioBackfill(activeReconnectAudioBackfill);
         emitLocalMicReconnectDiagnostic(debugCallId, {
@@ -474,8 +534,14 @@
     });
     connection.addEventListener('connectionstatechange', () => {
       emitDebugEvent(debugCallId, 'pc.connectionstatechange', {
-        connectionState: connection.connectionState
+        connectionState: connection.connectionState,
+        connectionGeneration: owner.generationId,
+        isCurrentPeer: ownsBrowserMediaConnection(owner)
       });
+      if (!ownsBrowserMediaConnection(owner)) {
+        emitMediaReconnectGuardSkip(owner, debugCallId, 'failed', 'recover', ['stale_peer']);
+        return;
+      }
       if (connection.connectionState === 'failed' || connection.connectionState === 'disconnected') {
         emitDebugEvent(debugCallId, 'pc.connection.failed', {
           connectionState: connection.connectionState,
@@ -485,13 +551,13 @@
           speakingRms: speakingRms
         });
         scheduleBrowserMediaReconnect(
-          connection,
+          owner,
           debugCallId,
           connection.connectionState === 'failed' ? 'failed' : 'disconnected'
         );
       }
       if (connection.connectionState === 'connected' && isBrowserMediaConnected(connection)) {
-        clearMediaReconnectTimer();
+        clearMediaReconnectTimer(owner);
         mediaReconnectAttempts = 0;
         retireReconnectAudioBackfill(activeReconnectAudioBackfill);
         emitLocalMicReconnectDiagnostic(debugCallId, {
@@ -504,8 +570,15 @@
             emitDebugEvent(debugCallId, 'datachannel.recreate', {
               previousReadyState: eventsChannel.readyState
             });
-            eventsChannel = connection.createDataChannel('rayme-events');
-            attachCallEventChannel(eventsChannel, debugCallId, 'recreated');
+            const recreatedEventsChannel = connection.createDataChannel('rayme-events');
+            owner.eventsChannel = recreatedEventsChannel;
+            eventsChannel = recreatedEventsChannel;
+            attachCallEventChannel(
+              recreatedEventsChannel,
+              owner,
+              debugCallId,
+              'recreated'
+            );
           }
         } catch {
           // Ignore errors during recovery attempt
@@ -533,15 +606,16 @@
   }
 
   function scheduleBrowserMediaReconnect(
-    connection: RTCPeerConnection,
+    owner: BrowserMediaConnectionOwner,
     debugCallId: string,
     reason: MediaReconnectReason
   ) {
+    const { connection } = owner;
     const guardSkips: string[] = [];
     if (mediaReconnecting) {
       guardSkips.push('already_reconnecting');
     }
-    if (connection !== peerConnection) {
+    if (!ownsBrowserMediaConnection(owner)) {
       guardSkips.push('stale_peer');
     }
     if (!callId) {
@@ -558,12 +632,12 @@
     }
 
     if (guardSkips.length > 0) {
-      emitMediaReconnectGuardSkip(connection, debugCallId, reason, 'schedule', guardSkips);
+      emitMediaReconnectGuardSkip(owner, debugCallId, reason, 'schedule', guardSkips);
       return;
     }
     if (mediaReconnectTimer) {
       if (reason === 'failed') {
-        clearMediaReconnectTimer();
+        clearMediaReconnectTimer(owner);
         emitDebugEvent(debugCallId, 'pc.media_reconnect.upgrade', {
           reason,
           attempts: mediaReconnectAttempts,
@@ -571,7 +645,7 @@
           iceConnectionState: connection.iceConnectionState
         });
       } else {
-        emitMediaReconnectGuardSkip(connection, debugCallId, reason, 'schedule', ['timer_pending']);
+        emitMediaReconnectGuardSkip(owner, debugCallId, reason, 'schedule', ['timer_pending']);
         return;
       }
     }
@@ -598,7 +672,10 @@
       attempts: mediaReconnectAttempts
     });
     startLocalMicReconnectDiagnostics(debugCallId, reason);
-    mediaReconnectTimer = window.setTimeout(() => {
+    const timerId = window.setTimeout(() => {
+      if (!ownsBrowserMediaConnection(owner) || mediaReconnectTimer !== timerId) {
+        return;
+      }
       mediaReconnectTimer = 0;
       if (isBrowserMediaConnected(connection)) {
         retireReconnectAudioBackfill(activeReconnectAudioBackfill);
@@ -609,20 +686,22 @@
         });
         return;
       }
-      void reconnectBrowserMedia(connection, debugCallId, reason);
+      void reconnectBrowserMedia(owner, debugCallId, reason);
     }, delayMs);
+    mediaReconnectTimer = timerId;
   }
 
   async function reconnectBrowserMedia(
-    failedConnection: RTCPeerConnection,
+    failedOwner: BrowserMediaConnectionOwner,
     debugCallId: string,
     reason: MediaReconnectReason
   ) {
+    const failedConnection = failedOwner.connection;
     const guardSkips: string[] = [];
     if (mediaReconnecting) {
       guardSkips.push('already_reconnecting');
     }
-    if (failedConnection !== peerConnection) {
+    if (!ownsBrowserMediaConnection(failedOwner)) {
       guardSkips.push('stale_peer');
     }
     if (!localMediaStream) {
@@ -638,7 +717,7 @@
       guardSkips.push(`terminal_state_${callState}`);
     }
     if (guardSkips.length > 0) {
-      emitMediaReconnectGuardSkip(failedConnection, debugCallId, reason, 'start', guardSkips);
+      emitMediaReconnectGuardSkip(failedOwner, debugCallId, reason, 'start', guardSkips);
       return;
     }
 
@@ -702,7 +781,12 @@
       if (mediaReconnectAttempts >= MEDIA_RECONNECT_MAX_ATTEMPTS) {
         await failTerminalMediaReconnect(debugCallId, 'media_reconnect_failed');
       } else {
-        scheduleBrowserMediaReconnectRetry(debugCallId, reason, reconnectAttempt);
+        scheduleBrowserMediaReconnectRetry(
+          activeBrowserMediaConnection,
+          debugCallId,
+          reason,
+          reconnectAttempt
+        );
       }
     } finally {
       mediaReconnecting = false;
@@ -710,10 +794,19 @@
   }
 
   function scheduleBrowserMediaReconnectRetry(
+    owner: BrowserMediaConnectionOwner | null,
     debugCallId: string,
     reason: MediaReconnectReason,
     failedAttempt: number
   ) {
+    if (!ownsBrowserMediaConnection(owner)) {
+      emitDebugEvent(debugCallId, 'pc.media_reconnect.retry_skip', {
+        reason,
+        failedAttempt,
+        causes: ['stale_peer']
+      });
+      return;
+    }
     if (mediaReconnectTimer) {
       emitDebugEvent(debugCallId, 'pc.media_reconnect.retry_skip', {
         reason,
@@ -728,13 +821,13 @@
       delayMs: MEDIA_RECONNECT_RETRY_DELAY_MS,
       attempts: mediaReconnectAttempts
     });
-    mediaReconnectTimer = window.setTimeout(() => {
-      mediaReconnectTimer = 0;
-      const connection = peerConnection;
-      const guardSkips: string[] = [];
-      if (!connection) {
-        guardSkips.push('missing_peer');
+    const timerId = window.setTimeout(() => {
+      if (!ownsBrowserMediaConnection(owner) || mediaReconnectTimer !== timerId) {
+        return;
       }
+      mediaReconnectTimer = 0;
+      const { connection } = owner;
+      const guardSkips: string[] = [];
       if (!localMediaStream) {
         guardSkips.push('missing_local_media');
       }
@@ -747,7 +840,7 @@
       if (callState === 'ended' || callState === 'failed') {
         guardSkips.push(`terminal_state_${callState}`);
       }
-      if (guardSkips.length > 0 || !connection) {
+      if (guardSkips.length > 0) {
         emitDebugEvent(debugCallId, 'pc.media_reconnect.retry_skip', {
           reason,
           failedAttempt,
@@ -764,8 +857,9 @@
         });
         return;
       }
-      void reconnectBrowserMedia(connection, debugCallId, reason);
+      void reconnectBrowserMedia(owner, debugCallId, reason);
     }, MEDIA_RECONNECT_RETRY_DELAY_MS);
+    mediaReconnectTimer = timerId;
   }
 
   async function failTerminalMediaReconnect(debugCallId: string, reason: string) {
@@ -878,7 +972,10 @@
     }
   }
 
-  function clearMediaReconnectTimer() {
+  function clearMediaReconnectTimer(owner: BrowserMediaConnectionOwner | null = null) {
+    if (owner && !ownsBrowserMediaConnection(owner)) {
+      return;
+    }
     if (mediaReconnectTimer) {
       window.clearTimeout(mediaReconnectTimer);
       mediaReconnectTimer = 0;
@@ -893,12 +990,13 @@
   }
 
   function emitMediaReconnectGuardSkip(
-    connection: RTCPeerConnection,
+    owner: BrowserMediaConnectionOwner,
     debugCallId: string,
     reason: MediaReconnectReason,
-    phase: 'schedule' | 'start',
+    phase: 'schedule' | 'start' | 'recover',
     guardSkips: string[]
   ) {
+    const { connection } = owner;
     emitDebugEvent(debugCallId, 'pc.media_reconnect.guard_skip', {
       reason,
       phase,
@@ -909,7 +1007,8 @@
       callState,
       connectionState: connection.connectionState,
       iceConnectionState: connection.iceConnectionState,
-      isCurrentPeer: connection === peerConnection,
+      connectionGeneration: owner.generationId,
+      isCurrentPeer: ownsBrowserMediaConnection(owner),
       hasCallId: Boolean(callId),
       hasSessionId: Boolean(sessionId),
       hasLocalMedia: Boolean(localMediaStream)
@@ -1374,18 +1473,33 @@
         name: (error as Error)?.name ?? 'unknown',
         message: (error as Error)?.message ?? ''
       });
-      await recoverMissedCallEvents(debugCallId, 'reconnect_backfill_failed');
+      await recoverMissedCallEvents(
+        debugCallId,
+        'reconnect_backfill_failed',
+        generation
+      );
       if (!ownsReconnectAudioBackfill(generation)) {
         return;
       }
-      queueMissedCallEventsRecovery(debugCallId, 'reconnect_backfill_failed_retry');
+      queueMissedCallEventsRecovery(
+        debugCallId,
+        'reconnect_backfill_failed_retry',
+        generation
+      );
       if (final) {
         finishReconnectBackfillFinalResponse(generation, false);
       }
     }
   }
 
-  async function recoverMissedCallEvents(debugCallId: string, reason: string) {
+  async function recoverMissedCallEvents(
+    debugCallId: string,
+    reason: string,
+    generation: ReconnectAudioBackfillGeneration | null = null
+  ) {
+    if (generation && !ownsReconnectAudioBackfill(generation)) {
+      return;
+    }
     if (!callId || !sessionId) {
       return;
     }
@@ -1396,6 +1510,9 @@
         events: response.events.length
       });
       for (const event of response.events) {
+        if (generation && !ownsReconnectAudioBackfill(generation)) {
+          return;
+        }
         await handleCallDataEvent(event);
       }
     } catch (error) {
@@ -1407,9 +1524,16 @@
     }
   }
 
-  function queueMissedCallEventsRecovery(debugCallId: string, reason: string) {
+  function queueMissedCallEventsRecovery(
+    debugCallId: string,
+    reason: string,
+    generation: ReconnectAudioBackfillGeneration | null = null
+  ) {
     const timer = window.setTimeout(() => {
-      void recoverMissedCallEvents(debugCallId, reason);
+      if (generation && !ownsReconnectAudioBackfill(generation)) {
+        return;
+      }
+      void recoverMissedCallEvents(debugCallId, reason, generation);
     }, MISSED_CALL_EVENTS_RECOVERY_RETRY_MS);
     timers = [...timers, timer];
   }
@@ -1576,25 +1700,39 @@
     }
   }
 
-  function attachCallEventChannel(channel: RTCDataChannel, debugCallId = '', source = 'unknown') {
+  function attachCallEventChannel(
+    channel: RTCDataChannel,
+    owner: BrowserMediaConnectionOwner,
+    debugCallId = '',
+    source = 'unknown'
+  ) {
     emitDebugEvent(debugCallId, 'datachannel.attach', {
       label: channel.label,
       readyState: channel.readyState,
       source
     });
     channel.onopen = () => {
+      if (!ownsBrowserMediaConnection(owner) || owner.eventsChannel !== channel) {
+        return;
+      }
       emitDebugEvent(debugCallId, 'datachannel.open', {
         label: channel.label,
         source
       });
     };
     channel.onclose = () => {
+      if (!ownsBrowserMediaConnection(owner) || owner.eventsChannel !== channel) {
+        return;
+      }
       emitDebugEvent(debugCallId, 'datachannel.close', {
         label: channel.label,
         source
       });
     };
     channel.onerror = (event) => {
+      if (!ownsBrowserMediaConnection(owner) || owner.eventsChannel !== channel) {
+        return;
+      }
       const error = (event as RTCErrorEvent).error;
       emitDebugEvent(debugCallId, 'datachannel.error', {
         label: channel.label,
@@ -1604,6 +1742,9 @@
       });
     };
     channel.onmessage = (message) => {
+      if (!ownsBrowserMediaConnection(owner) || owner.eventsChannel !== channel) {
+        return;
+      }
       const event = parseCallDataEvent(message.data);
       emitDebugEvent(debugCallId, 'datachannel.message', {
         label: channel.label,
@@ -3058,10 +3199,13 @@
     detachRemoteAudio();
     remoteAudioContext?.close().catch(() => undefined);
     remoteAudioContext = null;
-    eventsChannel?.close?.();
+    const closingEventsChannel = eventsChannel;
+    const closingPeerConnection = peerConnection;
+    activeBrowserMediaConnection = null;
     eventsChannel = null;
-    peerConnection?.close?.();
     peerConnection = null;
+    closingEventsChannel?.close?.();
+    closingPeerConnection?.close?.();
     localMediaStream?.getTracks().forEach((track) => track.stop());
     localMediaStream = null;
   }

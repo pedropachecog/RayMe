@@ -413,6 +413,45 @@ test('retired reconnect generation cannot resume after mute and a newer reconnec
   assertNoBrowserErrors();
 });
 
+test('ignores recovery callbacks from the old peer while its replacement owns reconnect', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  let releaseBackfill: () => void = () => {};
+  const backfillGate = new Promise<void>((resolve) => {
+    releaseBackfill = resolve;
+  });
+  await installMockCallMedia(page, { controllablePcm: true });
+  const counters = await installReconnectCallRoutes(page, {
+    firstBackfillGate: backfillGate
+  });
+
+  await startReconnectCall(page, counters);
+  await emitMockPcm(page, 1111, 400_000);
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await expect.poll(() => counters.offerCount).toBe(2);
+  await expect.poll(() => counters.backfillCount).toBe(1);
+  await expect(page.getByTestId('voice-visualizer').getByText('Understanding')).toBeVisible();
+
+  await setMockPeerState(page, 0, 'connected', 'connected');
+  await page.waitForTimeout(100);
+
+  await expect(page.getByTestId('voice-visualizer').getByText('Understanding')).toBeVisible();
+  expect(
+    counters.debugEvents.some(
+      (entry) =>
+        entry.event === 'pc.media_reconnect.guard_skip' &&
+        entry.detail.phase === 'recover' &&
+        entry.detail.isCurrentPeer === false
+    )
+  ).toBe(true);
+  expect(debugEventCount(counters, 'datachannel.recreate')).toBe(0);
+
+  releaseBackfill();
+  await expect.poll(() => debugEventCount(counters, 'pc.media_reconnect.ok')).toBe(1);
+  assertNoBrowserErrors();
+});
+
 test('serializes delayed double-click mute so responses cannot reverse or backfill pending audio', async ({
   page
 }) => {
@@ -978,8 +1017,17 @@ async function setCurrentMockPeerState(
   connectionState: RTCPeerConnectionState,
   iceConnectionState: RTCIceConnectionState = connectionState as RTCIceConnectionState
 ) {
+  await setMockPeerState(page, -1, connectionState, iceConnectionState);
+}
+
+async function setMockPeerState(
+  page: Page,
+  peerIndex: number,
+  connectionState: RTCPeerConnectionState,
+  iceConnectionState: RTCIceConnectionState = connectionState as RTCIceConnectionState
+) {
   await page.evaluate(
-    ({ connectionState, iceConnectionState }) => {
+    ({ peerIndex, connectionState, iceConnectionState }) => {
       const target = window as Window & {
         __raymeMockPeerConnections?: Array<{
           setMockConnectionState: (
@@ -988,13 +1036,13 @@ async function setCurrentMockPeerState(
           ) => void;
         }>;
       };
-      const peer = target.__raymeMockPeerConnections?.at(-1);
+      const peer = target.__raymeMockPeerConnections?.at(peerIndex);
       if (!peer) {
         throw new Error('No mock peer connection is available');
       }
       peer.setMockConnectionState(connectionState, iceConnectionState);
     },
-    { connectionState, iceConnectionState }
+    { peerIndex, connectionState, iceConnectionState }
   );
 }
 
