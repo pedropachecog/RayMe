@@ -1586,6 +1586,21 @@ class CallSession:
                     backfill_id
                 )
                 if reserved_audio_epoch is None:
+                    if audio_input_epoch is None and current_audio_epoch > 0:
+                        logger.info(
+                            "[rayme-call] reconnect_audio.backfill.identity_epoch_required "
+                            "session=%s backfill_id=%s current_epoch=%d",
+                            self.session_id,
+                            backfill_id,
+                            current_audio_epoch,
+                        )
+                        return {
+                            "status": "skipped",
+                            "frames": 0,
+                            "duration_ms": 0,
+                            "state": self.state,
+                            "reason": "audio_input_epoch_required",
+                        }
                     reserved_audio_epoch = (
                         current_audio_epoch
                         if audio_input_epoch is None

@@ -2549,6 +2549,18 @@ def test_retry_before_stale_backfill_uses_reserved_pre_mute_epoch() -> None:
         }
         assert vad.frames == []
 
+        retry_without_epoch = await session.backfill_reconnect_audio(
+            pcm=pre_mute_pcm,
+            backfill_id="retry-before-stale-original",
+            attempt=3,
+            final=True,
+        )
+        assert retry_without_epoch["status"] == "skipped"
+        assert session._reconnect_audio_backfill_epochs == {
+            "retry-before-stale-original": 0
+        }
+        assert vad.frames == []
+
         release_first.set()
         stale_original = await asyncio.wait_for(original, timeout=1.0)
         assert stale_original["status"] == "skipped"
@@ -2565,6 +2577,19 @@ def test_retry_before_stale_backfill_uses_reserved_pre_mute_epoch() -> None:
             "state": "listening",
             "reason": "audio_input_epoch_required",
         }
+        unidentified_epochless = await session.backfill_reconnect_audio(
+            pcm=pre_mute_pcm,
+            backfill_id="unseen-after-mute",
+            final=True,
+        )
+        assert unidentified_epochless == {
+            "status": "skipped",
+            "frames": 0,
+            "duration_ms": 0,
+            "state": "listening",
+            "reason": "audio_input_epoch_required",
+        }
+        assert "unseen-after-mute" not in session._reconnect_audio_backfill_epochs
         stale_anonymous = await session.backfill_reconnect_audio(
             pcm=pre_mute_pcm,
             audio_input_epoch=0,

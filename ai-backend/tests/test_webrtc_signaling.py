@@ -2723,12 +2723,25 @@ def test_webrtc_reconnect_audio_requires_anonymous_epoch_after_mute(
             "audio_input_epoch": 0,
         },
     )
+    unseen_identity = client.post(
+        route,
+        json={
+            "pcm_b64": base64.b64encode(pcm).decode("ascii"),
+            "sample_rate": 16000,
+            "channels": 1,
+            "backfill_id": "unseen-after-mute",
+        },
+    )
 
     assert missing_epoch.status_code == 200
     assert missing_epoch.json()["status"] == "skipped"
     assert missing_epoch.json()["reason"] == "audio_input_epoch_required"
     assert stale_epoch.status_code == 200
     assert stale_epoch.json()["status"] == "skipped"
+    assert unseen_identity.status_code == 200
+    assert unseen_identity.json()["status"] == "skipped"
+    assert unseen_identity.json()["reason"] == "audio_input_epoch_required"
+    assert "unseen-after-mute" not in session._reconnect_audio_backfill_epochs
     assert session._turn_frames == []
 
 
