@@ -69,9 +69,6 @@ CALL_RECONNECT_BACKFILL_MIN_OVERLAP_FRAMES = 25
 CALL_RECONNECT_BACKFILL_OVERLAP_CORRELATION = 0.92
 CALL_RECONNECT_BACKFILL_OVERLAP_MEAN_RATIO = 0.60
 CALL_STT_TRAILING_SILENCE_KEEP_MS = 400
-CALL_BARGE_IN_MIN_SPEECH_MS = 120
-CALL_BARGE_IN_MAX_ONSET_BUFFER_MS = 1000
-CALL_BARGE_IN_MIN_RMS = 200.0
 CALL_VAD_ANALYSIS_INTERVAL_MS = 100
 CALL_RECOVERABLE_EVENT_TYPES = {"user_final", "failed"}
 CALL_ENDED_EVENT_RECOVERY_GRACE_SECONDS = 60.0
@@ -461,14 +458,6 @@ class CallSession:
         self._vad_recent_sample_count = 0
         self._vad_analysis_elapsed_ms = 0
         self._vad_analysis_has_run = False
-        self._barge_in_frames: list[PcmAudioFrame] = []
-        self._barge_in_buffered_ms = 0
-        self._barge_in_speech_ms = 0
-        self._barge_in_speech_start_index: int | None = None
-        self._barge_in_speech_started_at: str | None = None
-        self._barge_in_energy_start_index: int | None = None
-        self._barge_in_energy_started_at: str | None = None
-        self._barge_in_interrupting = False
         self._cancelled_ai_turns: set[str] = set()
         self._cancelling_ai_turns: set[str] = set()
         self._active_tts_adapter: Any | None = None
@@ -2102,209 +2091,6 @@ class CallSession:
             self._speech_seen = True
         return vad_result
 
-    async def _handle_speaking_audio_frame(
-        self,
-        frame: PcmAudioFrame,
-    ) -> dict[str, Any] | None:
-        if self._barge_in_interrupting:
-            self._preserve_barge_in_turn_frame(frame)
-            return None
-
-        # Browser capture keeps WebRTC echo cancellation/noise suppression on;
-        # this server-side gate additionally requires sustained VAD-positive,
-        # sufficiently energetic PCM before it can interrupt assistant playout.
-        self._append_barge_in_onset_frame(frame)
-        rms, _ = self._pcm_frame_rms_peak(frame)
-        energetic = rms >= max(
-            CALL_BARGE_IN_MIN_RMS,
-            float(self.settings.call_min_turn_rms),
-        )
-        if energetic:
-            if self._barge_in_energy_start_index is None:
-                self._barge_in_energy_start_index = len(self._barge_in_frames) - 1
-                self._barge_in_energy_started_at = utc_timestamp()
-        else:
-            self._barge_in_energy_start_index = None
-            self._barge_in_energy_started_at = None
-        speech_now, detected_start_index = self._detect_barge_in_speech(frame)
-        frame_ms = self._pcm_frame_duration_ms(frame)
-        if speech_now:
-            if self._barge_in_energy_start_index is not None:
-                detected_start_index = max(
-                    detected_start_index or 0,
-                    self._barge_in_energy_start_index,
-                )
-            if self._barge_in_speech_ms <= 0:
-                self._barge_in_speech_start_index = (
-                    detected_start_index
-                    if detected_start_index is not None
-                    else len(self._barge_in_frames) - 1
-                )
-                self._barge_in_speech_started_at = (
-                    self._barge_in_energy_started_at or utc_timestamp()
-                )
-            elif detected_start_index is not None:
-                current_start = self._barge_in_speech_start_index
-                self._barge_in_speech_start_index = (
-                    detected_start_index
-                    if current_start is None
-                    else min(current_start, detected_start_index)
-                )
-            self._barge_in_speech_ms += frame_ms
-        else:
-            self._barge_in_speech_ms = 0
-            self._barge_in_speech_start_index = None
-            self._barge_in_speech_started_at = None
-            return None
-
-        if self._barge_in_speech_ms < CALL_BARGE_IN_MIN_SPEECH_MS:
-            return None
-
-        onset_index = self._barge_in_speech_start_index
-        if onset_index is None:
-            onset_index = max(len(self._barge_in_frames) - 1, 0)
-        # Keep one frame of preroll, but exclude older playback echo/noise from
-        # the next STT turn. The candidate buffer itself is explicitly bounded.
-        onset_index = max(onset_index - 1, 0)
-        onset_frames = list(self._barge_in_frames[onset_index:])
-        onset_started_at = self._barge_in_speech_started_at
-        self._reset_barge_in_onset()
-        self._begin_barge_in_turn(onset_frames, started_at=onset_started_at)
-
-        logger.info(
-            "[rayme-call] vad.barge_in session=%s onset_frames=%d onset_ms=%d",
-            self.session_id,
-            len(onset_frames),
-            sum(self._pcm_frame_duration_ms(item) for item in onset_frames),
-        )
-        self._barge_in_interrupting = True
-        try:
-            return await self.interrupt(cause="vad_barge_in")
-        finally:
-            self._barge_in_interrupting = False
-
-    def _append_barge_in_onset_frame(self, frame: PcmAudioFrame) -> None:
-        self._barge_in_frames.append(frame)
-        self._barge_in_buffered_ms += self._pcm_frame_duration_ms(frame)
-        while (
-            self._barge_in_buffered_ms > CALL_BARGE_IN_MAX_ONSET_BUFFER_MS
-            and len(self._barge_in_frames) > 1
-        ):
-            removed = self._barge_in_frames.pop(0)
-            self._barge_in_buffered_ms -= self._pcm_frame_duration_ms(removed)
-            if self._barge_in_speech_start_index is not None:
-                self._barge_in_speech_start_index = max(
-                    self._barge_in_speech_start_index - 1,
-                    0,
-                )
-            if self._barge_in_energy_start_index is not None:
-                self._barge_in_energy_start_index = max(
-                    self._barge_in_energy_start_index - 1,
-                    0,
-                )
-
-    def _detect_barge_in_speech(
-        self,
-        frame: PcmAudioFrame,
-    ) -> tuple[bool, int | None]:
-        rms, _ = self._pcm_frame_rms_peak(frame)
-        if rms < max(CALL_BARGE_IN_MIN_RMS, float(self.settings.call_min_turn_rms)):
-            return False, None
-
-        adapter = self.vad_adapter
-        if adapter is not None and hasattr(adapter, "accept_audio_frame"):
-            result = dict(adapter.accept_audio_frame(frame.pcm))
-            return bool(result.get("speech_detected", False)), None
-
-        if adapter is not None and hasattr(adapter, "speech_timestamps"):
-            samples = self._pcm_frames_as_float32(self._barge_in_frames)
-            timestamps = list(adapter.speech_timestamps(samples))
-            if not timestamps:
-                return False, None
-            latest = timestamps[-1]
-            frame_samples = max(len(frame.pcm) // 2, 1)
-            latest_end = int(latest.get("end", 0))
-            speech_reaches_current_frame = latest_end >= max(
-                len(samples) - frame_samples,
-                0,
-            )
-            if not speech_reaches_current_frame:
-                return False, None
-            speech_start_sample = max(int(latest.get("start", 0)), 0)
-            return True, self._frame_index_for_sample_offset(
-                self._barge_in_frames,
-                speech_start_sample,
-            )
-
-        energy_threshold = max(
-            CALL_BARGE_IN_MIN_RMS,
-            float(self.settings.vad_threshold) * 1000.0,
-        )
-        return rms >= energy_threshold, None
-
-    def _begin_barge_in_turn(
-        self,
-        frames: list[PcmAudioFrame],
-        *,
-        started_at: str | None,
-    ) -> None:
-        if not frames:
-            return
-        self._turn_frames.extend(frames)
-        if self._turn_started_at is None:
-            self._turn_started_at = started_at or utc_timestamp()
-        self._speech_seen = True
-        self._silence_ms = 0
-        if self._speech_start_frame is None:
-            self._speech_start_frame = max(len(self._turn_frames) - len(frames) + 1, 1)
-
-    def _preserve_barge_in_turn_frame(self, frame: PcmAudioFrame) -> None:
-        self._turn_frames.append(frame)
-        if self._turn_started_at is None:
-            self._turn_started_at = utc_timestamp()
-        rms, _ = self._pcm_frame_rms_peak(frame)
-        if rms >= max(CALL_BARGE_IN_MIN_RMS, float(self.settings.call_min_turn_rms)):
-            self._speech_seen = True
-            self._silence_ms = 0
-
-    def _reset_barge_in_onset(self) -> None:
-        self._barge_in_frames.clear()
-        self._barge_in_buffered_ms = 0
-        self._barge_in_speech_ms = 0
-        self._barge_in_speech_start_index = None
-        self._barge_in_speech_started_at = None
-        self._barge_in_energy_start_index = None
-        self._barge_in_energy_started_at = None
-
-    @staticmethod
-    def _pcm_frame_duration_ms(frame: PcmAudioFrame) -> int:
-        sample_count = len(frame.pcm) // 2
-        return max(int(sample_count * 1000 / max(frame.sample_rate, 1)), 1)
-
-    @staticmethod
-    def _pcm_frames_as_float32(frames: list[PcmAudioFrame]) -> np.ndarray:
-        chunks = [
-            np.frombuffer(frame.pcm, dtype=np.int16).astype(np.float32)
-            / float(np.iinfo(np.int16).max)
-            for frame in frames
-            if len(frame.pcm) >= 2 and len(frame.pcm) % 2 == 0
-        ]
-        if not chunks:
-            return np.asarray([], dtype=np.float32)
-        return np.concatenate(chunks).astype(np.float32, copy=False)
-
-    @staticmethod
-    def _frame_index_for_sample_offset(
-        frames: list[PcmAudioFrame],
-        sample_offset: int,
-    ) -> int:
-        consumed = 0
-        for index, frame in enumerate(frames):
-            consumed += len(frame.pcm) // 2
-            if sample_offset < consumed:
-                return index
-        return max(len(frames) - 1, 0)
-
     def _release_reconnect_live_frames_if_expired(self) -> None:
         until = self._reconnect_live_frame_hold_until
         if until <= 0:
@@ -2978,7 +2764,6 @@ class CallSession:
             self.muted = muted
             self._mute_revision += 1
             if muted:
-                self._reset_barge_in_onset()
                 if mute_transition:
                     self._audio_input_epoch += 1
                     self._discard_reconnect_live_frames(
@@ -3304,7 +3089,6 @@ class CallSession:
                     preroll_seconds=CALL_TTS_AUDIO_PREROLL_SECONDS,
                 )
                 first_chunk_enqueued_ms = round((time.perf_counter() - generation_started) * 1000, 1)
-                self._reset_barge_in_onset()
                 self.state = "speaking"
                 ai_audio_started_ms = round((time.perf_counter() - generation_started) * 1000, 1)
                 audio_started_event = simple_event(
@@ -3916,7 +3700,6 @@ class CallSession:
                     return
 
             first_chunk_enqueued_ms = elapsed_ms()
-            self._reset_barge_in_onset()
             self.state = "speaking"
             ai_audio_started_ms = elapsed_ms()
             buffered_audio_ms = round(

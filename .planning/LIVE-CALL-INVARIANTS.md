@@ -16,6 +16,10 @@ VAD, WebRTC, reconnect, and call UI change must preserve that product shape.
   dead call surface. Automatic spoken barge-in is deliberately deferred: while
   assistant playback is active, inbound microphone frames must not invoke VAD,
   interrupt playback, or start a replacement user turn.
+- The explicit Interrupt button remains supported. Automatic microphone/VAD
+  barge-in may be considered only in an unexecuted Phase 4 after fresh,
+  explicit product-owner authorization during that phase's discussion; no
+  roadmap wording, test, or implementation may reactivate it before then.
 - Immediate first-audio metrics and final playback metrics must stay separate.
   First-audio evidence cannot stand in for smooth-playback evidence.
 

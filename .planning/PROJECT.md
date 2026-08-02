@@ -2,11 +2,11 @@
 
 ## What This Is
 
-RayMe is a self-hosted web app that lets you have AI conversations that feel like real phone calls. You create or import characters (SillyTavern v2/v3 cards), clone voices from short audio samples with F5-TTS or XTTS v2, and then call them — with full-duplex audio, barge-in, and live bidirectional captions. Every chat thread holds both typed messages and call transcripts, so you can seamlessly switch between texting and calling the same character.
+RayMe is a self-hosted web app that lets you have AI conversations that feel like real phone calls. You create or import characters (SillyTavern v2/v3 cards), clone voices from short audio samples with F5-TTS or XTTS v2, and then call them — with full-duplex audio, an explicit Interrupt control, and live bidirectional captions. Automatic microphone/VAD barge-in is deferred/disabled. Every chat thread holds both typed messages and call transcripts, so you can seamlessly switch between texting and calling the same character.
 
 ## Core Value
 
-It must feel like an actual phone call with an AI — low-latency full-duplex audio with real barge-in, not a chatbot with audio bolted on. Everything else (voice fidelity, character depth, UI polish) is secondary to call feel.
+It must feel like an actual phone call with an AI — low-latency full-duplex audio and reliable explicit interruption, not a chatbot with audio bolted on. Everything else (voice fidelity, character depth, UI polish) is secondary to call feel.
 
 Live calls must remain live. A fix that waits for the full assistant response
 or full TTS generation before first playback is not an acceptable phone-call
@@ -28,7 +28,7 @@ fix; it turns RayMe into generated-audio playback and violates the core value.
 - [ ] No authentication — LAN-level trust is sufficient
 - [ ] English-only system in v1 (Spanish-accented English speakers still supported)
 - [ ] A "chat" thread holds typed messages AND call transcripts interleaved
-- [ ] Calls run full-duplex with barge-in via VAD
+- [ ] Calls run full-duplex; automatic microphone/VAD barge-in is deferred/disabled while the explicit Interrupt button remains supported
 - [ ] Live-call TTS begins playback before full TTS stream completion; bounded
       jitter/startup buffering is allowed, full-response generate-then-play is
       not
@@ -83,7 +83,8 @@ fix; it turns RayMe into generated-audio playback and violates the core value.
 - **Latency**: End-to-end turn latency (user stops speaking → AI starts speaking) must be low enough to feel like a phone call — the entire stack is budgeted against this.
 - **TTS chunking**: Long-form TTS must be segmented by a shared planner that respects model-specific token/character limits, prefers natural sentence boundaries, avoids tiny fragments, and measures first-chunk latency, total stitched playback time, and inter-chunk gaps.
 - **Live-call streaming**: Live-call TTS/STT/WebRTC fixes must preserve early
-  playback, listening recovery, and interrupt/barge-in. Do not trade call feel
+  playback, listening recovery, and explicit interruption. Automatic
+  microphone/VAD barge-in is deferred/disabled; do not trade call feel
   for full-response buffering.
 - **Topology**: Three endpoints (Web UI, AI backend, LLM) must be independently configurable and connectable over LAN. No assumption that they share a host.
 - **LLM contract**: The LLM must be reachable via an OpenAI-compatible Chat Completions API (streaming).
@@ -100,7 +101,7 @@ fix; it turns RayMe into generated-audio playback and violates the core value.
 |----------|-----------|---------|
 | Core value is "call feel" over voice/character quality | The phone-call experience is the differentiator; everything else is table stakes | — Pending |
 | Three independent services: Web UI, AI backend, LLM | Enables running the GPU box on LAN while the LLM can be OpenAI API or a separate local server | — Pending |
-| Full barge-in via VAD, not turn-taking or push-to-talk | Required to feel like a real call | — Pending |
+| Automatic microphone/VAD barge-in deferred; explicit Interrupt button remains supported | Reconsider only with fresh product-owner authorization in an unexecuted Phase 4 discussion | 2026-08-02 |
 | Per-chat voice choice (character has a default, overridable per chat) | Lets the same character sound different across chats without duplicating characters | — Pending |
 | Sliding-window memory for call context | Simpler than summarization; adequate for v1 and avoids extra LLM calls | — Pending |
 | Single user, no auth, LAN only | Matches actual usage; removes major complexity (sessions, permissions, multi-tenancy) | — Pending |

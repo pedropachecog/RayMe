@@ -28,7 +28,10 @@ RayMe is a live phone-call simulator, not a generated-audio player.
   TTS stream to finish before first playback, unless the user explicitly asks
   for a named non-live mode.
 - Smoothness fixes may use bounded jitter/startup buffering, but they must
-  preserve early playback, listening recovery, and interrupt/barge-in behavior.
+  preserve early playback, listening recovery, and explicit interruption
+  behavior. Automatic microphone/VAD barge-in is deferred/disabled and must
+  not be reintroduced without fresh product-owner authorization during an
+  unexecuted Phase 4 discussion.
 - Any live-call TTS change must include a regression proving first playback
   starts before stream completion for a slow stream, plus tests that reject
   whole-synthesis fallback on the VoxCPM2 streaming path.

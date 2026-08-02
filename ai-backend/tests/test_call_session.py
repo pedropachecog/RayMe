@@ -837,7 +837,6 @@ def test_mute_is_orthogonal_to_active_streaming_tts_ownership(
                 ScriptedInboundAudioFrame(pcm)
             ) is None
             assert session.dropped_audio_frames == dropped_before + 1
-            assert session._barge_in_frames == []
             assert session._turn_frames == []
 
             await session.set_muted(False)
@@ -981,22 +980,7 @@ def test_speaking_drops_microphone_frames_without_automatic_barge_in(
     assert all(event["type"] != "interrupted" for event in events)
 
 
-@pytest.mark.skip(reason="Automatic spoken barge-in is deferred from live calls.")
-@pytest.mark.parametrize(
-    ("post_unmute_frames", "expect_interrupt"),
-    [
-        (1, False),
-        (
-            (session_module.CALL_BARGE_IN_MIN_SPEECH_MS + 19) // 20,
-            True,
-        ),
-    ],
-)
-def test_mute_requires_full_fresh_barge_in_onset_after_unmute(
-    monkeypatch: pytest.MonkeyPatch,
-    post_unmute_frames: int,
-    expect_interrupt: bool,
-) -> None:
+def _deferred_automatic_barge_in_mute_contract() -> None:
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
     monkeypatch.setattr(
         session_module,
@@ -6055,8 +6039,7 @@ def test_qwen_cancel_preserves_adapter_ownership_until_terminal_then_recovers(
     )
 
 
-@pytest.mark.skip(reason="Automatic spoken barge-in is deferred from live calls.")
-def test_qwen_spoken_vad_barge_in_preserves_mic_turn_and_silences_real_playout(
+def _deferred_automatic_barge_in_qwen_contract(
     monkeypatch: Any,
 ) -> None:
     monkeypatch.setattr(session_module, "CALL_TTS_STREAM_START_MIN_CHUNKS", 1)
@@ -6382,7 +6365,7 @@ def test_qwen_control_causes_are_request_scoped_terminal_safe_and_recoverable(
                 speech,
                 label=f"Qwen audio before {control_cause}",
             )
-            if control_cause in {"button_interrupt", "vad_barge_in"}:
+            if control_cause == "button_interrupt":
                 terminal = await session.interrupt(cause=control_cause)
             elif control_cause == "hangup":
                 terminal = await session.end(reason="hangup")

@@ -4,7 +4,7 @@ milestone: v1.0
 milestone_name: milestone
 status: ready_to_verify
 stopped_at: Completed 09-15-PLAN.md
-last_updated: "2026-08-02T18:45:48Z"
+last_updated: "2026-08-02T19:04:00Z"
 last_activity: 2026-08-02
 progress:
   total_phases: 11
@@ -12,10 +12,12 @@ progress:
   total_plans: 112
   completed_plans: 109
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
-last_activity_desc: "Completed quick task 260802-q26: permanently prohibited reference-authorization forms, fields, gates, blockers, and metadata-driven fallback"
+last_activity_desc: "Phase 9 incident repair: automatic microphone/VAD barge-in deferred/disabled; explicit Interrupt remains supported"
 ---
 
 ## Phase Status
+
+- Current scope boundary (2026-08-02): Phase 9 excludes automatic microphone/VAD barge-in. It is deferred/disabled; Phase 4 is unexecuted and may not implement or reactivate it without fresh, explicit product-owner authorization during a Phase 4 discussion. Explicit Interrupt support remains distinct and active.
 
 - Phase 0 complete on 2026-04-23.
 - Phase 01.1 Wave 1 complete on 2026-04-24: plans 01.1-01 through 01.1-03 passed backend pytest, client unit tests, and full Playwright E2E.

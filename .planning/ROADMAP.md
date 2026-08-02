@@ -318,7 +318,9 @@ Plans:
 
 ### Phase 4: Call Feel (the load-bearing phase)
 
-**Goal:** Turn the Phase-3 MVP call into something that actually feels like a phone call: streaming TTS with <500 ms TTFA target, VAD-driven barge-in with LIFO cancel that reaches the GPU, live bidirectional captions, echo-loop mitigated on laptop speakers. This phase is the reason the product exists.
+**Goal:** Turn the Phase-3 MVP call into something that actually feels like a phone call: streaming TTS with <500 ms TTFA target, reliable explicit interruption that reaches the GPU, live bidirectional captions, echo-loop mitigated on laptop speakers. This phase is the reason the product exists.
+
+**Automatic-barge authorization gate:** Phase 4 is unexecuted. Automatic microphone/VAD barge-in is deferred/disabled and is not approved Phase 4 scope. It may not be implemented or reactivated unless the product owner gives fresh, explicit authorization during a Phase 4 discussion; until then, preserve the explicit Interrupt button only.
 
 **Depends on:** Phase 3 (media plumbing, FSM skeleton, timing instrumentation in place).
 
@@ -577,20 +579,20 @@ Plans:
 
 ### Phase 9: Integrate Faster Qwen3-TTS 1.7B into live calls
 
-**Goal:** Make `faster-qwen3-tts==0.3.2` with `Qwen/Qwen3-TTS-12Hz-1.7B-Base` a first-class RayMe voice-cloning engine whose saved voices can be selected for real calls on OMEN, with visible load/prewarm state, transcript-alignment protection, bounded early streaming, barge-in cancellation, and no whole-synthesis fallback.
+**Goal:** Make `faster-qwen3-tts==0.3.2` with `Qwen/Qwen3-TTS-12Hz-1.7B-Base` a first-class RayMe voice-cloning engine whose saved voices can be selected for real calls on OMEN, with visible load/prewarm state, transcript-alignment protection, bounded early streaming, explicit-control cancellation, and no whole-synthesis fallback. Automatic microphone/VAD barge-in is excluded from Phase 9.
 
 **Requirements:** REQ-22 (saved voice engine), REQ-45 (sentence/chunk streaming TTS), REQ-46 (<800 ms end-to-end target; <500 ms warmed TTS first-audio target from Spike 004b).
 
 **Depends on:** Phase 8 live streaming playback infrastructure and Spikes 004a/004b/005/006 runtime, longitudinal, and bounded-stream evidence.
 
-**User-goal preservation:** A technical integration is not complete unless the builder can select a 1.7B-cloned voice in RayMe, start a real call, hear early audio while later chunks are still generating, interrupt it, and continue the conversation without the voice degrading into muffling, whispering, noise, or unintelligibility over time.
+**User-goal preservation:** A technical integration is not complete unless the builder can select a 1.7B-cloned voice in RayMe, start a real call, hear early audio while later chunks are still generating, use the explicit Interrupt control when needed, and continue the conversation without the voice degrading into muffling, whispering, noise, or unintelligibility over time. Automatic microphone/VAD barge-in is excluded.
 
 **Success criteria** (observable, testable):
 
 1. Faster Qwen3-TTS 1.7B is visible in Voice Lab and saved-voice metadata, requires a matching reference transcript for ICL cloning, and returns sanitized actionable errors for missing/misaligned inputs.
 2. OMEN loads the pinned CUDA runtime and model through RayMe's one-hot TTS manager with visible `loading`/`resident` state; reference prompt extraction is prewarmed before the first spoken call turn rather than hidden inside playback latency.
 3. Real call synthesis uses the streaming API only: a deliberately slow stream starts playback before completion, startup buffering is explicitly bounded, immediate/final metrics stay separate, and VoxCPM2 retains tests rejecting whole-synthesis fallback.
-4. Barge-in/hangup stops Faster Qwen3 generation promptly, discards late chunks, returns the session to listening, and cannot emit a normal `ai_done` after cancellation.
+4. Explicit Interrupt/hangup stops Faster Qwen3 generation promptly, discards late chunks, returns the session to listening, and cannot emit a normal `ai_done` after cancellation. Automatic microphone/VAD barge-in remains disabled.
 5. Local backend/server/client regressions pass; `scripts/deploy-omen.sh` installs/verifies the pinned runtime, deploys the committed implementation, and post-deploy `/webrtc/status` plus a real call-flow evidence run prove the engine is ready for the builder's physical call test.
 
 **Plans:** 15/15 plans executed

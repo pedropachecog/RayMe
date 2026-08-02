@@ -1773,7 +1773,7 @@ test('shows a call notice in the transcript when /turns returns a type=error SSE
 }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
   await installMockCallMedia(page);
-  await installTurnErrorCallRoutes(page);
+  const counters = await installTurnErrorCallRoutes(page);
 
   await page.goto(`/chat/${threadId}`);
   await page.getByRole('button', { name: 'Start call' }).click();
@@ -1782,11 +1782,36 @@ test('shows a call notice in the transcript when /turns returns a type=error SSE
   await expect(page.getByText('Hello there.')).toBeVisible();
 
   // Error notice appears in the transcript — not a blocking panel
-  await expect(page.getByText('Speech playback failed: voice audio unavailable.')).toBeVisible();
+  await expect(page.getByText('Speech playback failed: voice audio unavailable.')).toHaveCount(1);
+  await expect(page.getByText('A partial RayMe reply.')).toHaveCount(1);
+  await expect(page.locator('.turn.streaming')).toHaveCount(0);
+
+  // The data channel can report the old interruption after the terminal SSE
+  // error. It must not recreate a transient assistant row.
+  await emitLatestMockDataChannelEvent(page, {
+    type: 'interrupted',
+    session_id: 'rtc-call-error-01',
+    turn_id: 'turn-err-1',
+    cancelled_turn_id: 'turn-err-1',
+    receiver_drain_ms: 0
+  });
+  await expect(page.getByText('A partial RayMe reply.')).toHaveCount(1);
+  await expect(page.locator('.turn.streaming')).toHaveCount(0);
 
   // Call state returns to listening — toolbar is still visible (not failed)
   await expect(page.getByRole('button', { name: 'End Call' })).toBeVisible();
   await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+
+  await emitLatestMockDataChannelEvent(page, {
+    type: 'user_final',
+    session_id: 'rtc-call-error-01',
+    turn_id: 'turn-err-2',
+    text: 'Try the next turn.'
+  });
+  await expect.poll(() => counters.turnCount).toBe(2);
+  await expect(page.getByText('The next response completes normally.')).toHaveCount(1);
+  await expect(page.locator('.turn.streaming')).toHaveCount(0);
+  await expect(page.getByText('Speech playback failed: voice audio unavailable.')).toHaveCount(1);
   assertNoBrowserErrors();
 });
 
@@ -2165,6 +2190,7 @@ function readMockPeerIdFromSdp(sdp: string) {
 
 async function installTurnErrorCallRoutes(page: Page) {
   await installCallDebugEventRoute(page);
+  const counters = { turnCount: 0 };
   const thread = makeThreadDetail({
     id: threadId,
     character_id: characterId,
@@ -2204,17 +2230,65 @@ async function installTurnErrorCallRoutes(page: Page) {
     });
   });
   await page.route('**/api/calls/*/turns', async (route) => {
+    counters.turnCount += 1;
+    const firstTurn = counters.turnCount === 1;
     await route.fulfill({
       status: 200,
       contentType: 'text/event-stream',
       body: [
-        `data: ${JSON.stringify({
-          type: 'error',
-          turn_id: 'turn-err-1',
-          code: 'call_tts_failed',
-          message: 'Speech playback failed: voice audio unavailable.'
-        })}`,
+        `data: ${JSON.stringify(firstTurn
+          ? {
+              type: 'ai_token',
+              turn_id: 'turn-err-1',
+              text: 'A partial RayMe reply.'
+            }
+          : {
+              type: 'ai_token',
+              turn_id: 'turn-err-2',
+              text: 'The next response'
+            })}`,
         '',
+        `data: ${JSON.stringify(firstTurn
+          ? {
+              type: 'ai_audio_started',
+              turn_id: 'turn-err-1',
+              audio: { duration_ms: 120, samples: 1920 }
+            }
+          : {
+              type: 'ai_audio_started',
+              turn_id: 'turn-err-2',
+              audio: { duration_ms: 120, samples: 1920 }
+            })}`,
+        '',
+        `data: ${JSON.stringify(firstTurn
+          ? {
+              type: 'error',
+              turn_id: 'turn-err-1',
+              code: 'call_tts_failed',
+              message: 'Speech playback failed: voice audio unavailable.'
+            }
+          : {
+              type: 'error',
+              turn_id: 'turn-err-1',
+              code: 'call_tts_failed',
+              message: 'Speech playback failed: voice audio unavailable.'
+            })}`,
+        '',
+        ...(firstTurn
+          ? []
+          : [
+              `data: ${JSON.stringify({
+                type: 'ai_token',
+                turn_id: 'turn-err-2',
+                text: ' completes normally.'
+              })}`,
+              '',
+              `data: ${JSON.stringify({
+                type: 'ai_done',
+                turn_id: 'turn-err-2'
+              })}`,
+              ''
+            ]),
         ''
       ].join('\n')
     });
@@ -2222,6 +2296,7 @@ async function installTurnErrorCallRoutes(page: Page) {
   await page.route('**/api/calls/*/end', async (route) => {
     await fulfillJson(route, { state: 'ended' });
   });
+  return counters;
 }
 
 async function installDuplicateTurnCallRoutes(

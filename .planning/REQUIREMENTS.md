@@ -79,8 +79,8 @@
   - *Source*: PROJECT.md Active.
 - **REQ-41** `[v1]` — Call audio is **full-duplex**: the user's mic stream and the AI's TTS output stream run concurrently; the user can speak while the AI is speaking.
   - *Source*: PROJECT.md Active + Key Decisions. Load-bearing for core value.
-- **REQ-42** `[v1]` — **VAD-driven barge-in**: speech detected on the user's mic during AI TTS playback cancels TTS playback, cancels the in-flight LLM generation, and begins a new STT turn. Barge-in is gated to avoid false triggers (minimum speech duration, minimum word count, playback-clock-aware window).
-  - *Source*: PROJECT.md Active + Key Decisions; PITFALLS.md critical item.
+- **REQ-42** `[deferred]` — **Automatic VAD-driven barge-in** is out of scope and disabled: microphone speech during AI TTS must not cancel playback, cancel generation, or begin a replacement STT turn. The explicit Interrupt button remains supported. Reconsideration is permitted only after fresh, explicit product-owner authorization during a future unexecuted Phase 4 discussion.
+  - *Source*: product-owner decision 2026-08-02; PROJECT.md Active; LIVE-CALL-INVARIANTS.md.
 - **REQ-43** `[v1]` — **Streaming STT with live user captions**: partial transcripts render within ~500 ms; final transcripts replace interim text. Interim vs final state is visually distinct (per DESIGN.md Transcription Chips).
   - *Source*: PROJECT.md Active.
 - **REQ-44** `[v1]` — **Streaming LLM with live AI captions**: tokens render in real time as the LLM produces them, ahead of TTS playback.
@@ -170,7 +170,7 @@ Every Active bullet in PROJECT.md maps to one or more REQ-IDs. Dropped bullets o
 | No authentication — LAN-level trust | REQ-04 |
 | English-only v1 | REQ-A3 |
 | A chat thread holds typed + call transcripts interleaved | REQ-30, REQ-60, REQ-61 |
-| Calls run full-duplex with barge-in via VAD | REQ-41, REQ-42 |
+| Calls run full-duplex; automatic VAD barge-in deferred, explicit Interrupt supported | REQ-41, REQ-42 |
 | Live captions during a call (user STT + AI response) | REQ-43, REQ-44 |
 | Text chat and call startable/resumable from same thread | REQ-40, REQ-50, REQ-60 |
 | LLM is OpenAI-compatible | REQ-03 |

@@ -216,6 +216,7 @@
   let speakingRms = $state<number | null>(null);
   let transcript = $state<CallTranscriptTurn[]>([]);
   let activeAiText = $state('');
+  let activeAiTurnId = $state<string | null>(null);
   let blockingPanel = $state<BlockingPanel | null>(null);
   let blockingPanelHeading = $state<HTMLElement | null>(null);
   let selectedCallEngine = $state('');
@@ -3448,7 +3449,7 @@
     }
 
     if (event.type === 'ai_done') {
-      finishAiTurn();
+      finishAiTurn(event.turn_id ?? undefined);
       return;
     }
 
@@ -3522,6 +3523,7 @@
     if (event.type === 'failed') {
       const message = messageForCallFailure(event.code, event.message);
       activeAiText = '';
+      activeAiTurnId = null;
 
       if (event.retry_allowed) {
         blockingPanel = null;
@@ -3598,6 +3600,7 @@
       }
     ];
     activeAiText = '';
+    activeAiTurnId = null;
     if (activeReconnectAudioBackfill) {
       activeReconnectAudioBackfill.progress.promotedState = false;
       activeReconnectAudioBackfill.progress.awaitingFinalResponse = false;
@@ -3722,7 +3725,7 @@
         if (doneEvent.message) {
           restoreCompletedAiMessage(doneEvent.message, doneEvent.turn_id);
         }
-        finishAiTurn();
+        finishAiTurn(doneEvent.turn_id);
       },
       turn_existing: (existingEvent) => {
         markActiveTurnResponseDelivered(existingEvent.turn_id);
@@ -3737,6 +3740,12 @@
           (errorEvent.code ?? 'call_generation_failed') as CallErrorCode,
           errorEvent.message
         );
+        const staleAgainstNewerResponse =
+          activeAiTurnId !== null && activeAiTurnId !== (errorEvent.turn_id ?? null);
+        if (staleAgainstNewerResponse) {
+          return;
+        }
+        clearActiveAiTextForTurn(errorEvent.turn_id);
         appendCallNotice(message, errorEvent.turn_id);
         applyCallState('listening');
       }
@@ -3771,11 +3780,25 @@
   }
 
   function appendAiText(text: string, turnId?: string) {
+    const resolvedTurnId = turnId ?? null;
+    if (activeAiTurnId !== null && activeAiTurnId !== resolvedTurnId) {
+      return;
+    }
+    if (activeAiTurnId === null && resolvedTurnId !== null) {
+      activeAiTurnId = resolvedTurnId;
+    }
     activeAiText = `${activeAiText}${text}`;
-    const existing = transcript.at(-1);
-    if (existing?.role === 'assistant' && existing.type === 'ai_speech') {
+    const existingIndex = transcript.findLastIndex(
+      (turn) =>
+        turn.role === 'assistant' &&
+        turn.type === 'ai_speech' &&
+        turn.turn_id === resolvedTurnId
+    );
+    if (
+      existingIndex >= 0
+    ) {
       transcript = transcript.map((turn, index) =>
-        index === transcript.length - 1 ? { ...turn, text: activeAiText } : turn
+        index === existingIndex ? { ...turn, text: activeAiText } : turn
       );
       return;
     }
@@ -3784,7 +3807,7 @@
       ...transcript,
       {
         id: `active-ai-${Date.now()}`,
-        turn_id: turnId,
+        turn_id: resolvedTurnId,
         role: 'assistant',
         type: 'ai_speech',
         text: activeAiText,
@@ -3793,8 +3816,21 @@
     ];
   }
 
-  function finishAiTurn() {
+  function clearActiveAiTextForTurn(turnId?: string): boolean {
+    if (!turnId || activeAiTurnId !== turnId) {
+      return false;
+    }
     activeAiText = '';
+    activeAiTurnId = null;
+    return true;
+  }
+
+  function finishAiTurn(turnId?: string) {
+    if (activeAiTurnId !== null && activeAiTurnId !== (turnId ?? null)) {
+      return;
+    }
+    activeAiText = '';
+    activeAiTurnId = null;
     applyCallState('listening');
   }
 

@@ -14,7 +14,7 @@ You can:
 - Import or create SillyTavern v2/v3 character cards.
 - Upload short voice samples in Voice Lab, transcribe them, edit the transcript, and save reusable voices.
 - Start text chats and live calls from the same character thread.
-- Run full-duplex browser calls with WebRTC, voice activity detection, barge-in, live captions, and durable call transcript rows.
+- Run full-duplex browser calls with WebRTC, voice activity detection, live captions, durable call transcript rows, and an explicit Interrupt control. Automatic microphone/VAD barge-in is currently deferred/disabled.
 - Point the app at any OpenAI-compatible Chat Completions endpoint, including the official OpenAI API or a local server.
 
 RayMe is intentionally scoped as a single-user, LAN-only personal system. There is no authentication layer in this repository; LAN trust is the security boundary for the current product shape.
@@ -255,7 +255,7 @@ scripts/operational-check.sh start
 
 ## Live-Call Invariant
 
-RayMe is a live phone-call simulator. Live-call fixes must preserve early playback, listening recovery, reconnect behavior, and interrupt/barge-in.
+RayMe is a live phone-call simulator. Live-call fixes must preserve early playback, listening recovery, reconnect behavior, and explicit interruption controls. Automatic microphone/VAD barge-in is deferred/disabled; it may not be reintroduced without fresh product-owner authorization during an unexecuted Phase 4 discussion.
 
 Do not fix call smoothness by waiting for the full assistant response or the full TTS stream before first playback unless a deliberately named non-live mode is being built. The repo has regression tests around WebRTC signaling, call session state, VoxCPM2 streaming behavior, and no whole-synthesis fallback for the live streaming path.
 
