@@ -323,6 +323,7 @@ export type CallEvent =
       session_id: string;
       muted: boolean;
       audio_input_epoch: number;
+      mute_revision: number;
       turn_id?: string | null;
     }
   | {

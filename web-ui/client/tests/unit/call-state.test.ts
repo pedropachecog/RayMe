@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { backfillCallReconnectAudio, recoverCallEvents } from '../../src/lib/api/calls';
+import {
+  backfillCallReconnectAudio,
+  recoverCallEvents,
+  setCallMuted
+} from '../../src/lib/api/calls';
 import { createCallStore } from '../../src/lib/call/store.svelte';
 
 const callId = 'call-01';
@@ -193,6 +197,28 @@ describe('client call API wrappers', () => {
     });
     expect(JSON.parse(lastRequest(fetchMock).init.body as string)).toEqual({
       session_id: 'rtc-1'
+    });
+  });
+
+  it('preserves the authoritative mute revision separately from the audio epoch', async () => {
+    const fetchMock = installFetch({
+      call_id: 'call/a',
+      session_id: 'rtc-1',
+      muted: false,
+      audio_input_epoch: 3,
+      mute_revision: 8
+    });
+
+    const result = await setCallMuted('call/a', 'rtc-1', false);
+
+    expect(result).toMatchObject({
+      muted: false,
+      audio_input_epoch: 3,
+      mute_revision: 8
+    });
+    expect(JSON.parse(lastRequest(fetchMock).init.body as string)).toEqual({
+      session_id: 'rtc-1',
+      muted: false
     });
   });
 });

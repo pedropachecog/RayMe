@@ -94,6 +94,7 @@ class ScriptedCallBackend:
         self.mute_calls: list[dict[str, Any]] = []
         self.muted = False
         self.audio_input_epoch = 0
+        self.mute_revision = 0
 
     async def readiness(self) -> dict[str, Any]:
         self.readiness_calls += 1
@@ -228,10 +229,12 @@ class ScriptedCallBackend:
         if muted and not self.muted:
             self.audio_input_epoch += 1
         self.muted = muted
+        self.mute_revision += 1
         return {
             "session_id": session_id,
             "muted": self.muted,
             "audio_input_epoch": self.audio_input_epoch,
+            "mute_revision": self.mute_revision,
         }
 
     async def end_call(self, base_url: str, session_id: str, reason: str) -> dict[str, Any]:
@@ -575,9 +578,12 @@ def test_mute_response_preserves_backend_authoritative_audio_epoch(
     assert muted.status_code == 200
     assert muted.json()["muted"] is True
     assert muted.json()["audio_input_epoch"] == 1
+    assert muted.json()["mute_revision"] == 1
     assert repeated.json()["audio_input_epoch"] == 1
+    assert repeated.json()["mute_revision"] == 2
     assert unmuted.json()["muted"] is False
     assert unmuted.json()["audio_input_epoch"] == 1
+    assert unmuted.json()["mute_revision"] == 3
 
 
 def test_start_requires_assigned_voice_with_recovery_message(call_fixture: CallFixture) -> None:

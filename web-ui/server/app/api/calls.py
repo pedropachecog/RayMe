@@ -118,6 +118,16 @@ class MuteRequest(BaseModel):
     muted: bool = False
 
 
+class MuteResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    call_id: str
+    session_id: str
+    muted: bool
+    audio_input_epoch: int = Field(ge=0)
+    mute_revision: int = Field(ge=1)
+
+
 class EndRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -315,7 +325,11 @@ async def create_call_offer(
         raise _backend_error(exc) from exc
 
 
-@router.post("/{call_id}/mute", dependencies=[Depends(enforce_same_origin_for_calls)])
+@router.post(
+    "/{call_id}/mute",
+    response_model=MuteResponse,
+    dependencies=[Depends(enforce_same_origin_for_calls)],
+)
 async def mute_call(
     call_id: str,
     payload: MuteRequest,
@@ -336,11 +350,15 @@ async def mute_call(
         )
         backend_muted = backend_state.get("muted")
         audio_input_epoch = backend_state.get("audio_input_epoch")
+        mute_revision = backend_state.get("mute_revision")
         if (
             not isinstance(backend_muted, bool)
             or isinstance(audio_input_epoch, bool)
             or not isinstance(audio_input_epoch, int)
             or audio_input_epoch < 0
+            or isinstance(mute_revision, bool)
+            or not isinstance(mute_revision, int)
+            or mute_revision < 1
         ):
             raise AiBackendProcessingError(
                 code="call_control_failed",
@@ -352,6 +370,7 @@ async def mute_call(
             "session_id": session_id,
             "muted": state["muted"],
             "audio_input_epoch": audio_input_epoch,
+            "mute_revision": mute_revision,
         }
     except CallServiceError as exc:
         raise _call_error(exc) from exc

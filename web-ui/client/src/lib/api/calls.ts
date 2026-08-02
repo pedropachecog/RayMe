@@ -151,6 +151,7 @@ export function setCallMuted(
   session_id: string;
   muted: boolean;
   audio_input_epoch: number;
+  mute_revision: number;
 }> {
   return apiFetch(`/calls/${encodeURIComponent(callId)}/mute`, {
     method: 'POST',

@@ -529,6 +529,31 @@ test('recovers an applied mute when its first HTTP response is lost', async ({ p
   assertNoBrowserErrors();
 });
 
+test('rejects a stale mute event after a newer unmute revision commits', async ({ page }) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installMockCallMedia(page);
+  const counters = await installReconnectCallRoutes(page);
+
+  await startReconnectCall(page, counters);
+  await page.getByRole('button', { name: 'Mute' }).click();
+  await expect(page.getByRole('button', { name: 'Unmute' })).toBeEnabled();
+  await page.getByRole('button', { name: 'Unmute' }).click();
+  await expect(page.getByRole('button', { name: 'Mute' })).toBeEnabled();
+
+  await emitLatestMockDataChannelEvent(page, {
+    type: 'muted',
+    session_id: 'rtc-call-reconnect-01',
+    muted: true,
+    audio_input_epoch: 1,
+    mute_revision: 1
+  });
+
+  await expect(page.getByRole('button', { name: 'Mute' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: 'Unmute' })).toHaveCount(0);
+  expect(counters.muteRequests.map((entry) => entry.muted)).toEqual([true, false]);
+  assertNoBrowserErrors();
+});
+
 test('retries when the first replacement offer fails during media reconnect', async ({
   page
 }) => {
@@ -1363,6 +1388,7 @@ async function installReconnectCallRoutes(
   };
   let authoritativeMuted = false;
   let authoritativeAudioInputEpoch = 0;
+  let authoritativeMuteRevision = 0;
   const thread = makeThreadDetail({
     id: threadId,
     character_id: characterId,
@@ -1486,6 +1512,7 @@ async function installReconnectCallRoutes(
         options.authoritativeMuteEpoch ?? authoritativeAudioInputEpoch + 1;
     }
     authoritativeMuted = requestedMuted;
+    authoritativeMuteRevision += 1;
     if (options.firstMuteGate && counters.muteCount === 1) {
       await options.firstMuteGate;
     }
@@ -1495,7 +1522,8 @@ async function installReconnectCallRoutes(
     }
     await fulfillJson(route, {
       muted: authoritativeMuted,
-      audio_input_epoch: authoritativeAudioInputEpoch
+      audio_input_epoch: authoritativeAudioInputEpoch,
+      mute_revision: authoritativeMuteRevision
     });
   });
   await page.route('**/api/calls/*/turns', async (route) => {
@@ -1734,7 +1762,7 @@ async function installMultiTurnCallRoutes(page: Page) {
     await fulfillJson(route, { state: 'listening' });
   });
   await page.route('**/api/calls/*/mute', async (route) => {
-    await fulfillJson(route, { muted: true, audio_input_epoch: 1 });
+    await fulfillJson(route, { muted: true, audio_input_epoch: 1, mute_revision: 1 });
   });
 }
 

@@ -166,6 +166,7 @@ class CallControlResponse(BaseModel):
     state: str
     muted: bool | None = None
     audio_input_epoch: int | None = Field(default=None, ge=0)
+    mute_revision: int | None = Field(default=None, ge=1)
     interrupted: bool | None = None
     cancelled_turn_id: str | None = None
     receiver_drain_ms: int | None = Field(default=None, ge=1, le=500)
@@ -480,6 +481,7 @@ async def mute_session(
             state=session.state,
             muted=session.muted,
             audio_input_epoch=event["audio_input_epoch"],
+            mute_revision=event["mute_revision"],
         )
     except TerminalCallSessionError as exc:
         raise _terminal_control_error(session) from exc

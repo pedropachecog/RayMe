@@ -664,8 +664,13 @@ def test_mute_stops_server_consumption() -> None:
     assert session.stats()["dropped_audio_frames"] == 1
     assert session.stats()["muted"] is True
     assert muted_event["audio_input_epoch"] == 1
-    assert _run(session.set_muted(True))["audio_input_epoch"] == 1
-    assert _run(session.set_muted(False))["audio_input_epoch"] == 1
+    assert muted_event["mute_revision"] == 1
+    repeated_event = _run(session.set_muted(True))
+    unmuted_event = _run(session.set_muted(False))
+    assert repeated_event["audio_input_epoch"] == 1
+    assert repeated_event["mute_revision"] == 2
+    assert unmuted_event["audio_input_epoch"] == 1
+    assert unmuted_event["mute_revision"] == 3
 
 
 def test_muted_raw_bytes_drop_returns_false_without_vad_or_stt() -> None:

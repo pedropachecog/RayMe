@@ -131,6 +131,7 @@ async function installActiveCallRoutes(page: Page, interruptResponseGate: Promis
     await fulfillJson(route, {
       muted: true,
       audio_input_epoch: 1,
+      mute_revision: 1,
       state: 'listening'
     });
   });

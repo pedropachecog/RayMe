@@ -486,6 +486,7 @@ class CallSession:
             _ReconnectBackfillAdmission,
         ] = {}
         self._audio_input_epoch = 0
+        self._mute_revision = 0
         self._stt_admission_generation = 0
         self._stt_admissions: dict[int, _SttTurnAdmission] = {}
         self._active_stt_finalization: _SttFinalization | None = None
@@ -2834,6 +2835,7 @@ class CallSession:
             self._ensure_control_mutable_locked()
             mute_transition = muted and not self.muted
             self.muted = muted
+            self._mute_revision += 1
             if muted:
                 self._reset_barge_in_onset()
                 if mute_transition:
@@ -2851,6 +2853,7 @@ class CallSession:
                 session_id=self.session_id,
                 muted=muted,
                 audio_input_epoch=self._audio_input_epoch,
+                mute_revision=self._mute_revision,
             )
             entry = self._commit_event(event)
         if asyncio.current_task() is self._event_delivery_task:

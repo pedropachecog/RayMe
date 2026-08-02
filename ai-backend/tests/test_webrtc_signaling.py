@@ -1856,6 +1856,7 @@ def test_webrtc_mute_control_returns_session_state(stub_webrtc: None) -> None:
     assert payload["state"] in {"listening", "muted"}
     assert payload["muted"] is True
     assert payload["audio_input_epoch"] == 1
+    assert payload["mute_revision"] == 1
 
     repeated = client.post(
         MUTE_ROUTE_TEMPLATE.format(session_id=session_id),
@@ -1867,6 +1868,8 @@ def test_webrtc_mute_control_returns_session_state(stub_webrtc: None) -> None:
     )
     assert repeated.json()["audio_input_epoch"] == 1
     assert unmuted.json()["audio_input_epoch"] == 1
+    assert repeated.json()["mute_revision"] == 2
+    assert unmuted.json()["mute_revision"] == 3
 
 
 def test_webrtc_interrupt_control_returns_session_state(stub_webrtc: None) -> None:

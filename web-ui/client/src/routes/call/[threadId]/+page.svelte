@@ -119,6 +119,7 @@
     readonly acknowledgement: {
       muted: boolean | null;
       audioInputEpoch: number | null;
+      muteRevision: number | null;
     };
   }
 
@@ -135,6 +136,7 @@
   let muteRequestGeneration = 0;
   let activeMuteRequest: MuteRequestOwner | null = null;
   let localMicAudioEpoch = 0;
+  let localMuteRevision = 0;
   let listeningRms = $state<number | null>(null);
   let speakingRms = $state<number | null>(null);
   let transcript = $state<CallTranscriptTurn[]>([]);
@@ -271,6 +273,7 @@
     clearEventTimers();
     handledUserFinalTurnIds.clear();
     localMicAudioEpoch = 0;
+    localMuteRevision = 0;
     muteRequestPending = false;
     muteSynchronizationFailed = false;
     activeMuteRequest = null;
@@ -2430,6 +2433,7 @@
       applyAuthoritativeMuteState(
         event.muted,
         event.audio_input_epoch,
+        event.mute_revision,
         owner
       );
       return;
@@ -2771,15 +2775,23 @@
     return Number.isInteger(value) && Number(value) >= 0;
   }
 
+  function isAuthoritativeMuteRevision(value: unknown): value is number {
+    return Number.isInteger(value) && Number(value) >= 1;
+  }
+
   function applyAuthoritativeMuteState(
     muted: boolean,
     audioInputEpoch: unknown,
+    muteRevision: unknown,
     owner: MuteRequestOwner | null = null
   ): boolean {
     if (
       typeof muted !== 'boolean' ||
       !isAuthoritativeAudioInputEpoch(audioInputEpoch) ||
-      audioInputEpoch < localMicAudioEpoch
+      audioInputEpoch < localMicAudioEpoch ||
+      !isAuthoritativeMuteRevision(muteRevision) ||
+      muteRevision < localMuteRevision ||
+      (muteRevision === localMuteRevision && muted !== serverMuted)
     ) {
       return false;
     }
@@ -2789,9 +2801,11 @@
     if (owner) {
       owner.acknowledgement.muted = muted;
       owner.acknowledgement.audioInputEpoch = audioInputEpoch;
+      owner.acknowledgement.muteRevision = muteRevision;
     }
     const epochChanged = audioInputEpoch !== localMicAudioEpoch;
     localMicAudioEpoch = audioInputEpoch;
+    localMuteRevision = muteRevision;
     serverMuted = muted;
     muteSynchronizationFailed = false;
     if (muted || epochChanged) {
@@ -2804,11 +2818,15 @@
   }
 
   function acknowledgedMuteResult(owner: MuteRequestOwner) {
-    const { muted, audioInputEpoch } = owner.acknowledgement;
-    if (muted !== owner.targetMuted || audioInputEpoch === null) {
+    const { muted, audioInputEpoch, muteRevision } = owner.acknowledgement;
+    if (muted !== owner.targetMuted || audioInputEpoch === null || muteRevision === null) {
       return null;
     }
-    return { muted, audio_input_epoch: audioInputEpoch };
+    return {
+      muted,
+      audio_input_epoch: audioInputEpoch,
+      mute_revision: muteRevision
+    };
   }
 
   async function requestAuthoritativeMute(owner: MuteRequestOwner) {
@@ -2825,7 +2843,8 @@
         }
         if (
           typeof result.muted === 'boolean' &&
-          isAuthoritativeAudioInputEpoch(result.audio_input_epoch)
+          isAuthoritativeAudioInputEpoch(result.audio_input_epoch) &&
+          isAuthoritativeMuteRevision(result.mute_revision)
         ) {
           return result;
         }
@@ -2872,7 +2891,8 @@
       targetMuted: !serverMuted,
       acknowledgement: {
         muted: null,
-        audioInputEpoch: null
+        audioInputEpoch: null,
+        muteRevision: null
       }
     });
     activeMuteRequest = owner;
@@ -2884,8 +2904,13 @@
       if (!ownsMuteRequest(owner) || !result) {
         return;
       }
-      if (!applyAuthoritativeMuteState(result.muted, result.audio_input_epoch, owner)) {
-        throw new Error('Mute response carried a stale audio epoch');
+      if (!applyAuthoritativeMuteState(
+        result.muted,
+        result.audio_input_epoch,
+        result.mute_revision,
+        owner
+      )) {
+        throw new Error('Mute response carried stale authoritative state');
       }
     } catch (error) {
       if (!ownsMuteRequest(owner)) {
