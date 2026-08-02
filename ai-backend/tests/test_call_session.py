@@ -1155,6 +1155,35 @@ class ScriptedSileroVadAdapter:
         return [{"start": 0, "end": min(end, total_samples)}]
 
 
+class SignalAwareSileroVadAdapter:
+    """Reports the first-to-last non-silent span in each analysis window."""
+
+    def __init__(
+        self,
+        *,
+        sampling_rate: int = 16000,
+        threshold: float = 0.5,
+        signal_floor: float = 0.01,
+    ) -> None:
+        self.sampling_rate = sampling_rate
+        self.threshold = threshold
+        self.signal_floor = signal_floor
+        self.calls: list[int] = []
+
+    def speech_timestamps(self, audio: Any) -> list[dict[str, int]]:
+        samples = np.asarray(audio, dtype=np.float32)
+        self.calls.append(int(samples.size))
+        signal_samples = np.flatnonzero(np.abs(samples) >= self.signal_floor)
+        if signal_samples.size == 0:
+            return []
+        return [
+            {
+                "start": int(signal_samples[0]),
+                "end": int(signal_samples[-1]) + 1,
+            }
+        ]
+
+
 class FlakySileroVadAdapter:
     """Mimics a brief Silero false-negative gap during continuous speech."""
 
@@ -6647,23 +6676,59 @@ def test_silero_vad_analysis_window_stays_bounded_after_five_seconds() -> None:
 
 
 def test_silero_vad_analysis_is_cadenced_for_a_long_live_turn() -> None:
-    """A live 20-ms input stream must not synchronously invoke Silero 50 times/s."""
-    settings = AiBackendSettings(vad_end_silence_ms=700, vad_max_turn_ms=30000)
-    vad = ScriptedSileroVadAdapter(sampling_rate=16000)
-    session = CallSession(session_id="vad-cadence", settings=settings, vad_adapter=vad)
-    pcm = np.full(320, 2000, dtype=np.int16).tobytes()
+    """A long live turn keeps exact cadence and still endpoints promptly."""
+    frame_samples = 320  # 20 ms at 16 kHz
+    frame_ms = 20
+    speech_frame_count = 1600
+    settings = AiBackendSettings(
+        call_vad_end_silence_ms=700,
+        call_vad_max_turn_ms=120000,
+    )
+    vad = SignalAwareSileroVadAdapter(sampling_rate=16000)
+    stt = ScriptedSttAdapter()
+    session, _ = _new_session(
+        session_id="vad-cadence",
+        settings=settings,
+        vad_adapter=vad,
+        stt_adapter=stt,
+    )
+    speech_pcm = np.full(frame_samples, 2000, dtype=np.int16).tobytes()
+    silence_pcm = np.zeros(frame_samples, dtype=np.int16).tobytes()
 
-    for _ in range(1600):  # 32 seconds at 20 ms/frame.
-        frame = PcmAudioFrame(pcm=pcm, sample_rate=16000, channels=1)
-        session._turn_frames.append(frame)
-        result = session._accept_vad_frame(frame)
-        assert result["end_of_turn"] is False
+    for _ in range(speech_frame_count):  # 32 seconds at 20 ms/frame.
+        result = _run(
+            session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(speech_pcm))
+        )
+        assert not (isinstance(result, dict) and result.get("type") == "user_final")
 
-    assert len(session._turn_frames) == 1600, "STT must retain the full user turn"
-    assert vad.calls
+    assert len(vad.calls) == 320, "1600 live frames must produce 320 Silero analyses"
     assert max(vad.calls) <= 16000 * 3
-    assert len(vad.calls) <= 321, "Silero analysis must be no more frequent than every 100 ms"
-    assert session._vad_recent_sample_count <= 16000 * 3
+
+    trailing_silence_frames = 0
+    final_event = None
+    while final_event is None and trailing_silence_frames < 50:
+        trailing_silence_frames += 1
+        result = _run(
+            session.handle_inbound_audio_frame(ScriptedInboundAudioFrame(silence_pcm))
+        )
+        if isinstance(result, dict) and result.get("type") == "user_final":
+            final_event = result
+
+    endpoint_delay_ms = trailing_silence_frames * frame_ms
+    assert final_event is not None
+    assert final_event["type"] == "user_final"
+    assert settings.call_vad_end_silence_ms <= endpoint_delay_ms
+    assert endpoint_delay_ms < (
+        settings.call_vad_end_silence_ms + session_module.CALL_VAD_ANALYSIS_INTERVAL_MS
+    )
+    kept_silence_frames = max(
+        session_module.CALL_STT_TRAILING_SILENCE_KEEP_MS // frame_ms,
+        1,
+    )
+    assert stt.calls == [
+        [speech_pcm] * speech_frame_count
+        + [silence_pcm] * kept_silence_frames
+    ]
 
 
 def test_speak_text_generic_adapter_uses_real_reference_audio() -> None:
