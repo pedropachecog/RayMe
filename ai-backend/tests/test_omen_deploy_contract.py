@@ -82,15 +82,55 @@ def test_omen_deploy_upgrades_persistent_web_schema_before_launch() -> None:
     assert source.index(migration_command) < source.index(launcher_write)
 
 
-def test_omen_deploy_provisions_service_auth_and_verified_ai_tls() -> None:
+def test_omen_deploy_preflights_phase1_tls_before_teardown_and_token_rotation() -> None:
     source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    path_assignments = (
+        '$raymeStateRoot = Split-Path -Parent $repo',
+        '$phase1TlsDir = Join-Path $raymeStateRoot "phase1-tls"',
+        '$aiCaBundle = Join-Path $phase1TlsDir "rayme-phase1-rootCA.pem"',
+        '$aiTlsCert = Join-Path $phase1TlsDir "rayme.local+1.pem"',
+        '$aiTlsKey = Join-Path $phase1TlsDir "rayme.local+1-key.pem"',
+        '$serviceTokenPath = Join-Path $raymeStateRoot "ai-backend-service-token.txt"',
+    )
+    for assignment in path_assignments:
+        assert source.count(assignment) == 1
+
+    checkout_validation = 'throw "OMEN checkout is $actualHead, expected $expectedHead"'
+    tls_gate = 'foreach ($tlsPath in @($aiTlsCert, $aiTlsKey, $aiCaBundle)) {'
+    leaf_validation = 'Test-Path -LiteralPath $tlsPath -PathType Leaf'
+    optional_voxcpm_stop = "if ($verifyVoxCpm2) {\n  Stop-RayMePortOwners"
+    canonical_qwen_stop = "Stop-RayMePortOwners\nInvoke-RayMeQwen3Provisioning"
+    final_service_stop = "Stop-RayMePortOwners\n\nfunction Protect-Phase09QwenLogs"
+    launcher_write = 'Write-Host "== Writing scheduled task launchers"'
+    task_delete = "schtasks /Delete /TN RayMePhase1AI"
+    task_register = "Register-RayMeTask -TaskName RayMePhase1AI"
+    token_rotation = "RandomNumberGenerator"
+
+    gate_index = source.index(tls_gate)
+    leaf_index = source.index(leaf_validation)
+    assert source.index(checkout_validation) < gate_index < leaf_index
+    for destructive_or_write_marker in (
+        "function Stop-RayMePortOwners",
+        optional_voxcpm_stop,
+        canonical_qwen_stop,
+        final_service_stop,
+        launcher_write,
+        task_delete,
+        task_register,
+    ):
+        assert leaf_index < source.index(destructive_or_write_marker)
 
     assert "RandomNumberGenerator" in source
     assert source.count('set "RAYME_AI_BACKEND_SERVICE_TOKEN=%%T"') == 2
+    assert source.count('for /f "usebackq delims=" %%T in ("$serviceTokenPath")') == 2
+    assert source.count("--cert $aiTlsCert --key $aiTlsKey") == 2
     assert 'set "RAYME_AI_BACKEND_BASE_URL=https://192.168.1.199:9443"' in source
     assert "icacls.exe $serviceTokenPath /inheritance:r" in source
     assert 'set "RAYME_AI_BACKEND_CA_BUNDLE=$aiCaBundle"' in source
-    assert 'mkcert\\rootCA.pem' in source
+    assert 'AppData\\Local\\mkcert\\rootCA.pem' not in source
+    assert source.index(canonical_qwen_stop) < source.index(token_rotation)
+    assert source.index(token_rotation) < source.index(launcher_write)
     assert "curl.exe --cacert $aiCaBundle" in source
     assert "curl.exe -k" not in source
 

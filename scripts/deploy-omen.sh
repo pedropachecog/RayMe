@@ -94,6 +94,19 @@ if ($expectedHead -and $actualHead -ne $expectedHead) {
   throw "OMEN checkout is $actualHead, expected $expectedHead"
 }
 
+Write-Host "== Validating RayMe Phase 1 TLS artifact inventory"
+$raymeStateRoot = Split-Path -Parent $repo
+$phase1TlsDir = Join-Path $raymeStateRoot "phase1-tls"
+$aiTlsCert = Join-Path $phase1TlsDir "rayme.local+1.pem"
+$aiTlsKey = Join-Path $phase1TlsDir "rayme.local+1-key.pem"
+$aiCaBundle = Join-Path $phase1TlsDir "rayme-phase1-rootCA.pem"
+$serviceTokenPath = Join-Path $raymeStateRoot "ai-backend-service-token.txt"
+foreach ($tlsPath in @($aiTlsCert, $aiTlsKey, $aiCaBundle)) {
+  if (-not (Test-Path -LiteralPath $tlsPath -PathType Leaf)) {
+    throw "RayMe Phase 1 TLS artifact is missing or is not a file at $tlsPath"
+  }
+}
+
 $cudaRuntimeBin = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin"
 if (-not (Test-Path "$cudaRuntimeBin\cublas64_12.dll")) {
   throw "Missing CUDA 12 runtime at $cudaRuntimeBin. Expected cublas64_12.dll for faster-whisper GPU STT."
@@ -473,7 +486,6 @@ $env:PATH = "$cudaRuntimeBin;$env:PATH"
 & "$repo\ai-backend\.venv\Scripts\python.exe" -c "import torch, torchaudio; assert '+cpu' not in torch.__version__.lower(), torch.__version__; assert torch.version.cuda, torch.__version__; assert torch.cuda.is_available(), torch.__version__; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'device', torch.cuda.get_device_name(0)); print('torchaudio', torchaudio.__version__)"
 
 Write-Host "== Configuring authenticated AI service identity and TLS trust"
-$serviceTokenPath = "C:\Users\pmpg\rayme\ai-backend-service-token.txt"
 $tokenBytes = New-Object byte[] 48
 $tokenGenerator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
 try { $tokenGenerator.GetBytes($tokenBytes) } finally { $tokenGenerator.Dispose() }
@@ -489,10 +501,6 @@ if ($LASTEXITCODE -ne 0) {
 $serviceToken = (Get-Content -Raw $serviceTokenPath).Trim()
 if ($serviceToken.Length -lt 43) {
   throw "RayMe AI service credential is missing or too short"
-}
-$aiCaBundle = "C:\Users\pmpg\AppData\Local\mkcert\rootCA.pem"
-if (-not (Test-Path $aiCaBundle)) {
-  throw "RayMe mkcert CA bundle is missing at $aiCaBundle"
 }
 $env:RAYME_AI_BACKEND_SERVICE_TOKEN = $serviceToken
 $env:RAYME_AI_BACKEND_CA_BUNDLE = $aiCaBundle
@@ -526,8 +534,8 @@ set "PATH=$cudaRuntimeBin;%PATH%"
 set "RAYME_DEPLOYED_COMMIT=$actualHead"
 set "RAYME_QWEN3_MODEL_DIR=$qwenModelDir"
 set "RAYME_QWEN3_MODEL_REVISION=$qwenModelRevision"
-for /f "usebackq delims=" %%T in ("C:\Users\pmpg\rayme\ai-backend-service-token.txt") do set "RAYME_AI_BACKEND_SERVICE_TOKEN=%%T"
-"$aiPythonw" ai-backend\scripts\run_https.py --host 192.168.1.199 --port 9443 --cert C:\Users\pmpg\rayme\phase1-tls\rayme.local+1.pem --key C:\Users\pmpg\rayme\phase1-tls\rayme.local+1-key.pem >> C:\Users\pmpg\rayme\logs\ai-backend.run.log 2>>&1
+for /f "usebackq delims=" %%T in ("$serviceTokenPath") do set "RAYME_AI_BACKEND_SERVICE_TOKEN=%%T"
+"$aiPythonw" ai-backend\scripts\run_https.py --host 192.168.1.199 --port 9443 --cert $aiTlsCert --key $aiTlsKey >> C:\Users\pmpg\rayme\logs\ai-backend.run.log 2>>&1
 "@
 Set-Content -Path "C:\Users\pmpg\rayme\start-ai-backend.cmd" -Value $aiLauncher -Encoding ASCII
 
@@ -538,11 +546,11 @@ set "RAYME_WEB_BIND_HOST=192.168.1.199"
 set "RAYME_WEB_PORT=8443"
 set "RAYME_WEB_PUBLIC_URL=https://192.168.1.199:8443"
 set "RAYME_AI_BACKEND_BASE_URL=https://192.168.1.199:9443"
-for /f "usebackq delims=" %%T in ("C:\Users\pmpg\rayme\ai-backend-service-token.txt") do set "RAYME_AI_BACKEND_SERVICE_TOKEN=%%T"
+for /f "usebackq delims=" %%T in ("$serviceTokenPath") do set "RAYME_AI_BACKEND_SERVICE_TOKEN=%%T"
 set "RAYME_AI_BACKEND_CA_BUNDLE=$aiCaBundle"
 set "RAYME_DATABASE_URL=sqlite+aiosqlite:///C:/Users/pmpg/rayme/RayMe/web-ui/server/data/rayme.sqlite3"
 set "RAYME_ALLOWED_ORIGINS=https://192.168.1.199:8443,https://rayme.local:8443"
-web-ui\server\.venv\Scripts\pythonw.exe web-ui\server\scripts\run_dev_https.py --host 192.168.1.199 --port 8443 --cert C:\Users\pmpg\rayme\phase1-tls\rayme.local+1.pem --key C:\Users\pmpg\rayme\phase1-tls\rayme.local+1-key.pem >> C:\Users\pmpg\rayme\logs\web-ui.run.log 2>>&1
+web-ui\server\.venv\Scripts\pythonw.exe web-ui\server\scripts\run_dev_https.py --host 192.168.1.199 --port 8443 --cert $aiTlsCert --key $aiTlsKey >> C:\Users\pmpg\rayme\logs\web-ui.run.log 2>>&1
 "@
 Set-Content -Path "C:\Users\pmpg\rayme\start-web-ui.cmd" -Value $webLauncher -Encoding ASCII
 
