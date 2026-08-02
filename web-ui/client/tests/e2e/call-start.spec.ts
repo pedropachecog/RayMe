@@ -16,10 +16,12 @@ type ReconnectRouteCounters = {
   recoverCount: number;
   turnCount: number;
   endCount: number;
+  muteCount: number;
   offers: Array<{ peerId: number | null; sdp: string }>;
   backfills: Array<Record<string, unknown>>;
   recoveredEvents: Array<Record<string, unknown>>;
   turns: Array<Record<string, unknown>>;
+  muteRequests: Array<Record<string, unknown>>;
   requestOrder: string[];
   debugEvents: Array<{ event: string; detail: Record<string, unknown>; session_id?: string }>;
 };
@@ -27,6 +29,9 @@ type ReconnectRouteCounters = {
 type ReconnectRouteOptions = {
   backfillDelayMs?: number;
   firstBackfillGate?: Promise<void>;
+  firstMuteGate?: Promise<void>;
+  abortMuteNumbers?: number[];
+  authoritativeMuteEpoch?: number;
   failBackfill?: boolean;
   hangBackfillFrom?: number;
   recoverEvents?: Array<Record<string, unknown>>;
@@ -405,6 +410,81 @@ test('retired reconnect generation cannot resume after mute and a newer reconnec
         entry.detail.baseBackfillId === retiredBaseId
     )
   ).toHaveLength(0);
+  assertNoBrowserErrors();
+});
+
+test('serializes delayed double-click mute so responses cannot reverse or backfill pending audio', async ({
+  page
+}) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  let releaseMute = () => undefined;
+  const muteGate = new Promise<void>((resolve) => {
+    releaseMute = resolve;
+  });
+  await installMockCallMedia(page, { controllablePcm: true });
+  const counters = await installReconnectCallRoutes(page, {
+    firstMuteGate: muteGate,
+    authoritativeMuteEpoch: 7
+  });
+
+  await startReconnectCall(page, counters);
+  await emitMockPcm(page, 1111);
+  await page.getByRole('button', { name: 'Mute' }).click();
+  const pendingControl = page.getByRole('button', { name: 'Unmute' });
+  await expect(pendingControl).toBeDisabled();
+  await page.evaluate(() => {
+    const button = document.querySelector<HTMLButtonElement>('button[aria-label="Unmute"]');
+    button?.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+  });
+  await emitMockPcm(page, 2222);
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await page.waitForTimeout(200);
+  expect(counters.muteCount).toBe(1);
+  expect(counters.backfillCount).toBe(0);
+
+  releaseMute();
+  await expect(pendingControl).toBeEnabled();
+  await pendingControl.click();
+  await expect(page.getByRole('button', { name: 'Mute' })).toBeEnabled();
+  await emitMockPcm(page, 3333);
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await expect.poll(() => counters.backfillCount).toBeGreaterThan(0);
+
+  expect(counters.muteCount).toBe(2);
+  expect(counters.muteRequests.map((entry) => entry.muted)).toEqual([true, false]);
+  expect(counters.backfills.every((entry) => entry.audio_input_epoch === 7)).toBe(true);
+  const values = new Set(
+    counters.backfills.flatMap((entry) => decodePcmValues(String(entry.pcm_b64 ?? '')))
+  );
+  expect(values.has(3333)).toBe(true);
+  expect(values.has(1111)).toBe(false);
+  expect(values.has(2222)).toBe(false);
+  assertNoBrowserErrors();
+});
+
+test('recovers an applied mute when its first HTTP response is lost', async ({ page }) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page, {
+    allowConsoleErrors: [/Failed to load resource/]
+  });
+  await installMockCallMedia(page, { controllablePcm: true });
+  const counters = await installReconnectCallRoutes(page, {
+    abortMuteNumbers: [1]
+  });
+
+  await startReconnectCall(page, counters);
+  await page.getByRole('button', { name: 'Mute' }).click();
+  await expect.poll(() => counters.muteCount).toBe(2);
+  await expect(page.getByRole('button', { name: 'Unmute' })).toBeEnabled();
+  expect(counters.muteRequests.map((entry) => entry.muted)).toEqual([true, true]);
+
+  await page.getByRole('button', { name: 'Unmute' }).click();
+  await expect(page.getByRole('button', { name: 'Mute' })).toBeEnabled();
+  await emitMockPcm(page, 3333);
+  await setCurrentMockPeerState(page, 'failed', 'disconnected');
+  await expect.poll(() => counters.backfillCount).toBeGreaterThan(0);
+
+  expect(counters.muteRequests.map((entry) => entry.muted)).toEqual([true, true, false]);
+  expect(counters.backfills.every((entry) => entry.audio_input_epoch === 1)).toBe(true);
   assertNoBrowserErrors();
 });
 
@@ -1184,13 +1264,17 @@ async function installReconnectCallRoutes(
     recoverCount: 0,
     turnCount: 0,
     endCount: 0,
+    muteCount: 0,
     offers: [],
     backfills: [],
     recoveredEvents: [],
     turns: [],
+    muteRequests: [],
     requestOrder: [],
     debugEvents: []
   };
+  let authoritativeMuted = false;
+  let authoritativeAudioInputEpoch = 0;
   const thread = makeThreadDetail({
     id: threadId,
     character_id: characterId,
@@ -1302,7 +1386,25 @@ async function installReconnectCallRoutes(
   });
   await page.route('**/api/calls/*/mute', async (route) => {
     const payload = route.request().postDataJSON() as { muted?: boolean };
-    await fulfillJson(route, { muted: payload.muted === true });
+    counters.muteCount += 1;
+    counters.muteRequests.push(payload as Record<string, unknown>);
+    const requestedMuted = payload.muted === true;
+    if (requestedMuted && !authoritativeMuted) {
+      authoritativeAudioInputEpoch =
+        options.authoritativeMuteEpoch ?? authoritativeAudioInputEpoch + 1;
+    }
+    authoritativeMuted = requestedMuted;
+    if (options.firstMuteGate && counters.muteCount === 1) {
+      await options.firstMuteGate;
+    }
+    if (options.abortMuteNumbers?.includes(counters.muteCount)) {
+      await route.abort('failed');
+      return;
+    }
+    await fulfillJson(route, {
+      muted: authoritativeMuted,
+      audio_input_epoch: authoritativeAudioInputEpoch
+    });
   });
   await page.route('**/api/calls/*/turns', async (route) => {
     counters.turnCount += 1;
@@ -1540,7 +1642,7 @@ async function installMultiTurnCallRoutes(page: Page) {
     await fulfillJson(route, { state: 'listening' });
   });
   await page.route('**/api/calls/*/mute', async (route) => {
-    await fulfillJson(route, { muted: true });
+    await fulfillJson(route, { muted: true, audio_input_epoch: 1 });
   });
 }
 

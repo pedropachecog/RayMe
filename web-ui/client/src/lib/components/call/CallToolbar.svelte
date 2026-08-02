@@ -27,6 +27,7 @@
   export let interruptEnabled = true;
   export let endEnabled = true;
   export let disabled = false;
+  export let muteDisabled = false;
   export let inputDevices: AudioInputDevice[] = [];
   export let outputDevices: AudioOutputDevice[] = [];
   export let selectedInputId = '';
@@ -78,7 +79,7 @@
     <button
       class="icon-control primary"
       type="button"
-      disabled={disabled}
+      disabled={disabled || muteDisabled}
       aria-label={muteLabel}
       aria-pressed={muted}
       title={muteLabel}

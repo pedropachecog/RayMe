@@ -91,6 +91,9 @@ class ScriptedCallBackend:
         self.cancel_turn_calls: list[dict[str, Any]] = []
         self.interrupt_calls: list[dict[str, Any]] = []
         self.interrupt_result: dict[str, Any] | None = None
+        self.mute_calls: list[dict[str, Any]] = []
+        self.muted = False
+        self.audio_input_epoch = 0
 
     async def readiness(self) -> dict[str, Any]:
         self.readiness_calls += 1
@@ -212,6 +215,24 @@ class ScriptedCallBackend:
                 "receiver_drain_ms": 250,
             }
         )
+
+    async def mute_call(
+        self,
+        base_url: str,
+        session_id: str,
+        muted: bool,
+    ) -> dict[str, Any]:
+        self.mute_calls.append(
+            {"base_url": base_url, "session_id": session_id, "muted": muted}
+        )
+        if muted and not self.muted:
+            self.audio_input_epoch += 1
+        self.muted = muted
+        return {
+            "session_id": session_id,
+            "muted": self.muted,
+            "audio_input_epoch": self.audio_input_epoch,
+        }
 
     async def end_call(self, base_url: str, session_id: str, reason: str) -> dict[str, Any]:
         if self.fail_end:
@@ -529,6 +550,34 @@ def test_mute_interrupt_and_end_reject_mismatched_session_for_existing_call(
         )
         assert response.status_code == 404
         assert _public_error_code(response) == "call_session_not_found"
+
+
+def test_mute_response_preserves_backend_authoritative_audio_epoch(
+    call_fixture: CallFixture,
+) -> None:
+    thread_id = asyncio.run(
+        _insert_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post(
+        "/api/calls/start",
+        json={"thread_id": thread_id},
+    ).json()
+    route = f"/api/calls/{started['call_id']}/mute"
+    payload = {"session_id": started["session_id"], "muted": True}
+
+    muted = call_fixture.client.post(route, json=payload)
+    repeated = call_fixture.client.post(route, json=payload)
+    unmuted = call_fixture.client.post(
+        route,
+        json={"session_id": started["session_id"], "muted": False},
+    )
+
+    assert muted.status_code == 200
+    assert muted.json()["muted"] is True
+    assert muted.json()["audio_input_epoch"] == 1
+    assert repeated.json()["audio_input_epoch"] == 1
+    assert unmuted.json()["muted"] is False
+    assert unmuted.json()["audio_input_epoch"] == 1
 
 
 def test_start_requires_assigned_voice_with_recovery_message(call_fixture: CallFixture) -> None:

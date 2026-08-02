@@ -165,6 +165,7 @@ class CallControlResponse(BaseModel):
     session_id: str
     state: str
     muted: bool | None = None
+    audio_input_epoch: int | None = Field(default=None, ge=0)
     interrupted: bool | None = None
     cancelled_turn_id: str | None = None
     receiver_drain_ms: int | None = Field(default=None, ge=1, le=500)
@@ -473,11 +474,12 @@ async def mute_session(
 ) -> CallControlResponse:
     session = _session_or_404(request, session_id)
     try:
-        await session.set_muted(payload.muted)
+        event = await session.set_muted(payload.muted)
         return CallControlResponse(
             session_id=session.session_id,
             state=session.state,
             muted=session.muted,
+            audio_input_epoch=event["audio_input_epoch"],
         )
     except TerminalCallSessionError as exc:
         raise _terminal_control_error(session) from exc

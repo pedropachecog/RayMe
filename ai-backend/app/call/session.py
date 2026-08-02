@@ -2850,6 +2850,7 @@ class CallSession:
                 MUTED_EVENT,
                 session_id=self.session_id,
                 muted=muted,
+                audio_input_epoch=self._audio_input_epoch,
             )
             entry = self._commit_event(event)
         if asyncio.current_task() is self._event_delivery_task:

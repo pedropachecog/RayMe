@@ -146,7 +146,12 @@ export function setCallMuted(
   callId: string,
   sessionId: string,
   muted: boolean
-): Promise<{ call_id: string; session_id: string; muted: boolean }> {
+): Promise<{
+  call_id: string;
+  session_id: string;
+  muted: boolean;
+  audio_input_epoch: number;
+}> {
   return apiFetch(`/calls/${encodeURIComponent(callId)}/mute`, {
     method: 'POST',
     body: JSON.stringify({ session_id: sessionId, muted })

@@ -128,7 +128,11 @@ async function installActiveCallRoutes(page: Page, interruptResponseGate: Promis
     }, 201);
   });
   await page.route('**/api/calls/*/mute', async (route) => {
-    await fulfillJson(route, { serverMuted: true, state: 'listening' });
+    await fulfillJson(route, {
+      muted: true,
+      audio_input_epoch: 1,
+      state: 'listening'
+    });
   });
   await page.route('**/api/calls/*/interrupt', async (route) => {
     await interruptResponseGate;
@@ -139,6 +143,13 @@ async function installActiveCallRoutes(page: Page, interruptResponseGate: Promis
       cancelled_turn_id: 'turn-before-interrupt',
       receiver_drain_ms: 120,
       state: 'listening'
+    });
+  });
+  await page.route('**/api/calls/*/events/recover', async (route) => {
+    await fulfillJson(route, {
+      call_id: 'call-toolbar-01',
+      session_id: 'rtc-call-toolbar-01',
+      events: []
     });
   });
   await page.route('**/api/calls/*/end', async (route) => {

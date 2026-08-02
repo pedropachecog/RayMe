@@ -102,6 +102,18 @@
     readonly progress: ReconnectAudioBackfillProgress;
   }
 
+  interface MuteRequestOwner {
+    readonly requestId: number;
+    readonly callId: string;
+    readonly sessionId: string;
+    readonly previousMuted: boolean;
+    readonly targetMuted: boolean;
+    readonly acknowledgement: {
+      muted: boolean | null;
+      audioInputEpoch: number | null;
+    };
+  }
+
   type MediaReconnectReason = 'failed' | 'disconnected';
 
   let thread = $state<ThreadDetail | null>(null);
@@ -110,7 +122,10 @@
   let callId = $state('');
   let sessionId = $state('');
   let serverMuted = $state(false);
-  let muteRequestPending = false;
+  let muteRequestPending = $state(false);
+  let muteSynchronizationFailed = $state(false);
+  let muteRequestGeneration = 0;
+  let activeMuteRequest: MuteRequestOwner | null = null;
   let localMicAudioEpoch = 0;
   let listeningRms = $state<number | null>(null);
   let speakingRms = $state<number | null>(null);
@@ -246,6 +261,9 @@
     clearEventTimers();
     handledUserFinalTurnIds.clear();
     localMicAudioEpoch = 0;
+    muteRequestPending = false;
+    muteSynchronizationFailed = false;
+    activeMuteRequest = null;
     retireReconnectAudioBackfill(activeReconnectAudioBackfill);
 
     try {
@@ -942,7 +960,7 @@
     debugCallId: string,
     reason: MediaReconnectReason
   ): ReconnectAudioBackfillGeneration | null {
-    if (muteRequestPending || serverMuted) {
+    if (muteRequestPending || muteSynchronizationFailed || serverMuted) {
       return null;
     }
     if (activeReconnectAudioBackfill) {
@@ -998,6 +1016,7 @@
     return Boolean(
       ownsReconnectAudioBackfill(generation) &&
       !muteRequestPending &&
+      !muteSynchronizationFailed &&
       !serverMuted &&
       generation.captureEpoch === localMicAudioEpoch
     );
@@ -1721,6 +1740,7 @@
   function appendLocalMicPcmChunk(chunk: LocalMicPcmChunk) {
     if (
       muteRequestPending ||
+      muteSynchronizationFailed ||
       serverMuted ||
       chunk.audioInputEpoch !== localMicAudioEpoch ||
       !chunk.samples.length
@@ -2181,6 +2201,22 @@
       return;
     }
 
+    if (event.type === 'muted') {
+      if (event.session_id !== sessionId) {
+        return;
+      }
+      const owner = activeMuteRequest;
+      if (owner && event.muted !== owner.targetMuted) {
+        return;
+      }
+      applyAuthoritativeMuteState(
+        event.muted,
+        event.audio_input_epoch,
+        owner
+      );
+      return;
+    }
+
     if (event.type === 'interrupted') {
       if (event.session_id !== sessionId) {
         return;
@@ -2509,34 +2545,149 @@
     applyCallState('listening');
   }
 
+  function ownsMuteRequest(owner: MuteRequestOwner | null): owner is MuteRequestOwner {
+    return Boolean(owner && activeMuteRequest === owner);
+  }
+
+  function isAuthoritativeAudioInputEpoch(value: unknown): value is number {
+    return Number.isInteger(value) && Number(value) >= 0;
+  }
+
+  function applyAuthoritativeMuteState(
+    muted: boolean,
+    audioInputEpoch: unknown,
+    owner: MuteRequestOwner | null = null
+  ): boolean {
+    if (
+      typeof muted !== 'boolean' ||
+      !isAuthoritativeAudioInputEpoch(audioInputEpoch) ||
+      audioInputEpoch < localMicAudioEpoch
+    ) {
+      return false;
+    }
+    if (owner && !ownsMuteRequest(owner)) {
+      return false;
+    }
+    if (owner) {
+      owner.acknowledgement.muted = muted;
+      owner.acknowledgement.audioInputEpoch = audioInputEpoch;
+    }
+    const epochChanged = audioInputEpoch !== localMicAudioEpoch;
+    localMicAudioEpoch = audioInputEpoch;
+    serverMuted = muted;
+    muteSynchronizationFailed = false;
+    if (muted || epochChanged) {
+      localMicPcmBuffer = [];
+    }
+    if (muted) {
+      retireReconnectAudioBackfill(activeReconnectAudioBackfill);
+    }
+    return true;
+  }
+
+  function acknowledgedMuteResult(owner: MuteRequestOwner) {
+    const { muted, audioInputEpoch } = owner.acknowledgement;
+    if (muted !== owner.targetMuted || audioInputEpoch === null) {
+      return null;
+    }
+    return { muted, audio_input_epoch: audioInputEpoch };
+  }
+
+  async function requestAuthoritativeMute(owner: MuteRequestOwner) {
+    let lastError: unknown = new Error('Mute request failed');
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      try {
+        const result = await setCallMuted(
+          owner.callId,
+          owner.sessionId,
+          owner.targetMuted
+        );
+        if (!ownsMuteRequest(owner)) {
+          return null;
+        }
+        if (
+          typeof result.muted === 'boolean' &&
+          isAuthoritativeAudioInputEpoch(result.audio_input_epoch)
+        ) {
+          return result;
+        }
+        lastError = new Error('Mute response did not include an authoritative audio epoch');
+      } catch (error) {
+        if (!ownsMuteRequest(owner)) {
+          return null;
+        }
+        lastError = error;
+      }
+      const acknowledged = acknowledgedMuteResult(owner);
+      if (acknowledged) {
+        return acknowledged;
+      }
+      if (attempt === 1) {
+        emitDebugEvent(owner.callId, 'call.mute.retry', {
+          requestId: owner.requestId,
+          muted: owner.targetMuted
+        });
+      }
+    }
+    const acknowledged = acknowledgedMuteResult(owner);
+    if (acknowledged) {
+      return acknowledged;
+    }
+    throw lastError;
+  }
+
   async function toggleMute() {
-    if (!callId || !sessionId) {
-      serverMuted = !serverMuted;
+    if (
+      muteRequestPending ||
+      muteSynchronizationFailed ||
+      !callId ||
+      !sessionId
+    ) {
       return;
     }
 
-    const previousMuted = serverMuted;
-    const nextMuted = !previousMuted;
+    const owner = Object.freeze<MuteRequestOwner>({
+      requestId: ++muteRequestGeneration,
+      callId,
+      sessionId,
+      previousMuted: serverMuted,
+      targetMuted: !serverMuted,
+      acknowledgement: {
+        muted: null,
+        audioInputEpoch: null
+      }
+    });
+    activeMuteRequest = owner;
     muteRequestPending = true;
-    serverMuted = nextMuted;
+    serverMuted = owner.targetMuted;
 
     try {
-      const result = await setCallMuted(callId, sessionId, nextMuted);
-      const confirmedMuted = Boolean(
-        (result as typeof result & { serverMuted?: boolean }).serverMuted ??
-          result.muted ??
-          nextMuted
-      );
-      serverMuted = confirmedMuted;
-      if (!previousMuted && confirmedMuted) {
-        localMicAudioEpoch += 1;
-        localMicPcmBuffer = [];
-        retireReconnectAudioBackfill(activeReconnectAudioBackfill);
+      const result = await requestAuthoritativeMute(owner);
+      if (!ownsMuteRequest(owner) || !result) {
+        return;
       }
-    } catch {
-      serverMuted = previousMuted;
+      if (!applyAuthoritativeMuteState(result.muted, result.audio_input_epoch, owner)) {
+        throw new Error('Mute response carried a stale audio epoch');
+      }
+    } catch (error) {
+      if (!ownsMuteRequest(owner)) {
+        return;
+      }
+      serverMuted = true;
+      muteSynchronizationFailed = true;
+      localMicPcmBuffer = [];
+      retireReconnectAudioBackfill(activeReconnectAudioBackfill);
+      emitDebugEvent(owner.callId, 'call.mute.sync_failed', {
+        requestId: owner.requestId,
+        targetMuted: owner.targetMuted,
+        previousMuted: owner.previousMuted,
+        name: (error as Error)?.name ?? 'unknown'
+      });
     } finally {
-      muteRequestPending = false;
+      if (ownsMuteRequest(owner)) {
+        activeMuteRequest = null;
+        muteRequestPending = false;
+      }
     }
   }
 
@@ -3182,6 +3333,7 @@
         stateLabel={callControlStateLabel}
         ready={callState === 'listening' && canUseToolbar}
         disabled={!canUseToolbar}
+        muteDisabled={muteRequestPending || muteSynchronizationFailed}
         interruptEnabled={callState === 'understanding' || callState === 'thinking' || callState === 'rehearsing' || callState === 'speaking'}
         endEnabled={!ending}
         inputPickerSupported={false}

@@ -328,9 +328,31 @@ async def mute_call(
         session_id = service.session_for_call(call_id)
         _reject_mismatched_session(session_id, payload.session_id)
         endpoint_settings = await SettingsService(session, runtime_settings).read()
-        await _mute_call(backend, endpoint_settings.ai_backend_url, session_id, payload.muted)
-        state = service.set_muted(call_id, payload.muted)
-        return {"call_id": call_id, "session_id": session_id, "muted": state["muted"]}
+        backend_state = await _mute_call(
+            backend,
+            endpoint_settings.ai_backend_url,
+            session_id,
+            payload.muted,
+        )
+        backend_muted = backend_state.get("muted")
+        audio_input_epoch = backend_state.get("audio_input_epoch")
+        if (
+            not isinstance(backend_muted, bool)
+            or isinstance(audio_input_epoch, bool)
+            or not isinstance(audio_input_epoch, int)
+            or audio_input_epoch < 0
+        ):
+            raise AiBackendProcessingError(
+                code="call_control_failed",
+                message="Call control request failed",
+            )
+        state = service.set_muted(call_id, backend_muted)
+        return {
+            "call_id": call_id,
+            "session_id": session_id,
+            "muted": state["muted"],
+            "audio_input_epoch": audio_input_epoch,
+        }
     except CallServiceError as exc:
         raise _call_error(exc) from exc
     except AiBackendClientError as exc:

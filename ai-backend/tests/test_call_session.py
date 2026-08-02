@@ -655,7 +655,7 @@ def test_existing_failed_session_reoffer_marks_in_progress_turn_for_reconnect_gr
 def test_mute_stops_server_consumption() -> None:
     session, _ = _new_session()
 
-    _run(session.set_muted(True))
+    muted_event = _run(session.set_muted(True))
     accepted = _run(session.handle_inbound_audio_frame(b"pcm-frame-1"))
 
     assert session.muted is True
@@ -663,6 +663,9 @@ def test_mute_stops_server_consumption() -> None:
     assert session.stats()["incoming_audio_frames"] == 1
     assert session.stats()["dropped_audio_frames"] == 1
     assert session.stats()["muted"] is True
+    assert muted_event["audio_input_epoch"] == 1
+    assert _run(session.set_muted(True))["audio_input_epoch"] == 1
+    assert _run(session.set_muted(False))["audio_input_epoch"] == 1
 
 
 def test_muted_raw_bytes_drop_returns_false_without_vad_or_stt() -> None:
