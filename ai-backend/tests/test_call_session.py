@@ -1103,6 +1103,82 @@ def test_explicit_terminal_suppresses_admitted_slow_backfill_user_final(
     _run(scenario())
 
 
+@pytest.mark.parametrize("terminal_state", ["ended", "failed"])
+@pytest.mark.parametrize("stt_result", ["accepted", "error"])
+def test_explicit_terminal_suppresses_every_slow_ordinary_stt_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+    terminal_state: str,
+    stt_result: str,
+) -> None:
+    entered_stt = threading.Event()
+    release_stt = threading.Event()
+    events: list[dict[str, Any]] = []
+    elapsed_seconds = 0.0
+    monkeypatch.setattr(
+        session_module.time,
+        "perf_counter",
+        lambda: elapsed_seconds,
+    )
+
+    class SlowOrdinarySttAdapter:
+        def transcribe(self, **_kwargs: Any) -> dict[str, Any]:
+            entered_stt.set()
+            assert release_stt.wait(timeout=2.0)
+            if stt_result == "error":
+                raise RuntimeError("simulated slow STT failure")
+            return {
+                "status": "accepted",
+                "transcript": "late ordinary transcript",
+                "language": "en",
+            }
+
+    async def scenario() -> None:
+        nonlocal elapsed_seconds
+        session, _ = _new_session(
+            vad_adapter=ScriptedVadAdapter(),
+            stt_adapter=SlowOrdinarySttAdapter(),
+            event_sink=events.append,
+        )
+        first_pcm = np.full(320, 1400, dtype=np.int16).tobytes()
+        final_pcm = np.full(320, 1800, dtype=np.int16).tobytes()
+        assert await session.handle_inbound_audio_frame(
+            ScriptedInboundAudioFrame(first_pcm)
+        ) is None
+        finalized = asyncio.create_task(
+            session.handle_inbound_audio_frame(
+                ScriptedInboundAudioFrame(final_pcm)
+            )
+        )
+        assert await asyncio.to_thread(entered_stt.wait, 1.0)
+
+        if terminal_state == "ended":
+            terminal = await session.end(reason="explicit_hangup")
+        else:
+            terminal = await session.fail(reason="explicit_failure")
+        elapsed_seconds = 31.5
+        release_stt.set()
+        result = await asyncio.wait_for(finalized, timeout=2.0)
+
+        assert result == {
+            "status": "terminal",
+            "frames": 0,
+            "duration_ms": 0,
+            "state": terminal_state,
+            "reason": (
+                "explicit_hangup"
+                if terminal_state == "ended"
+                else "explicit_failure"
+            ),
+        }
+        assert terminal["type"] == terminal_state
+        assert [event["type"] for event in events] == ["state", terminal_state]
+        assert "user_final" not in [event["type"] for event in events]
+        assert session._stt_admissions == {}
+        assert elapsed_seconds > 30.0
+
+    _run(scenario())
+
+
 def test_terminal_session_rejects_late_reconnect_backfill_without_revival() -> None:
     session, _ = _new_session()
     terminal = _run(session.fail(reason="connection_failed"))

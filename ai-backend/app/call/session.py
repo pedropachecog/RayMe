@@ -291,6 +291,13 @@ class _ReconnectBackfillAdmission:
 
 
 @dataclass
+class _SttTurnAdmission:
+    token: int
+    lifecycle_epoch: int
+    allow_transport_reconnect: bool
+
+
+@dataclass
 class _TtsSegmentLedgerEntry:
     segment_id: str
     ordinal: int
@@ -397,6 +404,8 @@ class CallSession:
             int,
             _ReconnectBackfillAdmission,
         ] = {}
+        self._stt_admission_generation = 0
+        self._stt_admissions: dict[int, _SttTurnAdmission] = {}
         self._reconnect_live_frame_hold_until = 0.0
         self._reconnect_live_frame_hold_logged = False
         self._reconnect_live_frame_hold_frames: list[PcmAudioFrame] = []
@@ -1678,6 +1687,26 @@ class CallSession:
         if not self._turn_frames:
             return None
 
+        admission, stale_response = await self._admit_stt_turn(
+            allow_transport_reconnect=backfill_admission is not None
+        )
+        if stale_response is not None:
+            return stale_response
+        if admission is None:
+            raise RuntimeError("STT turn was admitted without lifecycle ownership")
+        try:
+            return await self._finalize_user_turn_admitted(admission)
+        finally:
+            async with self._lifecycle_lock:
+                self._stt_admissions.pop(admission.token, None)
+
+    async def _finalize_user_turn_admitted(
+        self,
+        admission: _SttTurnAdmission,
+    ) -> dict[str, Any] | None:
+        if not self._turn_frames:
+            return None
+
         turn_id = f"user-turn-{self._turn_index + 1}"
         frames = self._trim_trailing_silence_for_stt(list(self._turn_frames))
         started_at = self._turn_started_at or utc_timestamp()
@@ -1739,12 +1768,9 @@ class CallSession:
         except Exception as exc:
             transcription_error = exc
 
-        if backfill_admission is not None:
-            stale_response = await self._stale_reconnect_backfill_response(
-                backfill_admission
-            )
-            if stale_response is not None:
-                return stale_response
+        stale_response = await self._stale_stt_turn_response(admission)
+        if stale_response is not None:
+            return stale_response
 
         if transcription_error is not None:
             logger.error(
@@ -1761,6 +1787,9 @@ class CallSession:
                 message="Speech transcription failed. Please try speaking again.",
                 retry_allowed=True,
             )
+            stale_response = await self._stale_stt_turn_response(admission)
+            if stale_response is not None:
+                return stale_response
             await self.emit_event(event)
             if self.ended_at is None:
                 self.state = "listening"
@@ -1788,6 +1817,9 @@ class CallSession:
                 message="Speech transcription failed. Please try speaking again.",
                 retry_allowed=True,
             )
+            stale_response = await self._stale_stt_turn_response(admission)
+            if stale_response is not None:
+                return stale_response
             await self.emit_event(event)
             if self.ended_at is None:
                 self.state = "listening"
@@ -1799,6 +1831,9 @@ class CallSession:
             started_at=started_at,
             ended_at=ended_at,
         )
+        stale_response = await self._stale_stt_turn_response(admission)
+        if stale_response is not None:
+            return stale_response
         await self.emit_event(event)
         # Transition to "thinking" — the AI is now generating LLM text.
         # Inbound audio during this window would be ambient noise that Whisper
@@ -1813,18 +1848,38 @@ class CallSession:
             "text": event["text"],
         }
 
-    async def _stale_reconnect_backfill_response(
+    async def _admit_stt_turn(
         self,
-        admission: _ReconnectBackfillAdmission,
+        *,
+        allow_transport_reconnect: bool,
+    ) -> tuple[_SttTurnAdmission | None, dict[str, Any] | None]:
+        async with self._lifecycle_lock:
+            lifecycle = self._peer_lifecycle
+            if (
+                self.ended_at is not None
+                or lifecycle.phase == "terminal"
+                or self.state in {"ended", "failed"}
+            ):
+                return None, self._terminal_stt_response_locked()
+            self._stt_admission_generation += 1
+            admission = _SttTurnAdmission(
+                token=self._stt_admission_generation,
+                lifecycle_epoch=lifecycle.epoch,
+                allow_transport_reconnect=allow_transport_reconnect,
+            )
+            self._stt_admissions[admission.token] = admission
+            return admission, None
+
+    async def _stale_stt_turn_response(
+        self,
+        admission: _SttTurnAdmission,
     ) -> dict[str, Any] | None:
         async with self._lifecycle_lock:
-            current = self._reconnect_backfill_admissions.get(admission.token)
+            current = self._stt_admissions.get(admission.token)
             lifecycle = self._peer_lifecycle
             if current is not admission:
                 return {
                     "status": "superseded",
-                    "frames": 0,
-                    "duration_ms": 0,
                     "state": self.state,
                 }
             if (
@@ -1832,24 +1887,25 @@ class CallSession:
                 or lifecycle.phase == "terminal"
                 or self.state in {"ended", "failed"}
             ):
-                return {
-                    "status": "terminal",
-                    "frames": 0,
-                    "duration_ms": 0,
-                    "state": self.state,
-                    "reason": self.end_reason,
-                }
+                return self._terminal_stt_response_locked()
             if (
                 admission.lifecycle_epoch != lifecycle.epoch
                 or lifecycle.phase not in {"stable", "reconnecting"}
             ):
                 return {
                     "status": "superseded",
-                    "frames": 0,
-                    "duration_ms": 0,
                     "state": self.state,
                 }
         return None
+
+    def _terminal_stt_response_locked(self) -> dict[str, Any]:
+        return {
+            "status": "terminal",
+            "frames": 0,
+            "duration_ms": 0,
+            "state": self.state,
+            "reason": self.end_reason,
+        }
 
     async def emit_event(self, event: dict[str, Any]) -> dict[str, Any]:
         event_type = event.get("type")
@@ -3790,6 +3846,9 @@ class CallSession:
                 lifecycle.epoch += 1
                 for admission in self._reconnect_backfill_admissions.values():
                     admission.lifecycle_epoch = lifecycle.epoch
+                for admission in self._stt_admissions.values():
+                    if admission.allow_transport_reconnect:
+                        admission.lifecycle_epoch = lifecycle.epoch
                 lifecycle.phase = "reconnecting"
                 lifecycle.state_before_reconnect = self.state
                 lifecycle.grace_peer = peer_connection
