@@ -57,11 +57,6 @@ class MessageContinueRequest(BaseModel):
 
     composer_text: str = Field(default="", max_length=20000)
 
-    @field_validator("composer_text")
-    @classmethod
-    def strip_composer_text(cls, value: str) -> str:
-        return value.strip()
-
 
 async def get_message_action_session() -> AsyncIterator[AsyncSession]:
     async for session in get_session():

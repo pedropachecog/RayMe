@@ -171,14 +171,16 @@ def _system_prompt(prompt_thread: object) -> str:
 
 
 def _continue_instruction(composer_text: str | None) -> str:
-    instruction = (
-        "Continue the previous assistant message. Return the complete assistant message, "
-        "including the existing text and the continuation."
+    if not composer_text:
+        return (
+            "Continue the previous assistant message. Return the complete assistant message, "
+            "including the existing text and the continuation."
+        )
+    return (
+        "The following text is already committed assistant output. Generate only the suffix "
+        "that follows it. Do not repeat, replace, omit, or reword the committed prefix.\n\n"
+        f"Committed assistant prefix:\n{composer_text}"
     )
-    stripped_text = composer_text.strip() if composer_text else ""
-    if not stripped_text:
-        return instruction
-    return f"{instruction}\n\nUser continuation note: {stripped_text}"
 
 
 def _thread(prompt_thread: object) -> object:

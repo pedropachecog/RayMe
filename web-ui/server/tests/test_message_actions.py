@@ -342,7 +342,7 @@ async def test_swipe_calls_llm_persists_alternate_and_excludes_unselected_from_f
     assert result.selected_alternate_id == selected.id
 
 
-async def test_continue_calls_llm_with_composer_text_and_selects_continue_alternate(
+async def test_continue_commits_composer_text_before_selecting_continue_alternate(
     monkeypatch: MonkeyPatch,
 ) -> None:
     repository = ScriptedActionRepository()
@@ -378,7 +378,7 @@ async def test_continue_calls_llm_with_composer_text_and_selects_continue_altern
     selected = result.alternates[-1]
     assert selected.source_action == "continue"
     assert result.selected_alternate_id == selected.id
-    assert selected.content_text == "Extended AI response"
+    assert selected.content_text == "finish this sentenceExtended AI response"
 
 
 async def test_edit_marks_downstream_turns_stale() -> None:
@@ -506,16 +506,30 @@ def test_swipe_route_generates_selected_alternate_and_future_context_excludes_un
     assert "Target original alternate" not in future_prompt_text
 
 
-def test_continue_route_uses_composer_text_and_returns_thread_message_shape(
+@pytest.mark.parametrize(
+    ("prefix", "model_output", "expected_suffix"),
+    [
+        (" Yes, I will do it. ", "NO i can't do that!", "NO i can't do that!"),
+        (
+            "Yes, I will do it.",
+            "Yes, I will do it. Then I will begin.",
+            " Then I will begin.",
+        ),
+    ],
+)
+def test_continue_route_commits_exact_prefix_before_generated_suffix(
     message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
+    prefix: str,
+    model_output: str,
+    expected_suffix: str,
 ) -> None:
     client, _sessionmaker, scripted_client = message_action_client
-    scripted_client.tokens = ["Extended AI response"]
+    scripted_client.tokens = [model_output]
     ids = asyncio.run(_create_action_thread(message_action_client[1]))
 
     response = client.post(
         f"/api/messages/{ids['ai']}/continue",
-        json={"composer_text": "finish this sentence"},
+        json={"composer_text": prefix},
     )
 
     assert response.status_code == 200
@@ -523,13 +537,17 @@ def test_continue_route_uses_composer_text_and_returns_thread_message_shape(
     assert body["id"] == ids["ai"]
     assert body["message_kind"] == "ai_text"
     assert body["role"] == "assistant"
-    assert body["content_text"] == "Extended AI response"
-    assert body["alternates"][-1]["source_action"] == "continue"
-    assert body["selected_alternate_id"] == body["alternates"][-1]["id"]
+    selected = body["alternates"][-1]
+    assert selected["source_action"] == "continue"
+    assert body["selected_alternate_id"] == selected["id"]
+    assert selected["content_text"] == f"{prefix}{expected_suffix}"
+    assert selected["content_text"].startswith(prefix)
+    assert selected["content_text"].count(prefix) == 1
+    assert body["content_text"] == selected["content_text"]
     prompt_text = "\n".join(
         message["content"] for message in scripted_client.requests[0]["messages"]
     )
-    assert "finish this sentence" in prompt_text
+    assert prefix in prompt_text
 
 
 def test_edit_route_marks_downstream_stale_and_truncate_keep_behaviors_work(

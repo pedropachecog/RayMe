@@ -95,9 +95,9 @@ async def test_continue_includes_composer_text_without_mutating_storage() -> Non
     )
 
     assert messages[-1]["role"] == "user"
-    assert "Continue the previous assistant message." in messages[-1]["content"]
-    assert "Return the complete assistant message" in messages[-1]["content"]
-    assert "User continuation note: finish this sentence" in messages[-1]["content"]
+    assert "already committed assistant output" in messages[-1]["content"]
+    assert "Generate only the suffix" in messages[-1]["content"]
+    assert "Committed assistant prefix:\nfinish this sentence" in messages[-1]["content"]
     assert messages[-2]["role"] == "assistant"
     assert repository.messages[-1]["content_text"] == "Edited-away downstream answer"
 

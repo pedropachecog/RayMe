@@ -293,7 +293,7 @@
   }
 
   async function requestContinue(message: ChatMessageView) {
-    const composerText = composerDraft.trim();
+    const composerText = composerDraft;
 
     if (hasStaleDownstream(message)) {
       staleConfirmation = { message, composerText };

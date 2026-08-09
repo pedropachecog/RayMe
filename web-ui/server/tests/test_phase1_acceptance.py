@@ -146,17 +146,19 @@ def test_phase1_import_chat_actions_reload_and_continue(
     assert swiped["alternates"][-1]["source_action"] == "swipe"
     assert swiped["content_text"] == "Swipe backend alternate"
 
+    continued_content = "extend this branchContinue backend extension"
     continued = client.post(
         f"/api/messages/{first_ai_message['id']}/continue",
         json={"composer_text": "extend this branch"},
     ).json()
     assert continued["selected_alternate_id"] == continued["alternates"][-1]["id"]
     assert continued["alternates"][-1]["source_action"] == "continue"
-    assert continued["content_text"] == "Continue backend extension"
+    assert continued["alternates"][-1]["content_text"] == continued_content
+    assert continued["content_text"] == continued_content
 
     reloaded = client.get(f"/api/threads/{thread_id}").json()
     selected_ai_turn = next(message for message in reloaded["messages"] if message["id"] == first_ai_message["id"])
-    assert selected_ai_turn["content_text"] == "Continue backend extension"
+    assert selected_ai_turn["content_text"] == continued_content
 
     second_send = client.post(
         f"/api/chat/{thread_id}/send",
@@ -182,7 +184,7 @@ def test_phase1_import_chat_actions_reload_and_continue(
     prompt_text = "\n".join(
         message["content"] for message in scripted_client.requests[-1]["messages"]  # type: ignore[index]
     )
-    assert "Continue backend extension" in prompt_text
+    assert continued_content in prompt_text
     assert "server-secret" not in prompt_text
 
 

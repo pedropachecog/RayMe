@@ -407,14 +407,14 @@ async def continue_ai_turn(
         action=CONTINUE_SOURCE_ACTION,
         composer_text=composer_text,
     )
-    content_text = await _collect_generated_text(
+    generated_suffix = await _collect_generated_text(
         settings,
         prompt_messages,
         completion_client=completion_client,
     )
     return await repository.add_selected_alternate(
         message_id,
-        content_text,
+        _commit_continue_prefix(composer_text, generated_suffix),
         source_action=CONTINUE_SOURCE_ACTION,
     )
 
@@ -440,6 +440,16 @@ async def _collect_generated_text(
     if completion_client is None:
         return await collect_chat_completion(settings, prompt_messages)
     return await collect_chat_completion(settings, prompt_messages, client=completion_client)
+
+
+def _commit_continue_prefix(prefix: str, generated_suffix: str) -> str:
+    """Make a supplied Continue prefix durable before persisting model output."""
+
+    if not prefix:
+        return generated_suffix
+    if generated_suffix.startswith(prefix):
+        generated_suffix = generated_suffix[len(prefix) :]
+    return f"{prefix}{generated_suffix}"
 
 
 def _source_action(source_action: str) -> MessageAlternateSourceAction:

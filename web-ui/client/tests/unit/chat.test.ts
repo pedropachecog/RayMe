@@ -349,7 +349,7 @@ describe('chat route contract', () => {
     });
     expect(selectedMessageContent(messages[0])).toBe('Generated continue from backend');
     expect(messages[0].alternates[0].source_action).toBe('continue');
-    expect(routeSource).toContain('composerDraft.trim()');
+    expect(routeSource).toContain('const composerText = composerDraft;');
   });
 
   it('edit marks downstream stale and keeps the truncate-or-keep choice copy in the route', async () => {
