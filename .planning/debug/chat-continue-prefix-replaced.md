@@ -2,7 +2,7 @@
 status: fixing
 trigger: "The continue function in chat does nto work well. if I do \"Yes, I will do it.\" it should be the prefix. but now it does \"NO i can't do that!\" instead of completing. So you're probably asking it to generate the whole text with \"Yes...\" as the start. That's not how it should work. The text I provide should not be optional."
 created: "2026-08-09T00:00:00Z"
-updated: "2026-08-09T18:33:37Z"
+updated: "2026-08-09T21:32:05Z"
 ---
 
 # Debug Session: Chat Continue Prefix Replaced
@@ -22,28 +22,28 @@ When the user invokes Continue with supplied text, that text is committed assist
 
 ## Current Focus
 
-- incident: "OMEN web-server environment recovery after a parent-owned deployed verification attempted uv reconciliation with Python 3.14 and left web-ui/server/.venv without Alembic."
-- known_pattern_candidate: "qwen-core-invalid-json — canonical deploy missing web schema readiness before runtime launch"
+- incident: "Physical acceptance failed on deployed commit eae4e6800c811e90b11c0e6beb45ed92b5df2763: Continue displays the committed prefix but the model-generated suffix is `I cannot fulfill that request`, not a coherent continuation."
 - bug_class: "bohrbug"
-- hypothesis: "Confirmed: the canonical deploy script called Alembic after stopping services but never provisioned or validated the web-ui/server virtual environment, so a partially removed environment made every recovery deploy fail before launch."
-- test: "The original recovery contract fails when only the deploy-script repair is reverted, then passes after that exact script is restored; the full deploy-contract suite, lint, Bash syntax, and diff hygiene pass."
-- expecting: "The parent-owned canonical deploy will restore web production dependencies with Python 3.12, preflight Alembic, migrate, then launch and health-check both services."
-- next_action: "Parent: run only scripts/deploy-omen.sh for OMEN recovery and report whether its web-environment provision, Alembic preflight/migration, service launch, and health checks complete."
+- hypothesis: "Confirmed: RayMe constructed nonempty Continue as a final user instruction and began decoding a fresh assistant response, then committed the prefix afterward. The repair replaces the target history entry with one exact final assistant prefix, so llama-server-compatible decoding begins after those committed assistant tokens."
+- test: "Specified real-SQL boundary tests prove the request ends in an assistant prefix, excludes the old target response, preserves whitespace, and stores exactly one prefix; all adjacent tests, full server suite, lint, diff hygiene, and the repair-only causality guardrail pass."
+- expecting: "On the configured endpoint, Continue now generates a coherent suffix after the exact supplied assistant text rather than beginning a fresh refusal response."
+- next_action: "Parent: commit as appropriate, deploy only through `scripts/deploy-omen.sh`, then run the physical Continue acceptance using a supplied prefix and report the complete resulting assistant message plus any deployment/model errors."
 
 reasoning_checkpoint:
-  hypothesis: "The canonical deploy fails to recover a damaged web virtual environment because it invokes that environment's Alembic module without first syncing the web project, even though Alembic is a declared production dependency."
+  hypothesis: "The physical refusal occurs because RayMe sends the supplied Continue value only in a final user instruction and concatenates it after generation, whereas llama-server decodes after a final assistant message; replacing the target AI history entry with the supplied assistant prefix at the request boundary makes decoding continue that prefix."
   confirming_evidence:
-    - "The deploy script contains AI `uv sync` calls but no `uv sync --project web-ui/server` before its Alembic invocation."
-    - "The web pyproject declares Alembic in production dependencies; the parent-observed canonical deploy failed specifically with `No module named alembic`."
-    - "The new deploy contract fails on the absent web provisioning marker before production code changes."
-  falsification_test: "This cause would be false if the current canonical script already synchronized web-ui/server and successfully preflighted Alembic before migration; source inspection and the failing contract show neither exists."
-  fix_rationale: "After canonical service shutdown and existing Qwen provisioning, reuse available canonical uv to sync only the web project's production dependencies with Python 3.12, fail closed if Alembic cannot import, then preserve the existing migration and launch sequence."
-  blind_spots: "Static coverage cannot prove OMEN's Windows file locks have released or a Python 3.12 download completes; the parent-owned canonical deploy must verify recovery and health on OMEN."
+    - "RayMe `prompt_builder.py` appends `_continue_instruction(composer_text)` with `role: user`; `llm_stream.py` forwards this structure directly to OpenAI-compatible chat completions."
+    - "The physical acceptance produced a refusal suffix despite correct visible prefix persistence, exactly the behavior expected when the prefix is absent from decoder context."
+    - "SillyTavern commit 8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8 moves its Continue message into the final generation position when prefill is enabled; primary llama.cpp documentation states that a trailing assistant message is assistant prefill by default."
+  falsification_test: "The hypothesis would be false if a pre-fix serialized Continue request already ended in one assistant message equal to the supplied prefix and excluded the original target AI content. Current source and tests observe the opposite."
+  fix_rationale: "For nonempty Continue only, omit the old target response from history and place the raw supplied text as the final assistant message. This makes the prefill part of the actual token context while retaining `_commit_continue_prefix` to normalize providers that echo the prefill."
+  blind_spots: "The active deployed endpoint identity could not be read through the current remote session, and an arbitrary OpenAI-compatible server may not support assistant prefill. llama-server—the documented local endpoint—does, and physical acceptance must verify the configured production endpoint after deployment."
   candidate_causes:
-    - "code: absent web project sync/preflight before the Alembic command."
-    - "config: parent-owned unpinned uv selected Python 3.14, unlike the proposed canonical Python-3.12 deployment contract."
-    - "environment: the externally interrupted reconciliation left web-ui/server/.venv partial; canonical service shutdown removes the active-service lock contributor before recovery."
-  and_gate: "no — no web sync alone fully explains why a canonical deploy cannot restore a missing Alembic module; interpreter selection and partial deletion are trigger conditions, not co-required root causes."
+    - "code: final Continue prompt role is user, and the old target assistant content remains in history rather than being overlaid by the supplied prefix."
+    - "config: a non-llama-server endpoint could treat a trailing assistant message as a completed turn rather than prefill."
+    - "data: some prefixes can still lead to poor model-quality suffixes, but they cannot explain the current source-level absence of a decoder prefix."
+  and_gate: "no — the user-instruction plus post-hoc-concatenation path independently produces the observed refusal suffix; endpoint prefill support is a compatibility constraint on the repair, not a second cause of the current behavior."
+
 
 ## Evidence
 
@@ -189,14 +189,164 @@ reasoning_checkpoint:
   found: "`uv run pytest tests/test_omen_deploy_contract.py -q` passed 9/9, `bash -n scripts/deploy-omen.sh` passed, cross-project Ruff passed for the changed deploy-contract test, and `git diff --check` passed."
   implication: "The parent context independently accepts the canonical web-environment recovery path; the repair is ready to commit and exercise on OMEN."
 
+- timestamp: "2026-08-09T18:35:58Z"
+  checked: "Canonical OMEN recovery deployment"
+  found: "`scripts/deploy-omen.sh` pulled `eae4e6800c811e90b11c0e6beb45ed92b5df2763`, provisioned `web-ui/server` under CPython 3.12.13, restored Alembic and all locked production dependencies, passed migration, rebuilt the client, restarted the canonical scheduled tasks, and completed listener/health verification."
+  implication: "OMEN recovered entirely through the authorized deployment path, and the Continue fix remains deployed on the exact recovered commit."
+
+- timestamp: "2026-08-09T18:36:35Z"
+  checked: "Independent deployed identity and readiness after recovery"
+  found: "OMEN repository HEAD and `/webrtc/status.deployed_commit` are `eae4e6800c811e90b11c0e6beb45ed92b5df2763`; WebRTC is `ready` with live-call/media readiness true and zero active sessions; web-to-AI readiness is `ready` and authenticated."
+  implication: "The application is operational and ready for product-owner acceptance of the real chat Continue behavior."
+
+- timestamp: "2026-08-09T20:30:00Z"
+  checked: "Product-owner physical acceptance on the recovered deployed commit"
+  found: "Continue still produced `I cannot fulfill that request` instead of coherently continuing the supplied text. The previously deployed persistence boundary keeps the prefix visible, but it does not control what tokens the model sees before decoding. The product owner explicitly authorized temporary-clone inspection of SillyTavern as a reference."
+  implication: "The original post-hoc concatenation fix addresses output ownership but not continuation semantics. Resume investigation at the actual prompt/message and provider generation boundary; treat user-instruction prompting, assistant-prefill, transport capability, and model-specific safety as competing falsifiable causes."
+
+- timestamp: "2026-08-09T20:40:00Z"
+  checked: "Initial RayMe source search and authorized SillyTavern reference acquisition"
+  found: "RayMe's nonempty Continue test currently asserts its final prompt message has role `user` and a `Committed assistant prefix` instruction. The prompt builder calls `_continue_instruction` as a user message. The authorized shallow clone is outside the repository at `/tmp/sillytavern-reference.X4rStI`, origin `https://github.com/SillyTavern/SillyTavern.git`, commit `8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8`."
+  implication: "The leading code-category hypothesis is directly supported: supplied text is currently presented as a user-direction payload, not yet evidenced as assistant prefill. Read the complete transport and reference paths to prove the effective decoding boundary and identify the minimal compatible architecture."
+
+- timestamp: "2026-08-09T20:50:00Z"
+  checked: "Complete RayMe Continue call path and upstream SillyTavern Continue construction at commit 8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8"
+  found: "`continue_ai_turn` includes the target assistant message in history, then `build_prompt_context` appends the supplied prefix only in a final `role: user` instruction. `llm_stream._prepare_messages` forwards that list unchanged (apart from an optional `/no_think` suffix on the final user message), so decoding never receives the supplied text as an assistant turn. SillyTavern's `public/script.js` builds a Continue cycle prompt from the edited assistant text; `public/scripts/openai.js` moves that message to the final generation position when its Continue Prefill mode is enabled, and explicitly gates native assistant prefill to a provider it knows supports it (Claude)."
+  implication: "The hypothesis is confirmed at RayMe's generation boundary: post-hoc concatenation cannot make the model continue the prefix. The remaining design question is the active Qwen/OpenAI-compatible endpoint's supported mechanism for decoding after a final assistant prefix."
+
+- timestamp: "2026-08-09T21:00:00Z"
+  checked: "RayMe runtime/provider configuration and generation history"
+  found: "RayMe intentionally targets a runtime-configurable OpenAI-compatible Chat Completions endpoint (including local llama-server), and no provider-specific continuation parameter exists in its current settings or client. Repository history shows the Continue code was introduced in `4f9f38b` as the post-hoc persistence fix; it contains no prior assistant-prefill design."
+  implication: "The correct repair must preserve the OpenAI-compatible architecture while selecting a documented decoding-after-prefix mechanism based on the deployed provider, rather than assuming the Qwen TTS runtime is the text LLM."
+
+- timestamp: "2026-08-09T21:05:00Z"
+  checked: "First read-only deployed-settings command"
+  found: "No remote state was changed, but nested command quoting truncated the local SQLite query and Python returned `SyntaxError: unterminated string literal`."
+  implication: "This is an observability-command construction error, not evidence about the deployment. Retry using an encoded source payload so the provider identity can be observed without exposing secrets or modifying OMEN."
+
+- timestamp: "2026-08-09T21:10:00Z"
+  checked: "Second read-only deployed-settings command"
+  found: "No remote state was changed, but the shell-built source string again stripped the SQL quotation marks before Python received it, yielding `SyntaxError: '(' was never closed`."
+  implication: "Provider identity remains unobserved. Use a literal here-document to create the encoded query in memory, avoiding shell interpolation entirely."
+
+- timestamp: "2026-08-09T21:15:00Z"
+  checked: "Third read-only deployed-settings command"
+  found: "The encoded source was intact locally, but the remote Windows native-process boundary still removed quoted Python literals, yielding the same harmless `SyntaxError`. No state was written."
+  implication: "Three attempts on this read path have failed for the same transport reason. Stop retrying it; the deployed settings endpoint already returns the non-secret provider identity needed for the investigation."
+
+- timestamp: "2026-08-09T21:20:00Z"
+  checked: "Read-only OMEN loopback settings endpoint"
+  found: "`https://127.0.0.1:8443/api/settings` was unreachable from the OMEN session. No state was changed."
+  implication: "The web service is not reachable through loopback even though its deployment contract uses the LAN binding. Query the configured LAN address before treating the provider identity as unavailable."
+
+- timestamp: "2026-08-09T21:25:00Z"
+  checked: "Read-only OMEN LAN settings endpoint"
+  found: "`https://192.168.1.199:8443/api/settings` failed TLS negotiation from the current remote session. No state was changed, and the provider identity remains unobserved."
+  implication: "Do not keep retrying a deployment-observability path with the same unavailable session conditions. RayMe's documented provider contract includes local llama-server, so establish the correct OpenAI-compatible continuation mechanism from primary upstream documentation and cover it at the serialized-request boundary."
+
+- timestamp: "2026-08-09T21:35:00Z"
+  checked: "Primary llama.cpp server documentation and source contract"
+  found: "llama-server documents assistant-message prefilling on its OpenAI-compatible chat endpoint: a final assistant message is prefilling by default (`--prefill-assistant` enabled), and its source declares that a trailing assistant message is prefilled into the response. This matches SillyTavern's final-Continue-message construction and conflicts with RayMe's final user instruction."
+  implication: "The root cause is confirmed at the provider decoding boundary. Add a red regression that proves the request ends in the supplied assistant prefix and excludes the replaced target turn, then implement the small history-overlay repair."
+
+- timestamp: "2026-08-09T21:45:00Z"
+  checked: "Specified prompt-builder assistant-prefill regression before implementation"
+  found: "`test_continue_prefills_exact_composer_text_as_final_assistant_turn` fails deterministically: the final prompt message is `role: user` containing the generated instruction text instead of the raw assistant prefix."
+  implication: "The red test directly reproduces the missing decoder-prefix boundary. Test whether the action also retains the original target assistant message before applying the overlay fix."
+
+- timestamp: "2026-08-09T21:50:00Z"
+  checked: "Specified Continue action-boundary regression before implementation"
+  found: "`test_continue_commits_composer_text_before_selecting_continue_alternate` fails because `continue_ai_turn` passes `until_message_id='ai-1'` instead of the preceding user message, so the old target assistant response is retained rather than replaced by an assistant prefill."
+  implication: "The generation path has both necessary defects: wrong final role and wrong history boundary. The real-SQL route regression now tests those together at the serialized model-request/persistence boundary."
+
+- timestamp: "2026-08-09T21:55:00Z"
+  checked: "Specified real-SQL Continue route regression before implementation"
+  found: "Both parameter cases fail because the exact serialized request ends with a user `Committed assistant prefix` instruction instead of `{'role': 'assistant', 'content': prefix}`. This reproduces the physical acceptance architecture failure while preserving the prior persistence assertions."
+  implication: "The red regression covers the authoritative generation/persistence boundary and distinguishes actual assistant prefill from user prompting plus post-hoc concatenation. Apply the confirmed minimal overlay repair."
+
+- timestamp: "2026-08-09T22:00:00Z"
+  checked: "Minimal nonempty Continue prefill implementation"
+  found: "`continue_ai_turn` now obtains history through the message before the target when a nonempty prefix is supplied. `build_prompt_context` then appends the raw prefix as the final `assistant` message; empty Continue retains the existing user-instruction path. `_commit_continue_prefix` remains the persistence guard for providers that echo an assistant prefill."
+  implication: "The actual OpenAI-compatible request can now make llama-server begin decoding after the committed assistant tokens rather than after a user instruction. Focused regressions must prove the red behavior is green without changing empty Continue."
+
+- timestamp: "2026-08-09T22:10:00Z"
+  checked: "Focused assistant-prefill red-to-green regression set"
+  found: "The prompt-builder prefill, action-history overlay, real-SQL route boundary cases, and Qwen OpenAI-compatible transport test all pass (5 passed). The route proof verifies that the generated request ends in one exact `assistant` prefix, omits the old target response, preserves whitespace, and still de-duplicates a provider-echoed prefix on persistence."
+  implication: "The original replacement bug and the physical acceptance semantic bug are both covered at the generation/persistence boundary. Run adjacent suites and source hygiene before the causality guardrail."
+
+- timestamp: "2026-08-09T22:20:00Z"
+  checked: "Adjacent Continue and chat regression suites plus source hygiene"
+  found: "`test_message_actions.py`, `test_prompt_builder.py`, `test_chat_stream.py`, and `test_phase1_acceptance.py` passed 34 tests. Scoped Ruff and `git diff --check` passed. The only changed source/test files are this session's two Continue modules and three focused test files; the unrelated qwen debug file remains untouched."
+  implication: "The overlay did not regress adjacent message, stream, or Phase-1 behavior. Complete the full server suite, then use a two-file path-scoped revert to prove production causality."
+
+- timestamp: "2026-08-09T22:30:00Z"
+  checked: "First complete web-server suite attempt"
+  found: "The process completed after emitting only progress dots; this terminal wrapper omitted both the pytest summary and an explicit shell marker."
+  implication: "Do not infer an all-suite pass from missing output. Rerun the same suite with output redirected only after pytest succeeds and a concise success marker is printed."
+
+- timestamp: "2026-08-09T22:35:00Z"
+  checked: "Second complete web-server suite attempt with explicit success marker"
+  found: "The command again completed but the output wrapper captured neither pytest output nor the trailing marker, matching the previously documented environment behavior."
+  implication: "The suite has not emitted an observable success record in this context. Preserve the command exit behavior with `pipefail` while piping only final pytest output through `tail` for a visible result."
+
+- timestamp: "2026-08-09T22:40:00Z"
+  checked: "Third complete web-server suite attempt with `pipefail` and final-output piping"
+  found: "The process completed but this wrapper still emitted no text, including no piped final lines."
+  implication: "Further stdout variants are not informative. Record the terminal command's structured exit status on one final run rather than repeating the same output-capture attempt."
+
+- timestamp: "2026-08-09T22:45:00Z"
+  checked: "Structured terminal result for the final full-suite run"
+  found: "The suite was still active after the 30-second terminal yield (session 37844), explaining the previous incomplete dot-only output; it had not completed silently."
+  implication: "Poll the existing test process rather than rerun it. Its final exit status will provide the needed complete-suite evidence."
+
+- timestamp: "2026-08-09T22:50:00Z"
+  checked: "First poll of complete web-server suite session 37844"
+  found: "The unchanged process is still running and reports 24% progress with no failure output."
+  implication: "The full suite contains slow tests; keep polling this one process rather than treating incomplete capture as a test result."
+
+- timestamp: "2026-08-09T23:00:00Z"
+  checked: "Complete web-server suite after assistant-prefill overlay"
+  found: "The existing suite session exited 0: `292 passed in 104.26s`."
+  implication: "The overlay preserves all existing web-server behavior. Use a two-file path-scoped revert with the new regression retained to prove the production change is causally necessary."
+
+- timestamp: "2026-08-09T23:10:00Z"
+  checked: "Path-scoped assistant-prefill production revert"
+  found: "After stashing only `message_actions.py` and `prompt_builder.py`, both retained real-SQL route boundary cases failed because the request reverted to the final user `Committed assistant prefix` instruction. Test files and the unrelated qwen debug file remained untouched."
+  implication: "The tests do not pass merely because of their own edits: the two production overlay changes are causally necessary. Restore them and reconfirm the exact same test before accepting the guardrail."
+
+- timestamp: "2026-08-09T23:20:00Z"
+  checked: "Path-scoped assistant-prefill production reapply"
+  found: "The two-file stash restored cleanly and the identical real-SQL route regression passed both parameter cases (2 passed). The stash was dropped; only this session's Continue source/tests/debug changes remain, with the unrelated qwen debug file still untracked and untouched."
+  implication: "The production overlay is both necessary and sufficient for the specified assistant-prefill request behavior. Run final source hygiene and then require a parent-owned canonical deployment plus physical acceptance on the configured endpoint."
+
+- timestamp: "2026-08-09T23:30:00Z"
+  checked: "Final assistant-prefill source hygiene"
+  found: "Scoped Ruff and `git diff --check` passed after the exact production reapply. The final source diff is limited to the two Continue modules and three focused regression files; the unrelated qwen debug file remains untouched."
+  implication: "All applicable local fix-acceptance signals accept the assistant-prefill architecture. The remaining required evidence is parent-owned canonical deployment and physical behavior on the configured provider."
+
+- timestamp: "2026-08-09T21:30:01Z"
+  checked: "Parent full web-server and lint verification of assistant prefill"
+  found: "`uv run pytest tests -q` passed 292/292 tests; scoped Ruff passed for all changed server source/tests; `git diff --check` passed."
+  implication: "The parent context independently confirms the final serialized Continue request ends in the exact assistant prefix, excludes the old target response, and preserves adjacent behavior."
+
+- timestamp: "2026-08-09T21:31:02Z"
+  checked: "Configured production LLM endpoint identity"
+  found: "OMEN `/api/settings` identifies `http://192.168.1.190:8001/v1` with model `unsloth/Qwen3.5-27B` and thinking disabled. The endpoint `/props` identifies llama-server build `b10327-69bf64379` and exposes its Qwen chat template."
+  implication: "The deployed provider is the llama-server implementation whose trailing-assistant prefill behavior the repair targets, not an unknown incompatible OpenAI endpoint."
+
+- timestamp: "2026-08-09T21:32:05Z"
+  checked: "Direct production-provider assistant-prefill probe"
+  found: "A read-only `/v1/chat/completions` request ending with assistant content `Yes, I will do it.` returned a coherent continuation beginning with that exact prefix (`Yes, I will do it. However, ...`) rather than a refusal. llama-server echoed the prefill in response content, which `_commit_continue_prefix` already de-duplicates at persistence."
+  implication: "Assistant prefill is empirically supported by the configured production endpoint and produces the intended decoding shape before RayMe deployment."
+
 ## Eliminated
 
 ## Specialist Review
 
 ## Resolution
 
-- root_cause: "Continue: for nonempty text, the server treated composer_text as optional prompt guidance and persisted only model output; client/API trim() also violated byte-for-byte preservation. Deployment recovery: canonical deploy invoked web Alembic without syncing/preflighting web-ui/server, so a partially removed virtual environment could not recover its declared production Alembic dependency."
-- fix: "Continue: preserve raw text and persist exact prefix plus generated suffix. Deployment recovery: sync web-ui/server production dependencies under Python 3.12 and preflight Alembic inside scripts/deploy-omen.sh before existing migrations."
+- root_cause: "Continue has two independent defects: (1) prior code persisted only model output and normalized supplied bytes; (2) the first repair kept the prefix only post-hoc and sent it to the model as a final user instruction while retaining the old target assistant message. The model therefore decoded a new response and could refuse instead of continuing the committed assistant tokens. Deployment recovery: canonical deploy invoked web Alembic without syncing/preflighting web-ui/server, so a partially removed virtual environment could not recover its declared production Alembic dependency."
+- fix: "Continue: preserve raw text, replace the target assistant history entry with the exact supplied prefix as the final assistant prefill for nonempty Continue, and persist that prefix plus generated suffix with one repeated-prefix removal. Deployment recovery: sync web-ui/server production dependencies under Python 3.12 and preflight Alembic inside scripts/deploy-omen.sh before existing migrations."
 - verification:
   oracle_type: specified
   target_test:
@@ -224,6 +374,36 @@ reasoning_checkpoint:
     fixed_on_reapply: true
     detail: "A path-scoped stash of only the four production files restored the original target-test failure; popping that stash restored two passing parameter cases."
   guardrail_verdict: accepted
+  assistant_prefill:
+    oracle_type: specified
+    target_test:
+      result: pass
+      command: "cd web-ui/server && uv run pytest tests/test_message_actions.py::test_continue_route_commits_exact_prefix_before_generated_suffix -q"
+      detail: "Two real-SQL boundary cases prove the request ends with one exact assistant prefix, excludes the replaced target response, preserves whitespace, and keeps one persisted prefix whether the provider returns only a suffix or echoes it."
+    mutation_check:
+      result: skipped
+      reason_if_skipped: "No configured mutation runner exists for the web-server test suite."
+      mutant_killed: null
+    no_op_deletion:
+      result: pass
+      detail: "The removed nonempty user instruction is replaced by required assistant-prefill context; empty Continue keeps the original user-instruction path, and post-hoc one-prefix persistence remains intact."
+      deletion_justified_by_rca: true
+    adjacent_tests:
+      result: pass
+      suites_run:
+        - "Focused assistant-prefill suite (5 passed)"
+        - "tests/test_message_actions.py tests/test_prompt_builder.py tests/test_chat_stream.py tests/test_phase1_acceptance.py (34 passed)"
+        - "uv run pytest tests -q (292 passed in 104.26s)"
+        - "Scoped Ruff and git diff --check (passed)"
+    revert_and_reconfirm:
+      result: pass
+      bug_returned_on_revert: true
+      fixed_on_reapply: true
+      detail: "Stashing only message_actions.py and prompt_builder.py made both real-SQL route cases fail with the old final user instruction; restoring that exact stash made both pass."
+    environment_verification:
+      result: awaiting_human_verify
+      detail: "Parent must deploy only through scripts/deploy-omen.sh and perform the physical Continue test on the configured endpoint."
+    guardrail_verdict: accepted
   deployment_recovery:
     oracle_type: specified
     target_test:
@@ -251,8 +431,8 @@ reasoning_checkpoint:
       fixed_on_reapply: true
       detail: "A stash of only scripts/deploy-omen.sh made the retained recovery contract fail because the provisioning helper was absent; restoring the stash made it pass."
     environment_verification:
-      result: awaiting_human_verify
-      detail: "No local PowerShell executable or OMEN access is available to this debugger. Parent must recover through scripts/deploy-omen.sh only."
+      result: pass
+      detail: "Parent ran scripts/deploy-omen.sh on OMEN; it rebuilt web-ui/server under Python 3.12.13, passed the Alembic preflight/migration, restarted both canonical services, and verified health on commit eae4e6800c811e90b11c0e6beb45ed92b5df2763."
     guardrail_verdict: accepted
 - files_changed:
   - web-ui/client/src/routes/chat/[threadId]/+page.svelte

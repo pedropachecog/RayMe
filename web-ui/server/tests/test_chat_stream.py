@@ -201,6 +201,30 @@ async def test_qwen_generation_can_disable_thinking() -> None:
     assert request["messages"][-1]["content"].endswith("/no_think")
 
 
+async def test_qwen_generation_preserves_final_assistant_prefill() -> None:
+    scripted_client = ScriptedOpenAIClient()
+    settings = ChatCompletionSettings(
+        base_url="http://llm.local/v1",
+        model="unsloth/Qwen3.5-27B",
+        api_key="server-secret",
+        disable_thinking=True,
+    )
+    prefix = "Yes, I will do it."
+
+    await collect_chat_completion(
+        settings,
+        [
+            {"role": "user", "content": "Prompt from user"},
+            {"role": "assistant", "content": prefix},
+        ],
+        client=scripted_client,
+    )
+
+    request = scripted_client.chat.completions.requests[0]
+    assert request["extra_body"] == {"chat_template_kwargs": {"enable_thinking": False}}
+    assert request["messages"][-1] == {"role": "assistant", "content": prefix}
+
+
 def test_done_event_contains_full_thread_message_shape() -> None:
     alternate = MessageAlternateShape(
         id="alternate-selected",

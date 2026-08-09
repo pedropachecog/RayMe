@@ -399,7 +399,11 @@ async def continue_ai_turn(
 ) -> ThreadMessageShape:
     """Extend the previous AI turn through the server-side LLM path."""
 
-    context = await _generation_context(message_id, repository, include_target=True)
+    context = await _generation_context(
+        message_id,
+        repository,
+        include_target=not bool(composer_text),
+    )
     prompt_messages = await build_prompt_context(
         context.thread_id,
         repository=repository,

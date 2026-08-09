@@ -84,21 +84,22 @@ async def test_swipe_selected_branch_only_enters_prompt() -> None:
     assert "Hidden branch" not in prompt_text
 
 
-async def test_continue_includes_composer_text_without_mutating_storage() -> None:
+async def test_continue_prefills_exact_composer_text_as_final_assistant_turn() -> None:
     repository = ScriptedPromptRepository()
+    prefix = "  finish this sentence  "
 
     messages = await build_prompt_context(
         "thread-1",
         repository=repository,
+        until_message_id="user-1",
         action="continue",
-        composer_text="finish this sentence",
+        composer_text=prefix,
     )
 
-    assert messages[-1]["role"] == "user"
-    assert "already committed assistant output" in messages[-1]["content"]
-    assert "Generate only the suffix" in messages[-1]["content"]
-    assert "Committed assistant prefix:\nfinish this sentence" in messages[-1]["content"]
-    assert messages[-2]["role"] == "assistant"
+    assert messages[-1] == {"role": "assistant", "content": prefix}
+    assert messages[-2] == {"role": "user", "content": "Hello"}
+    assert all(message["content"] != "Selected branch" for message in messages)
+    assert all("Committed assistant prefix" not in message["content"] for message in messages)
     assert repository.messages[-1]["content_text"] == "Edited-away downstream answer"
 
 

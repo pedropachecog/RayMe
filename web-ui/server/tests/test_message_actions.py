@@ -350,11 +350,11 @@ async def test_continue_commits_composer_text_before_selecting_continue_alternat
     async def scripted_build_prompt_context(*args: object, **kwargs: object) -> list[dict[str, str]]:
         assert kwargs["repository"] is repository
         assert kwargs["action"] == "continue"
-        assert kwargs["until_message_id"] == "ai-1"
+        assert kwargs["until_message_id"] == "user-1"
         assert kwargs["composer_text"] == "finish this sentence"
         return [
-            {"role": "assistant", "content": "Original AI response"},
-            {"role": "user", "content": "Continue with: finish this sentence"},
+            {"role": "user", "content": "Prompt from user"},
+            {"role": "assistant", "content": "finish this sentence"},
         ]
 
     async def scripted_collect_chat_completion(
@@ -362,7 +362,8 @@ async def test_continue_commits_composer_text_before_selecting_continue_alternat
         messages: list[dict[str, str]],
     ) -> str:
         assert settings == SERVER_SETTINGS
-        assert "finish this sentence" in "\n".join(message["content"] for message in messages)
+        assert messages[-1] == {"role": "assistant", "content": "finish this sentence"}
+        assert all(message["content"] != "Original AI response" for message in messages)
         return "Extended AI response"
 
     monkeypatch.setattr(message_actions, "build_prompt_context", scripted_build_prompt_context)
@@ -544,10 +545,11 @@ def test_continue_route_commits_exact_prefix_before_generated_suffix(
     assert selected["content_text"].startswith(prefix)
     assert selected["content_text"].count(prefix) == 1
     assert body["content_text"] == selected["content_text"]
-    prompt_text = "\n".join(
-        message["content"] for message in scripted_client.requests[0]["messages"]
-    )
-    assert prefix in prompt_text
+    prompt_messages = scripted_client.requests[0]["messages"]
+    assert prompt_messages[-1] == {"role": "assistant", "content": prefix}
+    assert prompt_messages[-2] == {"role": "user", "content": "Prompt from user"}
+    assert all(message["content"] != "Original AI response" for message in prompt_messages)
+    assert all("Committed assistant prefix" not in message["content"] for message in prompt_messages)
 
 
 def test_edit_route_marks_downstream_stale_and_truncate_keep_behaviors_work(

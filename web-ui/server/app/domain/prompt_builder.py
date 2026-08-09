@@ -77,12 +77,10 @@ async def build_prompt_context(
             break
 
     if action == "continue":
-        context.append(
-            {
-                "role": "user",
-                "content": _continue_instruction(composer_text),
-            }
-        )
+        if composer_text:
+            context.append({"role": "assistant", "content": composer_text})
+        else:
+            context.append({"role": "user", "content": _continue_instruction()})
 
     return context
 
@@ -170,16 +168,10 @@ def _system_prompt(prompt_thread: object) -> str:
     return "\n\n".join(part for part in parts if part)
 
 
-def _continue_instruction(composer_text: str | None) -> str:
-    if not composer_text:
-        return (
-            "Continue the previous assistant message. Return the complete assistant message, "
-            "including the existing text and the continuation."
-        )
+def _continue_instruction() -> str:
     return (
-        "The following text is already committed assistant output. Generate only the suffix "
-        "that follows it. Do not repeat, replace, omit, or reword the committed prefix.\n\n"
-        f"Committed assistant prefix:\n{composer_text}"
+        "Continue the previous assistant message. Return the complete assistant message, "
+        "including the existing text and the continuation."
     )
 
 
