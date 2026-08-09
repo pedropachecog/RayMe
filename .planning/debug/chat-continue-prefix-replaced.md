@@ -2,7 +2,7 @@
 status: fixing
 trigger: "The continue function in chat does nto work well. if I do \"Yes, I will do it.\" it should be the prefix. but now it does \"NO i can't do that!\" instead of completing. So you're probably asking it to generate the whole text with \"Yes...\" as the start. That's not how it should work. The text I provide should not be optional."
 created: "2026-08-09T00:00:00Z"
-updated: "2026-08-09T18:17:34Z"
+updated: "2026-08-09T18:33:37Z"
 ---
 
 # Debug Session: Chat Continue Prefix Replaced
@@ -22,26 +22,28 @@ When the user invokes Continue with supplied text, that text is committed assist
 
 ## Current Focus
 
+- incident: "OMEN web-server environment recovery after a parent-owned deployed verification attempted uv reconciliation with Python 3.14 and left web-ui/server/.venv without Alembic."
+- known_pattern_candidate: "qwen-core-invalid-json — canonical deploy missing web schema readiness before runtime launch"
 - bug_class: "bohrbug"
-- hypothesis: "For a nonempty Continue composer value, prompt_builder frames it as optional user guidance and continue_ai_turn stores the model response directly, so the supplied prefix is not committed at the final selected-alternate persistence boundary."
-- test: "The server regression passes with contradictory and repeated-prefix model output; the client route contract passes with raw draft forwarding."
-- expecting: "In the real workflow, supplied Continue text appears unchanged once at offset zero and only new generated text follows it."
-- next_action: "Await human verification of the original Continue workflow; do not deploy from this debugger session."
+- hypothesis: "Confirmed: the canonical deploy script called Alembic after stopping services but never provisioned or validated the web-ui/server virtual environment, so a partially removed environment made every recovery deploy fail before launch."
+- test: "The original recovery contract fails when only the deploy-script repair is reverted, then passes after that exact script is restored; the full deploy-contract suite, lint, Bash syntax, and diff hygiene pass."
+- expecting: "The parent-owned canonical deploy will restore web production dependencies with Python 3.12, preflight Alembic, migrate, then launch and health-check both services."
+- next_action: "Parent: run only scripts/deploy-omen.sh for OMEN recovery and report whether its web-environment provision, Alembic preflight/migration, service launch, and health checks complete."
 
 reasoning_checkpoint:
-  hypothesis: "For a nonempty Continue composer value, the server persists only model-generated text because it never combines composer_text with the collected completion; prompt wording cannot make the prefix durable."
+  hypothesis: "The canonical deploy fails to recover a damaged web virtual environment because it invokes that environment's Alembic module without first syncing the web project, even though Alembic is a declared production dependency."
   confirming_evidence:
-    - "prompt_builder labels composer_text a user continuation note and asks for a complete assistant message."
-    - "continue_ai_turn sends _collect_generated_text() directly to add_selected_alternate."
-    - "The real-SQL route regression failed: stored alternate was `NO i can't do that!`, not the submitted prefix plus that suffix."
-  falsification_test: "This cause would be false if the pre-fix selected alternate from the real-SQL route already began with the raw submitted prefix when the scripted completion omitted it; the observed failure is the opposite."
-  fix_rationale: "Preserve the raw nonempty composer value, ask the model only for following text, and construct the selected alternate as committed_prefix + generated_suffix at the server persistence boundary; the model can no longer replace or omit the prefix."
-  blind_spots: "A real remote model may still produce a semantically poor suffix, but it cannot change the committed prefix. Composer input handling still needs inspection to ensure the UI does not trim before the API."
+    - "The deploy script contains AI `uv sync` calls but no `uv sync --project web-ui/server` before its Alembic invocation."
+    - "The web pyproject declares Alembic in production dependencies; the parent-observed canonical deploy failed specifically with `No module named alembic`."
+    - "The new deploy contract fails on the absent web provisioning marker before production code changes."
+  falsification_test: "This cause would be false if the current canonical script already synchronized web-ui/server and successfully preflighted Alembic before migration; source inspection and the failing contract show neither exists."
+  fix_rationale: "After canonical service shutdown and existing Qwen provisioning, reuse available canonical uv to sync only the web project's production dependencies with Python 3.12, fail closed if Alembic cannot import, then preserve the existing migration and launch sequence."
+  blind_spots: "Static coverage cannot prove OMEN's Windows file locks have released or a Python 3.12 download completes; the parent-owned canonical deploy must verify recovery and health on OMEN."
   candidate_causes:
-    - "code: missing committed-prefix concatenation at continue_ai_turn persistence."
-    - "data: client/API trim composer text, losing leading/trailing bytes required by the exact-preservation contract."
-    - "config: an LLM model can ignore a prompt, but the scripted-model reproduction proves model behavior is not needed to omit a server-concatenated prefix."
-  and_gate: "no — the direct-persistence code path fully produces the reported replacement with an ordinary nonempty prefix; whitespace normalization is a separate exactness defect, not a co-required condition."
+    - "code: absent web project sync/preflight before the Alembic command."
+    - "config: parent-owned unpinned uv selected Python 3.14, unlike the proposed canonical Python-3.12 deployment contract."
+    - "environment: the externally interrupted reconciliation left web-ui/server/.venv partial; canonical service shutdown removes the active-service lock contributor before recovery."
+  and_gate: "no — no web sync alone fully explains why a canonical deploy cannot restore a missing Alembic module; interpreter selection and partial deletion are trigger conditions, not co-required root causes."
 
 ## Evidence
 
@@ -133,14 +135,68 @@ reasoning_checkpoint:
   found: "Scoped Ruff over all changed Python source/tests passed, and `git diff --check` passed. Repository-wide Ruff remains blocked only by pre-existing `F841` in unrelated `web-ui/server/tests/test_calls.py:3221`."
   implication: "The Continue repair is lint-clean; the unrelated Qwen call-test issue is preserved outside this session's scope."
 
+- timestamp: "2026-08-09T18:30:00Z"
+  checked: "Parent-provided canonical OMEN deployment recovery report and prior deployment knowledge-base entry"
+  found: "A parent-owned uv command selected Python 3.14 and was denied while removing web-ui/server/.venv/Lib; the subsequent canonical deploy stopped services and failed at Alembic because web-ui/server/.venv lacks the alembic module. The knowledge base contains a related prior deploy incident requiring migration-before-launch but not web-runtime recovery."
+  implication: "The failure is deterministic and occurs before launch. Treat the prior entry as a candidate only; inspect the canonical script's web-environment provisioning contract before forming the root cause."
+- timestamp: "2026-08-09T18:40:00Z"
+  checked: "Canonical deploy script, deploy contract, migration-fix history, and web runtime manifest"
+  found: "The script runs `uv sync --project ai-backend --extra tts` during Qwen provisioning, then later runs the web venv's `python -m alembic`. It has no web-ui/server sync or Alembic import preflight. web-ui/server declares Alembic as a production dependency and pytest only in its dev group; the prior migration fix added the Alembic call and test but no web-runtime provision step."
+  implication: "The missing web-environment bootstrap directly explains the reported `No module named alembic`; the repair should be a narrow canonical web sync before migration, pinned to the project's Python 3.12 runtime."
+- timestamp: "2026-08-09T18:50:00Z"
+  checked: "Official uv project-sync and Python-management documentation"
+  found: "uv documents `--no-dev` as excluding the dev dependency group, and uv can obtain a requested Python version when it is not already installed. The existing canonical AI sync already uses an explicit Python version."
+  implication: "A `uv sync --project web-ui/server --no-dev --python 3.12` recovery step is supported, avoids shipping pytest, and prevents the unpinned Python-3.14 reconciliation path."
+- timestamp: "2026-08-09T19:00:00Z"
+  checked: "Specified-oracle web-runtime deploy contract before the repair"
+  found: "`uv run pytest tests/test_omen_deploy_contract.py::test_omen_deploy_recovers_web_runtime_before_migrating -q` failed because `scripts/deploy-omen.sh` has no `Provisioning web server environment` marker or web sync/import sequence."
+  implication: "The missing canonical recovery step is reproducibly proven before implementation."
+- timestamp: "2026-08-09T19:10:00Z"
+  checked: "Minimal canonical deploy repair"
+  found: "scripts/deploy-omen.sh now invokes a web-server provisioning function after canonical service stop/Qwen provisioning and before migration. It reuses available canonical uv, pins Python 3.12, excludes the web dev group, syncs dependencies, and fails closed unless Alembic imports."
+  implication: "A damaged OMEN web venv can now be restored within the only permitted deploy path before database migration or service launch."
+- timestamp: "2026-08-09T19:20:00Z"
+  checked: "First post-repair deploy-contract run and lightweight static checks"
+  found: "The new test's required function-content strings were present, but `source.index(provision_marker)` pointed to the helper definition (before the final Qwen invocation), so its ordering assertion failed. Bash syntax and diff whitespace passed; Ruff cannot run in ai-backend because the production environment intentionally lacks the ruff executable."
+  implication: "The root-cause test is not falsified. Tighten the specified oracle to inspect the final deployment call site, then use the existing deploy-contract suite and production dependency-aware verification."
+- timestamp: "2026-08-09T19:30:00Z"
+  checked: "Second post-repair target-contract run"
+  found: "The call-site assertion correctly matched the final sequence, but the test incorrectly required the external `Applying web database migrations` marker to occur within the provisioning helper body."
+  implication: "This is a second static-test fixture error, not a product regression; the marker belongs in the retained final sequence assertion and must be removed from the helper-body list."
+- timestamp: "2026-08-09T19:40:00Z"
+  checked: "Corrected specified-oracle contract, complete deploy suite, syntax, and lint"
+  found: "The target contract and all 9 deploy-contract tests pass; Bash syntax and diff whitespace pass. PowerShell is unavailable in this Linux workspace, so Windows PowerShell parsing cannot run locally. Cross-project Ruff found only an unused `migration_marker` local in the newly added test."
+  implication: "The deployment behavior is statically covered and the remaining local validation issue is a test-only lint cleanup; a real OMEN canonical deploy remains the required platform verification."
+- timestamp: "2026-08-09T19:50:00Z"
+  checked: "Final static test, suite, lint, and source hygiene before causality guardrail"
+  found: "The target recovery contract passed; all 9 deploy-contract tests passed; cross-project Ruff passed; Bash syntax and git diff whitespace passed. The only tracked worktree changes are this debug file, the deploy script, and its deploy-contract test; the unrelated qwen debug session remains untracked and untouched."
+  implication: "The repaired canonical contract is locally verified. Use a path-scoped reversible stash of only the deploy script to prove the production change, rather than the test, causes the recovery test to pass."
+- timestamp: "2026-08-09T20:00:00Z"
+  checked: "Path-scoped deploy-script revert portion of the causality guardrail"
+  found: "After stashing only scripts/deploy-omen.sh, the retained recovery contract failed with `ValueError: substring not found` for `Invoke-RayMeWebServerProvisioning`; the test and unrelated worktree paths remained in place."
+  implication: "The static recovery contract correctly detects the original script's missing recovery behavior. Restore the exact production change and reconfirm it passes."
+- timestamp: "2026-08-09T20:10:00Z"
+  checked: "Path-scoped deploy-script reapply portion of the causality guardrail"
+  found: "Restoring the one-file stash dropped it cleanly and the identical recovery contract passed (1 passed). The worktree contains only this session's deploy script/test/debug changes plus the preserved untracked qwen debug file."
+  implication: "The added canonical web-runtime provisioning is causally necessary and sufficient for the stated static recovery contract; run the final suite and hygiene checks before human/environment verification."
+- timestamp: "2026-08-09T20:20:00Z"
+  checked: "Final deployment-repair verification"
+  found: "All 9 `test_omen_deploy_contract.py` tests passed; cross-project Ruff passed; `bash -n scripts/deploy-omen.sh` and `git diff --check` passed. The repair-only revert made the target test fail and reapplying it made the same test pass. No PowerShell executable is available locally, so Windows parsing and OMEN recovery must be verified by the parent through the canonical deploy script."
+  implication: "All applicable local guardrail signals accept the narrow repair. The remaining required evidence is the parent-owned real OMEN recovery deployment and health verification."
+
+- timestamp: "2026-08-09T18:33:37Z"
+  checked: "Parent deployment-recovery verification"
+  found: "`uv run pytest tests/test_omen_deploy_contract.py -q` passed 9/9, `bash -n scripts/deploy-omen.sh` passed, cross-project Ruff passed for the changed deploy-contract test, and `git diff --check` passed."
+  implication: "The parent context independently accepts the canonical web-environment recovery path; the repair is ready to commit and exercise on OMEN."
+
 ## Eliminated
 
 ## Specialist Review
 
 ## Resolution
 
-- root_cause: "For nonempty Continue text, the server treats composer_text as optional prompt guidance and persists only the full text emitted by the model; it never commits the supplied prefix at the selected-alternate persistence boundary. Client and API trim() calls also violate the required byte-for-byte preservation at whitespace boundaries."
-- fix: "Preserve raw Continue text in the client/API; when nonempty, instruct the model to generate only a suffix and persist the exact committed prefix plus that suffix (removing one immediately repeated full-prefix emission). Keep empty-Continue behavior unchanged."
+- root_cause: "Continue: for nonempty text, the server treated composer_text as optional prompt guidance and persisted only model output; client/API trim() also violated byte-for-byte preservation. Deployment recovery: canonical deploy invoked web Alembic without syncing/preflighting web-ui/server, so a partially removed virtual environment could not recover its declared production Alembic dependency."
+- fix: "Continue: preserve raw text and persist exact prefix plus generated suffix. Deployment recovery: sync web-ui/server production dependencies under Python 3.12 and preflight Alembic inside scripts/deploy-omen.sh before existing migrations."
 - verification:
   oracle_type: specified
   target_test:
@@ -168,6 +224,36 @@ reasoning_checkpoint:
     fixed_on_reapply: true
     detail: "A path-scoped stash of only the four production files restored the original target-test failure; popping that stash restored two passing parameter cases."
   guardrail_verdict: accepted
+  deployment_recovery:
+    oracle_type: specified
+    target_test:
+      result: pass
+      command: "cd ai-backend && uv run pytest tests/test_omen_deploy_contract.py::test_omen_deploy_recovers_web_runtime_before_migrating -q"
+      detail: "The original script failed the contract before the repair; the repaired script passes, including after a repair-only revert and reapply."
+    mutation_check:
+      result: skipped
+      reason_if_skipped: "No configured mutation runner exists for the deploy-script static-contract suite."
+      mutant_killed: null
+    no_op_deletion:
+      result: pass
+      detail: "The deploy change is additive and narrow: it inserts only web production-environment provisioning and an Alembic import preflight before the already-required migration."
+      deletion_justified_by_rca: true
+    adjacent_tests:
+      result: pass
+      suites_run:
+        - "cd ai-backend && uv run pytest tests/test_omen_deploy_contract.py -q (9 passed)"
+        - "cd web-ui/server && uv run ruff check ../../ai-backend/tests/test_omen_deploy_contract.py (passed)"
+        - "bash -n scripts/deploy-omen.sh (passed)"
+        - "git diff --check (passed)"
+    revert_and_reconfirm:
+      result: pass
+      bug_returned_on_revert: true
+      fixed_on_reapply: true
+      detail: "A stash of only scripts/deploy-omen.sh made the retained recovery contract fail because the provisioning helper was absent; restoring the stash made it pass."
+    environment_verification:
+      result: awaiting_human_verify
+      detail: "No local PowerShell executable or OMEN access is available to this debugger. Parent must recover through scripts/deploy-omen.sh only."
+    guardrail_verdict: accepted
 - files_changed:
   - web-ui/client/src/routes/chat/[threadId]/+page.svelte
   - web-ui/client/tests/unit/chat.test.ts
@@ -177,3 +263,5 @@ reasoning_checkpoint:
   - web-ui/server/tests/test_message_actions.py
   - web-ui/server/tests/test_phase1_acceptance.py
   - web-ui/server/tests/test_prompt_builder.py
+  - ai-backend/tests/test_omen_deploy_contract.py
+  - scripts/deploy-omen.sh

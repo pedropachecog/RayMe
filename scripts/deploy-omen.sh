@@ -465,6 +465,32 @@ print("__RAYME_QWEN3_RUNTIME_JSON__" + json.dumps({
   $script:QwenRuntimeIdentity = $probeLine.Substring("__RAYME_QWEN3_RUNTIME_JSON__".Length) | ConvertFrom-Json
 }
 
+function Invoke-RayMeWebServerProvisioning {
+  Write-Host "== Provisioning web server environment"
+
+  $command = Get-Command uv -ErrorAction SilentlyContinue
+  if ($command) {
+    $uv = [string]$command.Source
+  } else {
+    $uv = Join-Path $repo ".local\uv-bootstrap\Scripts\uv.exe"
+    if (-not (Test-Path $uv)) {
+      throw "Canonical uv bootstrap is missing after AI runtime provisioning"
+    }
+  }
+
+  $webPythonVersion = "3.12"
+  $env:UV_PYTHON = $webPythonVersion
+  & $uv sync --project web-ui/server --no-dev --python $webPythonVersion
+  if ($LASTEXITCODE -ne 0) { throw "Web server environment sync failed" }
+
+  $webPython = Join-Path $repo "web-ui\server\.venv\Scripts\python.exe"
+  if (-not (Test-Path $webPython)) {
+    throw "Web server Python runtime is missing after sync"
+  }
+  & "$repo\web-ui\server\.venv\Scripts\python.exe" -c "import alembic"
+  if ($LASTEXITCODE -ne 0) { throw "Web server Alembic preflight failed" }
+}
+
 if ($verifyVoxCpm2) {
   Stop-RayMePortOwners
   Invoke-RayMeVoxCpm2Verification
@@ -475,6 +501,7 @@ if ($verifyVoxCpm2) {
 # deployment materialize and attest the locked runtime/model before launch.
 Stop-RayMePortOwners
 Invoke-RayMeQwen3Provisioning
+Invoke-RayMeWebServerProvisioning
 
 Write-Host "== Applying web database migrations"
 $env:RAYME_DATABASE_URL = "sqlite+aiosqlite:///C:/Users/pmpg/rayme/RayMe/web-ui/server/data/rayme.sqlite3"

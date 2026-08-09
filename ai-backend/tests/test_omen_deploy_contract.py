@@ -82,6 +82,45 @@ def test_omen_deploy_upgrades_persistent_web_schema_before_launch() -> None:
     assert source.index(migration_command) < source.index(launcher_write)
 
 
+def test_omen_deploy_recovers_web_runtime_before_migrating() -> None:
+    source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+
+    provision_function = "function Invoke-RayMeWebServerProvisioning {"
+    provision_call = (
+        "Stop-RayMePortOwners\n"
+        "Invoke-RayMeQwen3Provisioning\n"
+        "Invoke-RayMeWebServerProvisioning\n\n"
+        'Write-Host "== Applying web database migrations"'
+    )
+    provision_marker = 'Write-Host "== Provisioning web server environment"'
+    python_version = '$webPythonVersion = "3.12"'
+    sync_command = "& $uv sync --project web-ui/server --no-dev --python $webPythonVersion"
+    sync_failure = 'if ($LASTEXITCODE -ne 0) { throw "Web server environment sync failed" }'
+    alembic_import = (
+        '& "$repo\\web-ui\\server\\.venv\\Scripts\\python.exe" '
+        '-c "import alembic"'
+    )
+    alembic_failure = 'if ($LASTEXITCODE -ne 0) { throw "Web server Alembic preflight failed" }'
+
+    provision_start = source.index(provision_function)
+    provision_end = source.index("\nif ($verifyVoxCpm2) {")
+    provision_source = source[provision_start:provision_end]
+
+    for expected in (
+        provision_marker,
+        python_version,
+        sync_command,
+        sync_failure,
+        alembic_import,
+        alembic_failure,
+    ):
+        assert expected in provision_source
+
+    assert provision_call in source
+    assert provision_source.index(provision_marker) < provision_source.index(sync_command)
+    assert provision_source.index(sync_command) < provision_source.index(alembic_import)
+
+
 def test_omen_deploy_preflights_phase1_tls_before_teardown_and_token_rotation() -> None:
     source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 
