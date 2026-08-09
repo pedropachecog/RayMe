@@ -28,6 +28,11 @@
     unlockCallAudioContext
   } from '$lib/call/audio';
   import {
+    createCallScreenWakeLock,
+    type CallScreenWakeLock,
+    type CallScreenWakeLockFallback
+  } from '$lib/call/wakeLock';
+  import {
     selectReconnectAudioBackfill as selectReconnectAudioBackfillFromChunks,
     type LocalMicPcmChunk,
     type LocalMicPcmSelection
@@ -282,6 +287,8 @@
   let callMediaLifecycle = 0;
   let activeInterruptDrain: InterruptDrainGeneration | null = null;
   let activeInterruptRequest: AbortController | null = null;
+  let callScreenWakeLock: CallScreenWakeLock | null = null;
+  let callScreenWakeLockFallback = $state<CallScreenWakeLockFallback | null>(null);
   let latestAiTurnId: string | null = null;
   const handledInterruptedTurnKeys = new Set<string>();
 
@@ -320,14 +327,26 @@
   const statusTone = $derived(callState === 'failed' ? 'danger' : callState === 'connecting' ? 'neutral' : 'healthy');
   const statusLabel = $derived(labelForState(callState));
   const callControlStateLabel = $derived(callState === 'listening' ? 'Ready to speak' : statusLabel);
+  const callScreenWakeLockNotice = $derived(
+    callScreenWakeLockFallback === 'unsupported'
+      ? 'This browser cannot keep your screen awake. Keep the screen on during this call.'
+      : callScreenWakeLockFallback === 'rejected'
+        ? 'RayMe could not keep your screen awake. Keep the screen on during this call.'
+        : null
+  );
   const canUseToolbar = $derived(callState !== 'connecting' && callState !== 'ended' && callState !== 'failed');
   const qwenPreparationActive = $derived(selectedCallEngine === 'qwen3_1_7b' && callState === 'connecting');
 
   onMount(() => {
+    callScreenWakeLock = createCallScreenWakeLock(undefined, (fallback) => {
+      callScreenWakeLockFallback = fallback;
+    });
     void initializeCall();
   });
 
   onDestroy(() => {
+    void callScreenWakeLock?.dispose();
+    callScreenWakeLock = null;
     callPreparationPollToken += 1;
     clearEventTimers();
     cancelActiveTurnStream();
@@ -392,6 +411,7 @@
       const started = await startCall({ thread_id: threadId });
       callId = started.call_id;
       sessionId = started.session_id || started.call_id;
+      syncCallScreenWakeLock();
       selectedCallEngine = started.engine_id ?? '';
       if (started.voice_id) {
         void getVoice(started.voice_id).then(
@@ -3215,6 +3235,18 @@
       keepMicrophoneSenderLive(undefined, 'listening');
       syncRemoteAudioAudibility();
     }
+    syncCallScreenWakeLock();
+  }
+
+  function syncCallScreenWakeLock() {
+    const wakeLock = callScreenWakeLock;
+    if (!wakeLock) return;
+
+    if (callId && !ending && callState !== 'ended' && callState !== 'failed') {
+      void wakeLock.activate();
+    } else {
+      void wakeLock.deactivate();
+    }
   }
 
   function keepMicrophoneSenderLive(prevState: string | undefined, nextState: string) {
@@ -3646,6 +3678,7 @@
     } catch (error) {
       if ((error as DOMException)?.name !== 'AbortError') {
         callState = 'failed';
+        syncCallScreenWakeLock();
       }
     } finally {
       finishActiveTurnResponseGuard(responseGuard);
@@ -4298,6 +4331,7 @@
     };
     activeTerminalCallTransaction = owner;
     ending = true;
+    syncCallScreenWakeLock();
     clearEventTimers();
     if (kind === 'hangup') {
       cancelActiveTurnStream();
@@ -4403,6 +4437,7 @@
       showBlockingPanel(terminalFailure);
     } else {
       callState = 'ended';
+      syncCallScreenWakeLock();
     }
     ending = false;
     emitDebugEvent(owner.debugCallId, 'call.terminal.ui_committed', {
@@ -4513,6 +4548,7 @@
 
   function showBlockingPanel(error: unknown) {
     callState = 'failed';
+    syncCallScreenWakeLock();
 
     if (error instanceof CallApiError) {
       if (error.code === 'qwen3_transcript_required') {
@@ -5012,6 +5048,11 @@
         onInterrupt={interrupt}
         onEnd={hangup}
       />
+      {#if callScreenWakeLockNotice}
+        <div class="wake-lock-notice" data-testid="wake-lock-notice" role="status">
+          <p>{callScreenWakeLockNotice}</p>
+        </div>
+      {/if}
       {#if muteSynchronizationFailed}
         <div class="mute-recovery" role="alert">
           <p>RayMe could not confirm the microphone state. Your microphone is physically off.</p>
@@ -5125,6 +5166,20 @@
     background: rgba(70, 42, 12, 0.94);
     color: var(--color-text);
     box-shadow: var(--shadow-float);
+  }
+
+  .wake-lock-notice {
+    border: 1px solid rgba(255, 191, 105, 0.56);
+    border-radius: var(--radius-md);
+    padding: var(--space-sm) var(--space-md);
+    background: rgba(70, 42, 12, 0.94);
+    color: var(--color-text);
+    box-shadow: var(--shadow-float);
+  }
+
+  .wake-lock-notice p {
+    margin: 0;
+    line-height: var(--line-body);
   }
 
   .mute-recovery p {
