@@ -2,7 +2,7 @@
 status: resolved
 trigger: "while the call works for the most part, it stops working correctly when the phone screen turns off for being idle. the call is still connected and it works once i wake up the screen but is there a way to keep the screen on while having a call? so I don't have to set my screen to never go to sleep or something."
 created: "2026-08-09T00:00:00Z"
-updated: "2026-08-09T17:52:51Z"
+updated: "2026-08-09T17:54:26Z"
 ---
 
 # Debug Session: Keep Screen Awake During Call
@@ -26,7 +26,7 @@ While a RayMe live call is active, prevent the phone from turning its screen off
 - hypothesis: "Confirmed on the deployed Android phone: wake-lock attempts are event-driven; a persistent rejection reports a visible fallback once and does not self-retry. A later explicit activation or visible recovery remains eligible to request again."
 - test: "Physical Android Chrome acceptance completed against deployed commit dae560cb290c3ea3acef9b4ac190304f40e7b023."
 - expecting: "The product owner confirmed the real call behavior works well, so the active-call screen-awake workflow and normal post-hangup behavior are accepted."
-- next_action: "Append the verified prevention record to the debug knowledge base, then commit only the resolved wake-lock session and knowledge-base entry. Preserve the unrelated Qwen debug session."
+- next_action: "None. The session is archived, its prevention record is in the debug knowledge base, and the unrelated Qwen debug session remains untouched."
 
 reasoning_checkpoint:
   hypothesis: "The helper's `finally` retry invokes `navigator.wakeLock.request('screen')` again after a rejected request, so an environment that continues to deny the lock creates a tight asynchronous retry loop; the call UI also has no visible fallback explanation."
