@@ -313,7 +313,7 @@
           candidate.thread_id === message.thread_id &&
           candidate.sequence > message.sequence &&
           candidate.role === 'assistant' &&
-          candidate.message_kind === 'ai_text'
+          candidate.message_kind.startsWith('ai_')
       ) ?? null
     );
   }

@@ -153,6 +153,57 @@ function editableThread(threadId: string) {
   };
 }
 
+function editableCallThread(threadId: string) {
+  return {
+    id: threadId,
+    character_id: 'character-1',
+    title: 'Editable call relay',
+    character_name: 'Aster',
+    character_portrait_url: null,
+    messages: [
+      {
+        id: 'call-user-speech',
+        thread_id: threadId,
+        message_kind: 'user_speech',
+        role: 'user',
+        sequence: 1,
+        content_text: 'Original spoken user prompt',
+        selected_alternate_id: null,
+        alternates: [],
+        stale_after_edit: false,
+        created_at: null,
+        updated_at: null
+      },
+      {
+        id: 'call-ai-speech',
+        thread_id: threadId,
+        message_kind: 'ai_speech',
+        role: 'assistant',
+        sequence: 2,
+        content_text: 'Original spoken AI response',
+        selected_alternate_id: null,
+        alternates: [],
+        stale_after_edit: false,
+        created_at: null,
+        updated_at: null
+      },
+      {
+        id: 'call-later-user-speech',
+        thread_id: threadId,
+        message_kind: 'user_speech',
+        role: 'user',
+        sequence: 3,
+        content_text: 'Later spoken user turn stays fresh after assistant correction',
+        selected_alternate_id: null,
+        alternates: [],
+        stale_after_edit: false,
+        created_at: null,
+        updated_at: null
+      }
+    ]
+  };
+}
+
 function staleAssistantIsolationThread(threadId: string) {
   return {
     id: threadId,
@@ -522,5 +573,82 @@ test('chat persists a user edit then regenerates its immediate downstream AI res
     'AI response to corrected prompt'
   );
   expect(requests).toEqual(['PATCH', 'POST']);
+  await expectNoBrowserErrors();
+});
+
+test('chat edits call-origin speech rows with the established role-specific semantics', async ({
+  page
+}) => {
+  const expectNoBrowserErrors = installBrowserErrorGuard(page);
+  const threadId = 'e2e-call-edit-thread';
+  const thread = editableCallThread(threadId);
+  const editedUser = { ...thread.messages[0], content_text: 'Corrected spoken user prompt' };
+  const regeneratedAssistant = {
+    ...thread.messages[1],
+    content_text: 'AI response to corrected spoken prompt'
+  };
+  const editedAssistant = {
+    ...thread.messages[1],
+    content_text: 'Corrected spoken AI response'
+  };
+  const requests: string[] = [];
+
+  await mockThread(page, threadId, thread);
+  await page.route('**/api/messages/call-user-speech', async (route) => {
+    requests.push(`${route.request().method()} user`);
+    expect(route.request().postDataJSON()).toEqual({ content: 'Corrected spoken user prompt' });
+    await route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(editedUser)
+    });
+  });
+  await page.route('**/api/messages/call-ai-speech', async (route) => {
+    requests.push(`${route.request().method()} assistant`);
+    expect(route.request().postDataJSON()).toEqual({ content: 'Corrected spoken AI response' });
+    await route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(editedAssistant)
+    });
+  });
+  await page.route('**/api/messages/call-ai-speech/regenerate', async (route) => {
+    requests.push(`${route.request().method()} regenerate`);
+    await route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(regeneratedAssistant)
+    });
+  });
+
+  await page.goto(`/chat/${threadId}`);
+
+  const assistant = page.locator('[data-message-id="call-ai-speech"]');
+  await assistant.getByRole('button', { name: 'Message actions' }).click();
+  await page.getByRole('menuitem', { name: 'Edit' }).click();
+  await assistant
+    .getByRole('textbox', { name: 'Edit message' })
+    .fill('Corrected spoken AI response');
+  await assistant.getByRole('button', { name: 'Save' }).click();
+
+  await expect(assistant).toContainText('Corrected spoken AI response');
+  await expect(page.locator('[data-message-id="call-later-user-speech"]')).toHaveAttribute(
+    'data-stale-after-edit',
+    'false'
+  );
+
+  const user = page.locator('[data-message-id="call-user-speech"]');
+  await user.getByRole('button', { name: 'Message actions' }).click();
+  await page.getByRole('menuitem', { name: 'Edit' }).click();
+  await user.getByRole('textbox', { name: 'Edit message' }).fill('Corrected spoken user prompt');
+  await user.getByRole('button', { name: 'Save' }).click();
+
+  await expect(user).toContainText('Corrected spoken user prompt');
+  await expect(assistant).toContainText('AI response to corrected spoken prompt');
+  await expect(page.locator('[data-message-id="call-later-user-speech"]')).toHaveAttribute(
+    'data-stale-after-edit',
+    'true'
+  );
+  expect(requests).toEqual(['PATCH assistant', 'PATCH user', 'POST regenerate']);
   await expectNoBrowserErrors();
 });

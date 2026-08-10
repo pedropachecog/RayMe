@@ -67,7 +67,6 @@
   );
   const showActions = $derived(
     !isCallEvent &&
-      !isCallSpeech &&
       !message.streaming &&
       !message.error &&
       (message.role === 'assistant' || message.role === 'user')

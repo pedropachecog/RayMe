@@ -720,6 +720,121 @@ def test_user_edit_then_regenerate_uses_edited_prompt_and_reactivates_response(
     assert assistant.stale_after_edit is False
 
 
+def test_call_assistant_edit_is_exact_and_preserves_call_linkage(
+    message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
+) -> None:
+    client, sessionmaker, _scripted_client = message_action_client
+    ids = asyncio.run(_create_call_edit_thread(sessionmaker, include_later_turns=True))
+
+    response = client.patch(
+        f"/api/messages/{ids['assistant']}",
+        json={"content": "Corrected spoken assistant response"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["id"] == ids["assistant"]
+    assert response.json()["message_kind"] == "ai_speech"
+    assert response.json()["content_text"] == "Corrected spoken assistant response"
+
+    rows = asyncio.run(_messages_for_thread(sessionmaker, ids["thread"]))
+    target = next(row for row in rows if row.id == ids["assistant"])
+    later_user = next(row for row in rows if row.id == ids["later_user"])
+    later_assistant = next(row for row in rows if row.id == ids["later_assistant"])
+    assert (
+        target.id,
+        target.message_kind,
+        target.role,
+        target.call_id,
+        target.call_turn_id,
+        target.content_text,
+        target.stale_after_edit,
+    ) == (
+        ids["assistant"],
+        "ai_speech",
+        "assistant",
+        ids["call"],
+        "turn-assistant",
+        "Corrected spoken assistant response",
+        False,
+    )
+    assert (
+        later_user.content_text,
+        later_user.call_id,
+        later_user.call_turn_id,
+        later_user.stale_after_edit,
+    ) == ("Later spoken user turn", ids["call"], "turn-later-user", False)
+    assert (
+        later_assistant.content_text,
+        later_assistant.call_id,
+        later_assistant.call_turn_id,
+        later_assistant.stale_after_edit,
+    ) == ("Later spoken assistant turn", ids["call"], "turn-later-assistant", False)
+
+
+def test_call_user_edit_regenerates_following_ai_from_corrected_content(
+    message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
+) -> None:
+    client, sessionmaker, scripted_client = message_action_client
+    ids = asyncio.run(_create_call_edit_thread(sessionmaker))
+    scripted_client.tokens = ["AI response to corrected spoken prompt"]
+
+    edit_response = client.patch(
+        f"/api/messages/{ids['user']}",
+        json={"content": "Corrected spoken user prompt"},
+    )
+    assert edit_response.status_code == 200
+    assert edit_response.json()["message_kind"] == "user_speech"
+    assert edit_response.json()["content_text"] == "Corrected spoken user prompt"
+
+    regenerate_response = client.post(f"/api/messages/{ids['assistant']}/regenerate")
+
+    assert regenerate_response.status_code == 200
+    assert regenerate_response.json()["message_kind"] == "ai_speech"
+    assert regenerate_response.json()["content_text"] == "AI response to corrected spoken prompt"
+    assert scripted_client.requests[0]["messages"][-1] == {
+        "role": "user",
+        "content": "Corrected spoken user prompt",
+    }
+    assert all(
+        message["content"] != "Original spoken user prompt"
+        for message in scripted_client.requests[0]["messages"]
+    )
+
+    rows = asyncio.run(_messages_for_thread(sessionmaker, ids["thread"]))
+    user = next(row for row in rows if row.id == ids["user"])
+    assistant = next(row for row in rows if row.id == ids["assistant"])
+    assert (
+        user.id,
+        user.message_kind,
+        user.call_id,
+        user.call_turn_id,
+        user.content_text,
+        user.stale_after_edit,
+    ) == (
+        ids["user"],
+        "user_speech",
+        ids["call"],
+        "turn-user",
+        "Corrected spoken user prompt",
+        False,
+    )
+    assert (
+        assistant.id,
+        assistant.message_kind,
+        assistant.call_id,
+        assistant.call_turn_id,
+        assistant.content_text,
+        assistant.stale_after_edit,
+    ) == (
+        ids["assistant"],
+        "ai_speech",
+        ids["call"],
+        "turn-assistant",
+        "AI response to corrected spoken prompt",
+        False,
+    )
+
+
 def test_editing_a_previously_stale_user_reactivates_its_regeneration_context(
     message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
 ) -> None:
@@ -797,6 +912,74 @@ async def _create_action_thread(
             "user": "user-1",
             "ai": "ai-1",
             "downstream": "downstream-1",
+        }
+
+
+async def _create_call_edit_thread(
+    sessionmaker: async_sessionmaker,
+    *,
+    include_later_turns: bool = False,
+) -> dict[str, str]:
+    async with sessionmaker() as session:
+        await _insert_character(session, character_id="char_call_actions")
+        thread_id = (await ThreadService(session).create_thread(character_id="char_call_actions"))["thread_id"]
+        call_id = "call-edit-1"
+        messages = [
+            Message(
+                id="call-user-1",
+                thread_id=thread_id,
+                call_id=call_id,
+                call_turn_id="turn-user",
+                message_kind="user_speech",
+                role="user",
+                sequence=1,
+                content_text="Original spoken user prompt",
+            ),
+            Message(
+                id="call-ai-1",
+                thread_id=thread_id,
+                call_id=call_id,
+                call_turn_id="turn-assistant",
+                message_kind="ai_speech",
+                role="assistant",
+                sequence=2,
+                content_text="Original spoken assistant response",
+            ),
+        ]
+        if include_later_turns:
+            messages.extend(
+                [
+                    Message(
+                        id="call-later-user-1",
+                        thread_id=thread_id,
+                        call_id=call_id,
+                        call_turn_id="turn-later-user",
+                        message_kind="user_speech",
+                        role="user",
+                        sequence=3,
+                        content_text="Later spoken user turn",
+                    ),
+                    Message(
+                        id="call-later-ai-1",
+                        thread_id=thread_id,
+                        call_id=call_id,
+                        call_turn_id="turn-later-assistant",
+                        message_kind="ai_speech",
+                        role="assistant",
+                        sequence=4,
+                        content_text="Later spoken assistant turn",
+                    ),
+                ]
+            )
+        session.add_all(messages)
+        await session.commit()
+        return {
+            "thread": thread_id,
+            "call": call_id,
+            "user": "call-user-1",
+            "assistant": "call-ai-1",
+            "later_user": "call-later-user-1",
+            "later_assistant": "call-later-ai-1",
         }
 
 
