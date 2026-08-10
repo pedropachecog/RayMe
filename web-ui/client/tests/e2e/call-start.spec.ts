@@ -1768,7 +1768,7 @@ test('keeps recovered turn response live while terminal reconnect tears browser 
   assertNoBrowserErrors();
 });
 
-test('shows a call notice in the transcript when /turns returns a type=error SSE event', async ({
+test('recovers a failed spoken turn to Listening and ignores its late events', async ({
   page
 }) => {
   const assertNoBrowserErrors = installBrowserErrorGuard(page);
@@ -1786,8 +1786,40 @@ test('shows a call notice in the transcript when /turns returns a type=error SSE
   await expect(page.getByText('A partial RayMe reply.')).toHaveCount(1);
   await expect(page.locator('.turn.streaming')).toHaveCount(0);
 
-  // The data channel can report the old interruption after the terminal SSE
-  // error. It must not recreate a transient assistant row.
+  const mediaBeforeLateEvents = await getMockCallMediaSnapshot(page);
+  expect(mediaBeforeLateEvents.peers).toHaveLength(1);
+  expect(mediaBeforeLateEvents.peers[0]?.connectionState).toBe('connected');
+
+  // A terminal failure after first audio must fence every delayed same-turn
+  // event. Otherwise a late state/audio-start recreates the stuck Speaking
+  // state or a late done restores a response after the failure.
+  await emitLatestMockDataChannelEvent(page, {
+    type: 'state',
+    session_id: 'rtc-call-error-01',
+    turn_id: 'turn-err-1',
+    state: 'speaking'
+  });
+  await emitLatestMockDataChannelEvent(page, {
+    type: 'ai_audio_started',
+    session_id: 'rtc-call-error-01',
+    turn_id: 'turn-err-1',
+    audio: { duration_ms: 120, samples: 1920 }
+  });
+  await page.waitForTimeout(50);
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  await emitLatestMockDataChannelEvent(page, {
+    type: 'ai_done',
+    session_id: 'rtc-call-error-01',
+    turn_id: 'turn-err-1'
+  });
+  await expect(page.getByText('A late failed-turn completion.')).toHaveCount(0);
+  await expect(page.getByTestId('voice-visualizer').getByText('Listening')).toBeVisible();
+  const mediaAfterLateEvents = await getMockCallMediaSnapshot(page);
+  expect(mediaAfterLateEvents.peers).toHaveLength(1);
+  expect(mediaAfterLateEvents.peers[0]?.connectionState).toBe('connected');
+
+  // The data channel can also report the old interruption after the terminal
+  // SSE error. It must not recreate a transient assistant row.
   await emitLatestMockDataChannelEvent(page, {
     type: 'interrupted',
     session_id: 'rtc-call-error-01',
@@ -2275,7 +2307,23 @@ async function installTurnErrorCallRoutes(page: Page) {
             })}`,
         '',
         ...(firstTurn
-          ? []
+          ? [
+              `data: ${JSON.stringify({
+                type: 'state',
+                turn_id: 'turn-err-1',
+                state: 'speaking'
+              })}`,
+              '',
+              `data: ${JSON.stringify({
+                type: 'ai_done',
+                turn_id: 'turn-err-1',
+                message: duplicateAssistantMessage(
+                  'message-late-failed-turn',
+                  'A late failed-turn completion.'
+                )
+              })}`,
+              ''
+            ]
           : [
               `data: ${JSON.stringify({
                 type: 'ai_token',

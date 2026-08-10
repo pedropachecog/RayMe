@@ -234,6 +234,7 @@
   let ending = $state(false);
   let timers: number[] = [];
   const handledUserFinalTurnIds = new Set<string>();
+  const failedAiTurnIds = new Set<string>();
   let activeTurnAbort: AbortController | null = null;
   let activeTurnReader: ReadableStreamDefaultReader<Uint8Array> | null = null;
   let activeTurnResponseGuard: ActiveTurnResponseGuard | null = null;
@@ -392,6 +393,7 @@
     callState = 'connecting';
     clearEventTimers();
     handledUserFinalTurnIds.clear();
+    failedAiTurnIds.clear();
     localMicAudioEpoch = 0;
     localMuteRevision = 0;
     muteRequestPending = false;
@@ -3449,12 +3451,18 @@
     }
 
     if (event.type === 'state') {
+      if (hasFailedAiTurn(event.turn_id)) {
+        return;
+      }
       applyCallState(event.state);
       return;
     }
 
     if (event.type === 'ai_audio_started') {
       const nextTurnId = event.turn_id ?? null;
+      if (hasFailedAiTurn(nextTurnId)) {
+        return;
+      }
       if (
         nextTurnId &&
         activeInterruptDrain &&
@@ -3481,6 +3489,9 @@
     }
 
     if (event.type === 'ai_done') {
+      if (hasFailedAiTurn(event.turn_id)) {
+        return;
+      }
       finishAiTurn(event.turn_id ?? undefined);
       return;
     }
@@ -3553,9 +3564,15 @@
     }
 
     if (event.type === 'failed') {
+      const failedTurnId = event.turn_id ?? activeAiTurnId;
+      if (hasFailedAiTurn(failedTurnId)) {
+        return;
+      }
+      if (failedTurnId && activeAiTurnId && activeAiTurnId !== failedTurnId) {
+        return;
+      }
       const message = messageForCallFailure(event.code, event.message);
-      activeAiText = '';
-      activeAiTurnId = null;
+      markAiTurnFailed(failedTurnId);
 
       if (event.retry_allowed) {
         blockingPanel = null;
@@ -3735,14 +3752,24 @@
   function handleTurnStreamEvent(event: CallTurnStreamEvent) {
     dispatchCallTurnStreamEvent(event, {
       ai_token: (tokenEvent) => {
+        if (hasFailedAiTurn(tokenEvent.turn_id)) {
+          return;
+        }
         if (!tokenEvent.text) {
           return;
         }
         markActiveTurnResponseDelivered(tokenEvent.turn_id);
         appendAiText(tokenEvent.text, tokenEvent.turn_id);
       },
-      state: (stateEvent) => applyCallState(stateEvent.state),
+      state: (stateEvent) => {
+        if (!hasFailedAiTurn(stateEvent.turn_id)) {
+          applyCallState(stateEvent.state);
+        }
+      },
       ai_audio_started: (audioEvent) => {
+        if (hasFailedAiTurn(audioEvent.turn_id)) {
+          return;
+        }
         markActiveTurnResponseDelivered(audioEvent.turn_id, audioEvent.audio?.duration_ms);
         emitDebugEvent(callId, 'call.ai_audio_started', {
           turn_id: audioEvent.turn_id ?? null,
@@ -3754,6 +3781,9 @@
         applyCallState('speaking');
       },
       ai_done: (doneEvent) => {
+        if (hasFailedAiTurn(doneEvent.turn_id)) {
+          return;
+        }
         markActiveTurnResponseDelivered(doneEvent.turn_id);
         if (doneEvent.message) {
           restoreCompletedAiMessage(doneEvent.message, doneEvent.turn_id);
@@ -3761,6 +3791,9 @@
         finishAiTurn(doneEvent.turn_id);
       },
       turn_existing: (existingEvent) => {
+        if (hasFailedAiTurn(existingEvent.turn_id)) {
+          return;
+        }
         markActiveTurnResponseDelivered(existingEvent.turn_id);
         const disposition = existingTurnDisposition(existingEvent.state);
         if (disposition.notice) {
@@ -3769,6 +3802,7 @@
         applyCallState(disposition.state);
       },
       error: (errorEvent) => {
+        const failedTurnId = errorEvent.turn_id ?? activeAiTurnId;
         const message = messageForCallFailure(
           (errorEvent.code ?? 'call_generation_failed') as CallErrorCode,
           errorEvent.message
@@ -3778,7 +3812,10 @@
         if (staleAgainstNewerResponse) {
           return;
         }
-        clearActiveAiTextForTurn(errorEvent.turn_id);
+        if (hasFailedAiTurn(failedTurnId)) {
+          return;
+        }
+        markAiTurnFailed(failedTurnId);
         appendCallNotice(message, errorEvent.turn_id);
         applyCallState('listening');
       }
@@ -3786,6 +3823,9 @@
   }
 
   function restoreCompletedAiMessage(message: CallTurnAssistantMessage, turnId?: string) {
+    if (hasFailedAiTurn(turnId)) {
+      return;
+    }
     const text = message.content_text?.trim() ?? '';
     if (!text) {
       return;
@@ -3814,6 +3854,9 @@
 
   function appendAiText(text: string, turnId?: string) {
     const resolvedTurnId = turnId ?? null;
+    if (hasFailedAiTurn(resolvedTurnId)) {
+      return;
+    }
     if (activeAiTurnId !== null && activeAiTurnId !== resolvedTurnId) {
       return;
     }
@@ -3858,7 +3901,22 @@
     return true;
   }
 
+  function hasFailedAiTurn(turnId: string | null | undefined): boolean {
+    return Boolean(turnId && failedAiTurnIds.has(turnId));
+  }
+
+  function markAiTurnFailed(turnId: string | null | undefined): void {
+    const resolvedTurnId = turnId ?? activeAiTurnId;
+    if (resolvedTurnId) {
+      failedAiTurnIds.add(resolvedTurnId);
+      clearActiveAiTextForTurn(resolvedTurnId);
+    }
+  }
+
   function finishAiTurn(turnId?: string) {
+    if (hasFailedAiTurn(turnId)) {
+      return;
+    }
     if (activeAiTurnId !== null && activeAiTurnId !== (turnId ?? null)) {
       return;
     }
