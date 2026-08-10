@@ -140,6 +140,7 @@ class SqlAlchemyMessageActionRepository:
         self.session.add(alternate)
         message.content_text = content_text
         message.selected_alternate_id = alternate.id
+        message.stale_after_edit = False
         message.updated_at = now
         await self._touch_thread(message.thread_id, now)
         await self.session.commit()

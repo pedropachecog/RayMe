@@ -135,6 +135,7 @@
     const stickToLatest = isNearBottom();
     const scrollAnchor = stickToLatest ? null : captureScrollAnchor();
     let preservedScrollTop = scrollAnchor?.scrollTop ?? null;
+    let streamCompleted = false;
     sendState = 'sending';
     const nextSequence = nextMessageSequence(messages);
     const draftKey = `${Date.now()}`;
@@ -175,6 +176,7 @@
           const shouldStick = stickToLatest && isNearBottom();
           preserveCurrentScrollTop(shouldStick);
           messages = sortMessages(replaceStreamingMessage(messages, streamingMessage.id, message));
+          streamCompleted = true;
           void settleSendLayout(shouldStick);
         },
         onError: () => {
@@ -191,8 +193,12 @@
       await settleSendLayout(shouldStick);
     } finally {
       sendState = 'idle';
-      const shouldStick = stickToLatest && isNearBottom();
-      await settleSendLayout(shouldStick);
+      if (streamCompleted) {
+        await refreshThread(threadId);
+      } else {
+        const shouldStick = stickToLatest && isNearBottom();
+        await settleSendLayout(shouldStick);
+      }
     }
 
     async function settleSendLayout(
@@ -272,6 +278,8 @@
   }
 
   async function saveEdit(message: ChatMessageView, content: string) {
+    const downstreamAssistant =
+      message.role === 'user' ? firstAssistantAfter(message) : null;
     const saved = await replaceFromBackend(
       message,
       'edit',
@@ -279,9 +287,35 @@
       applyEditedBackendMessage
     );
 
-    if (saved) {
-      cancelEdit();
+    if (!saved) {
+      return;
     }
+
+    cancelEdit();
+
+    if (!downstreamAssistant) {
+      return;
+    }
+
+    const regenerated = await replaceFromBackend(downstreamAssistant, 'regenerate', () =>
+      regenerateMessage(downstreamAssistant.id)
+    );
+
+    if (!regenerated) {
+      actionError = 'RayMe saved your edit, but could not regenerate the next response.';
+    }
+  }
+
+  function firstAssistantAfter(message: ChatMessageView): ChatMessageView | null {
+    return (
+      messages.find(
+        (candidate) =>
+          candidate.thread_id === message.thread_id &&
+          candidate.sequence > message.sequence &&
+          candidate.role === 'assistant' &&
+          candidate.message_kind === 'ai_text'
+      ) ?? null
+    );
   }
 
   async function selectAlternate(message: ChatMessageView, alternateId: string) {

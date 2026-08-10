@@ -623,6 +623,69 @@ def test_edit_route_marks_downstream_stale_and_truncate_keep_behaviors_work(
     assert all(row.id != ids["downstream"] for row in rows_after_truncate)
 
 
+def test_edit_route_persists_assistant_content_and_selected_alternate(
+    message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
+) -> None:
+    client, sessionmaker, _scripted_client = message_action_client
+    ids = asyncio.run(_create_action_thread(sessionmaker))
+
+    seeded = client.post(f"/api/messages/{ids['ai']}/swipes")
+    assert seeded.status_code == 200
+
+    response = client.patch(
+        f"/api/messages/{ids['ai']}",
+        json={"content": "Persisted edited assistant response"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == ids["ai"]
+    assert body["content_text"] == "Persisted edited assistant response"
+    assert body["selected_alternate_id"] == body["alternates"][-1]["id"]
+    assert body["alternates"][-1]["content_text"] == "Persisted edited assistant response"
+
+    rows = asyncio.run(_messages_for_thread(sessionmaker, ids["thread"]))
+    assistant = next(row for row in rows if row.id == ids["ai"])
+    assert assistant.content_text == "Persisted edited assistant response"
+
+
+def test_user_edit_then_regenerate_uses_edited_prompt_and_reactivates_response(
+    message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
+) -> None:
+    client, sessionmaker, scripted_client = message_action_client
+    ids = asyncio.run(_create_action_thread(sessionmaker))
+    scripted_client.tokens = ["AI response to corrected prompt"]
+
+    edit_response = client.patch(
+        f"/api/messages/{ids['user']}",
+        json={"content": "Corrected user prompt"},
+    )
+    assert edit_response.status_code == 200
+    assert edit_response.json()["content_text"] == "Corrected user prompt"
+
+    regenerate_response = client.post(f"/api/messages/{ids['ai']}/regenerate")
+
+    assert regenerate_response.status_code == 200
+    body = regenerate_response.json()
+    assert body["content_text"] == "AI response to corrected prompt"
+    assert body["stale_after_edit"] is False
+    assert scripted_client.requests[0]["messages"][-1] == {
+        "role": "user",
+        "content": "Corrected user prompt",
+    }
+    assert all(
+        message["content"] != "Prompt from user"
+        for message in scripted_client.requests[0]["messages"]
+    )
+
+    rows = asyncio.run(_messages_for_thread(sessionmaker, ids["thread"]))
+    user = next(row for row in rows if row.id == ids["user"])
+    assistant = next(row for row in rows if row.id == ids["ai"])
+    assert user.content_text == "Corrected user prompt"
+    assert assistant.content_text == "AI response to corrected prompt"
+    assert assistant.stale_after_edit is False
+
+
 async def _create_action_thread(
     sessionmaker: async_sessionmaker,
     *,
