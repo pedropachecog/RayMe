@@ -43,3 +43,13 @@ Resolved debug sessions. Used by `gsd-debugger` to surface known-pattern hypothe
 - **Why not caught:** No existing unit, mobile browser, or physical-phone acceptance gate covered the Screen Wake Lock lifecycle, persistent rejected-request behavior, or a visible fallback notice.
 - **Recurrence guard:** `web-ui/client/tests/unit/call-wake-lock.test.ts` covers `bounds persistent rejections until a new visible lifecycle event requests again`; `web-ui/client/tests/e2e/call-mobile.spec.ts` covers successful acquisition and `explains when the browser cannot keep the screen awake without ending the call`; both passed before deployed Android acceptance.
 ---
+
+## chat-continue-prefix-replaced — Edit → Continue discarded the committed assistant prefix
+- **Date:** 2026-08-10
+- **Error patterns:** Continue, composer_text empty, edited assistant prefix absent, whole-message replacement, assistant prefill
+- **Root cause(s):** Continue previously persisted raw model output; its first repair passed supplied text as a user instruction instead of assistant prefill; its Edit → Continue path then ignored the selected edited assistant content when the global composer was empty, re-entering the whole-message replacement path.
+- **Fix:** Preserve raw explicit composer text or resolve an empty composer to the selected assistant target, prefill it as the final assistant turn, and persist it exactly once before generated suffix text.
+- **Files changed:** web-ui/client/src/routes/chat/[threadId]/+page.svelte, web-ui/client/tests/unit/chat.test.ts, web-ui/server/app/api/messages.py, web-ui/server/app/domain/message_actions.py, web-ui/server/app/domain/prompt_builder.py, web-ui/server/tests/test_message_actions.py, web-ui/server/tests/test_phase1_acceptance.py, web-ui/server/tests/test_prompt_builder.py
+- **Why not caught:** Existing Continue tests covered nonempty composer input and did not model the separate Edit → empty-composer Continue workflow, so the UI/API contract gap escaped automated and initial physical verification.
+- **Recurrence guard:** `web-ui/server/tests/test_message_actions.py::test_continue_uses_edited_assistant_text_as_prefix_when_composer_is_empty` performs PATCH → empty-composer Continue against real SQL and asserts the returned/displayed selected alternate and persisted content retain the prefix once despite contradictory backend output.
+---
