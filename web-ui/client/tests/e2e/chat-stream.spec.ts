@@ -153,6 +153,88 @@ function editableThread(threadId: string) {
   };
 }
 
+function staleAssistantIsolationThread(threadId: string) {
+  return {
+    id: threadId,
+    character_id: 'character-1',
+    title: 'Stale assistant isolation',
+    character_name: 'Aster',
+    character_portrait_url: null,
+    messages: [
+      {
+        id: 'user-before-target',
+        thread_id: threadId,
+        message_kind: 'user_text',
+        role: 'user',
+        sequence: 1,
+        content_text: 'Prompt before the stale assistant pair',
+        selected_alternate_id: null,
+        alternates: [],
+        stale_after_edit: false,
+        created_at: null,
+        updated_at: null
+      },
+      {
+        id: 'second-to-last-ai',
+        thread_id: threadId,
+        message_kind: 'ai_text',
+        role: 'assistant',
+        sequence: 2,
+        content_text: 'Original second-to-last assistant response',
+        selected_alternate_id: 'target-alternate',
+        alternates: [
+          {
+            id: 'target-alternate',
+            message_id: 'second-to-last-ai',
+            alternate_index: 0,
+            content_text: 'Original second-to-last assistant response',
+            source_action: 'regenerate',
+            created_at: null
+          }
+        ],
+        stale_after_edit: true,
+        created_at: null,
+        updated_at: null
+      },
+      {
+        id: 'stale-user-between',
+        thread_id: threadId,
+        message_kind: 'user_text',
+        role: 'user',
+        sequence: 3,
+        content_text: 'Previously stale user message',
+        selected_alternate_id: null,
+        alternates: [],
+        stale_after_edit: true,
+        created_at: null,
+        updated_at: null
+      },
+      {
+        id: 'final-stale-ai',
+        thread_id: threadId,
+        message_kind: 'ai_text',
+        role: 'assistant',
+        sequence: 4,
+        content_text: 'Final stale assistant response',
+        selected_alternate_id: 'final-alternate',
+        alternates: [
+          {
+            id: 'final-alternate',
+            message_id: 'final-stale-ai',
+            alternate_index: 0,
+            content_text: 'Final stale assistant response',
+            source_action: 'regenerate',
+            created_at: null
+          }
+        ],
+        stale_after_edit: true,
+        created_at: null,
+        updated_at: null
+      }
+    ]
+  };
+}
+
 async function mockThread(page: Page, threadId: string, thread = hydratedThread(threadId)) {
   await page.route(`**/api/threads/${threadId}`, async (route) => {
     await route.fulfill({
@@ -330,6 +412,58 @@ test('chat persists an assistant edit through its authoritative message ID', asy
     'data-stale-after-edit',
     'false'
   );
+  expect(regenerateRequests).toBe(0);
+  await expectNoBrowserErrors();
+});
+
+test('chat keeps a later stale AI message isolated when editing the second-to-last assistant', async ({ page }) => {
+  const expectNoBrowserErrors = installBrowserErrorGuard(page);
+  const threadId = 'e2e-stale-assistant-isolation-thread';
+  const thread = staleAssistantIsolationThread(threadId);
+  let regenerateRequests = 0;
+  const editedTarget = {
+    ...thread.messages[1],
+    content_text: 'Corrected second-to-last assistant response',
+    alternates: [
+      {
+        ...thread.messages[1].alternates[0],
+        content_text: 'Corrected second-to-last assistant response'
+      }
+    ]
+  };
+
+  await mockThread(page, threadId, thread);
+  await page.route('**/api/messages/second-to-last-ai', async (route) => {
+    expect(route.request().method()).toBe('PATCH');
+    expect(route.request().postDataJSON()).toEqual({
+      content: 'Corrected second-to-last assistant response'
+    });
+    await route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(editedTarget)
+    });
+  });
+  await page.route('**/api/messages/final-stale-ai/regenerate', async (route) => {
+    regenerateRequests += 1;
+    await route.fulfill({ status: 500 });
+  });
+
+  await page.goto(`/chat/${threadId}`);
+  const target = page.locator('[data-message-id="second-to-last-ai"]');
+  const final = page.locator('[data-message-id="final-stale-ai"]');
+  await target.getByRole('button', { name: 'Message actions' }).click();
+  await page.getByRole('menuitem', { name: 'Edit' }).click();
+  await target
+    .getByRole('textbox', { name: 'Edit message' })
+    .fill('Corrected second-to-last assistant response');
+  await target.getByRole('button', { name: 'Save' }).click();
+
+  await expect(target).toContainText('Corrected second-to-last assistant response');
+  await expect(final).toContainText('Final stale assistant response');
+  await expect(final).toHaveAttribute('data-message-id', 'final-stale-ai');
+  await expect(final).toHaveAttribute('data-selected-alternate-id', 'final-alternate');
+  await expect(final).toHaveAttribute('data-stale-after-edit', 'true');
   expect(regenerateRequests).toBe(0);
   await expectNoBrowserErrors();
 });

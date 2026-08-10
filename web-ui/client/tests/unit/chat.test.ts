@@ -400,6 +400,70 @@ describe('chat route contract', () => {
     expect(messages[1].stale_after_edit).toBe(false);
   });
 
+  it('assistant edit preserves a later stale AI message identity, alternate, and content', () => {
+    const editedTarget: ThreadMessage = {
+      id: 'stale-assistant-target',
+      thread_id: 'thread-1',
+      message_kind: 'ai_text',
+      role: 'assistant',
+      sequence: 2,
+      content_text: 'Corrected second-to-last assistant response',
+      selected_alternate_id: 'target-alternate',
+      alternates: [
+        {
+          id: 'target-alternate',
+          message_id: 'stale-assistant-target',
+          alternate_index: 0,
+          content_text: 'Corrected second-to-last assistant response',
+          source_action: 'regenerate',
+          created_at: null
+        }
+      ],
+      stale_after_edit: true,
+      created_at: null,
+      updated_at: null
+    };
+    const staleUserBetween: ThreadMessage = {
+      ...staleUserMessage,
+      id: 'stale-user-between',
+      sequence: 3
+    };
+    const finalStaleAssistant: ThreadMessage = {
+      id: 'final-stale-assistant',
+      thread_id: 'thread-1',
+      message_kind: 'ai_text',
+      role: 'assistant',
+      sequence: 4,
+      content_text: 'Final stale assistant response',
+      selected_alternate_id: 'final-alternate',
+      alternates: [
+        {
+          id: 'final-alternate',
+          message_id: 'final-stale-assistant',
+          alternate_index: 0,
+          content_text: 'Final stale assistant response',
+          source_action: 'regenerate',
+          created_at: null
+        }
+      ],
+      stale_after_edit: true,
+      created_at: null,
+      updated_at: null
+    };
+
+    const messages = applyEditedBackendMessage(
+      [
+        { ...editedTarget, content_text: 'Original second-to-last assistant response' },
+        staleUserBetween,
+        finalStaleAssistant
+      ],
+      editedTarget
+    );
+
+    expect(messages[0].content_text).toBe('Corrected second-to-last assistant response');
+    expect(messages[2]).toEqual(finalStaleAssistant);
+  });
+
   it('renders exact LLM endpoint failure copy with retry/regenerate affordance', () => {
     const streaming = createDraftMessage({
       id: 'streaming-ai-1',

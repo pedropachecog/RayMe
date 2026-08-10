@@ -651,6 +651,38 @@ def test_edit_route_persists_assistant_content_and_selected_alternate(
     assert downstream.stale_after_edit is False
 
 
+def test_assistant_edit_isolated_from_later_stale_ai_record(
+    message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
+) -> None:
+    client, sessionmaker, _scripted_client = message_action_client
+    ids = asyncio.run(_create_assistant_identity_isolation_thread(sessionmaker))
+
+    response = client.patch(
+        f"/api/messages/{ids['target']}",
+        json={"content": "Corrected second-to-last assistant response"},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["id"] == ids["target"]
+    assert body["content_text"] == "Corrected second-to-last assistant response"
+    assert body["selected_alternate_id"] == ids["target_alternate"]
+
+    rows = asyncio.run(_messages_for_thread(sessionmaker, ids["thread"]))
+    target = next(row for row in rows if row.id == ids["target"])
+    final = next(row for row in rows if row.id == ids["final"])
+    final_alternates = asyncio.run(_alternates_for_message(sessionmaker, ids["final"]))
+    assert target.content_text == "Corrected second-to-last assistant response"
+    assert target.selected_alternate_id == ids["target_alternate"]
+    assert final.id == ids["final"]
+    assert final.content_text == "Final stale assistant response"
+    assert final.selected_alternate_id == ids["final_alternate"]
+    assert final.stale_after_edit is True
+    assert [(alternate.id, alternate.message_id, alternate.content_text) for alternate in final_alternates] == [
+        (ids["final_alternate"], ids["final"], "Final stale assistant response")
+    ]
+
+
 def test_user_edit_then_regenerate_uses_edited_prompt_and_reactivates_response(
     message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
 ) -> None:
@@ -686,6 +718,36 @@ def test_user_edit_then_regenerate_uses_edited_prompt_and_reactivates_response(
     assert user.content_text == "Corrected user prompt"
     assert assistant.content_text == "AI response to corrected prompt"
     assert assistant.stale_after_edit is False
+
+
+def test_editing_a_previously_stale_user_reactivates_its_regeneration_context(
+    message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
+) -> None:
+    client, sessionmaker, scripted_client = message_action_client
+    ids = asyncio.run(_create_stale_regeneration_thread(sessionmaker))
+    scripted_client.tokens = ["Independent final response from corrected user"]
+
+    edit_response = client.patch(
+        f"/api/messages/{ids['stale_user']}",
+        json={"content": "Corrected stale user prompt"},
+    )
+
+    assert edit_response.status_code == 200
+    assert edit_response.json()["stale_after_edit"] is False
+
+    regenerate_response = client.post(f"/api/messages/{ids['final_ai']}/regenerate")
+
+    assert regenerate_response.status_code == 200
+    assert regenerate_response.json()["content_text"] == "Independent final response from corrected user"
+    assert scripted_client.requests[0]["messages"][-1] == {
+        "role": "user",
+        "content": "Corrected stale user prompt",
+    }
+    rows = asyncio.run(_messages_for_thread(sessionmaker, ids["thread"]))
+    stale_user = next(row for row in rows if row.id == ids["stale_user"])
+    final_ai = next(row for row in rows if row.id == ids["final_ai"])
+    assert stale_user.stale_after_edit is False
+    assert final_ai.content_text == "Independent final response from corrected user"
 
 
 async def _create_action_thread(
@@ -735,6 +797,127 @@ async def _create_action_thread(
             "user": "user-1",
             "ai": "ai-1",
             "downstream": "downstream-1",
+        }
+
+
+async def _create_assistant_identity_isolation_thread(
+    sessionmaker: async_sessionmaker,
+) -> dict[str, str]:
+    async with sessionmaker() as session:
+        await _insert_character(session, character_id="char_assistant_isolation")
+        thread_id = (await ThreadService(session).create_thread(character_id="char_assistant_isolation"))["thread_id"]
+        session.add_all(
+            [
+                Message(
+                    id="user-before-target",
+                    thread_id=thread_id,
+                    message_kind="user_text",
+                    role="user",
+                    sequence=1,
+                    content_text="Prompt before stale assistant pair",
+                ),
+                Message(
+                    id="assistant-target",
+                    thread_id=thread_id,
+                    message_kind="ai_text",
+                    role="assistant",
+                    sequence=2,
+                    content_text="Original second-to-last assistant response",
+                    selected_alternate_id="alt-assistant-target",
+                    stale_after_edit=True,
+                ),
+                MessageAlternate(
+                    id="alt-assistant-target",
+                    message_id="assistant-target",
+                    alternate_index=0,
+                    content_text="Original second-to-last assistant response",
+                    source_action="regenerate",
+                ),
+                Message(
+                    id="stale-user-between",
+                    thread_id=thread_id,
+                    message_kind="user_text",
+                    role="user",
+                    sequence=3,
+                    content_text="Previously stale user message",
+                    stale_after_edit=True,
+                ),
+                Message(
+                    id="assistant-final",
+                    thread_id=thread_id,
+                    message_kind="ai_text",
+                    role="assistant",
+                    sequence=4,
+                    content_text="Final stale assistant response",
+                    selected_alternate_id="alt-assistant-final",
+                    stale_after_edit=True,
+                ),
+                MessageAlternate(
+                    id="alt-assistant-final",
+                    message_id="assistant-final",
+                    alternate_index=0,
+                    content_text="Final stale assistant response",
+                    source_action="regenerate",
+                ),
+            ]
+        )
+        await session.commit()
+        return {
+            "thread": thread_id,
+            "target": "assistant-target",
+            "target_alternate": "alt-assistant-target",
+            "final": "assistant-final",
+            "final_alternate": "alt-assistant-final",
+        }
+
+
+async def _create_stale_regeneration_thread(sessionmaker: async_sessionmaker) -> dict[str, str]:
+    async with sessionmaker() as session:
+        await _insert_character(session, character_id="char_stale_regeneration")
+        thread_id = (await ThreadService(session).create_thread(character_id="char_stale_regeneration"))["thread_id"]
+        session.add_all(
+            [
+                Message(
+                    id="user-before-branch",
+                    thread_id=thread_id,
+                    message_kind="user_text",
+                    role="user",
+                    sequence=1,
+                    content_text="Original branch prompt",
+                ),
+                Message(
+                    id="assistant-before-stale-user",
+                    thread_id=thread_id,
+                    message_kind="ai_text",
+                    role="assistant",
+                    sequence=2,
+                    content_text="Earlier assistant response that must not become the final response",
+                ),
+                Message(
+                    id="stale-user-to-edit",
+                    thread_id=thread_id,
+                    message_kind="user_text",
+                    role="user",
+                    sequence=3,
+                    content_text="Old stale user prompt",
+                    stale_after_edit=True,
+                ),
+                Message(
+                    id="final-ai-to-regenerate",
+                    thread_id=thread_id,
+                    message_kind="ai_text",
+                    role="assistant",
+                    sequence=4,
+                    content_text="Old stale final response",
+                    stale_after_edit=True,
+                ),
+            ]
+        )
+        await session.commit()
+        return {
+            "thread": thread_id,
+            "stale_user": "stale-user-to-edit",
+            "final_ai": "final-ai-to-regenerate",
         }
 
 
@@ -847,6 +1030,19 @@ async def _messages_for_thread(sessionmaker: async_sessionmaker, thread_id: str)
     async with sessionmaker() as session:
         result = await session.execute(
             select(Message).where(Message.thread_id == thread_id).order_by(Message.sequence)
+        )
+        return list(result.scalars())
+
+
+async def _alternates_for_message(
+    sessionmaker: async_sessionmaker,
+    message_id: str,
+) -> list[MessageAlternate]:
+    async with sessionmaker() as session:
+        result = await session.execute(
+            select(MessageAlternate)
+            .where(MessageAlternate.message_id == message_id)
+            .order_by(MessageAlternate.alternate_index)
         )
         return list(result.scalars())
 

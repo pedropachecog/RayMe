@@ -208,6 +208,7 @@ class SqlAlchemyMessageActionRepository:
                 selected.updated_at = now
 
         if message.role == "user":
+            message.stale_after_edit = False
             await self.session.execute(
                 update(Message)
                 .where(
