@@ -207,14 +207,15 @@ class SqlAlchemyMessageActionRepository:
                 selected.content_text = content_text
                 selected.updated_at = now
 
-        await self.session.execute(
-            update(Message)
-            .where(
-                Message.thread_id == message.thread_id,
-                Message.sequence > message.sequence,
+        if message.role == "user":
+            await self.session.execute(
+                update(Message)
+                .where(
+                    Message.thread_id == message.thread_id,
+                    Message.sequence > message.sequence,
+                )
+                .values(stale_after_edit=True, updated_at=now)
             )
-            .values(stale_after_edit=True, updated_at=now)
-        )
         await self._touch_thread(message.thread_id, now)
         await self.session.commit()
         return await self._hydrate_message(message.thread_id, message.id)

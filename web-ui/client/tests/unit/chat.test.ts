@@ -352,31 +352,52 @@ describe('chat route contract', () => {
     expect(routeSource).toContain('const composerText = composerDraft;');
   });
 
-  it('edit marks downstream stale and keeps the truncate-or-keep choice copy in the route', async () => {
-    const editedOpening: ThreadMessage = {
-      ...selectedOpening,
-      content_text: 'Edited opening branch'
+  it('user edit marks downstream stale and keeps the truncate-or-keep choice copy in the route', async () => {
+    const editedUser: ThreadMessage = {
+      ...staleUserMessage,
+      stale_after_edit: false,
+      content_text: 'Edited user branch'
     };
     const downstream: ThreadMessage = {
-      ...staleUserMessage,
+      ...selectedOpening,
+      id: 'downstream-ai',
+      sequence: 2,
       stale_after_edit: false
     };
-    const fetchMock = installFetch(mockJsonResponse(editedOpening));
+    const fetchMock = installFetch(mockJsonResponse(editedUser));
 
-    const response = await editMessage(selectedOpening.id, 'Edited opening branch');
+    const response = await editMessage(staleUserMessage.id, 'Edited user branch');
     const request = lastRequest(fetchMock);
-    const messages = applyEditedBackendMessage([selectedOpening, downstream], response);
+    const messages = applyEditedBackendMessage([editedUser, downstream], response);
 
-    expect(request.url).toBe('/api/messages/opening');
+    expect(request.url).toBe('/api/messages/user-stale');
     expect(request.init.method).toBe('PATCH');
-    expect(JSON.parse(request.init.body as string)).toEqual({ content: 'Edited opening branch' });
-    expect(messages[0].content_text).toBe('Edited opening branch');
+    expect(JSON.parse(request.init.body as string)).toEqual({ content: 'Edited user branch' });
+    expect(messages[0].content_text).toBe('Edited user branch');
     expect(messages[1].stale_after_edit).toBe(true);
     expect(bubbleSource).toContain('Stale');
     expect(chatApiSource).toContain(TRUNCATE_STALE_CONFIRMATION_COPY);
     expect(routeSource).toContain('TRUNCATE_STALE_CONFIRMATION_COPY');
     expect(routeSource).toContain('truncateStaleMessages');
     expect(routeSource).toContain('keepStaleMessages');
+  });
+
+  it('assistant edit keeps later messages fresh in the projected client state', () => {
+    const editedAssistant: ThreadMessage = {
+      ...selectedOpening,
+      content_text: 'Corrected assistant response'
+    };
+    const downstream: ThreadMessage = {
+      ...staleUserMessage,
+      id: 'downstream-user',
+      sequence: 2,
+      stale_after_edit: false
+    };
+
+    const messages = applyEditedBackendMessage([selectedOpening, downstream], editedAssistant);
+
+    expect(messages[0].content_text).toBe('Corrected assistant response');
+    expect(messages[1].stale_after_edit).toBe(false);
   });
 
   it('renders exact LLM endpoint failure copy with retry/regenerate affordance', () => {

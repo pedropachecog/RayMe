@@ -627,7 +627,7 @@ def test_edit_route_persists_assistant_content_and_selected_alternate(
     message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
 ) -> None:
     client, sessionmaker, _scripted_client = message_action_client
-    ids = asyncio.run(_create_action_thread(sessionmaker))
+    ids = asyncio.run(_create_action_thread(sessionmaker, include_downstream=True))
 
     seeded = client.post(f"/api/messages/{ids['ai']}/swipes")
     assert seeded.status_code == 200
@@ -646,7 +646,9 @@ def test_edit_route_persists_assistant_content_and_selected_alternate(
 
     rows = asyncio.run(_messages_for_thread(sessionmaker, ids["thread"]))
     assistant = next(row for row in rows if row.id == ids["ai"])
+    downstream = next(row for row in rows if row.id == ids["downstream"])
     assert assistant.content_text == "Persisted edited assistant response"
+    assert downstream.stale_after_edit is False
 
 
 def test_user_edit_then_regenerate_uses_edited_prompt_and_reactivates_response(

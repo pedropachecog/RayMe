@@ -135,6 +135,19 @@ function editableThread(threadId: string) {
         stale_after_edit: false,
         created_at: null,
         updated_at: null
+      },
+      {
+        id: 'later-user',
+        thread_id: threadId,
+        message_kind: 'user_text',
+        role: 'user',
+        sequence: 3,
+        content_text: 'Later user turn stays fresh after an assistant correction',
+        selected_alternate_id: null,
+        alternates: [],
+        stale_after_edit: false,
+        created_at: null,
+        updated_at: null
       }
     ]
   };
@@ -272,6 +285,7 @@ test('chat persists an assistant edit through its authoritative message ID', asy
   const expectNoBrowserErrors = installBrowserErrorGuard(page);
   const threadId = 'e2e-assistant-edit-thread';
   const thread = editableThread(threadId);
+  let regenerateRequests = 0;
   const editedAssistant = {
     ...thread.messages[1],
     content_text: 'Edited assistant response',
@@ -299,6 +313,10 @@ test('chat persists an assistant edit through its authoritative message ID', asy
       body: JSON.stringify(editedAssistant)
     });
   });
+  await page.route('**/api/messages/ai-after-user/regenerate', async (route) => {
+    regenerateRequests += 1;
+    await route.fulfill({ status: 500 });
+  });
 
   await page.goto(`/chat/${threadId}`);
   const assistant = page.locator('[data-message-id="ai-after-user"]');
@@ -308,6 +326,11 @@ test('chat persists an assistant edit through its authoritative message ID', asy
   await assistant.getByRole('button', { name: 'Save' }).click();
 
   await expect(assistant.getByText('Edited assistant response')).toBeVisible();
+  await expect(page.locator('[data-message-id="later-user"]')).toHaveAttribute(
+    'data-stale-after-edit',
+    'false'
+  );
+  expect(regenerateRequests).toBe(0);
   await expectNoBrowserErrors();
 });
 

@@ -184,7 +184,13 @@ export function applyEditedBackendMessage(
   messages: ChatMessageView[],
   editedMessage: ThreadMessage
 ): ChatMessageView[] {
-  return upsertBackendMessage(messages, editedMessage).map((message) =>
+  const updatedMessages = upsertBackendMessage(messages, editedMessage);
+
+  if (editedMessage.role !== 'user') {
+    return updatedMessages;
+  }
+
+  return updatedMessages.map((message) =>
     message.thread_id === editedMessage.thread_id && message.sequence > editedMessage.sequence
       ? { ...message, stale_after_edit: true }
       : message
