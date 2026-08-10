@@ -95,6 +95,7 @@ class ScriptedActionRepository:
             message_kind=message.message_kind,
             role=message.role,
             until_message_id=message.id if include_target else "user-1",
+            selected_content=message.selected_content() or "",
         )
 
     async def replace_selected_ai_response(
@@ -550,6 +551,45 @@ def test_continue_route_commits_exact_prefix_before_generated_suffix(
     assert prompt_messages[-2] == {"role": "user", "content": "Prompt from user"}
     assert all(message["content"] != "Original AI response" for message in prompt_messages)
     assert all("Committed assistant prefix" not in message["content"] for message in prompt_messages)
+
+
+def test_continue_uses_edited_assistant_text_as_prefix_when_composer_is_empty(
+    message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
+) -> None:
+    """The Edit → Continue UI flow must keep the edited assistant text immutable."""
+
+    client, sessionmaker, scripted_client = message_action_client
+    prefix = "Miles' eyes opened wide. He felt the palpitations of his"
+    refusal = " Miles did not tremble."
+    ids = asyncio.run(_create_action_thread(sessionmaker))
+
+    seeded = client.post(f"/api/messages/{ids['ai']}/swipes")
+    assert seeded.status_code == 200
+    scripted_client.requests.clear()
+    scripted_client.tokens = [refusal]
+
+    edited = client.patch(f"/api/messages/{ids['ai']}", json={"content": prefix})
+    assert edited.status_code == 200
+    assert edited.json()["content_text"] == prefix
+    assert edited.json()["alternates"][-1]["content_text"] == prefix
+
+    response = client.post(
+        f"/api/messages/{ids['ai']}/continue",
+        json={"composer_text": ""},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    selected = body["alternates"][-1]
+    expected = f"{prefix}{refusal}"
+    assert selected["source_action"] == "continue"
+    assert selected["content_text"] == expected
+    assert selected["content_text"].startswith(prefix)
+    assert selected["content_text"].count(prefix) == 1
+    assert body["content_text"] == expected
+    prompt_messages = scripted_client.requests[0]["messages"]
+    assert prompt_messages[-1] == {"role": "assistant", "content": prefix}
+    assert all(message["content"] != "Original AI response" for message in prompt_messages)
 
 
 def test_edit_route_marks_downstream_stale_and_truncate_keep_behaviors_work(

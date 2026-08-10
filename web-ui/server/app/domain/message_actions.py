@@ -43,6 +43,7 @@ class MessageGenerationContext:
     message_kind: str
     role: str
     until_message_id: str | None
+    selected_content: str
 
 
 class MessageActionRepository(Protocol):
@@ -103,12 +104,18 @@ class SqlAlchemyMessageActionRepository:
     ) -> MessageGenerationContext:
         message = await self._get_message(message_id)
         until_message_id = message.id if include_target else await self._previous_message_id(message)
+        selected_content = message.content_text or ""
+        if message.selected_alternate_id is not None:
+            selected = await self.session.get(MessageAlternate, message.selected_alternate_id)
+            if selected is not None and selected.message_id == message.id:
+                selected_content = selected.content_text
         return MessageGenerationContext(
             thread_id=message.thread_id,
             message_id=message.id,
             message_kind=message.message_kind,
             role=message.role,
             until_message_id=until_message_id,
+            selected_content=selected_content,
         )
 
     async def replace_selected_ai_response(
@@ -399,17 +406,16 @@ async def continue_ai_turn(
 ) -> ThreadMessageShape:
     """Extend the previous AI turn through the server-side LLM path."""
 
-    context = await _generation_context(
-        message_id,
-        repository,
-        include_target=not bool(composer_text),
-    )
+    context = await _generation_context(message_id, repository, include_target=False)
+    prefix = composer_text or context.selected_content
+    if not prefix:
+        context = await _generation_context(message_id, repository, include_target=True)
     prompt_messages = await build_prompt_context(
         context.thread_id,
         repository=repository,
         until_message_id=context.until_message_id,
         action=CONTINUE_SOURCE_ACTION,
-        composer_text=composer_text,
+        composer_text=prefix,
     )
     generated_suffix = await _collect_generated_text(
         settings,
@@ -418,7 +424,7 @@ async def continue_ai_turn(
     )
     return await repository.add_selected_alternate(
         message_id,
-        _commit_continue_prefix(composer_text, generated_suffix),
+        _commit_continue_prefix(prefix, generated_suffix),
         source_action=CONTINUE_SOURCE_ACTION,
     )
 
