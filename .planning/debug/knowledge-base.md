@@ -53,3 +53,13 @@ Resolved debug sessions. Used by `gsd-debugger` to surface known-pattern hypothe
 - **Why not caught:** Existing Continue tests covered nonempty composer input and did not model the separate Edit → empty-composer Continue workflow, so the UI/API contract gap escaped automated and initial physical verification.
 - **Recurrence guard:** `web-ui/server/tests/test_message_actions.py::test_continue_uses_edited_assistant_text_as_prefix_when_composer_is_empty` performs PATCH → empty-composer Continue against real SQL and asserts the returned/displayed selected alternate and persisted content retain the prefix once despite contradictory backend output.
 ---
+
+## message-edit-update-fails — Message edits lost persistence/branch identity and stale-user regeneration omitted its correction
+- **Date:** 2026-08-10
+- **Error patterns:** RayMe could not update this message, optimistic-user PATCH 404, assistant edit marked downstream stale, final AI repeated prior assistant, edited stale user omitted from regenerate context
+- **Root cause(s):** Successful streams left a client-only optimistic user ID in editable state; user edits did not regenerate their immediate AI response and regenerated rows stayed stale; server/client edit paths marked downstream rows stale for assistant-only corrections; an already-stale edited user was not reactivated, so final-AI regeneration excluded the correction and could repeat the preceding assistant.
+- **Fix:** Refresh thread state after successful streaming; regenerate the immediate AI response after a user edit; limit stale propagation to user edits; reactivate the edited user branch point before prompt construction; retain exact-ID assistant edit projection.
+- **Files changed:** web-ui/client/src/routes/chat/[threadId]/+page.svelte, web-ui/client/src/lib/api/chat.ts, web-ui/server/app/domain/message_actions.py, web-ui/client/tests/e2e/chat-stream.spec.ts, web-ui/client/tests/unit/chat.test.ts, web-ui/server/tests/test_message_actions.py
+- **Why not caught:** Existing message-action tests covered fresh user edits and direct assistant edits, but not an already-stale user followed by automatic regeneration or assistant edits with later stale AI identity/alternate preservation.
+- **Recurrence guard:** `web-ui/server/tests/test_message_actions.py::test_editing_a_previously_stale_user_reactivates_its_regeneration_context`; `web-ui/server/tests/test_message_actions.py::test_assistant_edit_isolated_from_later_stale_ai_record`; client unit and rendered stale-AI isolation coverage in `web-ui/client/tests/unit/chat.test.ts` and `web-ui/client/tests/e2e/chat-stream.spec.ts`.
+---
