@@ -1,8 +1,8 @@
 ---
-status: fixing
+status: resolved
 trigger: "The continue function in chat does nto work well. if I do \"Yes, I will do it.\" it should be the prefix. but now it does \"NO i can't do that!\" instead of completing. So you're probably asking it to generate the whole text with \"Yes...\" as the start. That's not how it should work. The text I provide should not be optional."
 created: "2026-08-09T00:00:00Z"
-updated: "2026-08-09T21:32:05Z"
+updated: "2026-08-10T01:40:54Z"
 ---
 
 # Debug Session: Chat Continue Prefix Replaced
@@ -22,27 +22,27 @@ When the user invokes Continue with supplied text, that text is committed assist
 
 ## Current Focus
 
-- incident: "Physical acceptance failed on deployed commit eae4e6800c811e90b11c0e6beb45ed92b5df2763: Continue displays the committed prefix but the model-generated suffix is `I cannot fulfill that request`, not a coherent continuation."
+- incident: "Physical acceptance failed again on deployed commit 8ef71e0a6bfaf1651385a7a13cad341fff474447. Entered exact prefix `Miles' eyes opened wide. He felt the palpitations of his`; the entire displayed result instead began ` Miles did not tremble...`, with no literal prefix."
 - bug_class: "bohrbug"
-- hypothesis: "Confirmed: RayMe constructed nonempty Continue as a final user instruction and began decoding a fresh assistant response, then committed the prefix afterward. The repair replaces the target history entry with one exact final assistant prefix, so llama-server-compatible decoding begins after those committed assistant tokens."
-- test: "Specified real-SQL boundary tests prove the request ends in an assistant prefix, excludes the old target response, preserves whitespace, and stores exactly one prefix; all adjacent tests, full server suite, lint, diff hygiene, and the repair-only causality guardrail pass."
-- expecting: "On the configured endpoint, Continue now generates a coherent suffix after the exact supplied assistant text rather than beginning a fresh refusal response."
-- next_action: "Parent: commit as appropriate, deploy only through `scripts/deploy-omen.sh`, then run the physical Continue acceptance using a supplied prefix and report the complete resulting assistant message plus any deployment/model errors."
+- hypothesis: "Confirmed and physically accepted: resolving an empty Continue composer to the selected edited assistant content preserves that committed prefix through prefill, persistence, and display."
+- test: "The product owner repeated the exact deployed Edit → Continue workflow on commit `8b7454c5a2b564d188d299348d76134b878258e9`."
+- expecting: "The literal prefix is present once at offset zero, followed only by generated suffix text."
+- next_action: "Archive this resolved session, commit planning records only, update the durable knowledge base, and leave the separate edit-message failure untouched."
 
 reasoning_checkpoint:
-  hypothesis: "The physical refusal occurs because RayMe sends the supplied Continue value only in a final user instruction and concatenates it after generation, whereas llama-server decodes after a final assistant message; replacing the target AI history entry with the supplied assistant prefix at the request boundary makes decoding continue that prefix."
+  hypothesis: "The Edit → Continue production flow loses the committed prefix because `continue_ai_turn` branches on empty `composer_text` instead of the selected edited assistant content, causing whole-message generation and persistence of only the model output."
   confirming_evidence:
-    - "RayMe `prompt_builder.py` appends `_continue_instruction(composer_text)` with `role: user`; `llm_stream.py` forwards this structure directly to OpenAI-compatible chat completions."
-    - "The physical acceptance produced a refusal suffix despite correct visible prefix persistence, exactly the behavior expected when the prefix is absent from decoder context."
-    - "SillyTavern commit 8172dcd0ee672d3cd9a5e5f7af134f91a45cd2b8 moves its Continue message into the final generation position when prefill is enabled; primary llama.cpp documentation states that a trailing assistant message is assistant prefill by default."
-  falsification_test: "The hypothesis would be false if a pre-fix serialized Continue request already ended in one assistant message equal to the supplied prefix and excluded the original target AI content. Current source and tests observe the opposite."
-  fix_rationale: "For nonempty Continue only, omit the old target response from history and place the raw supplied text as the final assistant message. This makes the prefill part of the actual token context while retaining `_commit_continue_prefix` to normalize providers that echo the prefill."
-  blind_spots: "The active deployed endpoint identity could not be read through the current remote session, and an arbitrary OpenAI-compatible server may not support assistant prefill. llama-server—the documented local endpoint—does, and physical acceptance must verify the configured production endpoint after deployment."
+    - "The exact affected browser session logged PATCH of the assistant message immediately before POST Continue; the persisted selected `source_action='continue'` alternate contains no prefix."
+    - "Current deployed code takes `include_target=not bool(composer_text)`, passes empty text to the user-instruction branch, and `_commit_continue_prefix('', generated_suffix)` returns raw model output."
+    - "The new real-SQL Edit → empty-composer Continue test fails deterministically: expected `Miles' eyes opened wide... Miles did not tremble.`, received only ` Miles did not tremble.`"
+  falsification_test: "This cause would be false if the current code preserved an edited target when the request had empty `composer_text`; the exact route test directly disproves that."
+  fix_rationale: "The repository already owns the selected assistant message at the generation/persistence boundary. Resolving an empty composer to that exact selected content before context construction gives the decoder a final assistant prefill and lets the existing one-prefix persistence guard store the same committed bytes."
+  blind_spots: "A blank Continue on an assistant message now intentionally extends that message rather than asking the model to regenerate it wholesale; this matches the Continue label and the immutable-prefix contract but requires product-owner physical verification after parent deployment."
   candidate_causes:
-    - "code: final Continue prompt role is user, and the old target assistant content remains in history rather than being overlaid by the supplied prefix."
-    - "config: a non-llama-server endpoint could treat a trailing assistant message as a completed turn rather than prefill."
-    - "data: some prefixes can still lead to poor model-quality suffixes, but they cannot explain the current source-level absence of a decoder prefix."
-  and_gate: "no — the user-instruction plus post-hoc-concatenation path independently produces the observed refusal suffix; endpoint prefill support is a compatibility constraint on the repair, not a second cause of the current behavior."
+    - "code: Continue uses only the global composer field to choose its assistant-prefill/persistence contract and ignores an edited selected target when that field is empty."
+    - "data: the target's selected assistant content was changed by the preceding PATCH and is the supplied prefix that the action must consume."
+    - "environment/config: stale server or stale static client was plausible, but the current OMEN checkout, launcher, and matching route log falsified it."
+  and_gate: "no — the code branch independently causes the defect once the valid edited-prefix data is present; no configuration or model behavior is needed to reproduce it."
 
 
 ## Evidence
@@ -339,20 +339,147 @@ reasoning_checkpoint:
   found: "A read-only `/v1/chat/completions` request ending with assistant content `Yes, I will do it.` returned a coherent continuation beginning with that exact prefix (`Yes, I will do it. However, ...`) rather than a refusal. llama-server echoed the prefill in response content, which `_commit_continue_prefix` already de-duplicates at persistence."
   implication: "Assistant prefill is empirically supported by the configured production endpoint and produces the intended decoding shape before RayMe deployment."
 
+- timestamp: "2026-08-09T21:34:47Z"
+  checked: "Canonical deployment of assistant-prefill correction"
+  found: "`scripts/deploy-omen.sh` pulled and verified `8ef71e0a6bfaf1651385a7a13cad341fff474447`, rechecked the pinned web environment, passed Alembic migration, rebuilt the client, restarted the canonical scheduled tasks, and completed both listener and health gates."
+  implication: "The second-stage Continue correction is live through the authorized deployment path on the exact tested commit."
+
+- timestamp: "2026-08-09T21:35:16Z"
+  checked: "Independent post-deploy identity and provider readiness"
+  found: "OMEN repository HEAD is `8ef71e0a6bfaf1651385a7a13cad341fff474447`; web-to-AI readiness is `ready` and authenticated; the configured llama-server endpoint reports `status=ok`."
+  implication: "RayMe and its prefill-capable production LLM are ready for the product owner's repeated physical Continue acceptance test."
+
+- timestamp: "2026-08-10T00:00:00Z"
+  checked: "Product-owner physical acceptance after assistant-prefill deployment"
+  found: "With exact entered text `Miles' eyes opened wide. He felt the palpitations of his`, the entire displayed result instead began ` Miles did not tremble. He did not widen his nostrils...`; the literal entered prefix was absent."
+  implication: "This is stronger than an incoherent suffix: the mandatory prefix invariant failed at display/storage. Do not assume the previously traced Continue route was exercised. Trace the deployed UI-to-API path and production data before changing code."
+
+- timestamp: "2026-08-10T00:30:59Z"
+  checked: "Current worktree identity and session scope"
+  found: "The checked-out source is exactly deployed Continue-prefill commit `8ef71e0a6bfaf1651385a7a13cad341fff474447`; only this debug artifact is modified and the unrelated Qwen debug artifact is untracked."
+  implication: "The new failure cannot be explained by uncommitted local source divergence. The next discriminating evidence must identify the deployed UI action and persisted production record."
+
+- timestamp: "2026-08-10T00:31:49Z"
+  checked: "Complete current chat Continue handler, client API wrapper, message-render path, and matching server routes"
+  found: "The only UI Continue action captures `composerDraft` unchanged, calls `continueMessage(message.id, composerText)`, which POSTs `composer_text` to `/api/messages/{id}/continue`, then replaces the displayed bubble with that returned `ThreadMessage`. The endpoint forwards the field unchanged to `continue_ai_turn`, which writes `_commit_continue_prefix(composer_text, generated_suffix)` as a `source_action='continue'` alternate. Normal composer Send alone calls the distinct streaming `/api/chat/{thread_id}/send` endpoint."
+  implication: "There is no second local Continue handler or client-side post-action rewrite. The observed no-prefix final message means either the deployed request contained an empty composer value, a different action was invoked, or observable deployed data does not match this deployed source path; inspect the concrete record next."
+
+- timestamp: "2026-08-10T00:32:20Z"
+  checked: "Read-only deployed thread list"
+  found: "The newest `Miles White` thread is `thread_4b13531a9af04bbdb39f382c9fded092`, updated at `2026-08-10T00:22:40.737075`; its persisted last-message snippet begins `Miles did not tremble...`, matching the reported entire display."
+  implication: "The production API exposes the exact affected record and agrees with the user-visible failure. Inspect its selected alternate metadata rather than inferring from the rendered UI."
+
+- timestamp: "2026-08-10T00:33:16Z"
+  checked: "Read-only exact deployed thread record `thread_4b13531a9af04bbdb39f382c9fded092`"
+  found: "Its latest assistant row (`msg_e16980ea5dc84643943b7f731668e493`, sequence 16) selects alternate index 2 with `source_action='continue'`, and both its selected content and that alternate start `Miles did not tremble...`; no literal supplied prefix is present. Earlier alternates 0 and 1 are also Continue results without the reported exact prefix."
+  implication: "The physical result was persisted by the Continue endpoint, not a normal Send or client-only display replacement. Given the current `_commit_continue_prefix` contract, the live handler either did not run current source or received an empty `composer_text`; distinguish those causes from live process evidence."
+
+- timestamp: "2026-08-10T00:34:40Z"
+  checked: "Read-only OMEN checkout, launcher, source markers, and recent web access log"
+  found: "OMEN checkout is deployed commit `8ef71e0a6bfaf1651385a7a13cad341fff474447`; the canonical launcher runs that checkout's `web-ui/server/scripts/run_dev_https.py`; the live source contains `continue_ai_turn`, `_commit_continue_prefix`, and the raw `payload.composer_text` route binding. The affected browser session logged `PATCH /api/messages/msg_e16980ea5dc84643943b7f731668e493` immediately before `POST /api/messages/msg_e16980ea5dc84643943b7f731668e493/continue`, with no normal Send request."
+  implication: "This falsifies stale-server and alternate-endpoint theories. The product owner entered/committed text through Edit, then Continue received its default empty composer value. The nonempty-prefix architecture is sound but does not cover the actual edit-then-Continue flow, which follows the legacy whole-message path."
+
+- timestamp: "2026-08-10T00:36:45Z"
+  checked: "Specified real-SQL Edit → empty-composer Continue regression before the repair"
+  found: "After PATCHing `Miles' eyes opened wide. He felt the palpitations of his` and scripting ` Miles did not tremble.`, POST Continue with `composer_text=''` persisted only ` Miles did not tremble.`; the assertion requiring prefix plus suffix failed deterministically."
+  implication: "The exact user-visible production path is reproducible at the API/generation/persistence boundary. The specified oracle is not a prompt-quality judgment."
+
+- timestamp: "2026-08-10T00:38:58Z"
+  checked: "Edit-prefix repair and focused regression hardening"
+  found: "`MessageGenerationContext` now carries the selected target content, including a selected alternate. Continue uses nonempty composer text when supplied, otherwise that exact selected target text, and then retains the existing final-assistant prefill and one-prefix persistence guard. The focused route/prompt suite passed 12 tests after the repair, including the selected-alternate Edit → Continue case, contradictory model output, provider-echo de-duplication, whitespace, and empty-target prompt behavior."
+  implication: "The authoritative route now returns and persists the exact edited prefix once before any backend output. Proceed with broader regression and causality verification."
+
+- timestamp: "2026-08-10T00:39:44Z"
+  checked: "Adjacent action/prompt/stream/Phase-1 suites and source hygiene"
+  found: "`test_message_actions.py`, `test_prompt_builder.py`, `test_phase1_acceptance.py`, and `test_chat_stream.py` passed 35 tests. Scoped Ruff passed for the changed production/test files and `git diff --check` passed."
+  implication: "The edited-prefix fallback preserves custom-composer prefill, selected-alternate branch behavior, stream contracts, and source hygiene. Run the complete suite and production-only revert/reapply guardrail."
+
+- timestamp: "2026-08-10T00:41:53Z"
+  checked: "Complete web-server suite after the edited-prefix repair"
+  found: "`uv run pytest tests -q` passed 293 tests in 101.65 seconds."
+  implication: "The repair does not regress the full server test suite. Isolate its causal contribution with a production-file-only reversible revert while keeping the new regression in place."
+
+- timestamp: "2026-08-10T00:42:34Z"
+  checked: "Production-only revert portion of the edited-prefix causality guardrail"
+  found: "After stashing only `web-ui/server/app/domain/message_actions.py`, the retained real-SQL Edit → empty-composer Continue regression failed with the exact original result: selected alternate ` Miles did not tremble.` instead of the committed prefix followed by that suffix."
+  implication: "The regression is not passing because of its test changes: the production derivation/prefill implementation is causally necessary. Restore exactly that module and rerun the same test."
+
+- timestamp: "2026-08-10T00:43:35Z"
+  checked: "Production-only reapply and final local guardrail"
+  found: "Popping the exact one-file stash restored the edited-prefix regression; it passed along with scoped Ruff and `git diff --check`. No configured mutation runner was found. The final changed code/test paths are only `web-ui/server/app/domain/message_actions.py` and `web-ui/server/tests/test_message_actions.py`; the unrelated Qwen debug artifact remains untouched."
+  implication: "The selected-target fallback is both necessary and sufficient for the real Edit → Continue boundary. Parent-owned deployment and human verification remain the only missing signal."
+
+- timestamp: "2026-08-10T00:48:38Z"
+  checked: "Commit, push, and canonical OMEN deployment of the Edit → Continue repair"
+  found: "Commit `8b7454c5a2b564d188d299348d76134b878258e9` was pushed to `origin/main`. `scripts/deploy-omen.sh` fast-forwarded OMEN to that exact revision, provisioned the declared web environment, applied migrations, rebuilt the client, restarted both canonical scheduled tasks, verified ports 9443 and 8443, and completed its health gate without error. No ad-hoc launcher or live-environment uv command was used."
+  implication: "The real-path prefix repair is live on OMEN and ready for product-owner physical verification; code, regression, repository identity, and deployment gates are complete."
+
+- timestamp: "2026-08-10T01:40:54Z"
+  checked: "Product-owner physical acceptance on deployed commit `8b7454c5a2b564d188d299348d76134b878258e9`"
+  found: "The product owner reported `that works now.` for the exact Edit → Continue prefix workflow."
+  implication: "The original production failure is resolved end-to-end: the committed prefix survives UI input, API action selection, assistant prefill, selected-alternate persistence, reload/display, and the configured provider."
+
 ## Eliminated
 
 ## Specialist Review
 
+## Prevention
+
+### Blameless branched 5-Whys
+
+- **Code branch:** The prefix disappeared because Continue selected its prefix solely from global `composer_text`; after Edit, that field is empty. This was possible because the action boundary did not model the selected assistant message as a valid committed prefix source. The repair gives `MessageGenerationContext` that selected content and routes it through the existing assistant-prefill and one-prefix persistence guard.
+- **Data/UI-contract branch:** The user validly supplied text through the Edit action, which persisted it on the selected assistant alternate before Continue ran. The UI/API contract did not state or test that an empty composer must use that selected content, so the action treated the valid edited state as absent input. The route regression now executes PATCH → empty-composer Continue against the real SQL repository.
+- **Environment/config branch:** A stale web process or wrong endpoint was plausible after deployment, but the OMEN checkout, canonical launcher, source markers, access log, and deployed commit all matched. This was ruled out rather than attributed to a person or device.
+- **AND-gate:** No. The code branch independently reproduces the failure once an edited selected target exists; provider/configuration did not need to contribute.
+
+### Why it was not caught
+
+Existing Continue regressions covered a nonempty composer prefix and the earlier assistant-prefill repair, but did not exercise the distinct user workflow that saves the prefix through Edit and invokes Continue with an empty composer. The UI/API contract gap therefore escaped unit, integration, review, and initial physical verification.
+
+### Recurrence guard
+
+`web-ui/server/tests/test_message_actions.py::test_continue_uses_edited_assistant_text_as_prefix_when_composer_is_empty` is a specified-oracle real-SQL regression. It PATCHes an assistant prefix, posts empty `composer_text`, scripts a contradictory backend response, and asserts that the returned/displayed selected alternate and durable content begin with the exact prefix once. It passed in the full 293-test web-server suite and fails when only the production action module is reverted.
+
 ## Resolution
 
-- root_cause: "Continue has two independent defects: (1) prior code persisted only model output and normalized supplied bytes; (2) the first repair kept the prefix only post-hoc and sent it to the model as a final user instruction while retaining the old target assistant message. The model therefore decoded a new response and could refuse instead of continuing the committed assistant tokens. Deployment recovery: canonical deploy invoked web Alembic without syncing/preflighting web-ui/server, so a partially removed virtual environment could not recover its declared production Alembic dependency."
-- fix: "Continue: preserve raw text, replace the target assistant history entry with the exact supplied prefix as the final assistant prefill for nonempty Continue, and persist that prefix plus generated suffix with one repeated-prefix removal. Deployment recovery: sync web-ui/server production dependencies under Python 3.12 and preflight Alembic inside scripts/deploy-omen.sh before existing migrations."
+- root_cause: "Continue has three independent defects: (1) prior code persisted only model output and normalized supplied bytes; (2) the first repair kept the prefix only post-hoc and sent it to the model as a final user instruction while retaining the old target assistant message; (3) after the assistant Edit flow saves a supplied prefix, Continue posts an empty global `composer_text`, so the nonempty assistant-prefill/persistence path was skipped and raw model output replaced the edited target. Deployment recovery: canonical deploy invoked web Alembic without syncing/preflighting web-ui/server, so a partially removed virtual environment could not recover its declared production Alembic dependency."
+- fix: "Continue: preserve raw text; treat an explicit composer value or, when it is empty, the current selected assistant target as the committed prefix; replace the target history entry with that exact prefix as final assistant prefill; and persist it plus generated suffix with one repeated-prefix removal. Deployment recovery: sync web-ui/server production dependencies under Python 3.12 and preflight Alembic inside scripts/deploy-omen.sh before existing migrations."
 - verification:
   oracle_type: specified
   target_test:
     result: pass
     command: "uv run pytest tests/test_message_actions.py::test_continue_route_commits_exact_prefix_before_generated_suffix -q"
     detail: "2 parameter cases passed after reapplying the production fix."
+  edited_target_continue:
+    oracle_type: specified
+    target_test:
+      result: pass
+      command: "cd web-ui/server && uv run pytest tests/test_message_actions.py::test_continue_uses_edited_assistant_text_as_prefix_when_composer_is_empty -q"
+      detail: "The test first failed before the repair and on a production-only revert with raw ` Miles did not tremble.`; after reapply it passes while asserting the API-returned/displayed message and stored selected alternate equal the exact edited prefix plus that suffix once."
+    mutation_check:
+      result: skipped
+      reason_if_skipped: "No Stryker, mutmut, cosmic-ray, or other configured mutation runner was found."
+      mutant_killed: null
+    no_op_deletion:
+      result: pass
+      detail: "The repair adds selected-target prefix derivation and routes it through existing assistant prefill and persistence guards; no behavior was simply removed."
+      deletion_justified_by_rca: true
+    adjacent_tests:
+      result: pass
+      suites_run:
+        - "Focused route/prompt regression suite (12 passed)"
+        - "tests/test_message_actions.py tests/test_prompt_builder.py tests/test_phase1_acceptance.py tests/test_chat_stream.py (35 passed)"
+        - "uv run pytest tests -q (293 passed in 101.65s)"
+        - "Scoped Ruff and git diff --check (passed)"
+    revert_and_reconfirm:
+      result: pass
+      bug_returned_on_revert: true
+      fixed_on_reapply: true
+      detail: "Stashing only app/domain/message_actions.py restored the original raw-model-output failure; popping that exact stash made the same regression pass."
+    environment_verification:
+      result: pass
+      detail: "Canonical deployment passed on exact commit `8b7454c5a2b564d188d299348d76134b878258e9`; the product owner then confirmed the exact Edit → Continue prefix workflow works."
+    guardrail_verdict: accepted
   mutation_check:
     result: skipped
     reason_if_skipped: "No Stryker, mutmut, cosmic-ray, or other configured mutation runner was found."
