@@ -36,6 +36,10 @@ def load_ai_backend_settings(
     environ: Mapping[str, str] | None = None,
 ) -> AiBackendSettings:
     source = os.environ if environ is None else environ
+    default_tts_engine = (
+        source.get("RAYME_TTS_DEFAULT_ENGINE", "f5").strip() or "f5"
+    )
     return AiBackendSettings(
+        default_tts_engine=default_tts_engine,
         service_auth_token=source.get("RAYME_AI_BACKEND_SERVICE_TOKEN", ""),
     )

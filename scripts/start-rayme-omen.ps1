@@ -326,7 +326,8 @@ function Start-RayMeProcess {
 
 try {
   $resolvedRepo = (Resolve-Path $Repo).Path
-  $logDir = "C:\Users\pmpg\rayme\logs"
+  $stateRoot = Split-Path -Parent $resolvedRepo
+  $logDir = Join-Path $stateRoot "logs"
   New-Item -ItemType Directory -Path $logDir -Force | Out-Null
   $aiLogPath = Join-Path $logDir "ai-backend.console.log"
   $webLogPath = Join-Path $logDir "web-ui.console.log"
@@ -346,8 +347,38 @@ try {
 
   Stop-PortOwners -Ports @($AiPort, $WebPort)
 
-  $certPath = "C:\Users\pmpg\rayme\phase1-tls\rayme.local+1.pem"
-  $keyPath = "C:\Users\pmpg\rayme\phase1-tls\rayme.local+1-key.pem"
+  $phase1TlsDir = Join-Path $stateRoot "phase1-tls"
+  $certPath = Join-Path $phase1TlsDir "rayme.local+1.pem"
+  $keyPath = Join-Path $phase1TlsDir "rayme.local+1-key.pem"
+  $aiCaBundle = Join-Path $phase1TlsDir "rayme-phase1-rootCA.pem"
+  $serviceTokenPath = Join-Path $stateRoot "ai-backend-service-token.txt"
+  foreach ($requiredPath in @($certPath, $keyPath, $aiCaBundle, $serviceTokenPath)) {
+    if (-not (Test-Path -LiteralPath $requiredPath -PathType Leaf)) {
+      throw "Required deployed RayMe file is missing: $requiredPath"
+    }
+  }
+
+  $serviceToken = (Get-Content -Raw $serviceTokenPath).Trim()
+  if ($serviceToken.Length -lt 43) {
+    throw "RayMe AI service credential is missing or too short"
+  }
+
+  $qwenModelRevision = "fd4b254389122332181a7c3db7f27e918eec64e3"
+  $qwenModelDir = Join-Path $stateRoot "models\qwen3-tts-1.7b-$qwenModelRevision"
+  $qwenManifestPath = Join-Path $qwenModelDir "rayme-model-revision.json"
+  if (-not (Test-Path -LiteralPath $qwenManifestPath -PathType Leaf)) {
+    throw "Pinned Qwen model manifest is missing"
+  }
+  $qwenManifest = Get-Content -Raw $qwenManifestPath | ConvertFrom-Json
+  if ([string]$qwenManifest.model_revision -ne $qwenModelRevision) {
+    throw "Pinned Qwen model revision does not match the launcher contract"
+  }
+
+  $deployedCommit = (& git.exe -C $resolvedRepo rev-parse HEAD | Select-Object -Last 1).Trim()
+  if ($LASTEXITCODE -ne 0 -or $deployedCommit -notmatch '^[0-9a-f]{40}$') {
+    throw "Could not resolve the deployed RayMe commit"
+  }
+
   $aiPython = Join-Path $resolvedRepo "ai-backend\.venv\Scripts\python.exe"
   $webPython = Join-Path $resolvedRepo "web-ui\server\.venv\Scripts\python.exe"
   $cudaPath = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin"
@@ -356,6 +387,11 @@ try {
   $aiEnv = @{
     "PYTHONUNBUFFERED" = "1"
     "PATH" = "$cudaPath;$env:PATH"
+    "RAYME_DEPLOYED_COMMIT" = $deployedCommit
+    "RAYME_QWEN3_MODEL_DIR" = $qwenModelDir
+    "RAYME_QWEN3_MODEL_REVISION" = $qwenModelRevision
+    "RAYME_TTS_DEFAULT_ENGINE" = "qwen3_1_7b"
+    "RAYME_AI_BACKEND_SERVICE_TOKEN" = $serviceToken
   }
   $webEnv = @{
     "PYTHONUNBUFFERED" = "1"
@@ -363,6 +399,8 @@ try {
     "RAYME_WEB_PORT" = [string]$WebPort
     "RAYME_WEB_PUBLIC_URL" = $WebUrl
     "RAYME_AI_BACKEND_BASE_URL" = "https://$BindHost`:$AiPort"
+    "RAYME_AI_BACKEND_SERVICE_TOKEN" = $serviceToken
+    "RAYME_AI_BACKEND_CA_BUNDLE" = $aiCaBundle
     "RAYME_DATABASE_URL" = $databaseUrl
     "RAYME_ALLOWED_ORIGINS" = "$WebUrl,https://rayme.local:$WebPort"
   }

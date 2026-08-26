@@ -561,6 +561,7 @@ set "PATH=$cudaRuntimeBin;%PATH%"
 set "RAYME_DEPLOYED_COMMIT=$actualHead"
 set "RAYME_QWEN3_MODEL_DIR=$qwenModelDir"
 set "RAYME_QWEN3_MODEL_REVISION=$qwenModelRevision"
+set "RAYME_TTS_DEFAULT_ENGINE=qwen3_1_7b"
 for /f "usebackq delims=" %%T in ("$serviceTokenPath") do set "RAYME_AI_BACKEND_SERVICE_TOKEN=%%T"
 "$aiPythonw" ai-backend\scripts\run_https.py --host 192.168.1.199 --port 9443 --cert $aiTlsCert --key $aiTlsKey >> C:\Users\pmpg\rayme\logs\ai-backend.run.log 2>>&1
 "@
@@ -645,14 +646,33 @@ function Write-RayMeDesktopShortcut {
 
   $shortcutPath = Join-Path $desktopDir "Run RayMe.lnk"
   $powershellPath = Join-Path $env:SystemRoot "System32\WindowsPowerShell\v1.0\powershell.exe"
+  $shortcutArguments = "-NoProfile -File `"$launcherScript`""
+  $shortcutDescription = "Run RayMe with visible AI and Web logs; close the console to stop"
   $shortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
   $shortcut.TargetPath = $powershellPath
-  $shortcut.Arguments = "-NoProfile -File `"$launcherScript`""
+  $shortcut.Arguments = $shortcutArguments
   $shortcut.WorkingDirectory = $repo
-  $shortcut.Description = "Run RayMe with visible AI and Web logs; close the console to stop"
+  $shortcut.Description = $shortcutDescription
   $shortcut.IconLocation = "$env:SystemRoot\System32\shell32.dll,220"
   $shortcut.WindowStyle = 1
   $shortcut.Save()
+
+  $verifiedShortcut = (New-Object -ComObject WScript.Shell).CreateShortcut($shortcutPath)
+  if (
+    -not [System.StringComparer]::OrdinalIgnoreCase.Equals(
+      [string]$verifiedShortcut.TargetPath,
+      [string]$powershellPath
+    ) -or
+    [string]$verifiedShortcut.Arguments -ne [string]$shortcutArguments -or
+    -not [System.StringComparer]::OrdinalIgnoreCase.Equals(
+      [string]$verifiedShortcut.WorkingDirectory,
+      [string]$repo
+    ) -or
+    [int]$verifiedShortcut.WindowStyle -ne 1 -or
+    [string]$verifiedShortcut.Description -ne [string]$shortcutDescription
+  ) {
+    throw "Desktop launcher verification failed"
+  }
   Write-Host "Desktop launcher: $shortcutPath"
 }
 
@@ -815,7 +835,7 @@ if (
 }
 $aiStatus = $aiHealth | ConvertFrom-Json
 $aiStatus | Select-Object service,status,stt_ready,vad_ready,resident_tts_engine | Format-List
-if (-not $aiStatus.stt_ready -or -not $aiStatus.vad_ready -or $aiStatus.resident_tts_engine -ne "f5") {
+if (-not $aiStatus.stt_ready -or -not $aiStatus.vad_ready -or $aiStatus.resident_tts_engine -ne "qwen3_1_7b") {
   throw "AI backend is not ready for live calls"
 }
 $qwenManifestPath = Join-Path $qwenModelDir "rayme-model-revision.json"
@@ -853,8 +873,8 @@ if (
 }
 $webStatus = ($webHealth | ConvertFrom-Json).ai_backend_status
 $webStatus | Select-Object endpoint_status,resident_tts_engine | Format-List
-if ($webStatus.endpoint_status -match "unreachable" -or $webStatus.resident_tts_engine -ne "f5") {
-  throw "Web UI cannot reach the resident F5 AI backend"
+if ($webStatus.endpoint_status -match "unreachable" -or $webStatus.resident_tts_engine -ne "qwen3_1_7b") {
+  throw "Web UI cannot reach the resident Qwen AI backend"
 }
 
 if ($verifyVoxCpm2) {

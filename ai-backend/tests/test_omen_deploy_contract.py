@@ -55,6 +55,17 @@ def test_default_omen_deploy_provisions_and_attests_qwen_before_launch() -> None
     assert "$webrtcStatus.deployed_commit -ne $actualHead" in health_gate
 
 
+def test_default_omen_deploy_starts_and_requires_qwen_residency() -> None:
+    source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
+    health_gate = source[source.index('Write-Host "== Verifying health"') :]
+
+    assert source.count('set "RAYME_TTS_DEFAULT_ENGINE=qwen3_1_7b"') == 1
+    assert '$aiStatus.resident_tts_engine -ne "qwen3_1_7b"' in health_gate
+    assert '$webStatus.resident_tts_engine -ne "qwen3_1_7b"' in health_gate
+    assert 'resident_tts_engine -ne "f5"' not in health_gate
+    assert "resident F5 AI backend" not in health_gate
+
+
 def test_omen_deploy_upgrades_persistent_web_schema_before_launch() -> None:
     source = DEPLOY_SCRIPT.read_text(encoding="utf-8")
 

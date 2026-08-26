@@ -74,7 +74,7 @@ AGENTS.md         Workspace operating rules for agents
 - AI backend: Python 3.11, FastAPI, aiortc, faster-whisper, Silero VAD.
 - Package managers: `npm` for the client, `uv` for Python services.
 - Tests: Vitest, Playwright, pytest.
-- TTS registry: F5-TTS, XTTS v2, Qwen3-TTS 0.6B-Base, LuxTTS, Chatterbox Turbo, TADA 1B, and VoxCPM2. The current code default is `f5`; other engines are selectable when their runtime dependencies and evidence gates are available.
+- TTS registry: F5-TTS, XTTS v2, Qwen3-TTS 1.7B-Base, LuxTTS, Chatterbox Turbo, TADA 1B, and VoxCPM2. Generic/local startup falls back to `f5`; canonical OMEN launchers set `qwen3_1_7b` as the resident startup engine.
 
 ## Prerequisites
 

@@ -308,6 +308,34 @@ def test_model_manager_defaults_match_phase_zero_decisions() -> None:
     assert settings.vram_budget_mb == 11000
 
 
+def test_omen_startup_can_select_qwen_as_the_resident_engine_from_environment() -> None:
+    config_module = importlib.import_module("app.config")
+    load_settings = _require_attr(config_module, "load_ai_backend_settings")
+
+    settings = load_settings(
+        {
+            "RAYME_TTS_DEFAULT_ENGINE": "qwen3_1_7b",
+            "RAYME_AI_BACKEND_SERVICE_TOKEN": "",
+        }
+    )
+
+    assert settings.default_tts_engine == "qwen3_1_7b"
+
+
+def test_blank_startup_engine_environment_keeps_the_local_f5_fallback() -> None:
+    config_module = importlib.import_module("app.config")
+    load_settings = _require_attr(config_module, "load_ai_backend_settings")
+
+    settings = load_settings(
+        {
+            "RAYME_TTS_DEFAULT_ENGINE": "  ",
+            "RAYME_AI_BACKEND_SERVICE_TOKEN": "",
+        }
+    )
+
+    assert settings.default_tts_engine == "f5"
+
+
 def test_model_manager_health_reports_one_hot_residency_and_vram_headroom() -> None:
     manager, _, _ = _build_manager()
 
