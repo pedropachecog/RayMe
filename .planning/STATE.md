@@ -3,16 +3,16 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: ready_to_verify
-stopped_at: Completed 09-15-PLAN.md
-last_updated: "2026-08-02T19:04:00Z"
-last_activity: 2026-08-02
+stopped_at: Completed quick task 260826-rgq
+last_updated: "2026-08-26T20:02:30Z"
+last_activity: 2026-08-26
 progress:
   total_phases: 11
   completed_phases: 8
   total_plans: 112
   completed_plans: 109
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
-last_activity_desc: "Phase 9 incident repair: automatic microphone/VAD barge-in deferred/disabled; explicit Interrupt remains supported"
+last_activity_desc: "Quick task 260826-rgq: canonical OMEN startup and Desktop launcher now leave Qwen3-TTS 1.7B resident"
 ---
 
 ## Phase Status
@@ -242,6 +242,7 @@ last_activity_desc: "Phase 9 incident repair: automatic microphone/VAD barge-in 
 | 260602-4xz | repair OMEN desktop RayMe launcher so it is quiet, does not auto-open browser, and does not show blank command prompts | 2026-06-02 | 3dffff8 | [260602-4xz-repair-omen-desktop-rayme-launcher-so-it](./quick/260602-4xz-repair-omen-desktop-rayme-launcher-so-it/) |
 | 260602-5bv | replace OMEN desktop RayMe shortcut with a visible foreground console that streams logs and stops services when closed | 2026-06-02 | 12d62d1 | [260602-5bv-replace-omen-desktop-rayme-shortcut-with](./quick/260602-5bv-replace-omen-desktop-rayme-shortcut-with/) |
 | 260802-q26 | permanently remove reference authorization from active and future RayMe planning | 2026-08-02 | f40d018 | [260802-q26-permanently-remove-reference-authorizati](./quick/260802-q26-permanently-remove-reference-authorizati/) |
+| 260826-rgq | Make Qwen the default resident TTS engine on OMEN startup and verify the OMEN Desktop launcher works as intended | 2026-08-26 | ca80da3 | [260826-rgq-make-qwen-the-default-resident-tts-engin](./quick/260826-rgq-make-qwen-the-default-resident-tts-engin/) |
 
 ### Roadmap Evolution
 
@@ -263,9 +264,9 @@ last_activity_desc: "Phase 9 incident repair: automatic microphone/VAD barge-in 
 
 ## Session Continuity
 
-Last activity: 2026-08-02
-Last session: 2026-08-02T18:45:48.976Z
-Stopped at: Completed quick task 260802-q26; live-call incident repair remains active
+Last activity: 2026-08-26
+Last session: 2026-08-26T20:02:30Z
+Stopped at: Completed quick task 260826-rgq; RayMe is running on OMEN with Qwen resident
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
