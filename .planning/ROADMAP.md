@@ -662,7 +662,7 @@ Voice Sample Authorization Policy (2026-08-02): `.planning/REFERENCE-AUTHORIZATI
 ### Phase 09.1: Default unfiltered roleplay and refusal-resistant prompt orchestration (INSERTED)
 
 **Goal:** Make every RayMe character conversation default to unfiltered fictional roleplay and resist generic helpful-AI/guideline refusals through a shared, inspectable, model-aware prompt composer and bounded streaming refusal recovery, without delaying live-call first playback or weakening explicit interruption.
-**Requirements**: REQ-37, REQ-38, REQ-39
+**Requirements:** REQ-37, REQ-38, REQ-39
 **Depends on:** Phase 1 text/thread foundation and Phase 9 live-call streaming path
 **Plans:** 0 plans
 
@@ -671,7 +671,7 @@ rather than moralizing or refusing. In live calls, ordinary output still reaches
 audible playback from an early usable stream prefix, and explicit interruption
 still returns the call to listening while rejecting late text and audio.
 
-**Success Criteria:**
+**Success criteria** (observable, testable):
 
 1. Roleplay is the effective default for new and existing character threads,
    including cards with blank system, example, and post-history fields;
