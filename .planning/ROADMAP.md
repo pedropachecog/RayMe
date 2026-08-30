@@ -659,6 +659,50 @@ Voice Sample Authorization Policy (2026-08-02): `.planning/REFERENCE-AUTHORIZATI
 
 *Roadmap derived 2026-04-17 from requirements + research synthesis. Next: `/gsd-plan-phase 8`.*
 
+### Phase 09.1: Default unfiltered roleplay and refusal-resistant prompt orchestration (INSERTED)
+
+**Goal:** Make every RayMe character conversation default to unfiltered
+fictional roleplay and resist generic helpful-AI/guideline refusals through a
+shared, inspectable, model-aware prompt composer and bounded streaming refusal
+recovery, without delaying live-call first playback or weakening explicit
+interruption.
+**Requirements**: REQ-37, REQ-38, REQ-39
+**Depends on:** Phase 1 text/thread foundation and Phase 9 live-call streaming path
+**Plans:** 0 plans
+
+**User-goal preservation:** RayMe answers as the selected character by default
+rather than moralizing or refusing. In live calls, ordinary output still reaches
+audible playback from an early usable stream prefix, and explicit interruption
+still returns the call to listening while rejecting late text and audio.
+
+**Success Criteria:**
+
+1. Roleplay is the effective default for new and existing character threads,
+   including cards with blank system, example, and post-history fields;
+   Assistant and Custom modes are deliberate visible selections.
+2. Text and call paths use the same ordered composer with global
+   Main/Auxiliary/late post-history slots, card overrides plus `{{original}}`,
+   `{{char}}`/`{{user}}` macros, example-dialogue injection, context budgeting,
+   model-aware roles, generation controls, and a credential-safe exact request
+   inspector.
+3. A deterministic corpus containing the observed deployed failure and varied
+   character-card strengths produces zero explicit generic/guideline refusals
+   under its fixed model/seed matrix. If the deployed checkpoint cannot pass,
+   the phase resolves the model-adapter/checkpoint boundary with recorded
+   evidence rather than hiding failures or returning canned prose.
+4. A bounded initial-prefix guard cancels and retries refusals before they are
+   displayed, spoken, or persisted. Normal generations stream after the bounded
+   guard; no path waits for a whole LLM response or whole TTS synthesis.
+5. Automated text/call regressions prove slow-stream first playback precedes
+   completion, VoxCPM2 rejects whole-synthesis fallback, explicit interruption
+   rejects late chunks, and refusal attempts never contaminate history. OMEN
+   acceptance uses only `scripts/deploy-omen.sh` and verifies the exact deployed
+   commit, health, effective prompt, and live behavior.
+
+Plans:
+
+- [ ] TBD (run $gsd-plan-phase 09.1 to break down)
+
 ### Phase 08.1: Live-call streaming invariant incident repair and prevention (INSERTED)
 
 **Goal:** Repair the bad post-Phase-8 buffering fix, contain the follow-on VoxCPM2 native crash regression, and make RayMe's live-call streaming invariant executable in code, tests, planning docs, and deployment handoff gates.

@@ -1,16 +1,17 @@
 ---
 gsd_state_version: 1.0
 milestone: v1.0
-milestone_name: milestone
 status: ready_to_verify
 stopped_at: Completed quick task 260826-rgq
-last_updated: "2026-08-26T20:02:30Z"
-last_activity: 2026-08-26
+last_updated: "2026-08-30T22:02:45.711Z"
+last_activity: 2026-08-30
+state_head: 38fb0ba2051cdcdec3576021f93b3552c39bdc05
 progress:
   total_phases: 11
-  completed_phases: 8
-  total_plans: 112
-  completed_plans: 109
+  completed_phases: 3
+  total_plans: 103
+  completed_plans: 99
+milestone_name: milestone
 current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
 last_activity_desc: "Quick task 260826-rgq: canonical OMEN startup and Desktop launcher now leave Qwen3-TTS 1.7B resident"
 ---
@@ -255,6 +256,7 @@ last_activity_desc: "Quick task 260826-rgq: canonical OMEN startup and Desktop l
 - Phase 7 added: Add VoxCPM2 to the TTS roster with empirical quality, latency, VRAM, and call-flow evaluations.
 - Phase 8 added: Wire VoxCPM2 streaming chunks into live RayMe call playback.
 - Phase 08.1 inserted after Phase 8: Live-call streaming invariant incident repair and prevention (URGENT)
+- Phase 09.1 inserted after Phase 9: Default unfiltered roleplay and refusal-resistant prompt orchestration (URGENT)
 
 ### Phase 0 Completion Notes
 
@@ -264,7 +266,7 @@ last_activity_desc: "Quick task 260826-rgq: canonical OMEN startup and Desktop l
 
 ## Session Continuity
 
-Last activity: 2026-08-26
+Last activity: 2026-08-30
 Last session: 2026-08-26T20:02:30Z
 Stopped at: Completed quick task 260826-rgq; RayMe is running on OMEN with Qwen resident
 Resume file: None

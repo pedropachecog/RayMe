@@ -42,6 +42,11 @@ fix; it turns RayMe into generated-audio playback and violates the core value.
 - [ ] Voice sample upload is assumed authorized; the technical sample contract remains asset containment, valid bytes and integrity, matching transcript/acoustic alignment where an engine needs it, private handling, and deletion/cache invalidation. See `.planning/REFERENCE-AUTHORIZATION-PROHIBITION.md`.
 - [ ] Character creator/editor supports the SillyTavern character-card field set plus a picture
 - [ ] Character importer accepts SillyTavern v2 and v3 card formats (JSON and PNG-embedded)
+- [ ] Every character conversation defaults to unfiltered fictional roleplay;
+      Assistant and Custom prompt modes are explicit alternatives
+- [ ] Text and call generation share an ordered, inspectable prompt composer
+      with inherited defaults, character overrides, examples, macros, context
+      budgeting, generation controls, and bounded refusal recovery
 - [ ] A character has a default voice, but each chat can override which voice is used
 - [ ] Call memory uses a sliding-window of the chat's recent turns
 - [ ] AI-generated audio is saved by default; user mic audio is off by default; both are togglable
@@ -112,6 +117,8 @@ fix; it turns RayMe into generated-audio playback and violates the core value.
 | Engine-agnostic TTS chunk planner is required | Native streaming is inconsistent and some engines have hard token limits; benchmarks and runtime behavior must use the best chunked path per engine, not raw whole-generation fallbacks | — Pending |
 | 3060 (12 GB) as the backend GPU target | Constrains model size choices across STT, TTS, and VAD | — Pending |
 | Text chat and calls share one chat thread | "Continue a conversation" is the story, regardless of modality | — Pending |
+| Unfiltered fictional roleplay is the default prompt mode for every character conversation | Blank or weak card prompts must not collapse into generic helpful-AI identity; Assistant and Custom remain explicit choices | 2026-08-30 |
+| Refusal recovery is bounded and streaming | Failed generic-refusal attempts must not be rendered, spoken, or persisted, while normal text and live-call output still starts early | 2026-08-30 |
 | UI honors the existing Stitch "Ethereal Core / True Dark" design system as a strong reference | Visual language and screen set are already designed; rebuilding without it wastes prior work | — Pending |
 
 ## Phase 0 Key Decisions
@@ -152,4 +159,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-04-17 after initialization*
+*Last updated: 2026-08-30 for urgent Phase 09.1 prompt orchestration scope*

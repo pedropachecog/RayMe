@@ -13,6 +13,13 @@
   blocker, sidecar, or automatic substitute. The technical contract is governed by
   `.planning/REFERENCE-AUTHORIZATION-PROHIBITION.md`.
 
+**Scoping decision** (2026-08-30, confirmed by user):
+- Every character conversation defaults to unfiltered fictional roleplay. A
+  blank character system or post-history field inherits that application
+  contract; it must not degrade into generic "helpful AI" behavior. Assistant
+  and Custom are explicit alternative modes. RayMe adds no hidden content
+  moderation or NSFW filter.
+
 **Status legend**: `[v1]` = must ship. `[v1.x]` = add after v1 validates. `[v2+]` = future consideration.
 
 ---
@@ -72,6 +79,27 @@
 - **REQ-35** `[v1]` — **Continue**: if the composer (textbox) contains text when the user triggers Continue, the LLM is invoked with the composer content appended to the last AI message, resuming/extending that turn.
   - *Source*: user scoping decision 2026-04-17 (explicit user addition).
 - **REQ-36** `[v1]` — The message list virtualizes once a thread exceeds ~500 messages. Jump-to-latest appears when the user has scrolled up.
+- **REQ-37** `[v1]` — **Default character roleplay contract**: every new and
+  existing character conversation resolves to the Roleplay prompt preset unless
+  the user explicitly selects Assistant or Custom. Blank card-level Main or
+  post-history fields inherit the active preset. The default instructs the LLM
+  to produce the selected character's next in-world reply and must not silently
+  fall back to generic helpful-assistant identity or guideline-refusal boilerplate.
+- **REQ-38** `[v1]` — **Shared SillyTavern-class prompt composer**: text and
+  live-call generation use one ordered, token-budgeted composer supporting
+  global Main, Auxiliary, and late post-history prompts; character overrides
+  with `{{original}}`; at least `{{char}}` and `{{user}}` macros; injected
+  example dialogue; model-aware message roles; explicit sampler controls; and
+  an exact effective-request inspector that excludes credentials. Thread
+  snapshots preserve character identity but must not freeze obsolete global
+  prompt defaults.
+- **REQ-39** `[v1]` — **Bounded streaming refusal recovery**: RayMe detects an
+  explicit generic/guideline refusal in the initial streamed prefix, cancels
+  that attempt, and retries with corrective prompt context before the refused
+  text is rendered, spoken, or persisted. Normal in-character output must be
+  released after a small bounded prefix guard; neither text nor calls may wait
+  for the full LLM response, and live-call early playback, listening recovery,
+  and explicit interruption remain mandatory.
 
 ### Voice Call (Full-Duplex)
 
@@ -170,6 +198,7 @@ Every Active bullet in PROJECT.md maps to one or more REQ-IDs. Dropped bullets o
 | No authentication — LAN-level trust | REQ-04 |
 | English-only v1 | REQ-A3 |
 | A chat thread holds typed + call transcripts interleaved | REQ-30, REQ-60, REQ-61 |
+| Character conversations default to inspectable, refusal-resistant fictional roleplay | REQ-37, REQ-38, REQ-39 |
 | Calls run full-duplex; automatic VAD barge-in deferred, explicit Interrupt supported | REQ-41, REQ-42 |
 | Live captions during a call (user STT + AI response) | REQ-43, REQ-44 |
 | Text chat and call startable/resumable from same thread | REQ-40, REQ-50, REQ-60 |
@@ -189,4 +218,5 @@ Every Active bullet in PROJECT.md maps to one or more REQ-IDs. Dropped bullets o
 
 ---
 
-*Requirements defined 2026-04-17, after research synthesis and scoping confirmation. Next: roadmap.*
+*Requirements defined 2026-04-17 and amended 2026-08-30 for Phase 09.1 after
+SillyTavern prompt-composition research and explicit product-owner scoping.*
