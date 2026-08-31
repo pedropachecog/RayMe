@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 status: ready_to_verify
-stopped_at: Completed 09.1-01-PLAN.md
-last_updated: "2026-08-31T03:19:47.058Z"
+stopped_at: Completed 09.1-02-PLAN.md
+last_updated: "2026-08-31T03:48:01.538Z"
 last_activity: 2026-08-31
-state_head: d54eae7eed426520deb825e42767fdfafe990710
+state_head: db2e44e3ce9c443776df3c74aefa8c9543c32a4f
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 117
-  completed_plans: 100
+  completed_plans: 102
 milestone_name: milestone
 current_phase_name: Default unfiltered roleplay and refusal-resistant prompt orchestration
-last_activity_desc: "Phase 09.1 Plan 01: bounded refusal recovery protects streamed chat and live-call consumers"
+last_activity_desc: "Phase 09.1 Plan 02: read-only provider-bound evidence contracts and verifier"
 ---
 
 ## Phase Status
@@ -258,6 +258,7 @@ last_activity_desc: "Phase 09.1 Plan 01: bounded refusal recovery protects strea
 - Phase 08.1 inserted after Phase 8: Live-call streaming invariant incident repair and prevention (URGENT)
 - Phase 09.1 inserted after Phase 9: Default unfiltered roleplay and refusal-resistant prompt orchestration (URGENT)
 - Phase 09.1 plan 09.1-01 completed on 2026-08-31: bounded refusal recovery now guards streamed and collected text, preserves early live-call caption/TTS playback, and keeps explicit Interrupt authoritative.
+- Phase 09.1 plan 09.1-02 completed on 2026-08-31: read-only OMEN/provider attestation, a fixed 36-turn evidence matrix, strict privacy schemas, independent verification, and controlled fixture teardown are now frozen.
 
 ### Phase 0 Completion Notes
 
@@ -268,8 +269,8 @@ last_activity_desc: "Phase 09.1 Plan 01: bounded refusal recovery protects strea
 ## Session Continuity
 
 Last activity: 2026-08-31
-Last session: 2026-08-31T03:19:37.692Z
-Stopped at: Completed 09.1-01-PLAN.md
+Last session: 2026-08-31T03:47:51.161Z
+Stopped at: Completed 09.1-02-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -294,6 +295,7 @@ Resume file: None
 | Phase 09 P14 | 4h 19m | 2 tasks | 36 files |
 | Phase 09 P15 | 4h08m | 2 tasks | 26 files |
 | Phase 09.1 P01 | 26m | 3 tasks | 7 files |
+| Phase 09.1 P02 | 17m50s | 3 tasks | 5 files |
 
 ## Decisions
 
@@ -352,3 +354,6 @@ Resume file: None
 - [Phase 09.1]: Release accepted original chunks irreversibly after a bounded safe prefix; never buffer a whole response or whole synthesis.
 - [Phase 09.1]: Retry at most three semantic attempts with the exact frozen correction and distinct request-scoped seeds; disable SDK retries.
 - [Phase 09.1]: Keep recent refusal activity content-free, process-local, and truthfully empty after restart.
+- [Phase 09.1]: Treat matching /v1/models and /props values as authoritative provider identity; the RayMe request-model setting remains a routing label.
+- [Phase 09.1]: Derive assistant-prefill capability from exact live /props template bytes when no explicit boolean is exposed, and fail closed if the template cannot prove the behavior.
+- [Phase 09.1]: Persist evidence seeds only in the immutable manifest; ordinary runtime seeds and all raw prompt, history, response, audio, URL, and path material remain private.
