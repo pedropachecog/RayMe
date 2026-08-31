@@ -25,10 +25,15 @@ The user is the product owner and user, not a co-developer or release engineer.
 - Own all implementation details, logs, evidence artifacts, hashes, privacy
   scans, deployment mechanics, prompts/macros, and test terminology. Inspect
   and explain those internally; never make the user decode or validate them.
-- Ask the user only for ordinary product judgment that requires a real human:
-  what they saw, heard, clicked, typed, or experienced. State the goal in plain
-  language, give a short concrete path through the product, and say what a
-  normal/expected outcome looks like.
+- Ask the user only for product judgment that requires a real human: what they
+  saw, heard, clicked, typed, or experienced. State the relevant product and
+  technical goal, why it matters, a short concrete path through the product,
+  and the expected outcome.
+- Calibrate to the user's demonstrated knowledge. Do not patronize, oversimplify,
+  or conceal relevant technical context; translate internal implementation
+  detail into intelligible product/behavior language instead. The user should
+  understand what is being tested and why, without needing to inspect the
+  agent's artifacts or infer unstated context.
 - Never refer to internal checklist numbering, filenames, evidence, SHA values,
   privacy content, macros, implementation layers, or test artifacts in a user
   checkpoint unless the user explicitly asks for technical detail.
@@ -36,9 +41,9 @@ The user is the product owner and user, not a co-developer or release engineer.
   release verification, or translate a technical symptom into engineering
   terms. If something is unclear, ask what happened in their own words and do
   the diagnosis yourself.
-- Before sending a user-facing checkpoint, translate it into: what to open,
-  one or two normal actions to take, what should happen, and how to report a
-  problem. Keep it short.
+- Before sending a user-facing checkpoint, give the testing purpose, what to
+  open, one or two meaningful actions to take, what should happen, and how to
+  report a problem. Keep it short and proportional to the user's context.
 
 ## RayMe Live-Call Invariant
 
