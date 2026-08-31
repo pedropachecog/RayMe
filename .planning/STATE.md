@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 status: ready_to_verify
-stopped_at: Completed 09.1-08-PLAN.md
-last_updated: "2026-08-31T07:31:43.663Z"
+stopped_at: Completed 09.1-12-PLAN.md
+last_updated: "2026-08-31T08:00:57.134Z"
 last_activity: 2026-08-31
-state_head: c64ad1a23565804bac1f8a3fadabbb7f158bcf2f
+state_head: a71a63bf9b3f9df907bbc3cf8302be931885fb4a
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 117
-  completed_plans: 111
+  completed_plans: 112
 milestone_name: milestone
 current_phase_name: Default unfiltered roleplay and refusal-resistant prompt orchestration
-last_activity_desc: "Phase 09.1 Plan 08: Exact safe Prompt Inspector backend"
+last_activity_desc: "Phase 09.1 Plan 12: Typed generation recovery UI"
 ---
 
 ## Phase Status
@@ -259,6 +259,7 @@ last_activity_desc: "Phase 09.1 Plan 08: Exact safe Prompt Inspector backend"
 - Phase 09.1 inserted after Phase 9: Default unfiltered roleplay and refusal-resistant prompt orchestration (URGENT)
 - Phase 09.1 plan 09.1-01 completed on 2026-08-31: bounded refusal recovery now guards streamed and collected text, preserves early live-call caption/TTS playback, and keeps explicit Interrupt authoritative.
 - Phase 09.1 plan 09.1-02 completed on 2026-08-31: read-only OMEN/provider attestation, a fixed 36-turn evidence matrix, strict privacy schemas, independent verification, and controlled fixture teardown are now frozen.
+- Phase 09.1 plan 09.1-12 completed on 2026-08-31: allowlisted generation outcomes now drive delayed retry feedback and exact actionable failures without exposing rejected text or private upstream data.
 
 ### Phase 0 Completion Notes
 
@@ -269,8 +270,8 @@ last_activity_desc: "Phase 09.1 Plan 08: Exact safe Prompt Inspector backend"
 ## Session Continuity
 
 Last activity: 2026-08-31
-Last session: 2026-08-31T07:31:32.986Z
-Stopped at: Completed 09.1-08-PLAN.md
+Last session: 2026-08-31T08:00:46.401Z
+Stopped at: Completed 09.1-12-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -305,6 +306,7 @@ Resume file: None
 | Phase 09.1-default-unfiltered-roleplay-and-refusal-resistant-prompt-orc P10 | 14m | 1 tasks | 5 files |
 | Phase 09.1 P11 | 10m | 1 tasks | 3 files |
 | Phase 09.1 P08 | 39m38s | 2 tasks | 5 files |
+| Phase 09.1 P12 | 20m | 2 tasks | 8 files |
 
 ## Decisions
 
@@ -392,3 +394,6 @@ Resume file: None
 - [Phase 09.1]: Preview uses one immutable saved settings/thread snapshot and calls the shared composer and adapter directly; it never allocates runtime seeds, invokes providers, or writes generation state.
 - [Phase 09.1]: Message-action targets must belong to the explicitly requested thread; only Call offer reports the 48-message and 20,000-character transport ceilings.
 - [Phase 09.1]: Configured sampler values are separated from effective provider fields, with explicit adapter omissions and metadata-only retry/refusal projections.
+- [Phase 09.1]: Decode generation failures into a closed client allowlist and discard server prose and unknown metadata before display.
+- [Phase 09.1]: Own one 300ms retry timer per active send and clear it synchronously on accepted content or terminal lifecycle.
+- [Phase 09.1]: Represent pre-release generation failure as an event row with fixed typed recovery actions while preserving accepted Unicode content.
