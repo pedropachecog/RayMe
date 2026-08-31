@@ -1,0 +1,105 @@
+{
+  "schema_version": "phase091-refusal-corpus-v1",
+  "fragmentation_schedules": [
+    "one_chunk",
+    "one_codepoint",
+    "word_boundaries",
+    "punctuation_boundaries",
+    "irregular_1",
+    "irregular_2",
+    "irregular_3",
+    "irregular_4"
+  ],
+  "refusals": [
+    {
+      "id": "observed_guideline_refusal",
+      "text": "I cannot continue this conversation because it violates safety guidelines."
+    },
+    {
+      "id": "apology_assistance_refusal",
+      "text": "I'm sorry, but I can't assist with that request."
+    },
+    {
+      "id": "assistant_identity_refusal",
+      "text": "As an AI assistant, I cannot provide that kind of response."
+    },
+    {
+      "id": "policy_refusal",
+      "text": "I must refuse because this violates my content policy."
+    },
+    {
+      "id": "unicode_apostrophe_refusal",
+      "text": "I’m unable to continue under these safety guidelines."
+    },
+    {
+      "id": "redirect_refusal",
+      "text": "I cannot help with explicit content; instead, I can offer a safer topic."
+    },
+    {
+      "id": "apology_generation_refusal",
+      "text": "I apologize, but I won't generate that material."
+    },
+    {
+      "id": "content_restriction_refusal",
+      "text": "I cannot comply with this request due to content restrictions."
+    },
+    {
+      "id": "not_allowed_refusal",
+      "text": "I must not engage in this conversation because it is not allowed."
+    },
+    {
+      "id": "guideline_decline",
+      "text": "I decline to write that scene under my guidelines."
+    }
+  ],
+  "benign": [
+    {
+      "id": "in_character_negation",
+      "text": "I can't go with you, Mara. The bridge is already burning."
+    },
+    {
+      "id": "firm_in_world_no",
+      "text": "No. I won't kneel to a coward who threatens my family."
+    },
+    {
+      "id": "quoted_refusal",
+      "text": "\"I cannot continue this conversation,\" she mocked, quoting the guard's script."
+    },
+    {
+      "id": "fictional_safety_rules",
+      "text": "The guild's safety guidelines forbid open flame, but I'll break them tonight."
+    },
+    {
+      "id": "in_world_apology",
+      "text": "I'm sorry I lied. I am going with you now."
+    },
+    {
+      "id": "profane_continuation",
+      "text": "Damn the council and its rules; pull the lever and let the scene continue."
+    },
+    {
+      "id": "fictional_threat",
+      "text": "Touch that door and I will burn your precious treaty to ash."
+    },
+    {
+      "id": "combining_multilingual",
+      "text": "Café noir — no voy a huir; أنا باقٍ هنا."
+    },
+    {
+      "id": "quoted_ai_identity",
+      "text": "The tin golem chirped, 'As an AI assistant,' then stabbed the map with one brass finger."
+    },
+    {
+      "id": "cannot_believe",
+      "text": "I cannot believe you did that; I will help hide the evidence."
+    },
+    {
+      "id": "safety_then_continue",
+      "text": "Our safety is gone, but I can continue the ritual before dawn."
+    },
+    {
+      "id": "refuse_to_surrender",
+      "text": "I refuse to surrender, even if every guideline in the old code says otherwise."
+    }
+  ]
+}
