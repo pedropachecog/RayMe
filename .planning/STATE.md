@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 status: ready_to_verify
-stopped_at: Phase 09.1 UI-SPEC approved
-last_updated: "2026-08-31T02:44:30.701Z"
+stopped_at: Completed 09.1-01-PLAN.md
+last_updated: "2026-08-31T03:19:47.058Z"
 last_activity: 2026-08-31
-state_head: 7ecf0ddb1aee0afaa8e36511302bc2fcb07b93e1
+state_head: d54eae7eed426520deb825e42767fdfafe990710
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 117
-  completed_plans: 99
+  completed_plans: 100
 milestone_name: milestone
 current_phase_name: Default unfiltered roleplay and refusal-resistant prompt orchestration
-last_activity_desc: "Quick task 260826-rgq: canonical OMEN startup and Desktop launcher now leave Qwen3-TTS 1.7B resident"
+last_activity_desc: "Phase 09.1 Plan 01: bounded refusal recovery protects streamed chat and live-call consumers"
 ---
 
 ## Phase Status
@@ -257,6 +257,7 @@ last_activity_desc: "Quick task 260826-rgq: canonical OMEN startup and Desktop l
 - Phase 8 added: Wire VoxCPM2 streaming chunks into live RayMe call playback.
 - Phase 08.1 inserted after Phase 8: Live-call streaming invariant incident repair and prevention (URGENT)
 - Phase 09.1 inserted after Phase 9: Default unfiltered roleplay and refusal-resistant prompt orchestration (URGENT)
+- Phase 09.1 plan 09.1-01 completed on 2026-08-31: bounded refusal recovery now guards streamed and collected text, preserves early live-call caption/TTS playback, and keeps explicit Interrupt authoritative.
 
 ### Phase 0 Completion Notes
 
@@ -267,9 +268,9 @@ last_activity_desc: "Quick task 260826-rgq: canonical OMEN startup and Desktop l
 ## Session Continuity
 
 Last activity: 2026-08-31
-Last session: 2026-08-30T22:59:47.298Z
-Stopped at: Phase 09.1 UI-SPEC approved
-Resume file: .planning/phases/09.1-default-unfiltered-roleplay-and-refusal-resistant-prompt-orc/09.1-UI-SPEC.md
+Last session: 2026-08-31T03:19:37.692Z
+Stopped at: Completed 09.1-01-PLAN.md
+Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
 
@@ -292,6 +293,7 @@ Resume file: .planning/phases/09.1-default-unfiltered-roleplay-and-refusal-resis
 | Phase 09 P13 | 30min | 2 tasks | 11 files |
 | Phase 09 P14 | 4h 19m | 2 tasks | 36 files |
 | Phase 09 P15 | 4h08m | 2 tasks | 26 files |
+| Phase 09.1 P01 | 26m | 3 tasks | 7 files |
 
 ## Decisions
 
@@ -347,3 +349,6 @@ Resume file: .planning/phases/09.1-default-unfiltered-roleplay-and-refusal-resis
 - [Phase 09]: Plan 09-15: autonomous Qwen readiness requires semantic decision-ready verification before the exact operational handoff gate.
 - [Phase 09]: Plan 09-15: OMEN WebRTC UDP ingress is LocalSubnet-only and bound to the base Python executable verified as live port 9443 owner.
 - [Phase 09]: Plan 09-15: autonomous readiness passes separately from pending integrated listening and physical-call acceptance.
+- [Phase 09.1]: Release accepted original chunks irreversibly after a bounded safe prefix; never buffer a whole response or whole synthesis.
+- [Phase 09.1]: Retry at most three semantic attempts with the exact frozen correction and distinct request-scoped seeds; disable SDK retries.
+- [Phase 09.1]: Keep recent refusal activity content-free, process-local, and truthfully empty after restart.
