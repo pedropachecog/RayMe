@@ -232,6 +232,7 @@ class Thread(TimestampMixin, Base):
     character_snapshot_personality: Mapped[str | None] = mapped_column(Text, nullable=True)
     character_snapshot_scenario: Mapped[str | None] = mapped_column(Text, nullable=True)
     character_snapshot_first_mes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    character_snapshot_mes_example: Mapped[str | None] = mapped_column(Text, nullable=True)
     character_snapshot_system_prompt: Mapped[str | None] = mapped_column(Text, nullable=True)
     character_snapshot_post_history_instructions: Mapped[str | None] = mapped_column(
         Text,

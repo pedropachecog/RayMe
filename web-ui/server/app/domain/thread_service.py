@@ -99,6 +99,7 @@ class ThreadService:
             character_snapshot_personality=character.personality,
             character_snapshot_scenario=character.scenario,
             character_snapshot_first_mes=character.first_mes,
+            character_snapshot_mes_example=character.mes_example,
             character_snapshot_system_prompt=character.system_prompt,
             character_snapshot_post_history_instructions=(
                 character.post_history_instructions
@@ -157,6 +158,7 @@ class ThreadService:
                 "personality": thread.character_snapshot_personality,
                 "scenario": thread.character_snapshot_scenario,
                 "first_mes": thread.character_snapshot_first_mes,
+                "mes_example": thread.character_snapshot_mes_example,
                 "system_prompt": thread.character_snapshot_system_prompt,
                 "post_history_instructions": (
                     thread.character_snapshot_post_history_instructions
