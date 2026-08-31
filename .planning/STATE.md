@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 status: ready_to_verify
-stopped_at: Completed 09.1-11-PLAN.md
-last_updated: "2026-08-31T06:49:35.040Z"
+stopped_at: Completed 09.1-08-PLAN.md
+last_updated: "2026-08-31T07:31:43.663Z"
 last_activity: 2026-08-31
-state_head: 5afea44bb79f581ad4493aacb417498bdf6bef32
+state_head: c64ad1a23565804bac1f8a3fadabbb7f158bcf2f
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 117
-  completed_plans: 110
+  completed_plans: 111
 milestone_name: milestone
 current_phase_name: Default unfiltered roleplay and refusal-resistant prompt orchestration
-last_activity_desc: "Phase 09.1 Plan 11: Character Editor prompt guidance"
+last_activity_desc: "Phase 09.1 Plan 08: Exact safe Prompt Inspector backend"
 ---
 
 ## Phase Status
@@ -269,8 +269,8 @@ last_activity_desc: "Phase 09.1 Plan 11: Character Editor prompt guidance"
 ## Session Continuity
 
 Last activity: 2026-08-31
-Last session: 2026-08-31T06:49:24.999Z
-Stopped at: Completed 09.1-11-PLAN.md
+Last session: 2026-08-31T07:31:32.986Z
+Stopped at: Completed 09.1-08-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -304,6 +304,7 @@ Resume file: None
 | Phase 09.1-default-unfiltered-roleplay-and-refusal-resistant-prompt-orc P07 | 15m24s | 2 tasks | 2 files |
 | Phase 09.1-default-unfiltered-roleplay-and-refusal-resistant-prompt-orc P10 | 14m | 1 tasks | 5 files |
 | Phase 09.1 P11 | 10m | 1 tasks | 3 files |
+| Phase 09.1 P08 | 34m20s | 2 tasks | 5 files |
 
 ## Decisions
 
@@ -388,3 +389,6 @@ Resume file: None
 - [Phase 09.1]: Use one prop-driven PromptMacroHelp component for example, macro, and field-source guidance so exact copy and escaping stay centralized.
 - [Phase 09.1]: Read the saved prompt mode and model profile only for visible context, with Roleplay and Auto as truthful shipped fallbacks and no Settings write path.
 - [Phase 09.1]: Keep example messages as character-card form content and never consult thread snapshots or a mutable live example source from explanatory help.
+- [Phase 09.1]: Preview uses one immutable saved settings/thread snapshot and calls the shared composer and adapter directly; it never allocates runtime seeds, invokes providers, or writes generation state.
+- [Phase 09.1]: Message-action targets must belong to the explicitly requested thread; only Call offer reports the 48-message and 20,000-character transport ceilings.
+- [Phase 09.1]: Configured sampler values are separated from effective provider fields, with explicit adapter omissions and metadata-only retry/refusal projections.
