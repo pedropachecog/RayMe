@@ -274,6 +274,20 @@ async def test_unusable_pre_release_streams_emit_only_safe_typed_errors(
     assert "private upstream detail" not in events[0]["message"]
     assert persisted == []
 
+    collect_client = AttemptScriptClient([script])
+    expected_exception = LLMEmptyOutput if expected_code == "llm_empty_output" else RuntimeError
+    with pytest.raises(expected_exception):
+        await collect_chat_completion(
+            ChatCompletionSettings(
+                base_url="http://llm.local/v1",
+                model="configured-model",
+            ),
+            [{"role": "user", "content": "Stay in character."}],
+            client=collect_client,
+        )
+    assert len(collect_client.requests) == 1
+    assert collect_client.closed_attempts == [1]
+
 
 async def test_post_release_transport_failure_never_starts_replacement_attempt() -> None:
     accepted = "The lantern swung across the quiet cabin."
@@ -306,6 +320,22 @@ async def test_post_release_transport_failure_never_starts_replacement_attempt()
     assert client.closed_attempts == [1]
     assert persisted == []
 
+    collect_client = AttemptScriptClient(
+        [[accepted, RuntimeError("other private disconnect")]]
+    )
+    with pytest.raises(RuntimeError, match="other private disconnect"):
+        await collect_chat_completion(
+            ChatCompletionSettings(
+                base_url="http://llm.local/v1",
+                model="configured-model",
+            ),
+            [{"role": "user", "content": "Look around."}],
+            client=collect_client,
+            seed_factory=lambda: 302,
+        )
+    assert len(collect_client.requests) == 1
+    assert collect_client.closed_attempts == [1]
+
 
 async def test_concurrent_retry_and_cancellation_keep_request_state_independent() -> None:
     settings_a = ChatCompletionSettings(base_url="http://a.local/v1", model="model-a")
@@ -316,6 +346,11 @@ async def test_concurrent_retry_and_cancellation_keep_request_state_independent(
     retry_client = AttemptScriptClient([[refusal], [accepted_a]])
     cancelled_started = asyncio.Event()
     cancelled_closed = asyncio.Event()
+    cancelled_persisted: list[str] = []
+
+    async def persist_cancelled(text: str) -> ThreadMessageShape:
+        cancelled_persisted.append(text)
+        raise AssertionError("cancelled output must not persist")
 
     class HeldOpenClient:
         def __init__(self) -> None:
@@ -353,13 +388,21 @@ async def test_concurrent_retry_and_cancellation_keep_request_state_independent(
             seed_factory=iter((401, 402)).__next__,
         )
     )
+
+    async def consume_cancelled_stream() -> list[str]:
+        return [
+            event
+            async for event in stream_chat_completion(
+                settings_b,
+                [{"role": "user", "content": "Continue B."}],
+                client=held_client,
+                persist_final=persist_cancelled,
+                seed_factory=lambda: 501,
+            )
+        ]
+
     cancel_task = asyncio.create_task(
-        collect_chat_completion(
-            settings_b,
-            [{"role": "user", "content": "Continue B."}],
-            client=held_client,
-            seed_factory=lambda: 501,
-        )
+        consume_cancelled_stream()
     )
 
     await cancelled_started.wait()
@@ -369,6 +412,7 @@ async def test_concurrent_retry_and_cancellation_keep_request_state_independent(
 
     assert await retry_task == accepted_a
     assert cancelled_closed.is_set()
+    assert cancelled_persisted == []
     assert [request["seed"] for request in retry_client.requests] == [401, 402]
     assert [request["attempt"] for request in retry_client.requests] == [1, 2]
     assert retry_client.closed_attempts == [1, 2]
@@ -580,8 +624,9 @@ def test_send_endpoint_keeps_user_message_but_no_partial_ai_on_upstream_failure(
 
     assert response.status_code == 200
     events = _sse_events(response.text)
-    assert events[0] == {"type": "token", "text": "Hel"}
-    assert events[-1] == {"type": "error", "message": "LLM stream failed"}
+    assert events == [
+        {"type": "error", "code": "llm_stream_failed", "message": "LLM stream failed"}
+    ]
     rows = asyncio.run(_messages_for_thread(sessionmaker, thread_id))
     assert [(row.message_kind, row.role, row.content_text) for row in rows] == [
         ("ai_text", "assistant", "Opening from card."),

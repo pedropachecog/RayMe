@@ -16,6 +16,7 @@ from openai import AsyncOpenAI
 from app.domain.prompt_builder import PromptContextMessage
 from app.domain.refusal_guard import (
     LLMEmptyOutput,
+    LLMGuardError,
     LLMRefusalExhausted,
     PrefixRefusalGuard,
 )
@@ -54,6 +55,7 @@ class DoneEvent(TypedDict):
 
 class ErrorEvent(TypedDict):
     type: Literal["error"]
+    code: str
     message: str
 
 
@@ -74,8 +76,8 @@ def done_event(message: ThreadMessageShape) -> DoneEvent:
     return {"type": DONE_EVENT_TYPE, "message": message.to_dict()}
 
 
-def error_event(message: str) -> ErrorEvent:
-    return {"type": ERROR_EVENT_TYPE, "message": message}
+def error_event(*, code: str, message: str) -> ErrorEvent:
+    return {"type": ERROR_EVENT_TYPE, "code": code, "message": message}
 
 
 async def stream_chat_completion(
@@ -102,8 +104,12 @@ async def stream_chat_completion(
         if persist_final is not None:
             message = await persist_final("".join(collected))
             yield encode_sse_event(done_event(message))
+    except LLMGuardError as exc:
+        yield encode_sse_event(error_event(code=exc.code, message=exc.message))
     except Exception:
-        yield encode_sse_event(error_event("LLM stream failed"))
+        yield encode_sse_event(
+            error_event(code="llm_stream_failed", message="LLM stream failed")
+        )
 
 
 async def collect_chat_completion(
