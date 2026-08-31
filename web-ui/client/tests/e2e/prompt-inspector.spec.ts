@@ -57,11 +57,14 @@ function threadFixture() {
   };
 }
 
-function previewFixture(action: string, options: { hostile?: boolean; many?: boolean } = {}) {
+function previewFixture(
+  action: string,
+  options: { hostile?: boolean; many?: boolean; zero?: boolean } = {}
+) {
   const hostile = options.hostile
     ? '<img src=x onerror="globalThis.INSPECTOR_XSS=1"> {{unknown}}\n  exact whitespace'
     : 'Stay fully in character.\n  Preserve exact spacing.';
-  const wireMessages = Array.from({ length: options.many ? 12 : 1 }, (_, index) => ({
+  const wireMessages = Array.from({ length: options.zero ? 0 : options.many ? 12 : 1 }, (_, index) => ({
     order: index,
     role: index % 2 ? 'user' : 'system',
     content: `${hostile}${index ? `\nrow-${index}` : ''}`,
@@ -174,6 +177,7 @@ function previewFixture(action: string, options: { hostile?: boolean; many?: boo
 type RouteOptions = {
   hostile?: boolean;
   many?: boolean;
+  zero?: boolean;
   delayMs?: number;
   budgetFailure?: boolean;
 };
@@ -206,7 +210,11 @@ async function installRoutes(page: Page, options: RouteOptions = {}) {
     }
     await fulfillJson(
       route,
-      previewFixture(String(payload.action), { hostile: options.hostile, many: options.many })
+      previewFixture(String(payload.action), {
+        hostile: options.hostile,
+        many: options.many,
+        zero: options.zero
+      })
     );
   });
   page.on('request', (request) => {
@@ -237,6 +245,8 @@ test('all six actions send exact preview-only payloads and keep offer ceilings i
   const dialog = page.getByRole('dialog', { name: 'Prompt Inspector' });
   await dialog.getByRole('button', { name: 'Preview Request' }).click();
   await expect(dialog.getByText('Preview only', { exact: true }).last()).toBeVisible();
+  await expect(dialog.locator('.message-card')).toHaveCount(1);
+  await expect(dialog.getByText('No refusal retries recorded for this thread.')).toBeVisible();
 
   for (const action of ['Regenerate', 'Swipe', 'Continue']) {
     await dialog.getByLabel('Action').selectOption({ label: action });
@@ -273,6 +283,27 @@ test('all six actions send exact preview-only payloads and keep offer ceilings i
   ]);
   expect(mutationRequests).toEqual([]);
   await expect(page.locator('textarea[aria-label="Message"]')).toHaveValue('Exact unsent composer draft');
+  assertNoBrowserErrors();
+});
+
+test('zero-message and fresh-process activity states remain explicit and truthful', async ({ page }) => {
+  const assertNoBrowserErrors = installBrowserErrorGuard(page);
+  await installRoutes(page, { zero: true });
+  await openInspector(page);
+  const dialog = page.getByRole('dialog', { name: 'Prompt Inspector' });
+  await dialog.getByRole('button', { name: 'Preview Request' }).click();
+
+  await expect(dialog.locator('.message-card')).toHaveCount(0);
+  await expect(dialog.getByText('No ordered messages are present in this request.')).toBeVisible();
+  await expect(dialog.getByText('No refusal retries recorded for this thread.')).toBeVisible();
+
+  await dialog.getByRole('button', { name: 'Close Prompt Inspector' }).click();
+  await page.reload();
+  await page.getByRole('textbox', { name: 'Message' }).fill('Fresh-process draft');
+  await page.getByRole('button', { name: 'Inspect Prompt' }).click();
+  const reopened = page.getByRole('dialog', { name: 'Prompt Inspector' });
+  await reopened.getByRole('button', { name: 'Preview Request' }).click();
+  await expect(reopened.getByText('No refusal retries recorded for this thread.')).toBeVisible();
   assertNoBrowserErrors();
 });
 
