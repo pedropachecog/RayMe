@@ -17,7 +17,12 @@ from app.config import Settings
 from app.domain import message_actions
 from app.domain.llm_stream import ChatCompletionSettings
 from app.domain.message_actions import MessageGenerationContext, SqlAlchemyMessageActionRepository
-from app.domain.prompt_builder import SqlAlchemyPromptRepository, build_prompt_context
+from app.domain.prompt_builder import (
+    SqlAlchemyPromptRepository,
+    build_prompt_context,
+    build_structured_prompt,
+)
+from app.domain.prompt_profiles import PromptGenerationSettings
 from app.domain.settings_service import SETTINGS_KEY
 from app.domain.thread_service import ThreadService
 from app.main import create_app
@@ -36,6 +41,20 @@ SERVER_SETTINGS = ChatCompletionSettings(
     base_url="http://llm.local/v1",
     model="configured-model",
     api_key="server-secret",
+)
+STRUCTURED_SERVER_SETTINGS = ChatCompletionSettings(
+    base_url="http://llm.local/v1",
+    model="unsloth/Qwen3.5-27B",
+    api_key="server-secret",
+    disable_thinking=True,
+    prompt_generation=PromptGenerationSettings.defaults().merge(
+        {
+            "model_profile": "qwen_llama_server",
+            "temperature": 0.65,
+            "top_k": 72,
+            "max_tokens": 768,
+        }
+    ),
 )
 
 
@@ -381,6 +400,72 @@ async def test_continue_commits_composer_text_before_selecting_continue_alternat
     assert selected.source_action == "continue"
     assert result.selected_alternate_id == selected.id
     assert selected.content_text == "finish this sentenceExtended AI response"
+
+
+@pytest.mark.parametrize(
+    ("action", "invoke"),
+    [
+        (
+            "regenerate",
+            lambda repository, client: message_actions.regenerate_ai_turn(
+                "ai-1",
+                repository=repository,
+                settings=STRUCTURED_SERVER_SETTINGS,
+                completion_client=client,
+            ),
+        ),
+        (
+            "swipe",
+            lambda repository, client: message_actions.create_swipe_alternate(
+                "ai-1",
+                repository=repository,
+                settings=STRUCTURED_SERVER_SETTINGS,
+                completion_client=client,
+            ),
+        ),
+        (
+            "continue",
+            lambda repository, client: message_actions.continue_ai_turn(
+                "ai-1",
+                "Existing prefix.",
+                repository=repository,
+                settings=STRUCTURED_SERVER_SETTINGS,
+                completion_client=client,
+            ),
+        ),
+    ],
+)
+async def test_generation_actions_share_saved_profile_and_structured_composer(
+    monkeypatch: MonkeyPatch,
+    action: str,
+    invoke: object,
+) -> None:
+    repository = ScriptedActionRepository()
+    client = ScriptedCompletionClient()
+    client.tokens = ["Accepted action response."]
+    builds: list[dict[str, object]] = []
+
+    async def capture_structured_prompt(*args: object, **kwargs: object):
+        builds.append(dict(kwargs))
+        return await build_structured_prompt(*args, **kwargs)
+
+    monkeypatch.setattr(
+        message_actions,
+        "build_structured_prompt",
+        capture_structured_prompt,
+    )
+
+    await invoke(repository, client)  # type: ignore[operator]
+
+    assert len(builds) == 1
+    assert builds[0]["action"] == action
+    assert builds[0]["settings"] == STRUCTURED_SERVER_SETTINGS.prompt_generation
+    request = client.requests[0]
+    assert request["settings"] == STRUCTURED_SERVER_SETTINGS
+    assert all(message.get("section_ids") for message in request["messages"])
+    if action == "continue":
+        assert request["messages"][-1]["role"] == "assistant"
+        assert request["messages"][-1]["content"] == "Existing prefix."
 
 
 async def test_edit_marks_downstream_turns_stale() -> None:
