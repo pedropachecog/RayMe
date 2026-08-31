@@ -544,6 +544,7 @@ async def create_call_turn(
         reservation_owner_token: str | None = None
         terminal_state: Literal["completed", "failed", "cancelled"] = "failed"
         accumulated: list[str] = []
+        pending_blank_tokens: list[str] = []
         speech_turn: SpeechTurn | None = None
         rehearsing_sent = False
         first_token_logged = False
@@ -666,6 +667,12 @@ async def create_call_turn(
                     token = str(event.get("text") or "")
                     if not token:
                         continue
+                    if not accumulated and not token.strip():
+                        pending_blank_tokens.append(token)
+                        continue
+                    if pending_blank_tokens:
+                        token = "".join((*pending_blank_tokens, token))
+                        pending_blank_tokens.clear()
                     if not first_token_logged:
                         first_token_logged = True
                         logger.info(
@@ -702,6 +709,7 @@ async def create_call_turn(
                             await speech_turn.submit(segment)
                     continue
                 if event.get("type") == "error":
+                    pending_blank_tokens.clear()
                     if speech_turn is not None:
                         await speech_turn.cancel()
                     try:
@@ -736,12 +744,26 @@ async def create_call_turn(
                 len(visible_text),
             )
             if not visible_text.strip():
-                terminal_state = "completed"
+                pending_blank_tokens.clear()
+                try:
+                    await _interrupt_call(
+                        backend,
+                        endpoint_settings.ai_backend_url,
+                        session_id,
+                    )
+                except AiBackendClientError as exc:
+                    logger.warning(
+                        "[call-turn] empty_generation_interrupt_failed call=%s turn=%s code=%s",
+                        call_id,
+                        payload.turn_id,
+                        exc.code,
+                    )
                 yield _sse(
                     {
-                        "type": "ai_done",
+                        "type": "error",
                         "turn_id": payload.turn_id,
-                        "message": None,
+                        "code": CALL_GENERATION_FAILED,
+                        "message": "AI generation failed",
                     }
                 )
                 return
