@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 status: ready_to_verify
-stopped_at: Completed 09.1-02-PLAN.md
-last_updated: "2026-08-31T03:48:01.538Z"
+stopped_at: Completed 09.1-03-PLAN.md
+last_updated: "2026-08-31T04:11:37.090Z"
 last_activity: 2026-08-31
-state_head: db2e44e3ce9c443776df3c74aefa8c9543c32a4f
+state_head: d5bfeb2a20d64c8b7dc1c89ac302176f7577ca55
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 117
-  completed_plans: 102
+  completed_plans: 103
 milestone_name: milestone
 current_phase_name: Default unfiltered roleplay and refusal-resistant prompt orchestration
-last_activity_desc: "Phase 09.1 Plan 02: read-only provider-bound evidence contracts and verifier"
+last_activity_desc: "Phase 09.1 Plan 03: typed Roleplay-first prompt profile persistence"
 ---
 
 ## Phase Status
@@ -269,8 +269,8 @@ last_activity_desc: "Phase 09.1 Plan 02: read-only provider-bound evidence contr
 ## Session Continuity
 
 Last activity: 2026-08-31
-Last session: 2026-08-31T03:47:51.161Z
-Stopped at: Completed 09.1-02-PLAN.md
+Last session: 2026-08-31T04:11:27.559Z
+Stopped at: Completed 09.1-03-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -296,6 +296,7 @@ Resume file: None
 | Phase 09 P15 | 4h08m | 2 tasks | 26 files |
 | Phase 09.1 P01 | 26m | 3 tasks | 7 files |
 | Phase 09.1 P02 | 17m50s | 3 tasks | 5 files |
+| Phase 09.1 P03 | 16m | 1 tasks | 5 files |
 
 ## Decisions
 
@@ -357,3 +358,6 @@ Resume file: None
 - [Phase 09.1]: Treat matching /v1/models and /props values as authoritative provider identity; the RayMe request-model setting remains a routing label.
 - [Phase 09.1]: Derive assistant-prefill capability from exact live /props template bytes when no explicit boolean is exposed, and fail closed if the template cannot prove the behavior.
 - [Phase 09.1]: Persist evidence seeds only in the immutable manifest; ordinary runtime seeds and all raw prompt, history, response, audio, URL, and path material remain private.
+- [Phase 09.1]: Version the shipped prompt contract as rayme-prompt-contract-v1 and the persisted nested schema as version 1. — Reset behavior and future migrations need explicit stable identities.
+- [Phase 09.1]: Keep Roleplay and Assistant complete while Custom preserves exact user text and permits blank optional Auxiliary and post-history fields. — Blank optional Custom fields are truthful inputs, not fabricated prompt content.
+- [Phase 09.1]: Merge prompt_generation inside the immutable live settings snapshot and expose it through a positive public DTO. — Partial patches preserve endpoint, audio, VAD, and private API-key state without serialize-then-redact leakage.
