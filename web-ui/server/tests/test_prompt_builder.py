@@ -109,9 +109,7 @@ def test_card_inheritance_original_boundaries_and_one_pass_macros_are_exact() ->
     )
 
     main = _section(result, "main")
-    assert main.content == (
-        "beforeGLOBAL(Mara|User|{{unknown}})after::Mara::User::{{mystery}}"
-    )
+    assert main.content == ("beforeGLOBAL(Mara|User|{{unknown}})after::Mara::User::{{mystery}}")
     assert main.override_state == "includes_original"
     assert _section(result, "auxiliary").content == "AUX=Mara/User"
     assert _section(result, "late_phi").content == "[PHI(Mara)][Mara][User]"
@@ -182,9 +180,7 @@ def test_section_identity_order_unicode_and_equal_content_are_preserved() -> Non
         duplicate,
         duplicate,
     ]
-    assert _section(result, "history:c").content.encode("utf-8") == UNICODE_CANARY.encode(
-        "utf-8"
-    )
+    assert _section(result, "history:c").content.encode("utf-8") == UNICODE_CANARY.encode("utf-8")
     assert result.public_preview.sections[-1].content == _section(result, "late_phi").content
 
 
@@ -211,9 +207,7 @@ def test_empty_optional_sections_are_visible_but_do_not_fabricate_messages() -> 
 
     assert _section(result, "auxiliary").content == ""
     assert _section(result, "late_phi").content == ""
-    candidate_ids = {
-        candidate.section_ids for candidate in result.transmitted_message_candidates
-    }
+    candidate_ids = {candidate.section_ids for candidate in result.transmitted_message_candidates}
     assert ("auxiliary",) not in candidate_ids
     assert ("late_phi",) not in candidate_ids
 
@@ -277,7 +271,7 @@ def test_budget_formula_and_output_reservation_change_optional_retention() -> No
             id=f"h-{index}",
             sequence=index,
             role="user" if index % 2 else "assistant",
-            content="x" * 320,
+            content="x" * 1_600,
         )
         for index in range(1, 13)
     )
@@ -333,12 +327,9 @@ def test_call_offer_alone_enforces_transport_message_and_content_limits() -> Non
     normal = compose_prompt(_build_input(action="call_turn", history=history))
     offer = compose_prompt(_build_input(action="call_offer", history=history))
 
-    assert any(
-        candidate.content == too_long for candidate in normal.transmitted_message_candidates
-    )
+    assert any(candidate.content == too_long for candidate in normal.transmitted_message_candidates)
     assert all(
-        len(candidate.content) <= 20_000
-        for candidate in offer.transmitted_message_candidates
+        len(candidate.content) <= 20_000 for candidate in offer.transmitted_message_candidates
     )
     assert offer.target_constraints.max_messages == 48
     assert normal.target_constraints.max_messages is None
@@ -348,9 +339,7 @@ def test_call_offer_alone_enforces_transport_message_and_content_limits() -> Non
             _build_input(
                 action="call_offer",
                 card_main=too_long,
-                history=(
-                    PromptHistoryEntry(id="u", sequence=1, role="user", content="u"),
-                ),
+                history=(PromptHistoryEntry(id="u", sequence=1, role="user", content="u"),),
             )
         )
 
