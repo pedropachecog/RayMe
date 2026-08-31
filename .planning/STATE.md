@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 status: ready_to_verify
-stopped_at: Completed 09.1-09-PLAN.md
-last_updated: "2026-08-31T05:16:53.685Z"
+stopped_at: Completed 09.1-06-PLAN.md
+last_updated: "2026-08-31T05:45:59.543Z"
 last_activity: 2026-08-31
-state_head: fe5fc56f506ab20989ea2eee17790306f003578e
+state_head: 14ab87a3f83f091c68db15025f81a21149a30ad6
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 117
-  completed_plans: 106
+  completed_plans: 107
 milestone_name: milestone
 current_phase_name: Default unfiltered roleplay and refusal-resistant prompt orchestration
-last_activity_desc: "Phase 09.1 Plan 09: typed Prompt & Generation Settings surface"
+last_activity_desc: "Phase 09.1 Plan 06: unified guarded text generation"
 ---
 
 ## Phase Status
@@ -269,8 +269,8 @@ last_activity_desc: "Phase 09.1 Plan 09: typed Prompt & Generation Settings surf
 ## Session Continuity
 
 Last activity: 2026-08-31
-Last session: 2026-08-31T05:15:24.636Z
-Stopped at: Completed 09.1-09-PLAN.md
+Last session: 2026-08-31T05:45:48.809Z
+Stopped at: Completed 09.1-06-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -300,6 +300,7 @@ Resume file: None
 | Phase 09.1 P04 | 9m | 1 tasks | 5 files |
 | Phase 09.1 P05 | 20m36s | 2 tasks | 5 files |
 | Phase 09.1 P09 | 12m | 1 tasks | 5 files |
+| Phase 09.1 P06 | 19m45s | 2 tasks | 5 files |
 
 ## Decisions
 
@@ -373,3 +374,5 @@ Resume file: None
 - [Phase 09.1]: Keep prompt mode, all three mode drafts, model profile, samplers, and Qwen no-thinking state in one controlled Settings owner so switching modes cannot erase or silently persist unrelated values. — The page owns one immutable nested form value and one explicit save boundary.
 - [Phase 09.1]: Endpoint connection probes patch only endpoint fields; unsaved prompt drafts enter persistence only through the page-level Save Settings transaction. — Connection testing must not become an implicit prompt save action.
 - [Phase 09.1]: Use native radio, select, checkbox, number, and textarea controls with exact field-local validation rather than generic string coercion or browser-default error prose. — Native semantics preserve keyboard and touch behavior while explicit validation keeps the persisted contract truthful.
+- [Phase 09.1]: Route Send, Regenerate, Swipe, and Continue through section-tagged structured composer output and one accepted-token iterator.
+- [Phase 09.1]: Stage message-action mutations only after guarded collection returns usable accepted text.
