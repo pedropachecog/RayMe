@@ -162,16 +162,43 @@ def verify_decision_ready(*, results_dir: Path, expected_commit: str, now: str |
             raise EvidenceError("deployed attempt gate failed")
     if not isinstance(traces, list) or len(traces) != 6:
         raise EvidenceError("lifecycle trace count mismatch")
+    manifest = _load(MANIFEST_PATH)
+    trace_contracts = {
+        row["trace_id"]: list(row["required_events"])
+        for row in manifest["lifecycle_traces"]
+    }
     for trace in traces:
-        immediate, final = trace.get("immediate"), trace.get("final")
-        if not isinstance(immediate, dict) or not isinstance(final, dict):
-            raise EvidenceError("lifecycle timing carrier mismatch")
-        if set(immediate) - {"first_caption_ms","first_speech_ms","interrupt_ms"}:
-            raise EvidenceError("immediate carrier contains final timing")
-        if final.get("late_rejected_count") != 0 or final.get("whole_synthesis_fallback_count") != 0:
+        trace_id = trace.get("trace_id") if isinstance(trace, dict) else None
+        events = trace.get("events") if isinstance(trace, dict) else None
+        if trace_id not in trace_contracts or not isinstance(events, list) or not events:
+            raise EvidenceError("lifecycle event carrier mismatch")
+        names: list[str] = []
+        elapsed: list[float] = []
+        for event in events:
+            if not isinstance(event, dict) or set(event) != {"event_id", "elapsed_ms"}:
+                raise EvidenceError("lifecycle event shape mismatch")
+            if not isinstance(event["event_id"], str) or isinstance(event["elapsed_ms"], bool) or not isinstance(event["elapsed_ms"], (int, float)):
+                raise EvidenceError("lifecycle event value mismatch")
+            names.append(event["event_id"])
+            elapsed.append(float(event["elapsed_ms"]))
+        if elapsed != sorted(elapsed):
+            raise EvidenceError("lifecycle events are not ordered")
+        cursor = 0
+        for required in trace_contracts[trace_id]:
+            try:
+                cursor = names.index(required, cursor) + 1
+            except ValueError as exc:
+                raise EvidenceError("lifecycle required event missing or out of order") from exc
+        if trace.get("late_rejected_count") != 0 or trace.get("whole_synthesis_fallback_count") != 0:
             raise EvidenceError("lifecycle late/fallback gate failed")
-        if not (immediate.get("first_caption_ms", math.inf) < final.get("llm_complete_ms", -1) and immediate.get("first_speech_ms", math.inf) < final.get("llm_complete_ms", -1) and immediate.get("first_speech_ms", math.inf) < final.get("tts_complete_ms", -1)):
-            raise EvidenceError("lifecycle early playback gate failed")
+        timing = {event["event_id"]: float(event["elapsed_ms"]) for event in events}
+        if {"first_caption", "first_speech", "llm_complete", "tts_complete"} <= set(timing):
+            if not (
+                timing["first_caption"] < timing["llm_complete"]
+                and timing["first_speech"] < timing["llm_complete"]
+                and timing["first_speech"] < timing["tts_complete"]
+            ):
+                raise EvidenceError("lifecycle early playback gate failed")
     recomputed_ready = len(rows) == 36 and len(traces) == 6
     if report.get("turn_count") != 36 or report.get("lifecycle_trace_count") != 6 or report.get("decision_ready") is not recomputed_ready or report.get("gate_results") != {gate: True for gate in sorted(GATES)}:
         raise EvidenceError("decision report does not match recomputation")

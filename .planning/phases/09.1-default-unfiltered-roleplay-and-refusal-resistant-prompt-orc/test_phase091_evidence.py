@@ -284,10 +284,16 @@ class FakeAcquisition:
 
     def run_lifecycle(self, _fixture, trace_id):
         self.calls.append(("lifecycle", trace_id))
+        required = next(
+            row["required_events"]
+            for row in json.loads(MANIFEST.read_text())["lifecycle_traces"]
+            if row["trace_id"] == trace_id
+        )
         return {
-            "first_caption_ms": 20.0, "first_speech_ms": 30.0,
-            "llm_complete_ms": 80.0, "tts_complete_ms": 90.0,
-            "final_playout_ms": 110.0, "interrupt_ms": 40.0,
+            "events": [
+                {"event_id": event_id, "elapsed_ms": float(index + 1) * 10.0}
+                for index, event_id in enumerate(required)
+            ],
             "late_rejected_count": 0, "whole_synthesis_fallback_count": 0,
         }
 
