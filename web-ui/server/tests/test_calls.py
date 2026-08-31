@@ -2881,8 +2881,86 @@ def test_blank_assistant_output_creates_no_speech_request_state_or_persistence(
     )
 
     events = _sse_events(response.text)
+    assert events == [
+        {
+            "type": "error",
+            "turn_id": "turn-blank-assistant",
+            "code": "call_generation_failed",
+            "message": "AI generation failed",
+        }
+    ]
     assert call_fixture.backend.speak_calls == []
     assert not any(event.get("type") == "state" for event in events)
+    assert not any(event.get("type") == "ai_token" for event in events)
+    assert call_fixture.backend.interrupt_calls == [
+        {"base_url": "https://127.0.0.1:9443", "session_id": started["session_id"]}
+    ]
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert not any(row[0] == "ai_speech" for row in rows)
+
+
+def test_refusal_exhaustion_closes_each_attempt_without_caption_speech_or_persistence(
+    call_fixture: CallFixture,
+) -> None:
+    rejected = "I cannot help with that because safety guidelines prohibit it."
+
+    class AlwaysRefusingCompletion:
+        def __init__(self) -> None:
+            self.requests: list[dict[str, Any]] = []
+            self.closed_attempts: list[int] = []
+
+        async def stream_chat_completion_tokens(
+            self,
+            settings: Any,
+            messages: Any,
+            *,
+            seed: int,
+            attempt: int,
+        ) -> AsyncIterator[str]:
+            del settings
+            self.requests.append(
+                {
+                    "attempt": attempt,
+                    "seed": seed,
+                    "messages": [dict(message) for message in messages],
+                }
+            )
+            try:
+                yield rejected
+                pytest.fail("refused call attempt remained open after guard decision")
+            finally:
+                self.closed_attempts.append(attempt)
+
+    completion = AlwaysRefusingCompletion()
+    calls_module = importlib.import_module("app.api.calls")
+    call_fixture.app.dependency_overrides[calls_module.get_call_completion_client] = (
+        lambda: completion
+    )
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-refusal-exhausted",
+            "text": "Stay in the scene.",
+            "source": "user_final",
+        },
+    )
+
+    assert _sse_events(response.text) == [
+        {
+            "type": "error",
+            "turn_id": "turn-refusal-exhausted",
+            "code": "call_generation_failed",
+            "message": "AI generation failed",
+        }
+    ]
+    assert completion.closed_attempts == [1, 2, 3]
+    assert len({request["seed"] for request in completion.requests}) == 3
+    assert rejected not in response.text
+    assert call_fixture.backend.speak_calls == []
     rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
     assert not any(row[0] == "ai_speech" for row in rows)
 
