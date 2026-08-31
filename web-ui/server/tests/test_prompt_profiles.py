@@ -8,6 +8,7 @@ import pytest
 
 from app.domain.prompt_profiles import (
     ASSISTANT_PROMPTS,
+    NUMERIC_SETTING_SPECS,
     PROMPT_CONTRACT_VERSION,
     PROMPT_GENERATION_SCHEMA_VERSION,
     ROLEPLAY_PROMPTS,
@@ -78,8 +79,7 @@ def test_prompt_values_are_frozen_slotted_dataclasses() -> None:
 
     with pytest.raises(FrozenInstanceError):
         settings.mode = "assistant"  # type: ignore[misc]
-    with pytest.raises(AttributeError):
-        settings.unplanned_roleplay_flag = True  # type: ignore[attr-defined]
+    assert not hasattr(settings, "__dict__")
 
 
 @pytest.mark.parametrize(
@@ -190,6 +190,25 @@ def test_numeric_bounds_and_steps_have_stable_field_specific_errors(
     assert raised.value.code == "invalid_prompt_generation"
     assert raised.value.field == field
     assert str(raised.value) == message
+
+
+@pytest.mark.parametrize("field", sorted(NUMERIC_SETTING_SPECS))
+def test_every_numeric_field_rejects_below_above_and_off_step_values(field: str) -> None:
+    spec = NUMERIC_SETTING_SPECS[field]
+    invalid_values: list[int | float] = [
+        spec.minimum - spec.step,
+        spec.maximum + spec.step,
+    ]
+    if isinstance(spec.minimum, int) and isinstance(spec.step, int):
+        invalid_values.append(float(spec.minimum) + (float(spec.step) / 2))
+    else:
+        invalid_values.append(float(spec.minimum) + (float(spec.step) / 2))
+
+    for value in invalid_values:
+        with pytest.raises(PromptProfileValidationError) as raised:
+            PromptGenerationSettings.defaults().merge({field: value})
+        assert raised.value.field == field
+        assert str(raised.value) == spec.message
 
 
 def test_nested_partial_merge_preserves_other_profiles_and_typed_values() -> None:

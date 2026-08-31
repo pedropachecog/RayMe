@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Awaitable, Callable
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, normalize_http_origin
@@ -19,6 +20,12 @@ from app.domain.llm_probe import (
     probe_http_health,
     probe_openai_compatible_llm,
 )
+from app.domain.prompt_profiles import (
+    PROMPT_CONTRACT_VERSION,
+    PROMPT_FIELD_MAX_LENGTH,
+    PROMPT_GENERATION_SCHEMA_VERSION,
+    PromptProfileValidationError,
+)
 from app.domain.settings_service import EndpointSettings, SettingsService
 from app.storage.session import get_session
 
@@ -28,7 +35,78 @@ HealthProbe = Callable[[str | None], Awaitable[ConnectionStatus]]
 LlmProbe = Callable[..., Awaitable[ConnectionStatus]]
 
 
+class PromptSetPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    main: str | None = Field(default=None, max_length=PROMPT_FIELD_MAX_LENGTH)
+    auxiliary: str | None = Field(default=None, max_length=PROMPT_FIELD_MAX_LENGTH)
+    post_history: str | None = Field(default=None, max_length=PROMPT_FIELD_MAX_LENGTH)
+
+
+class PromptGenerationPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: int | None = Field(default=None, strict=True)
+    prompt_contract_version: str | None = Field(default=None, max_length=100)
+    mode: Literal["roleplay", "assistant", "custom"] | None = None
+    roleplay: PromptSetPatch | None = None
+    assistant: PromptSetPatch | None = None
+    custom: PromptSetPatch | None = None
+    model_profile: (
+        Literal[
+            "auto",
+            "qwen_llama_server",
+            "generic_openai_compatible",
+        ]
+        | None
+    ) = None
+    context_limit: int | None = Field(default=None, strict=True)
+    max_tokens: int | None = Field(default=None, strict=True)
+    temperature: float | None = Field(default=None, strict=True)
+    top_p: float | None = Field(default=None, strict=True)
+    min_p: float | None = Field(default=None, strict=True)
+    top_k: int | None = Field(default=None, strict=True)
+    repetition_penalty: float | None = Field(default=None, strict=True)
+    presence_penalty: float | None = Field(default=None, strict=True)
+    frequency_penalty: float | None = Field(default=None, strict=True)
+
+
+class PublicPromptSet(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    main: str
+    auxiliary: str
+    post_history: str
+
+
+class PublicPromptGeneration(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal[PROMPT_GENERATION_SCHEMA_VERSION]
+    prompt_contract_version: Literal[PROMPT_CONTRACT_VERSION]
+    mode: Literal["roleplay", "assistant", "custom"]
+    roleplay: PublicPromptSet
+    assistant: PublicPromptSet
+    custom: PublicPromptSet
+    model_profile: Literal[
+        "auto",
+        "qwen_llama_server",
+        "generic_openai_compatible",
+    ]
+    context_limit: int
+    max_tokens: int
+    temperature: float
+    top_p: float
+    min_p: float
+    top_k: int
+    repetition_penalty: float
+    presence_penalty: float
+    frequency_penalty: float
+
+
 class SettingsPatch(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     web_url: str | None = Field(default=None, max_length=500)
     ai_backend_url: str | None = Field(default=None, max_length=500)
     llm_base_url: str | None = Field(default=None, max_length=500)
@@ -41,6 +119,7 @@ class SettingsPatch(BaseModel):
     vad_end_silence_ms: int | None = Field(default=None, ge=100, le=3000)
     stt_model: str | None = Field(default=None, max_length=200)
     tts_default_engine: str | None = Field(default=None, max_length=100)
+    prompt_generation: PromptGenerationPatch | None = None
 
     @field_validator("web_url", "ai_backend_url", "llm_base_url")
     @classmethod
@@ -65,6 +144,8 @@ class SettingsPatch(BaseModel):
 
 
 class PublicSettings(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     web_url: str
     ai_backend_url: str
     llm_base_url: str
@@ -77,6 +158,7 @@ class PublicSettings(BaseModel):
     vad_end_silence_ms: int
     stt_model: str
     tts_default_engine: str
+    prompt_generation: PublicPromptGeneration
     ai_backend_status: dict[str, object]
 
 
@@ -136,7 +218,13 @@ async def update_settings(
 ) -> dict[str, object]:
     _enforce_operator_managed_ai_backend_url(payload, runtime_settings)
     updates = payload.model_dump(exclude_unset=True)
-    settings = await service.update(updates)
+    try:
+        settings = await service.update(updates)
+    except PromptProfileValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=exc.to_public_dict(),
+        ) from exc
     return await _public_settings(settings, client)
 
 
@@ -269,6 +357,10 @@ def _is_configured(value: str | None) -> bool:
 
 __all__ = [
     "ConnectionTestResponse",
+    "PromptGenerationPatch",
+    "PromptSetPatch",
+    "PublicPromptGeneration",
+    "PublicPromptSet",
     "PublicSettings",
     "SettingsPatch",
     "get_ai_backend_client",

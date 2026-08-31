@@ -8,6 +8,7 @@ from typing import Any, Mapping
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings, normalize_http_origin
+from app.domain.prompt_profiles import PromptGenerationSettings
 from app.storage.models import AppSetting
 
 SETTINGS_KEY = "endpoint_settings"
@@ -26,6 +27,7 @@ SETTING_FIELDS = (
     "vad_end_silence_ms",
     "stt_model",
     "tts_default_engine",
+    "prompt_generation",
 )
 
 
@@ -43,6 +45,7 @@ class EndpointSettings:
     vad_end_silence_ms: int
     stt_model: str
     tts_default_engine: str
+    prompt_generation: PromptGenerationSettings
 
     @property
     def llm_api_key_configured(self) -> bool:
@@ -62,6 +65,7 @@ class EndpointSettings:
             "vad_end_silence_ms": self.vad_end_silence_ms,
             "stt_model": self.stt_model,
             "tts_default_engine": self.tts_default_engine,
+            "prompt_generation": self.prompt_generation.to_dict(),
             "ai_backend_status": _default_ai_backend_status(),
         }
 
@@ -79,6 +83,7 @@ class EndpointSettings:
             "vad_end_silence_ms": self.vad_end_silence_ms,
             "stt_model": self.stt_model,
             "tts_default_engine": self.tts_default_engine,
+            "prompt_generation": self.prompt_generation.to_dict(),
         }
 
 
@@ -94,11 +99,15 @@ class SettingsService:
 
     async def update(self, updates: Mapping[str, Any]) -> EndpointSettings:
         persisted = await self._load_persisted()
-        merged = {**persisted}
+        current = self._snapshot(persisted)
+        merged = current.to_private_dict()
         for key, value in updates.items():
             if key not in SETTING_FIELDS:
                 continue
-            merged[key] = _clean_setting_value(key, value)
+            if key == "prompt_generation":
+                merged[key] = current.prompt_generation.merge(value).to_dict()
+            else:
+                merged[key] = _clean_setting_value(key, value)
 
         snapshot = self._snapshot(merged)
         await self._save(snapshot.to_private_dict())
@@ -109,13 +118,16 @@ class SettingsService:
         if row is None or not isinstance(row.value_json, dict):
             return {}
 
-        return normalize_endpoint_settings(
-            {
-                key: _clean_persisted_setting(key, value)
-                for key, value in row.value_json.items()
-                if key in SETTING_FIELDS
-            }
-        )
+        cleaned: dict[str, object] = {}
+        for key, value in row.value_json.items():
+            if key not in SETTING_FIELDS:
+                continue
+            if key == "prompt_generation":
+                if isinstance(value, Mapping):
+                    cleaned[key] = dict(value)
+                continue
+            cleaned[key] = _clean_persisted_setting(key, value)
+        return normalize_endpoint_settings(cleaned)
 
     async def _save(self, values: Mapping[str, object]) -> None:
         row = await self._session.get(AppSetting, SETTINGS_KEY)
@@ -139,6 +151,7 @@ class SettingsService:
             "vad_end_silence_ms": 700,
             "stt_model": "distil-large-v3",
             "tts_default_engine": "f5",
+            "prompt_generation": PromptGenerationSettings.defaults().to_dict(),
         }
         values = {**defaults, **persisted}
         if self._runtime_settings.ai_backend_service_token:
@@ -164,6 +177,11 @@ class SettingsService:
             vad_end_silence_ms=int(values["vad_end_silence_ms"]),
             stt_model=str(values["stt_model"]).strip(),
             tts_default_engine=str(values["tts_default_engine"]).strip(),
+            prompt_generation=PromptGenerationSettings.from_mapping(
+                values.get("prompt_generation")
+                if isinstance(values.get("prompt_generation"), Mapping)
+                else None
+            ),
         )
 
 

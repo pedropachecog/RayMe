@@ -577,6 +577,8 @@ async def test_settings_service_persists_phase2_defaults_with_json_types(tmp_pat
             assert defaults.stt_model == "distil-large-v3"
             assert defaults.tts_default_engine == "f5"
             assert defaults.llm_disable_thinking is True
+            assert defaults.prompt_generation.mode == "roleplay"
+            assert defaults.prompt_generation.model_profile == "auto"
             assert await session.get(AppSetting, SETTINGS_KEY) is None
 
             await service.update(
@@ -588,6 +590,11 @@ async def test_settings_service_persists_phase2_defaults_with_json_types(tmp_pat
                     "stt_model": " distil-large-v3 ",
                     "tts_default_engine": " f5 ",
                     "llm_disable_thinking": False,
+                    "prompt_generation": {
+                        "temperature": 1.25,
+                        "top_k": 77,
+                        "custom": {"auxiliary": "", "post_history": ""},
+                    },
                 }
             )
 
@@ -602,6 +609,13 @@ async def test_settings_service_persists_phase2_defaults_with_json_types(tmp_pat
             assert row.value_json["stt_model"] == "distil-large-v3"
             assert row.value_json["tts_default_engine"] == "f5"
             assert row.value_json["llm_disable_thinking"] is False
+            prompt_generation = row.value_json["prompt_generation"]
+            assert prompt_generation["temperature"] == 1.25
+            assert isinstance(prompt_generation["temperature"], float)
+            assert prompt_generation["top_k"] == 77
+            assert isinstance(prompt_generation["top_k"], int)
+            assert prompt_generation["custom"]["auxiliary"] == ""
+            assert prompt_generation["custom"]["post_history"] == ""
     finally:
         await engine.dispose()
 
@@ -1225,6 +1239,31 @@ def test_prompt_generation_defaults_are_public_without_writing_legacy_settings(
     assert body["prompt_generation"]["repetition_penalty"] == 1.05
     assert body["prompt_generation"]["presence_penalty"] == 0.0
     assert body["prompt_generation"]["frequency_penalty"] == 0.0
+
+
+@pytest.mark.parametrize("mode", ["roleplay", "assistant", "custom"])
+def test_each_explicit_prompt_mode_saves_and_rereads_identically(
+    settings_client: TestClient,
+    mode: str,
+) -> None:
+    prompt_patch: dict[str, object] = {"mode": mode}
+    if mode == "custom":
+        prompt_patch["custom"] = {
+            "main": "Custom Ω main",
+            "auxiliary": "",
+            "post_history": "",
+        }
+
+    saved = settings_client.patch(
+        "/api/settings",
+        json={"prompt_generation": prompt_patch},
+    )
+    reread = settings_client.get("/api/settings")
+
+    assert saved.status_code == 200
+    assert reread.status_code == 200
+    assert saved.json() == reread.json()
+    assert reread.json()["prompt_generation"]["mode"] == mode
 
 
 def test_nested_prompt_patch_round_trips_unicode_and_preserves_private_and_unrelated_state(
