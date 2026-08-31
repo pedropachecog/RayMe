@@ -6,10 +6,21 @@ import type {
   CallStartRequest,
   CallStartResponse,
   CallTurnRequest,
+  CallTurnStreamEvent,
   GenerationFailure,
   GenerationFailureCode
 } from './types';
 import { decodeGenerationFailure, isGenerationFailureCode } from './types';
+
+export function generationFailureFromCallTerminal(
+  event: CallTurnStreamEvent
+): GenerationFailure | null {
+  if (event.type !== 'error') {
+    return null;
+  }
+
+  return decodeGenerationFailure({ code: event.code });
+}
 
 export interface CallReconnectAudioBackfillRequest {
   session_id: string;

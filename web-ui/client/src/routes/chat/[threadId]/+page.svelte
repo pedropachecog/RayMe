@@ -3,13 +3,14 @@
   import { page } from '$app/state';
   import { createVirtualizer } from '@tanstack/svelte-virtual';
   import { ArrowDown, ArrowLeft, Phone, RefreshCw } from 'lucide-svelte';
-  import { tick } from 'svelte';
+  import { onDestroy, tick } from 'svelte';
   import { get } from 'svelte/store';
 
   import {
     appendTokenToStreamingMessage,
     applyEditedBackendMessage,
     continueMessage,
+    createRetryStatusController,
     createDraftMessage,
     editMessage,
     generateSwipeAlternate,
@@ -25,9 +26,16 @@
     TRUNCATE_STALE_CONFIRMATION_COPY,
     upsertBackendMessage,
     type ChatMessageView,
+    type GenerationFailureActionIntent,
     type MessageActionId
   } from '$lib/api/chat';
-  import type { ThreadDetail, ThreadMessage } from '$lib/api/types';
+  import { GenerationApiError } from '$lib/api/client';
+  import type {
+    GenerationFailure,
+    GenerationFailureCode,
+    ThreadDetail,
+    ThreadMessage
+  } from '$lib/api/types';
   import ChatMessageBubble from '$lib/components/ChatMessageBubble.svelte';
   import Composer from '$lib/components/Composer.svelte';
 
@@ -61,6 +69,12 @@
   let staleConfirmation = $state<StaleContinueRequest | null>(null);
   let messagesViewport = $state<HTMLElement | null>(null);
   let showJumpToLatest = $state(false);
+  let promptInspectorIntent = $state<{
+    source: 'generation_failure';
+    code: GenerationFailureCode;
+  } | null>(null);
+  let activeSendAbort: AbortController | null = null;
+  let activeRetryFeedback: ReturnType<typeof createRetryStatusController> | null = null;
 
   const threadId = $derived(page.params.threadId ?? '');
   const characterName = $derived(thread?.character_name ?? 'Character');
@@ -100,6 +114,13 @@
     }
   });
 
+  onDestroy(() => {
+    activeSendAbort?.abort();
+    activeRetryFeedback?.dispose();
+    activeSendAbort = null;
+    activeRetryFeedback = null;
+  });
+
   $effect(() => {
     if (!threadId || threadId === loadedThreadId) {
       return;
@@ -136,6 +157,7 @@
     const scrollAnchor = stickToLatest ? null : captureScrollAnchor();
     let preservedScrollTop = scrollAnchor?.scrollTop ?? null;
     let streamCompleted = false;
+    const sendAbort = new AbortController();
     sendState = 'sending';
     const nextSequence = nextMessageSequence(messages);
     const draftKey = `${Date.now()}`;
@@ -159,6 +181,13 @@
     });
 
     messages = [...messages, userMessage, streamingMessage];
+    const retryFeedback = createRetryStatusController((retryStatus) => {
+      messages = messages.map((message) =>
+        message.id === streamingMessage.id ? { ...message, retryStatus } : message
+      );
+    });
+    activeSendAbort = sendAbort;
+    activeRetryFeedback = retryFeedback;
     await settleSendLayout(stickToLatest, 'smooth');
     if (!stickToLatest && messagesViewport) {
       preservedScrollTop = messagesViewport.scrollTop;
@@ -167,31 +196,57 @@
     try {
       await sendChatMessage(threadId, content, {
         onToken: (token) => {
+          retryFeedback.clear();
           const shouldStick = stickToLatest && isNearBottom();
           preserveCurrentScrollTop(shouldStick);
           messages = appendTokenToStreamingMessage(messages, streamingMessage.id, token);
           void settleSendLayout(shouldStick);
         },
         onDone: (message) => {
+          retryFeedback.clear();
           const shouldStick = stickToLatest && isNearBottom();
           preserveCurrentScrollTop(shouldStick);
           messages = sortMessages(replaceStreamingMessage(messages, streamingMessage.id, message));
           streamCompleted = true;
           void settleSendLayout(shouldStick);
         },
-        onError: () => {
+        onActivity: (activity) => {
+          if (activity.terminal_outcome === 'retry') {
+            retryFeedback.schedule(characterName, activity.retry_count + 1);
+          } else {
+            retryFeedback.clear();
+          }
+        },
+        onFailure: (failure) => {
+          retryFeedback.clear();
           const shouldStick = stickToLatest && isNearBottom();
           preserveCurrentScrollTop(shouldStick);
-          messages = markStreamingMessageError(messages, streamingMessage.id, content);
+          messages = markStreamingMessageError(messages, streamingMessage.id, content, failure);
           void settleSendLayout(shouldStick);
         }
-      });
-    } catch {
+      }, { signal: sendAbort.signal });
+    } catch (error) {
+      retryFeedback.clear();
+      if (isAbortError(error)) {
+        messages = messages.filter((message) => message.id !== streamingMessage.id);
+        return;
+      }
       const shouldStick = stickToLatest && isNearBottom();
       preserveCurrentScrollTop(shouldStick);
-      messages = markStreamingMessageError(messages, streamingMessage.id, content);
+      const failure: GenerationFailure =
+        error instanceof GenerationApiError
+          ? error.failure
+          : { type: 'generation_failure', code: 'llm_generation_failed' };
+      messages = markStreamingMessageError(messages, streamingMessage.id, content, failure);
       await settleSendLayout(shouldStick);
     } finally {
+      retryFeedback.dispose();
+      if (activeRetryFeedback === retryFeedback) {
+        activeRetryFeedback = null;
+      }
+      if (activeSendAbort === sendAbort) {
+        activeSendAbort = null;
+      }
       sendState = 'idle';
       if (streamCompleted) {
         await refreshThread(threadId);
@@ -233,6 +288,42 @@
       return !(index === messageIndex - 1 && candidate.id.startsWith('optimistic-user-'));
     });
     await handleSend(retryContent);
+  }
+
+  function handleGenerationFailureAction(
+    message: ChatMessageView,
+    action: GenerationFailureActionIntent
+  ) {
+    if (action === 'try_again') {
+      void retryFailedMessage(message);
+      return;
+    }
+
+    if (action === 'open_settings') {
+      void goto('/settings');
+      return;
+    }
+
+    if (message.failure) {
+      promptInspectorIntent = {
+        source: 'generation_failure',
+        code: message.failure.code
+      };
+    }
+  }
+
+  function generationFailureActionLabel(action: GenerationFailureActionIntent): string {
+    if (action === 'try_again') {
+      return 'Try Again';
+    }
+    if (action === 'open_settings') {
+      return 'Open Settings';
+    }
+    return 'Inspect Prompt';
+  }
+
+  function isAbortError(error: unknown): boolean {
+    return error instanceof DOMException && error.name === 'AbortError';
   }
 
   function handleComposerDraftChange(content: string) {
@@ -629,7 +720,54 @@
   }
 </script>
 
-<section class="chat-route">
+{#snippet renderMessage(message: ChatMessageView)}
+  {#if message.failure}
+    <article class="generation-failure" data-failure-code={message.failure.code}>
+      {#if message.content_text}
+        <p class="accepted-partial">{message.content_text}</p>
+      {/if}
+      <p class="generation-failure-copy" role="alert">{message.error}</p>
+      <div class="generation-failure-actions" aria-label="Generation recovery actions">
+        {#each message.failureActions ?? [] as action}
+          <button
+            type="button"
+            onclick={() => handleGenerationFailureAction(message, action)}
+          >
+            {generationFailureActionLabel(action)}
+          </button>
+        {/each}
+      </div>
+    </article>
+  {:else}
+    <div class="message-shell">
+      <ChatMessageBubble
+        {message}
+        {characterName}
+        {portraitUrl}
+        openingGreeting={isOpeningGreeting(message)}
+        actionBusy={isMessageBusy(message)}
+        busyLabel={busyLabelFor(message)}
+        editing={editingMessageId === message.id}
+        {editDraft}
+        onRetry={retryFailedMessage}
+        onAction={handleMessageAction}
+        onEditDraftChange={setEditDraft}
+        onSaveEdit={saveEdit}
+        onCancelEdit={cancelEdit}
+        onSelectAlternate={selectAlternate}
+        onGenerateAlternate={generateAlternate}
+      />
+      {#if message.retryStatus}
+        <p class="retry-status" role="status" aria-live="polite">{message.retryStatus}</p>
+      {/if}
+    </div>
+  {/if}
+{/snippet}
+
+<section
+  class="chat-route"
+  data-prompt-inspector-intent={promptInspectorIntent?.code ?? ''}
+>
   <header class="chat-header">
     <button class="back-button" type="button" aria-label="Back to Home" onclick={() => goto('/')}>
       <ArrowLeft size={18} strokeWidth={1.8} aria-hidden="true" />
@@ -694,46 +832,14 @@
                 style={`transform: translateY(${virtualRow.start}px);`}
                 use:measureVirtualRow
               >
-                <ChatMessageBubble
-                  {message}
-                  {characterName}
-                  {portraitUrl}
-                  openingGreeting={isOpeningGreeting(message)}
-                  actionBusy={isMessageBusy(message)}
-                  busyLabel={busyLabelFor(message)}
-                  editing={editingMessageId === message.id}
-                  {editDraft}
-                  onRetry={retryFailedMessage}
-                  onAction={handleMessageAction}
-                  onEditDraftChange={setEditDraft}
-                  onSaveEdit={saveEdit}
-                  onCancelEdit={cancelEdit}
-                  onSelectAlternate={selectAlternate}
-                  onGenerateAlternate={generateAlternate}
-                />
+                {@render renderMessage(message)}
               </div>
             {/if}
           {/each}
         </div>
       {:else}
         {#each messages as message (message.id)}
-          <ChatMessageBubble
-            {message}
-            {characterName}
-            {portraitUrl}
-            openingGreeting={isOpeningGreeting(message)}
-            actionBusy={isMessageBusy(message)}
-            busyLabel={busyLabelFor(message)}
-            editing={editingMessageId === message.id}
-            {editDraft}
-            onRetry={retryFailedMessage}
-            onAction={handleMessageAction}
-            onEditDraftChange={setEditDraft}
-            onSaveEdit={saveEdit}
-            onCancelEdit={cancelEdit}
-            onSelectAlternate={selectAlternate}
-            onGenerateAlternate={generateAlternate}
-          />
+          {@render renderMessage(message)}
         {/each}
       {/if}
     </div>
@@ -893,6 +999,72 @@
     left: 0;
     width: 100%;
     min-height: 64px;
+  }
+
+  .message-shell {
+    position: relative;
+    display: grid;
+  }
+
+  .retry-status {
+    width: min(100%, 680px);
+    margin: calc(var(--space-xs) * -1) 0 0 52px;
+    color: var(--color-text-muted);
+    font-size: var(--font-label);
+    font-weight: 600;
+    line-height: var(--line-label);
+  }
+
+  .generation-failure {
+    display: grid;
+    width: min(calc(100% - 52px), 680px);
+    gap: var(--space-sm);
+    margin-left: 52px;
+    border: 1px solid rgba(255, 113, 108, 0.28);
+    border-radius: var(--radius-md);
+    padding: var(--space-md);
+    background: rgba(255, 113, 108, 0.08);
+  }
+
+  .generation-failure-copy,
+  .accepted-partial {
+    margin: 0;
+    white-space: pre-wrap;
+  }
+
+  .generation-failure-copy {
+    color: var(--color-danger);
+    font-size: var(--font-body);
+    font-weight: 600;
+    line-height: var(--line-body);
+  }
+
+  .accepted-partial {
+    color: var(--color-text);
+    font-size: var(--font-body);
+    line-height: var(--line-body);
+  }
+
+  .generation-failure-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-xs);
+  }
+
+  .generation-failure-actions button {
+    min-height: 44px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    padding: 0 14px;
+    background: rgba(182, 160, 255, 0.18);
+    color: var(--color-text);
+    font-size: var(--font-label);
+    font-weight: 600;
+  }
+
+  .generation-failure-actions button:hover,
+  .generation-failure-actions button:focus-visible {
+    background: rgba(182, 160, 255, 0.28);
   }
 
   .composer-wrap {
@@ -1068,6 +1240,12 @@
     .portrait {
       width: 44px;
       height: 44px;
+    }
+
+    .retry-status,
+    .generation-failure {
+      width: min(calc(100% - 44px), 680px);
+      margin-left: 44px;
     }
   }
 </style>
