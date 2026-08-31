@@ -196,3 +196,50 @@ describe('Prompt Inspector Task 1 contracts', () => {
     expect(routeSource).not.toContain('PRIVACY_CANARY');
   });
 });
+
+describe('Prompt Inspector Task 2 action and state matrix', () => {
+  it('offers all text and call actions with exact eligibility guidance', () => {
+    for (const option of ['Send', 'Regenerate', 'Swipe', 'Continue', 'Call offer', 'Call turn']) {
+      expect(drawerSource).toContain(`>${option}<`);
+    }
+    expect(drawerSource).toContain('Target turn');
+    expect(drawerSource).toContain('Preview user transcript');
+    expect(drawerSource).toContain(
+      'No assistant turns are available on the selected branch. Choose another action or add an assistant turn first.'
+    );
+    expect(drawerSource).toContain('Enter a preview user transcript to inspect Call turn.');
+    expect(drawerSource).toContain('target_message_id');
+    expect(drawerSource).toContain("action: 'call_offer'");
+    expect(drawerSource).toContain("action: 'call_turn'");
+  });
+
+  it('keeps call-offer transport ceilings separate from normal Call turn budgeting', () => {
+    expect(drawerSource).toContain("result.action === 'call_offer'");
+    expect(drawerSource).toContain('AI-backend transport messages');
+    expect(drawerSource).toContain('AI-backend transport characters');
+    expect(drawerSource).toContain('Configured context · Estimate');
+    expect(drawerSource).toContain('Reserved output · Estimate');
+  });
+
+  it('implements stale, error, budget, zero-one-many, long-content, and metadata-only states', () => {
+    expect(drawerSource).toContain('Preview out of date');
+    expect(drawerSource).toContain('RayMe could not preview this request.');
+    expect(drawerSource).toContain('This request does not fit the configured context.');
+    expect(drawerSource).toContain('No refusal retries recorded for this thread.');
+    expect(drawerSource).toContain('activity-list');
+    expect(drawerSource).toContain('ordered-spine');
+    expect(drawerSource).toContain('max-height: 480px');
+    expect(drawerSource).toContain('overflow-x: auto');
+    expect(drawerSource).toContain('textSummary(target.content, 80)');
+  });
+
+  it('clears local call transcript and keeps mobile header priority with a 44px Reload overflow', () => {
+    expect(drawerSource).toContain("callTranscript = ''");
+    expect(routeSource).toContain('MoreHorizontal');
+    expect(routeSource).toContain('header-overflow');
+    expect(routeSource).toContain('Reload thread');
+    expect(routeSource).toContain('@media (max-width: 519px)');
+    expect(routeSource).toContain('min-width: 44px');
+    expect(routeSource).not.toMatch(/barge.?in/i);
+  });
+});
