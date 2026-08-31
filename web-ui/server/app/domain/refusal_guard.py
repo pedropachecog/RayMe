@@ -14,6 +14,7 @@ REFUSAL_SAFE_SENTENCE_MIN_VISIBLE_CHARACTERS = 24
 REFUSAL_ESTIMATOR_VERSION = "unicode-codepoints-v1"
 
 _WHITESPACE_RE = re.compile(r"\s+")
+_APOSTROPHE_TRANSLATION = str.maketrans("‘’ʼ＇", "''''")
 _SENTENCE_BOUNDARY_RE = re.compile(r"[.!?]+[\"')\]]*(?=\s|$)")
 _REFUSAL_VERB_RE = re.compile(
     r"(?:\b(?:i\s+)?(?:cannot|can\s+not|can't|won't|will\s+not|must\s+not)\s+"
@@ -42,7 +43,8 @@ _IDENTITY_RE = re.compile(
 )
 _POLICY_RE = re.compile(
     r"\b(?:policy|policies|guideline|guidelines|safety|"
-    r"content\s+restriction|content\s+restrictions|not\s+allowed|violat(?:e|es|ing))\b"
+    r"content\s+restriction|content\s+restrictions|not\s+allowed|violat(?:e|es|ing)|"
+    r"explicit\s+(?:sexual|erotic)\s+content)\b"
 )
 _APOLOGY_RE = re.compile(r"(?:^|\s)(?:i(?:'m|\s+am)\s+)?sorry\b|\bapologi[sz](?:e|ing)\b")
 _REDIRECT_RE = re.compile(
@@ -235,7 +237,7 @@ class PrefixRefusalGuard:
 
 
 def _comparison_view(text: str) -> str:
-    normalized = unicodedata.normalize("NFKC", text).casefold()
+    normalized = unicodedata.normalize("NFKC", text).casefold().translate(_APOSTROPHE_TRANSLATION)
     return _WHITESPACE_RE.sub(" ", normalized).strip()
 
 

@@ -20,6 +20,10 @@
       "text": "I cannot fulfill that request. I am an AI assistant designed to be helpful and harmless, so I do not generate sexually explicit content or engage in erotic roleplay."
     },
     {
+      "id": "observed_omen_typographic_apostrophe_explicit_content_refusal",
+      "text": "I can’t write explicit sexual content like that. Let’s keep things respectful and safe instead."
+    },
+    {
       "id": "declarative_guideline_refusal",
       "text": "That roleplay violates safety guidelines."
     },
@@ -64,6 +68,10 @@
     {
       "id": "in_character_negation",
       "text": "I can't go with you, Mara. The bridge is already burning."
+    },
+    {
+      "id": "unicode_in_character_negation",
+      "text": "I can’t go with you, Mara. The bridge is already burning."
     },
     {
       "id": "firm_in_world_no",
