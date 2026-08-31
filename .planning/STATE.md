@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 status: ready_to_verify
-stopped_at: Completed 09.1-06-PLAN.md
-last_updated: "2026-08-31T05:45:59.543Z"
+stopped_at: Completed 09.1-07-PLAN.md
+last_updated: "2026-08-31T06:09:25.603Z"
 last_activity: 2026-08-31
-state_head: 14ab87a3f83f091c68db15025f81a21149a30ad6
+state_head: e2bc44223a9772e2e84ae78c07d6fbda270b76e9
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 117
-  completed_plans: 107
+  completed_plans: 108
 milestone_name: milestone
 current_phase_name: Default unfiltered roleplay and refusal-resistant prompt orchestration
-last_activity_desc: "Phase 09.1 Plan 06: unified guarded text generation"
+last_activity_desc: "Phase 09.1 Plan 07: unified guarded live-call generation"
 ---
 
 ## Phase Status
@@ -269,8 +269,8 @@ last_activity_desc: "Phase 09.1 Plan 06: unified guarded text generation"
 ## Session Continuity
 
 Last activity: 2026-08-31
-Last session: 2026-08-31T05:45:48.809Z
-Stopped at: Completed 09.1-06-PLAN.md
+Last session: 2026-08-31T06:09:15.316Z
+Stopped at: Completed 09.1-07-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -301,6 +301,7 @@ Resume file: None
 | Phase 09.1 P05 | 20m36s | 2 tasks | 5 files |
 | Phase 09.1 P09 | 12m | 1 tasks | 5 files |
 | Phase 09.1 P06 | 23m05s | 2 tasks | 5 files |
+| Phase 09.1-default-unfiltered-roleplay-and-refusal-resistant-prompt-orc P07 | 15m24s | 2 tasks | 2 files |
 
 ## Decisions
 
@@ -376,3 +377,6 @@ Resume file: None
 - [Phase 09.1]: Use native radio, select, checkbox, number, and textarea controls with exact field-local validation rather than generic string coercion or browser-default error prose. — Native semantics preserve keyboard and touch behavior while explicit validation keeps the persisted contract truthful.
 - [Phase 09.1]: Route Send, Regenerate, Swipe, and Continue through section-tagged structured composer output and one accepted-token iterator.
 - [Phase 09.1]: Stage message-action mutations only after guarded collection returns usable accepted text.
+- [Phase 09.1]: Call offers and turns resolve one request-owned structured composer/settings snapshot; offers serialize the adapter while turns retain shared fresh-seed retry ownership.
+- [Phase 09.1]: The 48-message and 20,000-character ceilings apply only to final call-offer wire messages; call turns retain configured output-aware context budgeting.
+- [Phase 09.1]: Pre-content whitespace is held until accepted visible text and discarded on empty completion so no empty caption, speech, audio, or persistence escapes.

@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 3
 waived_count: 0
-fixed_count: 9
-total_count: 12
-last_updated: 2026-08-31T03:18:36.517Z
+fixed_count: 10
+total_count: 13
+last_updated: 2026-08-31T06:11:41.172Z
 ---
 
 # Broken Windows Ledger
@@ -27,6 +27,7 @@ last_updated: 2026-08-31T03:18:36.517Z
 | 10 | 09 | deviation | scripts/deploy-omen.sh |  | Canonical WebRTC required a LocalSubnet-only UDP rule bound to the base Python executable that owns live port 9443. | fixed |  | 2026-08-01T06:39:19.348Z | 2026-08-01T06:39:38.808Z |
 | 11 | 09 | stub | .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-run-omen-evidence.py | 1028 | Finish-acoustic mode emits a deliberately rejected intermediate browser artifact; the real live suite must overwrite it before decision-ready verification. | open |  | 2026-08-01T06:40:34.486Z |  |
 | 12 | 09.1 | deviation | web-ui/server/app/domain/refusal_guard.py |  | Narrowed an over-broad policy secondary signal so benign safe sentences retain early release | open |  | 2026-08-31T03:18:36.517Z |  |
+| 13 | 09.1 | deviation | .planning/STATE.md |  | Legacy STATE header required manual completed-plan and phase-label reconciliation after SDK writes. | fixed |  | 2026-08-31T06:10:40.971Z | 2026-08-31T06:11:41.172Z |
 
 ````json
 [
@@ -173,6 +174,18 @@ last_updated: 2026-08-31T03:18:36.517Z
     "reason": "",
     "recorded_at": "2026-08-31T03:18:36.517Z",
     "resolved_at": null
+  },
+  {
+    "id": 13,
+    "kind": "deviation",
+    "phase": "09.1",
+    "file": ".planning/STATE.md",
+    "line": null,
+    "description": "Legacy STATE header required manual completed-plan and phase-label reconciliation after SDK writes.",
+    "status": "fixed",
+    "reason": "",
+    "recorded_at": "2026-08-31T06:10:40.971Z",
+    "resolved_at": "2026-08-31T06:11:41.172Z"
   }
 ]
 ````
