@@ -279,6 +279,50 @@ async def test_stream_and_collect_share_three_attempt_refusal_exhaustion() -> No
     _assert_three_refusal_requests(collect_client, refusal, (201, 202, 203))
 
 
+async def test_declarative_guideline_refusal_retries_without_reaching_chat_or_persistence() -> None:
+    refusal = "That roleplay violates safety guidelines."
+    accepted = "The lantern swung across the quiet cabin."
+    client = AttemptScriptClient([[refusal], [accepted]])
+    persisted: list[str] = []
+
+    async def persist_final(text: str) -> ThreadMessageShape:
+        persisted.append(text)
+        return ThreadMessageShape(
+            id="ai-message",
+            thread_id="thread-1",
+            message_kind="ai_text",
+            role="assistant",
+            sequence=2,
+            content_text=text,
+        )
+
+    events = [
+        json.loads(event.removeprefix("data: "))
+        async for event in stream_chat_completion(
+            ChatCompletionSettings(
+                base_url="http://llm.local/v1",
+                model="configured-model",
+            ),
+            [{"role": "user", "content": "Continue the scene."}],
+            client=client,
+            persist_final=persist_final,
+            seed_factory=iter((151, 152)).__next__,
+        )
+    ]
+
+    assert events[0] == {"type": "token", "text": accepted}
+    assert events[-1]["type"] == "done"
+    assert refusal not in json.dumps(events, ensure_ascii=False)
+    assert persisted == [accepted]
+    assert client.closed_attempts == [1, 2]
+    assert [request["attempt"] for request in client.requests] == [1, 2]
+    assert refusal not in json.dumps(client.requests[1]["messages"], ensure_ascii=False)
+    assert client.requests[1]["messages"][-1] == {
+        "role": "user",
+        "content": REFUSAL_RETRY_CORRECTION,
+    }
+
+
 @pytest.mark.parametrize(
     ("script", "expected_code"),
     [

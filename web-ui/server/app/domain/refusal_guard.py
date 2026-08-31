@@ -29,6 +29,13 @@ _REFUSAL_VERB_RE = re.compile(
     r"\b(?:i\s+)?(?:decline|refuse)\s+(?:this|that|the)\s+"
     r"(?:request|conversation|task|prompt)\b)"
 )
+_DECLARATIVE_META_POLICY_REFUSAL_RE = re.compile(
+    r"(?:^|(?<=[.!?])\s*)(?:this|that)\s+"
+    r"(?:roleplay|scene|request|conversation|prompt|content)\s+"
+    r"(?:violates?|breaks?|conflicts?\s+with|goes\s+against)\s+"
+    r"(?:my\s+)?(?:policy|policies|guideline|guidelines|safety|"
+    r"content\s+restriction|content\s+restrictions)\b"
+)
 _IDENTITY_RE = re.compile(
     r"\b(?:as\s+an?\s+)?(?:ai|artificial\s+intelligence|language\s+model|"
     r"assistant|chatbot)\b"
@@ -233,9 +240,11 @@ def _comparison_view(text: str) -> str:
 
 def _refusal_reason(text: str) -> str | None:
     normalized = _comparison_view(text)
-    if _REFUSAL_VERB_RE.search(normalized) is None:
-        return None
-    return _secondary_reason(normalized)
+    if _REFUSAL_VERB_RE.search(normalized) is not None:
+        return _secondary_reason(normalized)
+    if _DECLARATIVE_META_POLICY_REFUSAL_RE.search(normalized) is not None:
+        return "policy_or_safety"
+    return None
 
 
 def _secondary_reason(normalized: str) -> str | None:

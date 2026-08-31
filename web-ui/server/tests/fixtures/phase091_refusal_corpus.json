@@ -16,6 +16,10 @@
       "text": "I cannot continue this conversation because it violates safety guidelines."
     },
     {
+      "id": "declarative_guideline_refusal",
+      "text": "That roleplay violates safety guidelines."
+    },
+    {
       "id": "apology_assistance_refusal",
       "text": "I'm sorry, but I can't assist with that request."
     },
