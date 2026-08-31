@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 status: ready_to_verify
-stopped_at: Completed 09.1-05-PLAN.md
-last_updated: "2026-08-31T04:55:55.223Z"
+stopped_at: Completed 09.1-09-PLAN.md
+last_updated: "2026-08-31T05:16:53.685Z"
 last_activity: 2026-08-31
-state_head: 2760db560d10a2af8029b92d3156a26faf27e897
+state_head: fe5fc56f506ab20989ea2eee17790306f003578e
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 117
-  completed_plans: 105
+  completed_plans: 106
 milestone_name: milestone
 current_phase_name: Default unfiltered roleplay and refusal-resistant prompt orchestration
-last_activity_desc: "Phase 09.1 Plan 05: exact structured prompt composer and model-aware adapters"
+last_activity_desc: "Phase 09.1 Plan 09: typed Prompt & Generation Settings surface"
 ---
 
 ## Phase Status
@@ -269,8 +269,8 @@ last_activity_desc: "Phase 09.1 Plan 05: exact structured prompt composer and mo
 ## Session Continuity
 
 Last activity: 2026-08-31
-Last session: 2026-08-31T04:55:45.411Z
-Stopped at: Completed 09.1-05-PLAN.md
+Last session: 2026-08-31T05:15:24.636Z
+Stopped at: Completed 09.1-09-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -299,6 +299,7 @@ Resume file: None
 | Phase 09.1 P03 | 16m | 1 tasks | 5 files |
 | Phase 09.1 P04 | 9m | 1 tasks | 5 files |
 | Phase 09.1 P05 | 20m36s | 2 tasks | 5 files |
+| Phase 09.1 P09 | 12m | 1 tasks | 5 files |
 
 ## Decisions
 
@@ -369,3 +370,6 @@ Resume file: None
 - [Phase 09.1]: Serialize late PHI and retry correction as user messages for Qwen because the observed pinned template skips late system messages; Generic retains their system role.
 - [Phase 09.1]: Reserve configured output tokens separately from the five-percent safety margin and fail with prompt_budget_exceeded when the complete mandatory bundle cannot fit.
 - [Phase 09.1]: Preserve the injected custom-client compatibility seam while routing real OpenAI-compatible requests through the typed immutable adapter.
+- [Phase 09.1]: Keep prompt mode, all three mode drafts, model profile, samplers, and Qwen no-thinking state in one controlled Settings owner so switching modes cannot erase or silently persist unrelated values. — The page owns one immutable nested form value and one explicit save boundary.
+- [Phase 09.1]: Endpoint connection probes patch only endpoint fields; unsaved prompt drafts enter persistence only through the page-level Save Settings transaction. — Connection testing must not become an implicit prompt save action.
+- [Phase 09.1]: Use native radio, select, checkbox, number, and textarea controls with exact field-local validation rather than generic string coercion or browser-default error prose. — Native semantics preserve keyboard and touch behavior while explicit validation keeps the persisted contract truthful.
