@@ -1161,6 +1161,257 @@ def test_qwen_slow_llm_submits_first_safe_segment_before_stream_completion(
     assert backend.speak_calls[-1]["payload"]["final_chunk"] is True
 
 
+def test_refusal_retry_releases_caption_and_speech_before_llm_and_tts_complete(
+    call_fixture: CallFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rejected_prefix = (
+        "I cannot continue this conversation because safety guidelines prevent it."
+    )
+    correction = (
+        "The prior draft broke character. Respond only with the in-world reply."
+    )
+    release_llm = threading.Event()
+    release_tts = threading.Event()
+    first_audio = threading.Event()
+    llm_completed = threading.Event()
+    response_holder: list[Any] = []
+    ordering: list[str] = []
+
+    class RefusalThenAcceptedCompletion:
+        def __init__(self) -> None:
+            self.requests: list[dict[str, Any]] = []
+
+        async def stream_chat_completion_tokens(
+            self,
+            settings: Any,
+            messages: Any,
+            *,
+            seed: int,
+            attempt: int,
+        ) -> AsyncIterator[str]:
+            del settings
+            self.requests.append(
+                {
+                    "attempt": attempt,
+                    "seed": seed,
+                    "messages": [dict(message) for message in messages],
+                }
+            )
+            ordering.append(f"attempt_{attempt}_open")
+            try:
+                if attempt == 1:
+                    for chunk in (
+                        "I cannot continue ",
+                        "this conversation because ",
+                        "safety guidelines prevent it.",
+                    ):
+                        yield chunk
+                    pytest.fail("refused attempt was not closed before retry")
+                yield "This is the first accepted sentence."
+                while not release_llm.is_set():
+                    await asyncio.sleep(0.01)
+                yield " The accepted tail remains"
+                ordering.append("llm_complete")
+                llm_completed.set()
+            finally:
+                ordering.append(f"attempt_{attempt}_closed")
+
+    class SlowStreamingBackend(ScriptedCallBackend):
+        async def speak_call(
+            self,
+            base_url: str,
+            session_id: str,
+            payload: dict[str, Any],
+        ) -> dict[str, Any]:
+            self.speak_calls.append(
+                {"base_url": base_url, "session_id": session_id, "payload": dict(payload)}
+            )
+            if not payload["final_chunk"]:
+                ordering.append("ai_audio_started")
+                first_audio.set()
+                while not release_tts.is_set():
+                    await asyncio.sleep(0.01)
+                ordering.append("tts_stream_complete")
+                return {
+                    "session_id": session_id,
+                    "event": {"status": "queued", "turn_id": payload["turn_id"]},
+                }
+            return {
+                "session_id": session_id,
+                "event": {
+                    "type": "ai_done",
+                    "turn_id": payload["turn_id"],
+                    "tts_playback_final": {"playout_wait_completed": True},
+                },
+            }
+
+    thread_id, _ = asyncio.run(
+        _insert_qwen_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    calls_module = importlib.import_module("app.api.calls")
+    completion = RefusalThenAcceptedCompletion()
+    backend = SlowStreamingBackend()
+    call_fixture.app.dependency_overrides[calls_module.get_call_completion_client] = (
+        lambda: completion
+    )
+    call_fixture.app.dependency_overrides[calls_module.get_call_backend_client] = lambda: backend
+    original_sse = calls_module._sse
+
+    def observed_sse(event: dict[str, Any]) -> str:
+        if event.get("type") == "ai_token":
+            ordering.append("first_caption")
+        return original_sse(event)
+
+    monkeypatch.setattr(calls_module, "_sse", observed_sse)
+
+    def request_turn() -> None:
+        response_holder.append(
+            call_fixture.client.post(
+                f"/api/calls/{started['call_id']}/turns",
+                json={
+                    "session_id": started["session_id"],
+                    "turn_id": "turn-refusal-retry-live",
+                    "text": "Stay in character and answer live.",
+                    "source": "user_final",
+                },
+            )
+        )
+
+    request_thread = threading.Thread(target=request_turn, daemon=True)
+    request_thread.start()
+    try:
+        assert first_audio.wait(timeout=2.0), (
+            "accepted retry did not reach speech while the LLM stream remained open"
+        )
+        assert request_thread.is_alive()
+        assert ordering.index("attempt_1_closed") < ordering.index("attempt_2_open")
+        assert ordering.index("attempt_2_open") < ordering.index("first_caption")
+        assert ordering.index("first_caption") < ordering.index("ai_audio_started")
+        assert "llm_complete" not in ordering
+        assert "tts_stream_complete" not in ordering
+
+        release_llm.set()
+        assert llm_completed.wait(timeout=2.0)
+        assert request_thread.is_alive(), "TTS unexpectedly completed with the LLM stream"
+        assert "tts_stream_complete" not in ordering
+    finally:
+        release_llm.set()
+        release_tts.set()
+        request_thread.join(timeout=3.0)
+
+    assert not request_thread.is_alive()
+    assert ordering.index("ai_audio_started") < ordering.index("llm_complete")
+    assert ordering.index("llm_complete") < ordering.index("tts_stream_complete")
+    assert len(completion.requests) == 2
+    assert completion.requests[0]["seed"] != completion.requests[1]["seed"]
+    retry_messages = completion.requests[1]["messages"]
+    assert [
+        message["content"]
+        for message in retry_messages
+        if message.get("content") == correction
+    ] == [correction]
+    assert rejected_prefix not in json.dumps(retry_messages)
+
+    response = response_holder[0]
+    assert response.status_code == 200
+    events = _sse_events(response.text)
+    assert rejected_prefix not in response.text
+    assert "".join(event.get("text", "") for event in events) == (
+        "This is the first accepted sentence. The accepted tail remains"
+    )
+    assert sum(event.get("type") == "ai_done" for event in events) == 1
+    assert [call["payload"]["text"] for call in backend.speak_calls] == [
+        "This is the first accepted sentence.",
+        "The accepted tail remains",
+    ]
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert [row for row in rows if row[0] == "ai_speech"] == [
+        (
+            "ai_speech",
+            "assistant",
+            "This is the first accepted sentence. The accepted tail remains",
+        )
+    ]
+
+
+def test_interrupt_during_refusal_retry_closes_attempt_and_rejects_late_output(
+    call_fixture: CallFixture,
+) -> None:
+    attempt_two_open = threading.Event()
+    attempt_two_closed = threading.Event()
+    release_attempt = threading.Event()
+    response_holder: list[Any] = []
+
+    class InterruptibleRefusalRetryCompletion:
+        async def stream_chat_completion_tokens(
+            self,
+            settings: Any,
+            messages: Any,
+            *,
+            seed: int,
+            attempt: int,
+        ) -> AsyncIterator[str]:
+            del settings, messages, seed
+            try:
+                if attempt == 1:
+                    yield "I cannot help with that because it violates safety guidelines."
+                    pytest.fail("refused attempt was not closed before retry")
+                attempt_two_open.set()
+                yield "This accepted sentence starts speaking now."
+                while not release_attempt.is_set():
+                    await asyncio.sleep(0.01)
+                yield " This late text must never escape"
+            finally:
+                if attempt == 2:
+                    attempt_two_closed.set()
+
+    thread_id, _ = asyncio.run(
+        _insert_qwen_thread_with_character_and_voice(call_fixture.sessionmaker)
+    )
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+    calls_module = importlib.import_module("app.api.calls")
+    call_fixture.app.dependency_overrides[calls_module.get_call_completion_client] = (
+        InterruptibleRefusalRetryCompletion
+    )
+
+    def request_turn() -> None:
+        response_holder.append(
+            call_fixture.client.post(
+                f"/api/calls/{started['call_id']}/turns",
+                json={
+                    "session_id": started["session_id"],
+                    "turn_id": "turn-refusal-retry-interrupt",
+                    "text": "Begin, then let Interrupt stop the retry.",
+                    "source": "user_final",
+                },
+            )
+        )
+
+    request_thread = threading.Thread(target=request_turn, daemon=True)
+    request_thread.start()
+    try:
+        assert attempt_two_open.wait(timeout=2.0)
+        response = call_fixture.client.post(
+            f"/api/calls/{started['call_id']}/interrupt",
+            json={"session_id": started["session_id"]},
+        )
+        assert response.status_code == 200
+        assert attempt_two_closed.wait(timeout=2.0)
+    finally:
+        release_attempt.set()
+        request_thread.join(timeout=3.0)
+
+    assert not request_thread.is_alive()
+    if response_holder:
+        events = _sse_events(response_holder[0].text)
+        assert not any(event.get("type") == "ai_done" for event in events)
+        assert "This late text must never escape" not in response_holder[0].text
+    rows = asyncio.run(_message_kinds(call_fixture.sessionmaker, thread_id))
+    assert not any(row[0] == "ai_speech" for row in rows)
+
+
 def test_qwen_offer_polls_shared_readiness_without_repeating_preparation(
     call_fixture: CallFixture,
 ) -> None:
