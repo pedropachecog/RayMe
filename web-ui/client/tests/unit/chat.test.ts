@@ -5,8 +5,10 @@ import {
   appendTokenToStreamingMessage,
   CHAT_STREAM_ERROR_COPY,
   continueMessage,
+  createRetryStatusController,
   createDraftMessage,
   editMessage,
+  generationFailurePresentation,
   generateSwipeAlternate,
   loadThread,
   markStreamingMessageError,
@@ -20,7 +22,12 @@ import {
   TRUNCATE_STALE_CONFIRMATION_COPY,
   upsertBackendMessage
 } from '../../src/lib/api/chat';
-import type { ThreadDetail, ThreadMessage } from '../../src/lib/api/types';
+import { generationFailureFromCallTerminal } from '../../src/lib/api/calls';
+import type {
+  GenerationFailure,
+  ThreadDetail,
+  ThreadMessage
+} from '../../src/lib/api/types';
 import chatApiSource from '../../src/lib/api/chat.ts?raw';
 import bubbleSource from '../../src/lib/components/ChatMessageBubble.svelte?raw';
 import composerSource from '../../src/lib/components/Composer.svelte?raw';
@@ -83,6 +90,7 @@ const threadDetail: ThreadDetail = {
 };
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
 });
 
@@ -482,6 +490,180 @@ describe('chat route contract', () => {
     expect(chatApiSource).toContain(CHAT_STREAM_ERROR_COPY);
     expect(bubbleSource).toContain('{message.error}');
     expect(bubbleSource).toContain('Redo');
+  });
+
+  it('shows retry metadata at exactly 300ms and never flickers at 299ms', () => {
+    vi.useFakeTimers();
+    const statuses: Array<string | null> = [];
+    const retry = createRetryStatusController((status) => statuses.push(status));
+
+    retry.schedule('Aster', 2);
+    vi.advanceTimersByTime(299);
+    expect(statuses).toEqual([]);
+
+    vi.advanceTimersByTime(1);
+    expect(statuses).toEqual(['Keeping Aster in character — attempt 2 of 3…']);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('clears retry feedback synchronously on accepted content and cannot flicker after dispose', () => {
+    vi.useFakeTimers();
+    const statuses: Array<string | null> = [];
+    const retry = createRetryStatusController((status) => statuses.push(status));
+
+    retry.schedule('Aster', 2);
+    vi.advanceTimersByTime(300);
+    retry.clear();
+    expect(statuses.at(-1)).toBeNull();
+
+    retry.schedule('Aster', 3);
+    retry.dispose();
+    vi.runAllTimers();
+    expect(statuses).toEqual(['Keeping Aster in character — attempt 2 of 3…', null]);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('removes retry status on the first accepted Unicode chunk without rewriting it', () => {
+    const accepted = 'Cafe\u0301 — 你好 — 👩🏽‍🚀';
+    const streaming = {
+      ...createDraftMessage({
+        id: 'streaming-ai-typed',
+        thread_id: 'thread-1',
+        message_kind: 'ai_text',
+        role: 'assistant',
+        sequence: 2,
+        content_text: '',
+        streaming: true
+      }),
+      retryStatus: 'Keeping Aster in character — attempt 2 of 3…'
+    };
+
+    const [updated] = appendTokenToStreamingMessage([streaming], streaming.id, accepted);
+    expect(updated.content_text).toBe(accepted);
+    expect(updated.retryStatus).toBeNull();
+  });
+
+  it.each([
+    [
+      'llm_refusal_exhausted',
+      'The model stayed out of character after three attempts. Try again or inspect the prompt.',
+      ['try_again', 'inspect_prompt']
+    ],
+    [
+      'prompt_budget_exceeded',
+      'This request does not fit the configured context. Raise the context limit or reduce prompt/history content, then try again.',
+      ['open_settings', 'inspect_prompt']
+    ],
+    [
+      'provider_evidence_mismatch',
+      'The selected model profile could not build this request. Check Prompt & Generation settings.',
+      ['open_settings']
+    ],
+    [
+      'invalid_model_profile',
+      'The selected model profile could not build this request. Check Prompt & Generation settings.',
+      ['open_settings']
+    ],
+    [
+      'invalid_generation_request',
+      'The selected model profile could not build this request. Check Prompt & Generation settings.',
+      ['open_settings']
+    ],
+    ['llm_stream_failed', CHAT_STREAM_ERROR_COPY, ['try_again']]
+  ] as const)(
+    'maps %s to exact fixed copy and typed action intents',
+    (code, expectedMessage, expectedActions) => {
+      const presentation = generationFailurePresentation({
+        type: 'generation_failure',
+        code
+      });
+      expect(presentation).toEqual({
+        message: expectedMessage,
+        actions: expectedActions
+      });
+    }
+  );
+
+  it('turns a failed placeholder into a non-assistant failure row with no rejected content', () => {
+    const prior = { ...selectedOpening };
+    const streaming = createDraftMessage({
+      id: 'streaming-ai-failure',
+      thread_id: 'thread-1',
+      message_kind: 'ai_text',
+      role: 'assistant',
+      sequence: 2,
+      content_text: '',
+      streaming: true,
+      retryContent: 'Original user request'
+    });
+    const failure: GenerationFailure = {
+      type: 'generation_failure',
+      code: 'llm_refusal_exhausted'
+    };
+
+    const updated = markStreamingMessageError(
+      [prior, streaming],
+      streaming.id,
+      'Original user request',
+      failure
+    );
+
+    expect(updated[0]).toEqual(prior);
+    expect(updated.filter((message) => message.role === 'assistant')).toHaveLength(1);
+    expect(updated[1]).toMatchObject({
+      role: 'event',
+      content_text: '',
+      streaming: false,
+      error:
+        'The model stayed out of character after three attempts. Try again or inspect the prompt.',
+      retryContent: 'Original user request',
+      failure,
+      failureActions: ['try_again', 'inspect_prompt'],
+      retryStatus: null
+    });
+    expect(JSON.stringify(updated)).not.toContain('REJECTED_PROSE_CANARY');
+  });
+
+  it('maps call terminal generation codes into the shared failure union only', () => {
+    expect(
+      generationFailureFromCallTerminal({
+        type: 'error',
+        turn_id: 'turn-1',
+        code: 'prompt_budget_exceeded',
+        message: 'REJECTED_PROSE_CANARY'
+      })
+    ).toEqual({ type: 'generation_failure', code: 'prompt_budget_exceeded' });
+    expect(
+      generationFailureFromCallTerminal({
+        type: 'error',
+        turn_id: 'turn-1',
+        code: 'private_internal_code',
+        message: 'REJECTED_PROSE_CANARY'
+      })
+    ).toEqual({ type: 'generation_failure', code: 'llm_generation_failed' });
+  });
+
+  it('owns retry timers and abort cleanup through the route lifecycle', () => {
+    expect(routeSource).toContain('onActivity: (activity) =>');
+    expect(routeSource).toContain("activity.terminal_outcome === 'retry'");
+    expect(routeSource).toContain('retryFeedback.schedule(characterName, activity.retry_count + 1)');
+    expect(routeSource).toContain('onFailure: (failure) =>');
+    expect(routeSource).toContain('retryFeedback.clear();');
+    expect(routeSource).toContain('activeSendAbort?.abort();');
+    expect(routeSource).toContain('onDestroy(() =>');
+    expect(routeSource).toContain('activeRetryFeedback?.dispose();');
+  });
+
+  it('renders keyboard-reachable fixed failure actions and a polite retry announcement', () => {
+    expect(routeSource).toContain('aria-live="polite"');
+    expect(routeSource).toContain('{message.retryStatus}');
+    expect(routeSource).toContain('generation-failure-actions');
+    expect(routeSource).toContain('Try Again');
+    expect(routeSource).toContain('Open Settings');
+    expect(routeSource).toContain('Inspect Prompt');
+    expect(routeSource).toContain("goto('/settings')");
+    expect(routeSource).toContain('promptInspectorIntent = {');
+    expect(routeSource).not.toContain('REJECTED_PROSE_CANARY');
   });
 
   it('composer sends on Enter and preserves newline entry on Shift+Enter', () => {
