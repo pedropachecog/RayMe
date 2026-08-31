@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 status: ready_to_verify
-stopped_at: Completed 09.1-03-PLAN.md
-last_updated: "2026-08-31T04:11:37.090Z"
+stopped_at: Completed 09.1-04-PLAN.md
+last_updated: "2026-08-31T04:26:23.858Z"
 last_activity: 2026-08-31
-state_head: d5bfeb2a20d64c8b7dc1c89ac302176f7577ca55
+state_head: b6d2cfc293d2263bb69c5afa9a12c9de127e2a70
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 117
-  completed_plans: 103
+  completed_plans: 104
 milestone_name: milestone
 current_phase_name: Default unfiltered roleplay and refusal-resistant prompt orchestration
-last_activity_desc: "Phase 09.1 Plan 03: typed Roleplay-first prompt profile persistence"
+last_activity_desc: "Phase 09.1 Plan 04: truthful nullable thread example snapshots"
 ---
 
 ## Phase Status
@@ -269,8 +269,8 @@ last_activity_desc: "Phase 09.1 Plan 03: typed Roleplay-first prompt profile per
 ## Session Continuity
 
 Last activity: 2026-08-31
-Last session: 2026-08-31T04:11:27.559Z
-Stopped at: Completed 09.1-03-PLAN.md
+Last session: 2026-08-31T04:25:43.837Z
+Stopped at: Completed 09.1-04-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -297,6 +297,7 @@ Resume file: None
 | Phase 09.1 P01 | 26m | 3 tasks | 7 files |
 | Phase 09.1 P02 | 17m50s | 3 tasks | 5 files |
 | Phase 09.1 P03 | 16m | 1 tasks | 5 files |
+| Phase 09.1 P04 | 9m | 1 tasks | 5 files |
 
 ## Decisions
 
@@ -361,3 +362,5 @@ Resume file: None
 - [Phase 09.1]: Version the shipped prompt contract as rayme-prompt-contract-v1 and the persisted nested schema as version 1. — Reset behavior and future migrations need explicit stable identities.
 - [Phase 09.1]: Keep Roleplay and Assistant complete while Custom preserves exact user text and permits blank optional Auxiliary and post-history fields. — Blank optional Custom fields are truthful inputs, not fabricated prompt content.
 - [Phase 09.1]: Merge prompt_generation inside the immutable live settings snapshot and expose it through a positive public DTO. — Partial patches preserve endpoint, audio, VAD, and private API-key state without serialize-then-redact leakage.
+- [Phase 09.1]: Treat a null legacy example snapshot as historical truth, never as permission to read the linked character's current mes_example value. — Existing conversations must not silently import later character-card edits.
+- [Phase 09.1]: Keep revision 0009 to one nullable Text column with no UPDATE or backfill. — Unrelated thread, character, lorebook, and source data must remain byte-identical.

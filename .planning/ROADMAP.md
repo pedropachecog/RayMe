@@ -664,7 +664,7 @@ Voice Sample Authorization Policy (2026-08-02): `.planning/REFERENCE-AUTHORIZATI
 **Goal:** Make every RayMe character conversation default to unfiltered fictional roleplay and resist generic helpful-AI/guideline refusals through a shared, inspectable, model-aware prompt composer, visible Settings and Prompt Inspector UI, and bounded streaming refusal recovery, without delaying live-call first playback or weakening explicit interruption.
 **Requirements:** REQ-37, REQ-38, REQ-39
 **Depends on:** Phase 1 text/thread foundation and Phase 9 live-call streaming path
-**Plans:** 3/14 plans executed
+**Plans:** 4/14 plans executed
 
 **User-goal preservation:** RayMe answers as the selected character by default
 rather than moralizing or refusing. In live calls, ordinary output still reaches
@@ -704,7 +704,7 @@ Plans:
 
 - [x] 09.1-02-PLAN.md — Observe OMEN read-only, then freeze sanitized evidence and verifier contracts (Wave 2)
 - [x] 09.1-03-PLAN.md — Persist the typed prompt profile and Roleplay default independently (Wave 2)
-- [ ] 09.1-04-PLAN.md — Migrate the nullable truthful thread example snapshot independently (Wave 2)
+- [x] 09.1-04-PLAN.md — Migrate the nullable truthful thread example snapshot independently (Wave 2)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
