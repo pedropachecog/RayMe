@@ -232,6 +232,7 @@ def test_send_preview_is_exact_no_store_and_accepts_same_or_missing_origin(
         "request_shape_version",
         "thread_id",
         "configured_model",
+        "configured_sampler",
         "adapter",
         "sections",
         "wire_messages",
@@ -249,6 +250,16 @@ def test_send_preview_is_exact_no_store_and_accepts_same_or_missing_origin(
         "effective": "qwen_llama_server",
         "name": "qwen_llama_server",
         "version": "rayme-generation-request-v1",
+    }
+    assert body["configured_sampler"] == {
+        "max_tokens": 320,
+        "temperature": 0.6,
+        "top_p": 0.87,
+        "min_p": 0.07,
+        "top_k": 37,
+        "repetition_penalty": 1.08,
+        "presence_penalty": 0.1,
+        "frequency_penalty": 0.0,
     }
     assert [message["order"] for message in body["wire_messages"]] == list(
         range(len(body["wire_messages"]))
@@ -374,12 +385,17 @@ def test_prompt_preview_openapi_is_strict_and_credential_free(
 ) -> None:
     schema = prompt_preview_fixture.client.get("/openapi.json").json()
     operation = schema["paths"]["/api/prompt-preview"]["post"]
-    request_ref = operation["requestBody"]["content"]["application/json"]["schema"]["$ref"]
-    request_schema = schema["components"]["schemas"][request_ref.rsplit("/", 1)[-1]]
+    body_schema = operation["requestBody"]["content"]["application/json"]["schema"]
+    request_schemas = [
+        schema["components"]["schemas"][item["$ref"].rsplit("/", 1)[-1]]
+        for item in body_schema["oneOf"]
+    ]
     operation_text = _serialized(operation).casefold()
 
-    assert request_schema["additionalProperties"] is False
-    assert request_schema["required"] == ["action", "thread_id", "composer_text"]
+    assert body_schema["discriminator"]["propertyName"] == "action"
+    assert len(request_schemas) == 6
+    assert all(item["additionalProperties"] is False for item in request_schemas)
+    assert request_schemas[0]["required"] == ["thread_id", "composer_text", "action"]
     for forbidden_name in (
         "api_key",
         "authorization",
@@ -677,6 +693,108 @@ def test_barrier_synchronized_previews_do_not_cross_contaminate_or_persist(
     assert asyncio.run(_persistent_counts(prompt_preview_fixture.sessionmaker)) == before
 
 
+def test_generic_adapter_omissions_and_qwen_role_remapping_are_explicit(
+    prompt_preview_fixture: PromptPreviewFixture,
+) -> None:
+    qwen = prompt_preview_fixture.client.post(
+        "/api/prompt-preview", json=_send_payload()
+    ).json()
+    asyncio.run(_set_endpoint_adapter(prompt_preview_fixture.sessionmaker))
+    generic = prompt_preview_fixture.client.post(
+        "/api/prompt-preview", json=_send_payload()
+    ).json()
+
+    assert qwen["adapter"]["effective"] == "qwen_llama_server"
+    assert qwen["effective_request"]["extra_body"]["top_k"] == 37
+    assert any(
+        message["role"] == "user" and "Card ending for Mara." in message["content"]
+        for message in qwen["wire_messages"]
+    )
+    assert generic["adapter"] == {
+        "configured": "generic_openai_compatible",
+        "effective": "generic_openai_compatible",
+        "name": "generic_openai_compatible",
+        "version": "rayme-generation-request-v1",
+    }
+    assert generic["effective_request"]["extra_body"] is None
+    assert generic["effective_request"]["omitted_fields"] == [
+        "extra_body.top_k",
+        "extra_body.min_p",
+        "extra_body.repeat_penalty",
+        "extra_body.chat_template_kwargs",
+    ]
+    assert generic["configured_sampler"]["top_k"] == 37
+    assert generic["configured_sampler"]["repetition_penalty"] == 1.08
+    assert any(
+        message["role"] == "system" and message["content"] == "Card ending for Mara."
+        for message in generic["wire_messages"]
+    )
+
+
+def test_empty_continue_uses_selected_assistant_and_legacy_nulls_remain_truthful(
+    prompt_preview_fixture: PromptPreviewFixture,
+) -> None:
+    asyncio.run(_set_legacy_null_snapshots(prompt_preview_fixture.sessionmaker))
+
+    response = prompt_preview_fixture.client.post(
+        "/api/prompt-preview",
+        json={
+            "action": "continue",
+            "thread_id": THREAD_ID,
+            "target_message_id": "msg_preview_002",
+            "composer_text": "",
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["wire_messages"][-1]["role"] == "assistant"
+    assert body["wire_messages"][-1]["content"] == "Prior assistant turn."
+    assert any(
+        section["section_id"] == "description" and section["content"] == "Description: "
+        for section in body["sections"]
+    )
+    assert all(section["content"] is not None for section in body["sections"])
+
+
+def test_cancelled_preview_propagates_and_leaves_durable_state_unchanged(
+    prompt_preview_fixture: PromptPreviewFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview_module = importlib.import_module("app.api.prompt_preview")
+    started = asyncio.Event()
+    never_release = asyncio.Event()
+
+    async def held_build(*_args: object, **_kwargs: object) -> object:
+        started.set()
+        await never_release.wait()
+        raise AssertionError("cancelled preview resumed unexpectedly")
+
+    monkeypatch.setattr(preview_module, "build_structured_prompt", held_build)
+    before = asyncio.run(_persistent_counts(prompt_preview_fixture.sessionmaker))
+
+    async def cancel_preview() -> None:
+        from fastapi import Response
+
+        async with prompt_preview_fixture.sessionmaker() as session:
+            task = asyncio.create_task(
+                preview_module.preview_prompt(
+                    preview_module.SendPromptPreviewRequest(**_send_payload()),
+                    Response(),
+                    session,
+                    prompt_preview_fixture.app.state.settings,
+                    prompt_preview_fixture.activity,
+                )
+            )
+            await started.wait()
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+    asyncio.run(cancel_preview())
+    assert asyncio.run(_persistent_counts(prompt_preview_fixture.sessionmaker)) == before
+
+
 async def _direct_action_projection(
     fixture: PromptPreviewFixture,
     *,
@@ -797,4 +915,34 @@ async def _set_thread_system_prompt(
         thread = await session.get(Thread, THREAD_ID)
         assert thread is not None
         thread.character_snapshot_system_prompt = content
+        await session.commit()
+
+
+async def _set_endpoint_adapter(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
+    async with sessionmaker() as session:
+        row = await session.get(AppSetting, SETTINGS_KEY)
+        assert row is not None and isinstance(row.value_json, dict)
+        values = dict(row.value_json)
+        prompt_generation = dict(values["prompt_generation"])
+        prompt_generation["model_profile"] = "generic_openai_compatible"
+        values["prompt_generation"] = prompt_generation
+        values["llm_model"] = "generic-preview-model"
+        values["llm_disable_thinking"] = False
+        row.value_json = values
+        await session.commit()
+
+
+async def _set_legacy_null_snapshots(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
+    async with sessionmaker() as session:
+        thread = await session.get(Thread, THREAD_ID)
+        assert thread is not None
+        thread.character_snapshot_description = None
+        thread.character_snapshot_personality = None
+        thread.character_snapshot_scenario = None
+        thread.character_snapshot_mes_example = None
+        thread.character_snapshot_post_history_instructions = None
         await session.commit()

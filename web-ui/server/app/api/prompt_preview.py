@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator, Callable, Coroutine
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from fastapi.exceptions import RequestValidationError
@@ -14,8 +14,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.origin import enforce_same_origin, get_runtime_settings
 from app.config import Settings
-from app.domain.generation_profiles import build_generation_request
+from app.domain.generation_profiles import GenerationRequest, build_generation_request
 from app.domain.llm_stream import MAX_SEMANTIC_ATTEMPTS
+from app.domain.message_actions import (
+    InvalidMessageActionError,
+    MessageActionNotFoundError,
+    SqlAlchemyMessageActionRepository,
+)
 from app.domain.prompt_builder import (
     PromptBudgetExceeded,
     PromptBuildResult,
@@ -71,19 +76,67 @@ router = APIRouter(
 )
 
 
-class SendPromptPreviewRequest(BaseModel):
+class PromptPreviewRequestBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal["send"]
     thread_id: str = Field(min_length=1, max_length=128)
-    composer_text: str = Field(min_length=1, max_length=20_000)
 
-    @field_validator("thread_id", "composer_text")
+    @field_validator("thread_id")
     @classmethod
     def require_visible_text(cls, value: str) -> str:
         if not value.strip():
             raise ValueError("text must not be blank")
         return value
+
+
+class ComposerPromptPreviewRequest(PromptPreviewRequestBase):
+    composer_text: str = Field(min_length=1, max_length=20_000)
+
+    @field_validator("composer_text")
+    @classmethod
+    def require_visible_composer_text(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("text must not be blank")
+        return value
+
+
+class SendPromptPreviewRequest(ComposerPromptPreviewRequest):
+    action: Literal["send"]
+
+
+class RegeneratePromptPreviewRequest(PromptPreviewRequestBase):
+    action: Literal["regenerate"]
+    target_message_id: str = Field(min_length=1, max_length=128)
+
+
+class SwipePromptPreviewRequest(PromptPreviewRequestBase):
+    action: Literal["swipe"]
+    target_message_id: str = Field(min_length=1, max_length=128)
+
+
+class ContinuePromptPreviewRequest(PromptPreviewRequestBase):
+    action: Literal["continue"]
+    target_message_id: str = Field(min_length=1, max_length=128)
+    composer_text: str = Field(default="", max_length=20_000)
+
+
+class CallOfferPromptPreviewRequest(PromptPreviewRequestBase):
+    action: Literal["call_offer"]
+
+
+class CallTurnPromptPreviewRequest(ComposerPromptPreviewRequest):
+    action: Literal["call_turn"]
+
+
+PromptPreviewRequest = Annotated[
+    SendPromptPreviewRequest
+    | RegeneratePromptPreviewRequest
+    | SwipePromptPreviewRequest
+    | ContinuePromptPreviewRequest
+    | CallOfferPromptPreviewRequest
+    | CallTurnPromptPreviewRequest,
+    Field(discriminator="action"),
+]
 
 
 class PreviewAdapter(BaseModel):
@@ -150,6 +203,19 @@ class PreviewEffectiveRequest(BaseModel):
     omitted_fields: list[str]
 
 
+class PreviewConfiguredSampler(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    max_tokens: int
+    temperature: float
+    top_p: float
+    min_p: float
+    top_k: int
+    repetition_penalty: float
+    presence_penalty: float
+    frequency_penalty: float
+
+
 class PreviewBudget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -178,6 +244,9 @@ class PreviewRefusalPolicy(BaseModel):
     safe_sentence_min_visible_characters: int
     estimator_version: str
     retry_correction_present: Literal[True] = True
+    correction_role: Literal["system", "user"]
+    seed_policy: Literal["fresh_at_send_time_per_attempt"]
+    correction_prose_exposed: Literal[False] = False
     rejected_prose_exposed: Literal[False] = False
     exhausted_error_code: Literal["llm_refusal_exhausted"]
 
@@ -200,7 +269,7 @@ class PreviewRefusalActivity(BaseModel):
 class PromptPreviewResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    action: Literal["send"]
+    action: Literal["send", "regenerate", "swipe", "continue", "call_offer", "call_turn"]
     variant: str
     mode: str
     prompt_contract_version: str
@@ -208,6 +277,7 @@ class PromptPreviewResponse(BaseModel):
     thread_id: str
     configured_model: str
     adapter: PreviewAdapter
+    configured_sampler: PreviewConfiguredSampler
     sections: list[PreviewSection]
     wire_messages: list[PreviewWireMessage]
     effective_request: PreviewEffectiveRequest
@@ -232,7 +302,7 @@ def get_prompt_preview_refusal_activity_store() -> RefusalActivityStore:
     dependencies=[Depends(enforce_same_origin)],
 )
 async def preview_prompt(
-    payload: SendPromptPreviewRequest,
+    payload: PromptPreviewRequest,
     response: Response,
     session: AsyncSession = Depends(get_prompt_preview_session),
     runtime_settings: Settings = Depends(get_runtime_settings),
@@ -243,19 +313,26 @@ async def preview_prompt(
     response.headers.update(_NO_STORE)
     endpoint_settings = await SettingsService(session, runtime_settings).read()
     try:
-        prompt = await build_structured_prompt(
-            payload.thread_id,
+        prompt = await _build_action_prompt(
+            payload,
+            session=session,
             settings=endpoint_settings.prompt_generation,
-            repository=SqlAlchemyPromptRepository(session),
-            action="send",
-            composer_text=payload.composer_text,
         )
-    except ThreadNotFoundError as exc:
+    except (ThreadNotFoundError, MessageActionNotFoundError) as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
                 "code": PROMPT_PREVIEW_NOT_FOUND,
                 "message": "Prompt preview thread was not found.",
+            },
+            headers=_NO_STORE,
+        ) from exc
+    except InvalidMessageActionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "invalid_prompt_preview_target",
+                "message": "Prompt preview target is invalid.",
             },
             headers=_NO_STORE,
         ) from exc
@@ -286,7 +363,7 @@ def _response_projection(
     thread_id: str,
     *,
     prompt: PromptBuildResult,
-    generation: Any,
+    generation: GenerationRequest,
     activity: RefusalActivityStore,
 ) -> PromptPreviewResponse:
     request_kwargs = generation.to_openai_kwargs()
@@ -323,7 +400,7 @@ def _response_projection(
     if sampler is None:
         raise RuntimeError("prompt preview requires configured generation settings")
     return PromptPreviewResponse(
-        action="send",
+        action=prompt.action,
         variant=prompt.variant,
         mode=prompt.mode,
         prompt_contract_version=prompt.prompt_contract_version,
@@ -335,6 +412,16 @@ def _response_projection(
             effective=generation.effective_adapter,
             name=generation.effective_adapter,
             version=PROMPT_PREVIEW_REQUEST_SHAPE_VERSION,
+        ),
+        configured_sampler=PreviewConfiguredSampler(
+            max_tokens=sampler.max_tokens,
+            temperature=sampler.temperature,
+            top_p=sampler.top_p,
+            min_p=sampler.min_p,
+            top_k=sampler.top_k,
+            repetition_penalty=sampler.repetition_penalty,
+            presence_penalty=sampler.presence_penalty,
+            frequency_penalty=sampler.frequency_penalty,
         ),
         sections=sections,
         wire_messages=wire_messages,
@@ -349,7 +436,13 @@ def _response_projection(
             frequency_penalty=sampler.frequency_penalty,
             extra_body=PreviewExtraBody.model_validate(extra_body) if extra_body else None,
             seed_policy="generated_at_send_time",
-            omitted_fields=[] if extra_body else ["extra_body"],
+            omitted_fields=_omitted_request_fields(
+                generation,
+                has_template_options=bool(
+                    isinstance(extra_body, dict)
+                    and extra_body.get("chat_template_kwargs") is not None
+                ),
+            ),
         ),
         budget=PreviewBudget(
             context_limit=prompt.context_limit,
@@ -375,6 +468,10 @@ def _response_projection(
             prefix_max_estimated_tokens=REFUSAL_PREFIX_MAX_ESTIMATED_TOKENS,
             safe_sentence_min_visible_characters=REFUSAL_SAFE_SENTENCE_MIN_VISIBLE_CHARACTERS,
             estimator_version=REFUSAL_ESTIMATOR_VERSION,
+            correction_role=(
+                "user" if generation.effective_adapter == "qwen_llama_server" else "system"
+            ),
+            seed_policy="fresh_at_send_time_per_attempt",
             exhausted_error_code="llm_refusal_exhausted",
         ),
         recent_refusal_activity=[
@@ -384,9 +481,74 @@ def _response_projection(
     )
 
 
+async def _build_action_prompt(
+    payload: PromptPreviewRequest,
+    *,
+    session: AsyncSession,
+    settings: Any,
+) -> PromptBuildResult:
+    repository: Any = SqlAlchemyPromptRepository(session)
+    until_message_id: str | None = None
+    composer_text: str | None = getattr(payload, "composer_text", None)
+
+    if isinstance(
+        payload,
+        (
+            RegeneratePromptPreviewRequest,
+            SwipePromptPreviewRequest,
+            ContinuePromptPreviewRequest,
+        ),
+    ):
+        repository = SqlAlchemyMessageActionRepository(session)
+        context = await repository.get_generation_context(
+            payload.target_message_id,
+            include_target=False,
+        )
+        if context.thread_id != payload.thread_id:
+            raise MessageActionNotFoundError(payload.target_message_id)
+        if context.role != "assistant" or not context.message_kind.startswith("ai_"):
+            raise InvalidMessageActionError("Message action requires an AI message")
+        until_message_id = context.until_message_id
+        if isinstance(payload, ContinuePromptPreviewRequest):
+            composer_text = payload.composer_text or context.selected_content
+            if not composer_text:
+                context = await repository.get_generation_context(
+                    payload.target_message_id,
+                    include_target=True,
+                )
+                until_message_id = context.until_message_id
+
+    return await build_structured_prompt(
+        payload.thread_id,
+        settings=settings,
+        repository=repository,
+        until_message_id=until_message_id,
+        action=payload.action,
+        composer_text=composer_text,
+    )
+
+
+def _omitted_request_fields(
+    generation: GenerationRequest,
+    *,
+    has_template_options: bool,
+) -> list[str]:
+    if generation.effective_adapter == "generic_openai_compatible":
+        return [
+            "extra_body.top_k",
+            "extra_body.min_p",
+            "extra_body.repeat_penalty",
+            "extra_body.chat_template_kwargs",
+        ]
+    if not has_template_options:
+        return ["extra_body.chat_template_kwargs"]
+    return []
+
+
 __all__ = [
     "PROMPT_PREVIEW_REQUEST_SHAPE_VERSION",
     "PromptPreviewResponse",
+    "PromptPreviewRequest",
     "SendPromptPreviewRequest",
     "get_prompt_preview_refusal_activity_store",
     "get_prompt_preview_session",
