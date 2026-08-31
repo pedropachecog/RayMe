@@ -176,6 +176,149 @@ export interface ThreadDetail extends ThreadSummary {
   messages: ThreadMessage[];
 }
 
+export type PromptPreviewAction =
+  | 'send'
+  | 'regenerate'
+  | 'swipe'
+  | 'continue'
+  | 'call_offer'
+  | 'call_turn';
+
+export type PromptPreviewRequest =
+  | { action: 'send'; thread_id: string; composer_text: string }
+  | { action: 'regenerate'; thread_id: string; target_message_id: string }
+  | { action: 'swipe'; thread_id: string; target_message_id: string }
+  | {
+      action: 'continue';
+      thread_id: string;
+      target_message_id: string;
+      composer_text: string;
+    }
+  | { action: 'call_offer'; thread_id: string }
+  | { action: 'call_turn'; thread_id: string; composer_text: string };
+
+export interface PromptPreviewAdapter {
+  configured: ModelProfile;
+  effective: Exclude<ModelProfile, 'auto'>;
+  name: Exclude<ModelProfile, 'auto'>;
+  version: 'rayme-generation-request-v1';
+}
+
+export interface PromptPreviewSection {
+  order: number;
+  section_id: string;
+  logical_role: 'system' | 'user' | 'assistant';
+  content: string;
+  source: string;
+  override_state: string;
+  mandatory: boolean;
+  estimated_tokens: number;
+  atomic_group_id: string | null;
+  included: true;
+}
+
+export interface PromptPreviewWireMessage {
+  order: number;
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+  section_ids: string[];
+}
+
+export interface PromptPreviewConfiguredSampler {
+  max_tokens: number;
+  temperature: number;
+  top_p: number;
+  min_p: number;
+  top_k: number;
+  repetition_penalty: number;
+  presence_penalty: number;
+  frequency_penalty: number;
+}
+
+export interface PromptPreviewExtraBody {
+  top_k: number;
+  min_p: number;
+  repeat_penalty: number;
+  chat_template_kwargs: { enable_thinking: boolean } | null;
+}
+
+export interface PromptPreviewEffectiveRequest {
+  model: string;
+  messages: Array<{ role: string; content: string }>;
+  stream: true;
+  max_tokens: number;
+  temperature: number;
+  top_p: number;
+  presence_penalty: number;
+  frequency_penalty: number;
+  extra_body: PromptPreviewExtraBody | null;
+  seed_policy: 'generated_at_send_time';
+  omitted_fields: string[];
+}
+
+export interface PromptPreviewBudget {
+  context_limit: number;
+  configured_max_output: number;
+  safety_margin: number;
+  input_budget: number;
+  estimator_version: string;
+  estimated_input_tokens: number;
+  included_history_count: number;
+  dropped_history_count: number;
+  included_example_group_count: number;
+  dropped_example_group_count: number;
+  max_messages: number | null;
+  max_content_length: number | null;
+  content_truncated: false;
+}
+
+export interface PromptPreviewRefusalPolicy {
+  max_attempts: number;
+  max_retries: number;
+  prefix_max_characters: number;
+  prefix_max_estimated_tokens: number;
+  safe_sentence_min_visible_characters: number;
+  estimator_version: string;
+  retry_correction_present: true;
+  correction_role: 'system' | 'user';
+  seed_policy: 'fresh_at_send_time_per_attempt';
+  correction_prose_exposed: false;
+  rejected_prose_exposed: false;
+  exhausted_error_code: 'llm_refusal_exhausted';
+}
+
+export interface PromptPreviewRefusalActivity {
+  action: string;
+  attempt: number;
+  reason_code: string;
+  prefix_characters: number;
+  prefix_estimated_tokens: number;
+  retry_count: number;
+  release_ms: number | null;
+  decision_ms: number | null;
+  terminal_outcome: string;
+  timestamp: string;
+}
+
+export interface PromptPreviewResponse {
+  action: PromptPreviewAction;
+  variant: string;
+  mode: string;
+  prompt_contract_version: string;
+  request_shape_version: 'rayme-generation-request-v1';
+  thread_id: string;
+  configured_model: string;
+  adapter: PromptPreviewAdapter;
+  configured_sampler: PromptPreviewConfiguredSampler;
+  sections: PromptPreviewSection[];
+  wire_messages: PromptPreviewWireMessage[];
+  effective_request: PromptPreviewEffectiveRequest;
+  budget: PromptPreviewBudget;
+  warnings: string[];
+  refusal_policy: PromptPreviewRefusalPolicy;
+  recent_refusal_activity: PromptPreviewRefusalActivity[];
+}
+
 export const GENERATION_FAILURE_CODES = [
   'llm_refusal_exhausted',
   'prompt_budget_exceeded',

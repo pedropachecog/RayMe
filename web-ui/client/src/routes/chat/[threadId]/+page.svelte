@@ -2,7 +2,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { createVirtualizer } from '@tanstack/svelte-virtual';
-  import { ArrowDown, ArrowLeft, Phone, RefreshCw } from 'lucide-svelte';
+  import { ArrowDown, ArrowLeft, Phone, RefreshCw, ScanSearch } from 'lucide-svelte';
   import { onDestroy, tick } from 'svelte';
   import { get } from 'svelte/store';
 
@@ -38,6 +38,7 @@
   } from '$lib/api/types';
   import ChatMessageBubble from '$lib/components/ChatMessageBubble.svelte';
   import Composer from '$lib/components/Composer.svelte';
+  import PromptInspectorDrawer from '$lib/components/PromptInspectorDrawer.svelte';
 
   type BusyAction = MessageActionId | 'truncate-stale' | 'keep-stale';
 
@@ -73,6 +74,8 @@
     source: 'generation_failure';
     code: GenerationFailureCode;
   } | null>(null);
+  let promptInspectorOpen = $state(false);
+  let promptInspectorReturnFocus = $state<HTMLElement | null>(null);
   let activeSendAbort: AbortController | null = null;
   let activeRetryFeedback: ReturnType<typeof createRetryStatusController> | null = null;
 
@@ -84,6 +87,22 @@
   const shouldVirtualize = $derived(messages.length >= VIRTUALIZATION_THRESHOLD);
   const hasUserMessage = $derived(
     messages.some((message) => message.role === 'user' && message.message_kind === 'user_text')
+  );
+  const eligibleAssistantTargets = $derived(
+    messages
+      .filter(
+        (message) =>
+          message.role === 'assistant' &&
+          message.message_kind.startsWith('ai_') &&
+          !message.stale_after_edit &&
+          !message.streaming &&
+          !message.failure
+      )
+      .map((message) => ({
+        id: message.id,
+        sequence: message.sequence,
+        content: selectedMessageContent(message)
+      }))
   );
   const messageVirtualizer = createVirtualizer<HTMLDivElement, HTMLDivElement>({
     count: 0,
@@ -292,7 +311,8 @@
 
   function handleGenerationFailureAction(
     message: ChatMessageView,
-    action: GenerationFailureActionIntent
+    action: GenerationFailureActionIntent,
+    event?: MouseEvent
   ) {
     if (action === 'try_again') {
       void retryFailedMessage(message);
@@ -309,7 +329,18 @@
         source: 'generation_failure',
         code: message.failure.code
       };
+      openPromptInspector(event?.currentTarget ?? null);
     }
+  }
+
+  function openPromptInspector(trigger: EventTarget | null) {
+    promptInspectorReturnFocus = trigger instanceof HTMLElement ? trigger : null;
+    promptInspectorOpen = true;
+  }
+
+  function closePromptInspector() {
+    promptInspectorOpen = false;
+    promptInspectorIntent = null;
   }
 
   function generationFailureActionLabel(action: GenerationFailureActionIntent): string {
@@ -731,7 +762,7 @@
         {#each message.failureActions ?? [] as action}
           <button
             type="button"
-            onclick={() => handleGenerationFailureAction(message, action)}
+            onclick={(event) => handleGenerationFailureAction(message, action, event)}
           >
             {generationFailureActionLabel(action)}
           </button>
@@ -768,7 +799,11 @@
   class="chat-route"
   data-prompt-inspector-intent={promptInspectorIntent?.code ?? ''}
 >
-  <header class="chat-header">
+  <header
+    class="chat-header"
+    inert={promptInspectorOpen ? true : undefined}
+    aria-hidden={promptInspectorOpen ? 'true' : undefined}
+  >
     <button class="back-button" type="button" aria-label="Back to Home" onclick={() => goto('/')}>
       <ArrowLeft size={18} strokeWidth={1.8} aria-hidden="true" />
     </button>
@@ -786,6 +821,18 @@
       <h1>{threadTitle}</h1>
     </div>
 
+    <button
+      class="inspect-button"
+      type="button"
+      aria-label="Inspect Prompt"
+      aria-haspopup="dialog"
+      aria-expanded={promptInspectorOpen}
+      onclick={(event) => openPromptInspector(event.currentTarget)}
+    >
+      <ScanSearch size={18} strokeWidth={1.8} aria-hidden="true" />
+      <span>Inspect Prompt</span>
+    </button>
+
     <button class="call-button" type="button" aria-label="Start call" onclick={startThreadCall}>
       <Phone size={18} strokeWidth={1.8} aria-hidden="true" />
     </button>
@@ -796,13 +843,23 @@
   </header>
 
   {#if loadState === 'loading'}
-    <div class="chat-state" aria-label="Loading chat">
+    <div
+      class="chat-state"
+      aria-label="Loading chat"
+      inert={promptInspectorOpen ? true : undefined}
+      aria-hidden={promptInspectorOpen ? 'true' : undefined}
+    >
       <span></span>
       <span></span>
       <span></span>
     </div>
   {:else if loadState === 'error'}
-    <div class="chat-state error" role="status">
+    <div
+      class="chat-state error"
+      role="status"
+      inert={promptInspectorOpen ? true : undefined}
+      aria-hidden={promptInspectorOpen ? 'true' : undefined}
+    >
       <h2>Thread unavailable</h2>
       <p>{pageError}</p>
       <button type="button" onclick={() => refreshThread()}>
@@ -818,6 +875,8 @@
       aria-label="Chat messages"
       data-message-count={messages.length}
       data-virtualized={shouldVirtualize ? 'true' : 'false'}
+      inert={promptInspectorOpen ? true : undefined}
+      aria-hidden={promptInspectorOpen ? 'true' : undefined}
       onscroll={handleMessagesScroll}
     >
       {#if shouldVirtualize}
@@ -844,7 +903,11 @@
       {/if}
     </div>
 
-    <div class="composer-wrap">
+    <div
+      class="composer-wrap"
+      inert={promptInspectorOpen ? true : undefined}
+      aria-hidden={promptInspectorOpen ? 'true' : undefined}
+    >
       {#if showJumpToLatest}
         <div class="jump-row">
           <button class="jump-to-latest" type="button" onclick={() => scrollToLatest()}>
@@ -882,6 +945,15 @@
       </div>
     </div>
   {/if}
+
+  <PromptInspectorDrawer
+    open={promptInspectorOpen}
+    {threadId}
+    composerDraft={composerDraft}
+    targets={eligibleAssistantTargets}
+    returnFocus={promptInspectorReturnFocus}
+    onClose={closePromptInspector}
+  />
 </section>
 
 <style>
@@ -899,7 +971,7 @@
     top: 0;
     z-index: 3;
     display: grid;
-    grid-template-columns: 44px 48px minmax(0, 1fr) 44px 44px;
+    grid-template-columns: 44px 48px minmax(0, 1fr) auto 44px 44px;
     align-items: center;
     gap: var(--space-sm);
     min-height: 72px;
@@ -908,6 +980,7 @@
   }
 
   .back-button,
+  .inspect-button,
   .call-button,
   .refresh-button,
   .chat-state button {
@@ -924,6 +997,18 @@
 
   .call-button {
     background: rgba(0, 227, 253, 0.14);
+  }
+
+  .inspect-button {
+    display: inline-flex;
+    min-width: 44px;
+    gap: var(--space-sm);
+    padding: 0 var(--space-md);
+    background: rgba(182, 160, 255, 0.16);
+  }
+
+  .inspect-button[aria-expanded='true'] {
+    background: rgba(182, 160, 255, 0.28);
   }
 
   .portrait {
@@ -1234,12 +1319,25 @@
     }
 
     .chat-header {
-      grid-template-columns: 44px 44px minmax(0, 1fr) 44px 44px;
+      grid-template-columns: 44px 44px minmax(0, 1fr) 44px 44px 44px;
     }
 
     .portrait {
       width: 44px;
       height: 44px;
+    }
+
+    .inspect-button {
+      padding: 0;
+    }
+
+    .inspect-button span {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0 0 0 0);
+      white-space: nowrap;
     }
 
     .retry-status,
