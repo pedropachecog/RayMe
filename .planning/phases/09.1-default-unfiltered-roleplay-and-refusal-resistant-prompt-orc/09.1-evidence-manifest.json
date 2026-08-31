@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "phase": "09.1",
+  "provider_preflight": {
+    "artifact": "results/omen-preflight.json",
+    "freshness_seconds": 3600,
+    "required_fields": [
+      "deployed_commit",
+      "health",
+      "provider.model_id",
+      "provider.context_capacity",
+      "provider.chat_template_sha256",
+      "provider.chat_template_bytes",
+      "provider.chat_template_id",
+      "provider.assistant_prefill"
+    ],
+    "expected_values": null
+  },
+  "generated_results": [
+    "results/omen-preflight.json",
+    "results/local-verification.json",
+    "results/omen-evidence.json",
+    "results/decision-report.json"
+  ]
+}

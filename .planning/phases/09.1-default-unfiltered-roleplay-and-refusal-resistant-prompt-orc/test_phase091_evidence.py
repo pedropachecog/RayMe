@@ -70,7 +70,8 @@ def test_preflight_is_read_only_and_sanitized():
     serialized = json.dumps(result)
     for forbidden in (
         "private.invalid",
-        "chat_template\"",
+        "{% for message",
+        "{{ message.content }}",
         "llm_base_url",
         "credentials",
         "runtime_seed",
