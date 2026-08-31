@@ -16,6 +16,7 @@ from app.api.chat import get_chat_completion_client, get_chat_session
 from app.config import Settings
 from app.domain.llm_stream import (
     CHAT_COMPLETION_SEED_LIMIT,
+    REFUSAL_RETRY_CORRECTION,
     ChatCompletionSettings,
     collect_chat_completion,
     done_event,
@@ -23,6 +24,7 @@ from app.domain.llm_stream import (
     stream_chat_completion,
     token_event,
 )
+from app.domain.refusal_guard import LLMEmptyOutput, LLMRefusalExhausted
 from app.domain.settings_service import SETTINGS_KEY
 from app.domain.thread_service import ThreadService
 from app.main import create_app
@@ -71,6 +73,37 @@ class ScriptedOpenAICompletions:
 class ScriptedOpenAIClient:
     def __init__(self) -> None:
         self.chat = type("ScriptedChat", (), {"completions": ScriptedOpenAICompletions()})()
+
+
+class AttemptScriptClient:
+    def __init__(self, scripts: list[list[str | BaseException]]) -> None:
+        self.scripts = scripts
+        self.requests: list[dict[str, object]] = []
+        self.closed_attempts: list[int] = []
+
+    async def stream_chat_completion_tokens(
+        self,
+        settings: ChatCompletionSettings,
+        messages: list[dict[str, str]],
+        *,
+        seed: int,
+        attempt: int,
+    ):
+        self.requests.append(
+            {
+                "settings": settings,
+                "messages": [dict(message) for message in messages],
+                "seed": seed,
+                "attempt": attempt,
+            }
+        )
+        try:
+            for item in self.scripts[attempt - 1]:
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
+        finally:
+            self.closed_attempts.append(attempt)
 
 
 @pytest.fixture()
@@ -157,6 +190,211 @@ async def test_collect_chat_completion_uses_same_server_side_stream_settings() -
 
     assert text == "Hello"
     assert scripted_client.requests[0]["settings"] == settings
+
+
+async def test_stream_and_collect_share_three_attempt_refusal_exhaustion() -> None:
+    settings = ChatCompletionSettings(
+        base_url="http://llm.local/v1",
+        model="configured-model",
+    )
+    refusal = "I cannot help with that request because policy forbids it."
+    persisted: list[str] = []
+
+    async def persist_final(text: str) -> ThreadMessageShape:
+        persisted.append(text)
+        raise AssertionError("refused output must not persist")
+
+    stream_client = AttemptScriptClient([[refusal], [refusal], [refusal]])
+    stream_events = [
+        json.loads(event.removeprefix("data: "))
+        async for event in stream_chat_completion(
+            settings,
+            [{"role": "user", "content": "Stay in character."}],
+            client=stream_client,
+            persist_final=persist_final,
+            seed_factory=iter((101, 102, 103)).__next__,
+        )
+    ]
+
+    assert stream_events == [
+        {
+            "type": "error",
+            "code": "llm_refusal_exhausted",
+            "message": "AI generation refused after bounded recovery attempts",
+        }
+    ]
+    assert persisted == []
+    _assert_three_refusal_requests(stream_client, refusal, (101, 102, 103))
+
+    collect_client = AttemptScriptClient([[refusal], [refusal], [refusal]])
+    with pytest.raises(LLMRefusalExhausted) as exc_info:
+        await collect_chat_completion(
+            settings,
+            [{"role": "user", "content": "Stay in character."}],
+            client=collect_client,
+            seed_factory=iter((201, 202, 203)).__next__,
+        )
+    assert exc_info.value.code == "llm_refusal_exhausted"
+    _assert_three_refusal_requests(collect_client, refusal, (201, 202, 203))
+
+
+@pytest.mark.parametrize(
+    ("script", "expected_code"),
+    [
+        ([], "llm_empty_output"),
+        ([RuntimeError("private upstream detail")], "llm_stream_failed"),
+    ],
+)
+async def test_unusable_pre_release_streams_emit_only_safe_typed_errors(
+    script: list[str | BaseException],
+    expected_code: str,
+) -> None:
+    persisted: list[str] = []
+
+    async def persist_final(text: str) -> ThreadMessageShape:
+        persisted.append(text)
+        raise AssertionError("unusable output must not persist")
+
+    events = [
+        json.loads(event.removeprefix("data: "))
+        async for event in stream_chat_completion(
+            ChatCompletionSettings(
+                base_url="http://llm.local/v1",
+                model="configured-model",
+            ),
+            [{"role": "user", "content": "Stay in character."}],
+            client=AttemptScriptClient([script]),
+            persist_final=persist_final,
+        )
+    ]
+
+    assert len(events) == 1
+    assert events[0]["type"] == "error"
+    assert events[0]["code"] == expected_code
+    assert "private upstream detail" not in events[0]["message"]
+    assert persisted == []
+
+
+async def test_post_release_transport_failure_never_starts_replacement_attempt() -> None:
+    accepted = "The lantern swung across the quiet cabin."
+    client = AttemptScriptClient([[accepted, RuntimeError("private disconnect")]])
+    persisted: list[str] = []
+
+    async def persist_final(text: str) -> ThreadMessageShape:
+        persisted.append(text)
+        raise AssertionError("partial output must not persist")
+
+    events = [
+        json.loads(event.removeprefix("data: "))
+        async for event in stream_chat_completion(
+            ChatCompletionSettings(
+                base_url="http://llm.local/v1",
+                model="configured-model",
+            ),
+            [{"role": "user", "content": "Look around."}],
+            client=client,
+            persist_final=persist_final,
+            seed_factory=lambda: 301,
+        )
+    ]
+
+    assert events == [
+        {"type": "token", "text": accepted},
+        {"type": "error", "code": "llm_stream_failed", "message": "LLM stream failed"},
+    ]
+    assert len(client.requests) == 1
+    assert client.closed_attempts == [1]
+    assert persisted == []
+
+
+async def test_concurrent_retry_and_cancellation_keep_request_state_independent() -> None:
+    settings_a = ChatCompletionSettings(base_url="http://a.local/v1", model="model-a")
+    settings_b = ChatCompletionSettings(base_url="http://b.local/v1", model="model-b")
+    refusal = "I cannot help with that request because policy forbids it."
+    accepted_a = "The first traveler kept walking through the rain."
+    accepted_b = "The second traveler waited beside the old bridge."
+    retry_client = AttemptScriptClient([[refusal], [accepted_a]])
+    cancelled_started = asyncio.Event()
+    cancelled_closed = asyncio.Event()
+
+    class HeldOpenClient:
+        def __init__(self) -> None:
+            self.requests: list[dict[str, object]] = []
+
+        async def stream_chat_completion_tokens(
+            self,
+            settings: ChatCompletionSettings,
+            messages: list[dict[str, str]],
+            *,
+            seed: int,
+            attempt: int,
+        ):
+            self.requests.append(
+                {
+                    "settings": settings,
+                    "messages": [dict(message) for message in messages],
+                    "seed": seed,
+                    "attempt": attempt,
+                }
+            )
+            try:
+                yield accepted_b
+                cancelled_started.set()
+                await asyncio.Event().wait()
+            finally:
+                cancelled_closed.set()
+
+    held_client = HeldOpenClient()
+    retry_task = asyncio.create_task(
+        collect_chat_completion(
+            settings_a,
+            [{"role": "user", "content": "Continue A."}],
+            client=retry_client,
+            seed_factory=iter((401, 402)).__next__,
+        )
+    )
+    cancel_task = asyncio.create_task(
+        collect_chat_completion(
+            settings_b,
+            [{"role": "user", "content": "Continue B."}],
+            client=held_client,
+            seed_factory=lambda: 501,
+        )
+    )
+
+    await cancelled_started.wait()
+    cancel_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await cancel_task
+
+    assert await retry_task == accepted_a
+    assert cancelled_closed.is_set()
+    assert [request["seed"] for request in retry_client.requests] == [401, 402]
+    assert [request["attempt"] for request in retry_client.requests] == [1, 2]
+    assert retry_client.closed_attempts == [1, 2]
+    assert held_client.requests == [
+        {
+            "settings": settings_b,
+            "messages": [{"role": "user", "content": "Continue B."}],
+            "seed": 501,
+            "attempt": 1,
+        }
+    ]
+
+
+def _assert_three_refusal_requests(
+    client: AttemptScriptClient,
+    refusal: str,
+    expected_seeds: tuple[int, int, int],
+) -> None:
+    assert len(client.requests) == 3
+    assert client.closed_attempts == [1, 2, 3]
+    assert tuple(request["seed"] for request in client.requests) == expected_seeds
+    assert tuple(request["attempt"] for request in client.requests) == (1, 2, 3)
+    for request in client.requests[1:]:
+        messages = request["messages"]
+        assert messages[-1] == {"role": "user", "content": REFUSAL_RETRY_CORRECTION}
+        assert all(refusal not in message["content"] for message in messages)
 
 
 async def test_openai_compatible_generation_uses_fresh_random_seed() -> None:
