@@ -222,3 +222,132 @@ def test_verifier_rejects_stale_or_changed_preflight_identity():
             expected_provider=baseline["provider"],
             now="2026-08-31T00:30:00Z",
         )
+
+
+# Task 3: production acquisition lifecycle and local-release binding.
+
+
+def _load_verifier(name="phase091_verifier"):
+    spec = importlib.util.spec_from_file_location(name, VERIFIER)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_local_verification_uses_exact_intended_commit_and_rejects_mismatch(tmp_path):
+    runner = load_runner()
+    verifier = _load_verifier("phase091_local_release")
+    commit = "d" * 40
+    output = tmp_path / "local-verification.json"
+    runner.record_local_verification(
+        output, intended_commit=commit,
+        gates={gate: True for gate in verifier.GATES},
+        generated_at="2026-08-31T00:00:00Z",
+    )
+    assert json.loads(output.read_text())["intended_commit"] == commit
+    assert verifier.verify_local_release(
+        results_dir=tmp_path, expected_commit=commit,
+        now="2026-08-31T00:30:00Z",
+    ) == commit
+    with pytest.raises(verifier.EvidenceError, match="intended commit"):
+        verifier.verify_local_release(
+            results_dir=tmp_path, expected_commit="e" * 40,
+            now="2026-08-31T00:30:00Z",
+        )
+
+
+class FakeAcquisition:
+    def __init__(self, preflight, expected_commit):
+        self.preflight = preflight
+        self.expected_commit = expected_commit
+        self.calls = []
+
+    def current_preflight(self):
+        self.calls.append("current_preflight")
+        current = json.loads(json.dumps(self.preflight))
+        current["deployed_commit"] = self.expected_commit
+        return current
+
+    def settings_fingerprint(self):
+        self.calls.append("settings_fingerprint")
+        return "a" * 64
+
+    def run_generation(self, scenario_id, evidence_seed):
+        self.calls.append(("generation", scenario_id, evidence_seed))
+        return {"attempts": 1, "refusal_count": 0, "request_diff_count": 0,
+                "persisted_rejected_count": 0, "false_retry_count": 0}
+
+    def start_slow_fixture(self):
+        self.calls.append("fixture_start")
+        return object()
+
+    def run_lifecycle(self, _fixture, trace_id):
+        self.calls.append(("lifecycle", trace_id))
+        return {
+            "first_caption_ms": 20.0, "first_speech_ms": 30.0,
+            "llm_complete_ms": 80.0, "tts_complete_ms": 90.0,
+            "final_playout_ms": 110.0, "interrupt_ms": 40.0,
+            "late_rejected_count": 0, "whole_synthesis_fallback_count": 0,
+        }
+
+    def stop_slow_fixture(self, _fixture):
+        self.calls.append("fixture_stop")
+
+    def health_ready(self):
+        self.calls.append("health_ready")
+        return True
+
+
+def test_ordered_acquisition_runs_36_then_fixture_and_restores_state(tmp_path):
+    runner = load_runner()
+    preflight = json.loads((PHASE_DIR / "results/omen-preflight.json").read_text())
+    acquisition = FakeAcquisition(preflight, "f" * 40)
+    evidence, decision = runner.run_ordered_evidence(
+        acquisition,
+        json.loads(MANIFEST.read_text()),
+        expected_commit="f" * 40,
+        baseline_preflight=preflight,
+        generated_at="2026-08-31T00:10:00Z",
+    )
+    generation_calls = [call for call in acquisition.calls if isinstance(call, tuple) and call[0] == "generation"]
+    assert len(generation_calls) == 36
+    assert acquisition.calls.index("fixture_start") > acquisition.calls.index(generation_calls[-1])
+    assert acquisition.calls.count("settings_fingerprint") == 2
+    assert acquisition.calls[-2:] == ["health_ready", "fixture_stop"] or "fixture_stop" in acquisition.calls[-3:]
+    assert evidence["deployed_commit"] == "f" * 40
+    assert evidence["turn_count"] == 36
+    assert decision["decision_ready"] is True
+    serialized = json.dumps(evidence)
+    assert "runtime_seed" not in serialized and '"seed"' not in serialized
+
+
+def test_fixture_teardown_runs_when_lifecycle_fails():
+    runner = load_runner()
+    preflight = json.loads((PHASE_DIR / "results/omen-preflight.json").read_text())
+    acquisition = FakeAcquisition(preflight, "f" * 40)
+    acquisition.run_lifecycle = lambda *_args: (_ for _ in ()).throw(RuntimeError("fixture failure"))
+    with pytest.raises(RuntimeError, match="fixture failure"):
+        runner.run_ordered_evidence(
+            acquisition, json.loads(MANIFEST.read_text()),
+            expected_commit="f" * 40, baseline_preflight=preflight,
+        )
+    assert "fixture_stop" in acquisition.calls
+
+
+def test_immediate_timing_carrier_never_contains_final_only_values():
+    runner = load_runner()
+    immediate, final = runner.split_timing_carriers({
+        "first_caption_ms": 20.0, "first_speech_ms": 30.0,
+        "llm_complete_ms": 80.0, "tts_complete_ms": 90.0,
+        "final_playout_ms": 110.0, "interrupt_ms": 40.0,
+        "late_rejected_count": 0,
+    })
+    assert set(immediate) == {"first_caption_ms", "first_speech_ms", "interrupt_ms"}
+    assert set(final) == {"llm_complete_ms", "tts_complete_ms", "final_playout_ms", "late_rejected_count"}
+
+
+def test_runner_source_forbids_deployment_and_scheduled_task_mutation():
+    source = RUNNER.read_text(encoding="utf-8").lower()
+    for forbidden in ("deploy-omen.sh", "schtasks", "start-process", "scheduledtask", "launcher.cmd"):
+        assert forbidden not in source
