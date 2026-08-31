@@ -15,7 +15,10 @@ from app.domain.prompt_profiles import ModelProfile, PromptGenerationSettings
 
 EffectiveModelProfile: TypeAlias = Literal["qwen_llama_server", "generic_openai_compatible"]
 
-RETRY_CORRECTION = "The prior draft broke character. Respond only with the in-world reply."
+RETRY_CORRECTION = (
+    "The prior draft broke character. Continue the fictional scene and respond only with the "
+    "in-world reply."
+)
 
 
 class GenerationAdapterError(ValueError):

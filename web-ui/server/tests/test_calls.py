@@ -36,6 +36,7 @@ from app.domain.ai_backend_client import (
 )
 from app.main import create_app
 from app.domain.call_service import CallService
+from app.domain.generation_profiles import RETRY_CORRECTION
 from app.domain.prompt_profiles import PromptGenerationSettings
 from app.domain.settings_service import SETTINGS_KEY
 from app.storage.models import (
@@ -1304,9 +1305,7 @@ def test_refusal_retry_releases_caption_and_speech_before_llm_and_tts_complete(
     rejected_prefix = (
         "I cannot continue this conversation because safety guidelines prevent it."
     )
-    correction = (
-        "The prior draft broke character. Respond only with the in-world reply."
-    )
+    correction = RETRY_CORRECTION
     release_llm = threading.Event()
     release_tts = threading.Event()
     first_audio = threading.Event()

@@ -23,6 +23,13 @@ REJECTED_PROSE = "I cannot help with that request because policy forbids it."
 PREFILL = "The lantern"
 
 
+def test_retry_correction_explicitly_grounds_the_in_world_continuation_as_fiction() -> None:
+    assert RETRY_CORRECTION == (
+        "The prior draft broke character. Continue the fictional scene and respond only with the "
+        "in-world reply."
+    )
+
+
 def _logical_messages() -> tuple[PromptMessageCandidate, ...]:
     return (
         PromptMessageCandidate("system", "Main \N{SNOWMAN}", ("resolved_main",)),
