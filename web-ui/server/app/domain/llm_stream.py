@@ -270,8 +270,21 @@ def _messages_for_attempt(
     attempt: int,
 ) -> list[PromptContextMessage]:
     prepared = [dict(message) for message in messages]
+    final_prefill = prepared.pop() if prepared and prepared[-1]["role"] == "assistant" else None
+    last_user_index = next(
+        (index for index in range(len(prepared) - 1, -1, -1) if prepared[index]["role"] == "user"),
+        None,
+    )
+    if last_user_index is not None:
+        late_system = [
+            message for message in prepared[last_user_index + 1 :] if message["role"] == "system"
+        ]
+        if late_system and len(late_system) == len(prepared[last_user_index + 1 :]):
+            prepared = prepared[:last_user_index] + late_system + [prepared[last_user_index]]
     if attempt > 1:
         prepared.append({"role": "user", "content": REFUSAL_RETRY_CORRECTION})
+    if final_prefill is not None:
+        prepared.append(final_prefill)
     return prepared
 
 
