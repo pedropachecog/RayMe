@@ -524,14 +524,19 @@
   .select-field,
   .number-field {
     display: grid;
+    min-width: 0;
   }
 
   .prompt-panel {
+    width: 100%;
+    max-width: 100%;
     gap: var(--space-lg);
     border-radius: var(--radius-md);
     background: rgba(20, 31, 56, 0.78);
     padding: var(--space-lg);
     box-shadow: inset 0 0 0 1px rgba(64, 72, 93, 0.14);
+    font-family: var(--font-family-body);
+    overflow: hidden;
   }
 
   .panel-heading {
@@ -558,6 +563,7 @@
   h2,
   h3 {
     color: var(--color-text);
+    font-family: var(--font-family-heading);
     font-weight: 600;
   }
 
@@ -573,8 +579,13 @@
 
   p,
   small,
-  .mode-copy {
+  .mode-copy,
+  button,
+  input,
+  select,
+  textarea {
     color: var(--color-text-muted);
+    font-family: var(--font-family-body);
     font-size: var(--font-body);
     font-weight: 400;
     line-height: var(--line-body);
@@ -595,6 +606,7 @@
   .mode-grid,
   .numeric-grid {
     display: grid;
+    min-width: 0;
     gap: var(--space-md);
   }
 
@@ -615,7 +627,7 @@
     position: absolute;
     inset: 0 auto 0 0;
     width: 4px;
-    background: linear-gradient(180deg, var(--color-primary), #70aaff);
+    background: var(--pulse-gradient);
     content: '';
   }
 
@@ -660,6 +672,7 @@
   .prompt-editor,
   .profile-section,
   .generation-section {
+    min-width: 0;
     gap: var(--space-md);
     border-radius: var(--radius-md);
     padding: var(--space-md);
@@ -668,6 +681,7 @@
 
   .subsection-heading,
   .title-row {
+    min-width: 0;
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -703,6 +717,8 @@
     min-height: 144px;
     max-height: 320px;
     resize: vertical;
+    overflow-x: hidden;
+    overflow-y: auto;
     overflow-wrap: anywhere;
     white-space: pre-wrap;
   }
@@ -770,9 +786,31 @@
     }
   }
 
+  @media (max-width: 639px) {
+    .mode-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
   @media (min-width: 720px) {
     .numeric-grid {
       grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+
+  @media (max-width: 719px) {
+    .numeric-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  @media (max-width: 359px) {
+    .subsection-heading {
+      align-items: stretch;
+    }
+
+    .reset-button {
+      width: 100%;
     }
   }
 </style>

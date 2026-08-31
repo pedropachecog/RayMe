@@ -1,19 +1,27 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import promptPanelSource from '../../src/lib/components/settings/PromptGenerationSettingsPanel.svelte?raw';
 import settingsRouteSource from '../../src/routes/settings/+page.svelte?raw';
 
-const appCss = readFileSync(new URL('../../src/app.css', import.meta.url), 'utf8');
+const clientRoot = process.cwd().replaceAll('\\', '/').endsWith('/web-ui/client')
+  ? process.cwd()
+  : resolve(process.cwd(), 'web-ui/client');
+const appCss = readFileSync(resolve(clientRoot, 'src/app.css'), 'utf8');
 
 describe('Prompt & Generation visual contract', () => {
   it('ships a valid local Manrope SemiBold asset and OFL without a runtime font request', () => {
-    const font = readFileSync(new URL('../../static/fonts/Manrope-SemiBold.woff2', import.meta.url));
-    const license = readFileSync(new URL('../../static/fonts/OFL.txt', import.meta.url), 'utf8');
+    const font = readFileSync(resolve(clientRoot, 'static/fonts/Manrope-SemiBold.woff2'));
+    const license = readFileSync(resolve(clientRoot, 'static/fonts/OFL.txt'), 'utf8');
 
     expect(font.subarray(0, 4).toString('ascii')).toBe('wOF2');
     expect(font.length).toBeGreaterThan(40_000);
+    expect(createHash('sha256').update(font).digest('hex')).toBe(
+      '4b751c7594f0619ec9259c9f5564e0245944cdf0f564b1a3bec612eb98ea8ee1'
+    );
     expect(license).toContain('SIL OPEN FONT LICENSE Version 1.1');
     expect(appCss).toContain("url('/fonts/Manrope-SemiBold.woff2') format('woff2')");
     expect(appCss).not.toMatch(/https?:\/\/|fonts\.(googleapis|gstatic)\.com/i);
