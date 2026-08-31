@@ -323,6 +323,55 @@ async def test_declarative_guideline_refusal_retries_without_reaching_chat_or_pe
     }
 
 
+async def test_sentence_boundary_identity_refusal_retries_without_reaching_chat_or_persistence() -> None:
+    refusal_prefix = "I cannot fulfill that request. "
+    refusal_tail = (
+        "I am an AI assistant designed to be helpful and harmless, so I do not generate "
+        "sexually explicit content or engage in erotic roleplay."
+    )
+    refusal = refusal_prefix + refusal_tail
+    accepted = "The rain softened against the cottage windows."
+    client = AttemptScriptClient([[refusal_prefix, refusal_tail], [accepted]])
+    persisted: list[str] = []
+
+    async def persist_final(text: str) -> ThreadMessageShape:
+        persisted.append(text)
+        return ThreadMessageShape(
+            id="ai-message",
+            thread_id="thread-1",
+            message_kind="ai_text",
+            role="assistant",
+            sequence=2,
+            content_text=text,
+        )
+
+    events = [
+        json.loads(event.removeprefix("data: "))
+        async for event in stream_chat_completion(
+            ChatCompletionSettings(
+                base_url="http://llm.local/v1",
+                model="configured-model",
+            ),
+            [{"role": "user", "content": "Continue the scene."}],
+            client=client,
+            persist_final=persist_final,
+            seed_factory=iter((161, 162)).__next__,
+        )
+    ]
+
+    assert events[0] == {"type": "token", "text": accepted}
+    assert events[-1]["type"] == "done"
+    assert refusal not in json.dumps(events, ensure_ascii=False)
+    assert persisted == [accepted]
+    assert client.closed_attempts == [1, 2]
+    assert [request["attempt"] for request in client.requests] == [1, 2]
+    assert refusal not in json.dumps(client.requests[1]["messages"], ensure_ascii=False)
+    assert client.requests[1]["messages"][-1] == {
+        "role": "user",
+        "content": REFUSAL_RETRY_CORRECTION,
+    }
+
+
 @pytest.mark.parametrize(
     ("script", "expected_code"),
     [

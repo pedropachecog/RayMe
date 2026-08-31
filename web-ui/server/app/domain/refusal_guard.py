@@ -205,6 +205,7 @@ class PrefixRefusalGuard:
             visible_characters >= self._min_visible_characters
             and _SENTENCE_BOUNDARY_RE.search(self._prefix) is not None
             and _secondary_reason(normalized) is None
+            and _REFUSAL_VERB_RE.search(normalized) is None
         )
         ceiling_reached = (
             len(self._prefix) >= self._max_characters
