@@ -1207,3 +1207,131 @@ def _ai_backend_client(status: ConnectionStatus):
             raise AiBackendUnavailable(code="unreachable", message="AI backend unreachable")
 
     return ScriptedAiBackendClient
+
+
+def test_prompt_generation_defaults_are_public_without_writing_legacy_settings(
+    settings_client: TestClient,
+) -> None:
+    body = settings_client.get("/api/settings").json()
+
+    assert body["prompt_generation"]["mode"] == "roleplay"
+    assert body["prompt_generation"]["model_profile"] == "auto"
+    assert body["prompt_generation"]["context_limit"] == 16_384
+    assert body["prompt_generation"]["max_tokens"] == 512
+    assert body["prompt_generation"]["temperature"] == 0.8
+    assert body["prompt_generation"]["top_p"] == 0.95
+    assert body["prompt_generation"]["min_p"] == 0.05
+    assert body["prompt_generation"]["top_k"] == 40
+    assert body["prompt_generation"]["repetition_penalty"] == 1.05
+    assert body["prompt_generation"]["presence_penalty"] == 0.0
+    assert body["prompt_generation"]["frequency_penalty"] == 0.0
+
+
+def test_nested_prompt_patch_round_trips_unicode_and_preserves_private_and_unrelated_state(
+    settings_client: TestClient,
+) -> None:
+    api_key = "sk-prompt-profile-canary"
+    first = settings_client.patch(
+        "/api/settings",
+        json={
+            "llm_api_key": api_key,
+            "ai_backend_url": "https://ai.local:9443",
+            "save_ai_audio": False,
+            "vad_threshold": 0.65,
+        },
+    )
+    assert first.status_code == 200
+
+    updated = settings_client.patch(
+        "/api/settings",
+        json={
+            "prompt_generation": {
+                "mode": "custom",
+                "custom": {
+                    "main": "  Exact Ω café — scene  ",
+                    "auxiliary": "",
+                    "post_history": "\t",
+                },
+                "model_profile": "qwen_llama_server",
+                "context_limit": 32_768,
+                "max_tokens": 1_024,
+                "temperature": 1.10,
+                "top_p": 0.91,
+                "min_p": 0.07,
+                "top_k": 77,
+                "repetition_penalty": 1.09,
+                "presence_penalty": -0.2,
+                "frequency_penalty": 0.3,
+            }
+        },
+    )
+    fetched = settings_client.get("/api/settings")
+
+    assert updated.status_code == 200
+    assert updated.json() == fetched.json()
+    body = fetched.json()
+    prompt = body["prompt_generation"]
+    assert prompt["custom"] == {
+        "main": "  Exact Ω café — scene  ",
+        "auxiliary": "",
+        "post_history": "\t",
+    }
+    assert prompt["mode"] == "custom"
+    assert prompt["model_profile"] == "qwen_llama_server"
+    assert prompt["context_limit"] == 32_768
+    assert isinstance(prompt["context_limit"], int)
+    assert prompt["temperature"] == 1.10
+    assert isinstance(prompt["temperature"], float)
+    assert body["ai_backend_url"] == "https://ai.local:9443"
+    assert body["save_ai_audio"] is False
+    assert body["vad_threshold"] == 0.65
+    assert body["llm_api_key_configured"] is True
+    assert api_key not in json.dumps(body)
+    assert "llm_api_key" not in body
+
+
+def test_partial_nested_prompt_patch_preserves_omitted_prompt_and_endpoint_values(
+    settings_client: TestClient,
+) -> None:
+    before = settings_client.get("/api/settings").json()
+
+    response = settings_client.patch(
+        "/api/settings",
+        json={"prompt_generation": {"temperature": 1.25}},
+    )
+
+    assert response.status_code == 200
+    after = response.json()
+    assert after["prompt_generation"]["temperature"] == 1.25
+    assert after["prompt_generation"]["roleplay"] == before["prompt_generation"]["roleplay"]
+    assert after["prompt_generation"]["assistant"] == before["prompt_generation"]["assistant"]
+    assert after["prompt_generation"]["custom"] == before["prompt_generation"]["custom"]
+    for key in (
+        "web_url",
+        "ai_backend_url",
+        "llm_base_url",
+        "llm_model",
+        "save_ai_audio",
+        "save_mic_audio",
+        "vad_threshold",
+        "vad_end_silence_ms",
+        "stt_model",
+        "tts_default_engine",
+    ):
+        assert after[key] == before[key]
+
+
+def test_invalid_nested_prompt_value_returns_stable_field_contract(
+    settings_client: TestClient,
+) -> None:
+    response = settings_client.patch(
+        "/api/settings",
+        json={"prompt_generation": {"context_limit": 2_049}},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"] == {
+        "code": "invalid_prompt_generation",
+        "field": "context_limit",
+        "message": "Context limit must be between 2,048 and 131,072, in steps of 1,024.",
+    }
