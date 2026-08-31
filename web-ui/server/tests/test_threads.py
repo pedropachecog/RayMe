@@ -63,6 +63,63 @@ def test_thread_creation_inserts_first_message_before_any_user_message(
     assert messages[0]["alternates"][0]["source_action"] == "first_mes"
 
 
+@pytest.mark.parametrize(
+    "mes_example",
+    [
+        "",
+        "<START>\n{{user}}: Café\n{{char}}: e\u0301 🐉 — exact Unicode snapshot.",
+    ],
+)
+def test_thread_creation_snapshots_examples_exactly_once(
+    thread_client: tuple[TestClient, async_sessionmaker],
+    mes_example: str,
+) -> None:
+    client, sessionmaker = thread_client
+    character_id = asyncio.run(
+        _insert_character(sessionmaker, mes_example=mes_example)
+    )
+
+    thread_id = client.post(
+        "/api/threads", json={"character_id": character_id}
+    ).json()["thread_id"]
+    asyncio.run(
+        _replace_character_examples(
+            sessionmaker,
+            character_id,
+            "<START>\n{{char}}: Later card edit must not leak into the thread.",
+        )
+    )
+
+    detail = client.get(f"/api/threads/{thread_id}").json()
+    assert detail["character_snapshot"]["mes_example"] == mes_example
+
+
+def test_thread_detail_keeps_truthful_null_example_snapshot_after_character_edit(
+    thread_client: tuple[TestClient, async_sessionmaker],
+) -> None:
+    client, sessionmaker = thread_client
+    character_id = asyncio.run(
+        _insert_character(
+            sessionmaker,
+            mes_example="<START>\n{{char}}: Initial live card example.",
+        )
+    )
+    thread_id = client.post(
+        "/api/threads", json={"character_id": character_id}
+    ).json()["thread_id"]
+    asyncio.run(_clear_thread_example_snapshot(sessionmaker, thread_id))
+    asyncio.run(
+        _replace_character_examples(
+            sessionmaker,
+            character_id,
+            "<START>\n{{char}}: Edited live example must not fill legacy null.",
+        )
+    )
+
+    detail = client.get(f"/api/threads/{thread_id}").json()
+    assert detail["character_snapshot"]["mes_example"] is None
+
+
 def test_thread_creation_persists_selected_alternate_greeting_index_as_opening_message(
     thread_client: tuple[TestClient, async_sessionmaker],
 ) -> None:
@@ -221,6 +278,7 @@ async def _insert_character(
     *,
     character_id: str = "char_test",
     first_mes: str = "Hello from the character.",
+    mes_example: str | None = None,
     alternate_greetings: list[str] | None = None,
 ) -> str:
     async with sessionmaker() as session:
@@ -232,6 +290,7 @@ async def _insert_character(
                 personality="personality",
                 scenario="scenario",
                 first_mes=first_mes,
+                mes_example=mes_example,
                 system_prompt="system",
                 alternate_greetings_json=list(alternate_greetings or []),
                 raw_source_json={"spec": "chara_card_v3"},
@@ -239,6 +298,31 @@ async def _insert_character(
         )
         await session.commit()
         return character_id
+
+
+async def _replace_character_examples(
+    sessionmaker: async_sessionmaker,
+    character_id: str,
+    mes_example: str,
+) -> None:
+    async with sessionmaker() as session:
+        character = (
+            await session.execute(select(Character).where(Character.id == character_id))
+        ).scalar_one()
+        character.mes_example = mes_example
+        await session.commit()
+
+
+async def _clear_thread_example_snapshot(
+    sessionmaker: async_sessionmaker,
+    thread_id: str,
+) -> None:
+    async with sessionmaker() as session:
+        thread = (
+            await session.execute(select(Thread).where(Thread.id == thread_id))
+        ).scalar_one()
+        thread.character_snapshot_mes_example = None
+        await session.commit()
 
 
 async def _insert_portrait(sessionmaker: async_sessionmaker, character_id: str) -> None:

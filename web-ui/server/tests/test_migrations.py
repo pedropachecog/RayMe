@@ -69,6 +69,12 @@ def column_names(connection: sqlite3.Connection, table_name: str) -> set[str]:
     return {row["name"] for row in connection.execute(f"PRAGMA table_info({table_name})")}
 
 
+def column_info(connection: sqlite3.Connection, table_name: str) -> dict[str, sqlite3.Row]:
+    return {
+        row["name"]: row for row in connection.execute(f"PRAGMA table_info({table_name})")
+    }
+
+
 def index_names(connection: sqlite3.Connection, table_name: str) -> set[str]:
     return {row["name"] for row in connection.execute(f"PRAGMA index_list({table_name})")}
 
@@ -129,7 +135,11 @@ def test_initial_migration_creates_all_storage_tables(tmp_path: Path) -> None:
             "character_snapshot_post_history_instructions",
             "character_snapshot_lorebook_json",
             "character_snapshot_raw_source_json",
+            "character_snapshot_mes_example",
         }.issubset(thread_columns)
+        assert column_info(connection, models.THREADS_TABLE)[
+            "character_snapshot_mes_example"
+        ]["notnull"] == 0
 
         voice_columns = column_names(connection, "voices")
         assert VOICE_COLUMNS.issubset(voice_columns)
@@ -703,3 +713,134 @@ def test_upload_implies_authorization_migration_rejects_downgrade(
         revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
 
     assert revision["version_num"] == "0008_remove_qwen3_authorization"
+
+
+def test_thread_example_snapshot_upgrade_keeps_legacy_null_and_preserves_all_other_data(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "rayme-thread-example-legacy.sqlite3"
+    config = migration_config(db_path)
+    command.upgrade(config, "0008_remove_qwen3_authorization")
+
+    character_lorebook = '{"entries":[{"key":["Café"],"content":"e\\u0301 🐉"}],"order":7}'
+    character_raw_source = '{"spec":"chara_card_v3","nested":{"preserve":true}}'
+    thread_lorebook = '{"thread_copy":{"bytes":"stay exactly here"},"order":[2,1]}'
+    thread_raw_source = '{"thread":"snapshot","nested":["a","b"]}'
+
+    with connect(db_path) as connection:
+        connection.execute(
+            """
+            INSERT INTO characters
+                (id, name, description, personality, scenario, first_mes, mes_example,
+                 system_prompt, post_history_instructions, raw_source_json, lorebook_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "char-legacy-example",
+                "Legacy Character",
+                "description-before-0009",
+                "personality-before-0009",
+                "scenario-before-0009",
+                "first-before-0009",
+                "<START>\n{{char}}: Live card text must never be imported.",
+                "system-before-0009",
+                "phi-before-0009",
+                character_raw_source,
+                character_lorebook,
+            ),
+        )
+        connection.execute(
+            """
+            INSERT INTO threads
+                (id, character_id, title, character_snapshot_name,
+                 character_snapshot_description, character_snapshot_personality,
+                 character_snapshot_scenario, character_snapshot_first_mes,
+                 character_snapshot_system_prompt,
+                 character_snapshot_post_history_instructions,
+                 character_snapshot_lorebook_json, character_snapshot_raw_source_json,
+                 last_message_at, deleted_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "thread-legacy-example",
+                "char-legacy-example",
+                "Legacy Thread",
+                "Legacy Character Snapshot",
+                "snapshot-description",
+                "snapshot-personality",
+                "snapshot-scenario",
+                "snapshot-first",
+                "snapshot-system",
+                "snapshot-phi",
+                thread_lorebook,
+                thread_raw_source,
+                "2026-08-30 23:59:58",
+                None,
+            ),
+        )
+        connection.commit()
+        character_before = dict(
+            connection.execute(
+                "SELECT * FROM characters WHERE id = 'char-legacy-example'"
+            ).fetchone()
+        )
+        thread_before = dict(
+            connection.execute(
+                "SELECT * FROM threads WHERE id = 'thread-legacy-example'"
+            ).fetchone()
+        )
+
+    command.upgrade(config, "head")
+
+    with connect(db_path) as connection:
+        revision = connection.execute("SELECT version_num FROM alembic_version").fetchone()
+        assert revision["version_num"] == "0009_thread_example_snapshot"
+        info = column_info(connection, "threads")["character_snapshot_mes_example"]
+        assert info["type"] == "TEXT"
+        assert info["notnull"] == 0
+        upgraded_character = dict(
+            connection.execute(
+                "SELECT * FROM characters WHERE id = 'char-legacy-example'"
+            ).fetchone()
+        )
+        upgraded_thread = dict(
+            connection.execute(
+                "SELECT * FROM threads WHERE id = 'thread-legacy-example'"
+            ).fetchone()
+        )
+        assert upgraded_thread.pop("character_snapshot_mes_example") is None
+        assert upgraded_character == character_before
+        assert upgraded_thread == thread_before
+        assert upgraded_character["lorebook_json"] == character_lorebook
+        assert upgraded_thread["character_snapshot_lorebook_json"] == thread_lorebook
+
+    command.downgrade(config, "0008_remove_qwen3_authorization")
+
+    with connect(db_path) as connection:
+        assert "character_snapshot_mes_example" not in column_names(connection, "threads")
+        assert dict(
+            connection.execute(
+                "SELECT * FROM characters WHERE id = 'char-legacy-example'"
+            ).fetchone()
+        ) == character_before
+        assert dict(
+            connection.execute(
+                "SELECT * FROM threads WHERE id = 'thread-legacy-example'"
+            ).fetchone()
+        ) == thread_before
+
+    command.upgrade(config, "head")
+
+    with connect(db_path) as connection:
+        restored = dict(
+            connection.execute(
+                "SELECT * FROM threads WHERE id = 'thread-legacy-example'"
+            ).fetchone()
+        )
+        assert restored.pop("character_snapshot_mes_example") is None
+        assert restored == thread_before
+        assert dict(
+            connection.execute(
+                "SELECT * FROM characters WHERE id = 'char-legacy-example'"
+            ).fetchone()
+        ) == character_before
