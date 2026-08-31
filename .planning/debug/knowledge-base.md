@@ -4,6 +4,16 @@ Resolved debug sessions. Used by `gsd-debugger` to surface known-pattern hypothe
 
 ---
 
+## last-chat-refusal-recovery — Sentence-boundary refusal escaped before its identity cue arrived
+- **Date:** 2026-08-31
+- **Error patterns:** cannot fulfill that request, AI assistant, helpful and harmless, sentence-boundary streaming, generic refusal persisted
+- **Root cause(s):** `PrefixRefusalGuard._should_release()` released a sentence-boundary prefix that already matched `_REFUSAL_VERB_RE` when its generic identity/policy cue arrived in the next chunk; irreversible passthrough then emitted and persisted the complete refusal.
+- **Fix:** Block early safe-sentence release while `_REFUSAL_VERB_RE` already matches the held prefix; add the exact production-form corpus case, benign neighbor, and end-to-end shared-stream retry/persistence regression.
+- **Files changed:** web-ui/server/app/domain/refusal_guard.py, web-ui/server/tests/fixtures/phase091_refusal_corpus.json, web-ui/server/tests/test_chat_stream.py
+- **Why not caught:** The corpus lacked a multi-sentence refusal whose secondary generic cue begins after an independently releasable first sentence.
+- **Recurrence guard:** `web-ui/server/tests/test_chat_stream.py::test_sentence_boundary_identity_refusal_retries_without_reaching_chat_or_persistence` plus the frozen corpus's `observed_omen_sentence_boundary_identity_refusal` and `in_world_fulfill_negation` cases.
+---
+
 ## qwen-core-invalid-json — Canonical deploy launched new ORM code against an unmigrated OMEN database
 - **Date:** 2026-08-01
 - **Error patterns:** RayMe runtime returned invalid JSON, POST /api/threads 500, table messages has no column named call_id
