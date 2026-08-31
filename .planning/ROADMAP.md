@@ -664,7 +664,7 @@ Voice Sample Authorization Policy (2026-08-02): `.planning/REFERENCE-AUTHORIZATI
 **Goal:** Make every RayMe character conversation default to unfiltered fictional roleplay and resist generic helpful-AI/guideline refusals through a shared, inspectable, model-aware prompt composer, visible Settings and Prompt Inspector UI, and bounded streaming refusal recovery, without delaying live-call first playback or weakening explicit interruption.
 **Requirements:** REQ-37, REQ-38, REQ-39
 **Depends on:** Phase 1 text/thread foundation and Phase 9 live-call streaming path
-**Plans:** 11 plans
+**Plans:** 14 plans
 
 **User-goal preservation:** RayMe answers as the selected character by default
 rather than moralizing or refusing. In live calls, ordinary output still reaches
@@ -698,16 +698,19 @@ still returns the call to listening while rejecting late text and audio.
 Plans:
 
 - [ ] 09.1-01-PLAN.md — Trace refusal-then-accepted live streaming through the lowest shared guarded iterator (Wave 1)
-- [ ] 09.1-02-PLAN.md — Freeze sanitized fixed-matrix evidence, verifier, and OMEN acquisition contracts (Wave 2)
-- [ ] 09.1-03-PLAN.md — Persist the typed prompt profile default and truthful example snapshots (Wave 2)
-- [ ] 09.1-04-PLAN.md — Compose exact structured prompts and model-aware Qwen/generic wire requests (Wave 3)
-- [ ] 09.1-05-PLAN.md — Unify Send, Regenerate, Swipe, and Continue on guarded generation (Wave 4)
-- [ ] 09.1-06-PLAN.md — Unify call offers/turns while preserving early playback and Interrupt (Wave 4)
-- [ ] 09.1-07-PLAN.md — Expose the same-origin non-mutating exact prompt preview API (Wave 5)
-- [ ] 09.1-08-PLAN.md — Deliver Prompt & Generation Settings and Character macro guidance (Wave 3)
-- [ ] 09.1-09-PLAN.md — Preserve typed generation failures and metadata-only retry feedback in clients (Wave 5)
-- [ ] 09.1-10-PLAN.md — Deliver the accessible responsive exact Prompt Inspector (Wave 6)
-- [ ] 09.1-11-PLAN.md — Run the full local gate, canonically deploy, and verify real-Qwen evidence (Wave 7)
+- [ ] 09.1-02-PLAN.md — Observe OMEN read-only, then freeze sanitized evidence and verifier contracts (Wave 2)
+- [ ] 09.1-03-PLAN.md — Persist the typed prompt profile and Roleplay default independently (Wave 2)
+- [ ] 09.1-04-PLAN.md — Migrate the nullable truthful thread example snapshot independently (Wave 2)
+- [ ] 09.1-05-PLAN.md — Compose exact structured prompts and model-aware Qwen/Generic requests (Wave 3)
+- [ ] 09.1-06-PLAN.md — Unify Send, Regenerate, Swipe, and Continue on guarded generation (Wave 4)
+- [ ] 09.1-07-PLAN.md — Unify Call offers/turns while preserving early playback and Interrupt (Wave 4)
+- [ ] 09.1-08-PLAN.md — Expose the same-origin non-mutating exact prompt preview API (Wave 5)
+- [ ] 09.1-09-PLAN.md — Deliver the typed Prompt & Generation Settings surface (Wave 3)
+- [ ] 09.1-10-PLAN.md — Finish app-local typography and responsive Settings states (Wave 4)
+- [ ] 09.1-11-PLAN.md — Deliver Character Editor macro, inheritance, example, and PHI guidance (Wave 4)
+- [ ] 09.1-12-PLAN.md — Preserve typed generation failures and metadata-only retry feedback (Wave 5)
+- [ ] 09.1-13-PLAN.md — Deliver the accessible responsive exact Prompt Inspector (Wave 6)
+- [ ] 09.1-14-PLAN.md — Freeze one SHA, run the full local gate, canonically deploy, and verify evidence (Wave 7)
 
 ### Phase 08.1: Live-call streaming invariant incident repair and prevention (INSERTED)
 
