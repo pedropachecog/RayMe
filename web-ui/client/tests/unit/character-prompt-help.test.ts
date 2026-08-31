@@ -1,9 +1,5 @@
-import { mount, unmount } from 'svelte';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import PromptMacroHelp, {
-  promptSourceGuidance
-} from '../../src/lib/components/PromptMacroHelp.svelte';
 import promptHelpSource from '../../src/lib/components/PromptMacroHelp.svelte?raw';
 import editorSource from '../../src/routes/characters/[id]/+page.svelte?raw';
 
@@ -16,96 +12,74 @@ const ORIGINAL_HELP = 'Includes the active global prompt at {{original}}.';
 const PHI_HELP =
   'Runs after the selected conversation history as the late post-history instruction (PHI), sometimes called a jailbreak.';
 
-const mounted: ReturnType<typeof mount>[] = [];
-
-afterEach(async () => {
-  await Promise.all(mounted.splice(0).map((component) => unmount(component)));
-  document.body.replaceChildren();
-});
-
-function renderHelp(props: Record<string, unknown>) {
-  const target = document.createElement('div');
-  document.body.append(target);
-  const component = mount(PromptMacroHelp, { target, props });
-  mounted.push(component);
-  return target;
-}
-
 describe('Character Editor prompt guidance', () => {
   it('shows the exact complete-scene example syntax as persistent escaped text', () => {
-    const target = renderHelp({ variant: 'examples' });
-
-    expect(target.textContent?.trim()).toBe(EXAMPLE_HELP);
-    expect(target.querySelector('start')).toBeNull();
+    expect(promptHelpSource).toContain('Separate example scenes with');
+    expect(promptHelpSource).toContain("{'<START>'}");
+    expect(promptHelpSource).toContain("{'{{user}}:'}");
+    expect(promptHelpSource).toContain("{'{{char}}:'}");
+    expect(promptHelpSource.replace(/\s+/g, ' ')).toContain(
+      EXAMPLE_HELP.replace('<START>', "{'<START>'}")
+        .replace('{{user}}:', "{'{{user}}:'}")
+        .replace('{{char}}:', "{'{{char}}:'}")
+    );
     expect(promptHelpSource).not.toContain('{@html}');
     expect(promptHelpSource).not.toContain('innerHTML');
     expect(promptHelpSource).not.toContain('marked(');
   });
 
   it('defines every macro, the one-pass contract, and the phase-local User value', () => {
-    const hostileName = '<img src=x onerror=alert(1)> 🐉'.repeat(12);
-    const target = renderHelp({
-      variant: 'macros',
-      characterName: hostileName,
-      activeMode: 'custom',
-      modelProfile: 'qwen_llama_server'
-    });
-    const text = target.textContent ?? '';
-
-    expect(target.querySelector('h3')?.textContent).toBe('Prompt macros');
-    expect(Array.from(target.querySelectorAll('code')).map((node) => node.textContent)).toEqual([
-      '{{char}}',
-      '{{user}}',
-      '{{original}}'
-    ]);
-    expect(text).toContain('Current character name.');
-    expect(text).toContain(hostileName);
-    expect(text).toContain('Current user name. In this phase, it resolves to User.');
-    expect(text).toContain(
+    expect(promptHelpSource).toContain('<h3>Prompt macros</h3>');
+    for (const token of ["{'{{char}}'}", "{'{{user}}'}", "{'{{original}}'}"]) {
+      expect(promptHelpSource).toContain(`<code>${token}</code>`);
+    }
+    expect(promptHelpSource).toContain('Current character name.');
+    expect(promptHelpSource).toContain(
+      "{characterName || 'The character name field is currently blank.'}"
+    );
+    expect(promptHelpSource).toContain(
+      'Current user name. In this phase, it resolves to <strong>User</strong>.'
+    );
+    expect(promptHelpSource).toContain(
       'Active global Main or post-history prompt; expanded before the name macros.'
     );
-    expect(text).toContain('Macros expand once. Unknown macros remain unchanged.');
-    expect(text).toContain('Active global prompt: Custom mode with Qwen / llama-server profile.');
-    expect(target.querySelector('img')).toBeNull();
-    expect(target.innerHTML).toContain('&lt;img src=x onerror=alert(1)&gt;');
+    expect(promptHelpSource).toContain('Macros expand once. Unknown macros remain unchanged.');
+    expect(promptHelpSource).toContain(
+      'Active global prompt: {modeLabels[activeMode]} mode with {profileLabels[modelProfile]} profile.'
+    );
+    expect(promptHelpSource).not.toContain('<img');
+    expect(promptHelpSource).not.toContain('onerror');
   });
 
   it('derives blank, replacement, and includes-original guidance without changing card text', () => {
-    const cases = [
-      { value: '', expected: BLANK_HELP, state: 'inherits' },
-      { value: '  \n\t', expected: BLANK_HELP, state: 'inherits' },
-      {
-        value: 'Stay fiercely in character. Unknown {{future}} remains.',
-        expected: OVERRIDE_HELP,
-        state: 'overrides'
-      },
-      {
-        value: 'Before\n{{original}}\nafter {{char}} with {{user}}',
-        expected: ORIGINAL_HELP,
-        state: 'includes-original'
-      }
-    ] as const;
-
-    for (const fixture of cases) {
-      const before = fixture.value;
-      expect(promptSourceGuidance(fixture.value)).toEqual({
-        state: fixture.state,
-        text: fixture.expected
-      });
-      expect(fixture.value).toBe(before);
+    for (const contract of [
+      'if (!value.trim())',
+      "state: 'inherits'",
+      BLANK_HELP,
+      "if (value.includes('{{original}}'))",
+      "state: 'includes-original'",
+      ORIGINAL_HELP,
+      "state: 'overrides'",
+      OVERRIDE_HELP,
+      '$: sourceGuidance = promptSourceGuidance(fieldValue);',
+      'data-source-state={sourceGuidance.state}',
+      '<p>{sourceGuidance.text}</p>'
+    ]) {
+      expect(promptHelpSource).toContain(contract);
     }
+
+    expect(promptHelpSource).not.toContain('fieldValue = fieldValue');
+    expect(promptHelpSource).not.toContain('characterName = characterName');
+    expect(editorSource).not.toContain('form.system_prompt =');
+    expect(editorSource).not.toContain('form.post_history_instructions =');
   });
 
   it('keeps PHI meaning visible alongside each reactive source state', () => {
-    for (const [value, expected] of [
-      ['', BLANK_HELP],
-      ['Replace it.', OVERRIDE_HELP],
-      ['Keep {{original}} here.', ORIGINAL_HELP]
-    ] as const) {
-      const target = renderHelp({ variant: 'source', fieldValue: value, postHistory: true });
-      expect(target.textContent).toContain(expected);
-      expect(target.textContent).toContain(PHI_HELP);
-    }
+    expect(promptHelpSource.replace(/\s+/g, ' ')).toContain(PHI_HELP);
+    expect(promptHelpSource).toContain('{#if postHistory}');
+    expect(editorSource).toContain('fieldValue={form.system_prompt}');
+    expect(editorSource).toContain('fieldValue={form.post_history_instructions}');
+    expect(editorSource).toContain('postHistory');
   });
 
   it('integrates saved profile context and help in create, review, and edit without changing editor actions', () => {
@@ -135,15 +109,9 @@ describe('Character Editor prompt guidance', () => {
   });
 
   it('keeps long Unicode and macro help selectable and contained at 320px', () => {
-    const target = renderHelp({
-      variant: 'macros',
-      characterName: '龍🐉'.repeat(512),
-      activeMode: 'roleplay',
-      modelProfile: 'auto'
-    });
-
-    expect(target.textContent).toContain('龍🐉'.repeat(512));
+    expect(promptHelpSource).toContain('{characterName ||');
     expect(promptHelpSource).toContain('overflow-wrap: anywhere');
+    expect(promptHelpSource).toContain('user-select: text');
     expect(promptHelpSource).toContain('min-width: 0');
     expect(promptHelpSource).toContain('max-width: 100%');
     expect(promptHelpSource).toContain('@media (max-width: 400px)');

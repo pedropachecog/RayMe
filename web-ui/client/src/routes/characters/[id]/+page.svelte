@@ -11,10 +11,18 @@
     updateCharacter,
     uploadPortrait
   } from '$lib/api/characters';
+  import { getSettings } from '$lib/api/settings';
   import { listVoices } from '$lib/api/voices';
-  import type { CharacterDetail, CharacterEditorPayload, VoiceSummary } from '$lib/api/types';
+  import type {
+    CharacterDetail,
+    CharacterEditorPayload,
+    ModelProfile,
+    PromptMode,
+    VoiceSummary
+  } from '$lib/api/types';
   import CharacterFormSection from '$lib/components/CharacterFormSection.svelte';
   import PortraitDropzone from '$lib/components/PortraitDropzone.svelte';
+  import PromptMacroHelp from '$lib/components/PromptMacroHelp.svelte';
   import VoiceAssignmentSelect from '$lib/components/voice/VoiceAssignmentSelect.svelte';
 
   type EditorMode = 'create' | 'review' | 'edit';
@@ -60,6 +68,8 @@
   let voices: VoiceSummary[] = [];
   let voicesLoading = false;
   let voicesError = '';
+  let activePromptMode: PromptMode = 'roleplay';
+  let activeModelProfile: ModelProfile = 'auto';
 
   $: modeLabel = mode === 'create' ? 'Create character' : mode === 'review' ? 'Review character' : 'Edit character';
   $: portraitBusy = portraitState !== 'idle' || saveState === 'saving';
@@ -67,6 +77,7 @@
 
   onMount(() => {
     void loadSavedVoices();
+    void loadPromptProfile();
 
     if (isCreateMode) {
       return;
@@ -109,6 +120,16 @@
       voicesError = 'RayMe could not load saved voices.';
     } finally {
       voicesLoading = false;
+    }
+  }
+
+  async function loadPromptProfile() {
+    try {
+      const settings = await getSettings();
+      activePromptMode = settings.prompt_generation.mode;
+      activeModelProfile = settings.prompt_generation.model_profile;
+    } catch {
+      // The shipped Roleplay/Auto defaults keep help truthful when Settings is unavailable.
     }
   }
 
@@ -529,6 +550,7 @@
             <span>Example messages</span>
             <textarea name="mes_example" rows="6" bind:value={form.mes_example}></textarea>
           </label>
+          <PromptMacroHelp variant="examples" />
 
           <div class="alternate-heading">
             <h3>Alternate greetings</h3>
@@ -588,10 +610,18 @@
           description="Advanced SillyTavern-compatible text fields preserved by RayMe."
           labelledby="system-section"
         >
+          <PromptMacroHelp
+            variant="macros"
+            characterName={form.name}
+            activeMode={activePromptMode}
+            modelProfile={activeModelProfile}
+          />
+
           <label>
             <span>System prompt</span>
             <textarea name="system_prompt" rows="7" bind:value={form.system_prompt}></textarea>
           </label>
+          <PromptMacroHelp variant="source" fieldValue={form.system_prompt} />
 
           <label>
             <span>Post-history instructions</span>
@@ -601,6 +631,11 @@
               bind:value={form.post_history_instructions}
             ></textarea>
           </label>
+          <PromptMacroHelp
+            variant="source"
+            fieldValue={form.post_history_instructions}
+            postHistory
+          />
 
           <label>
             <span>Creator notes</span>
