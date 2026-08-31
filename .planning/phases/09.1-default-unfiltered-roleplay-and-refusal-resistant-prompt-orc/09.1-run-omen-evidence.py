@@ -44,6 +44,13 @@ class EvidenceError(RuntimeError):
     """A fail-closed evidence or probe error safe to show without raw values."""
 
 
+def _remote_powershell(command: str) -> str:
+    """Keep PowerShell's complete command inside one Windows SSH argument."""
+    if '"' in command:
+        raise EvidenceError("remote PowerShell command contains unsafe quoting")
+    return f'powershell -NoProfile -NonInteractive -Command "{command}"'
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -162,7 +169,7 @@ class LiveReadOnlyProbe:
         try:
             completed = subprocess.run(
                 ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", OMEN_ALIAS,
-                 "powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+                 _remote_powershell(command)],
                 check=True,
                 capture_output=True,
                 text=True,
@@ -741,11 +748,18 @@ def _exercise_call_trace(module: Any, fixture: Any, trace_id: str) -> dict[str, 
         calls_module._sse = original_sse
 
 
-def _worker_acquire(expected_commit: str) -> tuple[dict[str, Any], dict[str, Any]]:
+def _worker_acquire(
+    expected_commit: str, baseline: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
     server_dir = Path(__file__).resolve().parents[3] / "web-ui" / "server"
     if str(server_dir) not in sys.path:
         sys.path.insert(0, str(server_dir))
-    baseline = json.loads((RESULTS_DIR / "omen-preflight.json").read_text(encoding="utf-8"))
+    if (
+        baseline.get("artifact") != "omen-preflight"
+        or baseline.get("deployed_commit") != expected_commit
+        or not isinstance(baseline.get("provider"), dict)
+    ):
+        raise EvidenceError("streamed preflight identity is invalid")
     manifest = _load_manifest()
     acquisition = _OmenProductionAcquisition(
         manifest=manifest, expected_commit=expected_commit, baseline=baseline,
@@ -760,13 +774,21 @@ def _run_remote_acquisition(expected_commit: str) -> tuple[dict[str, Any], dict[
     remote_python = f"{OMEN_REPO}\\web-ui\\server\\.venv\\Scripts\\python.exe"
     command = (
         f"Set-Location -LiteralPath '{OMEN_REPO}'; "
-        f"& '{remote_python}' '{remote_script}' --worker-acquire --expected-commit '{expected_commit}'"
+        f"& '{remote_python}' '{remote_script}' --worker-acquire --baseline-stdin "
+        f"--expected-commit '{expected_commit}'"
     )
+    try:
+        baseline = json.loads((RESULTS_DIR / "omen-preflight.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise EvidenceError("sanitized preflight is unavailable") from exc
+    if not isinstance(baseline, dict) or baseline.get("deployed_commit") != expected_commit:
+        raise EvidenceError("sanitized preflight does not match intended release")
     try:
         completed = subprocess.run(
             ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", OMEN_ALIAS,
-             "powershell", "-NoProfile", "-NonInteractive", "-Command", command],
+             _remote_powershell(command)],
             check=True, capture_output=True, text=True, timeout=3600,
+            input=json.dumps(baseline, separators=(",", ":"), sort_keys=True),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise EvidenceError("OMEN production acquisition failed") from exc
@@ -788,6 +810,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--preflight", action="store_true")
     parser.add_argument("--record-local-verification", action="store_true")
     parser.add_argument("--worker-acquire", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--baseline-stdin", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--expected-commit")
     parser.add_argument("--intended-commit")
     parser.add_argument("--gate", action="append", default=[])
@@ -811,7 +834,17 @@ def main(argv: list[str] | None = None) -> int:
                 gates={gate: True for gate in args.gate},
             )
         elif args.worker_acquire:
-            evidence, decision = _worker_acquire(str(args.expected_commit or ""))
+            if not args.baseline_stdin:
+                raise EvidenceError("worker preflight transport is required")
+            try:
+                baseline = json.loads(sys.stdin.read())
+            except json.JSONDecodeError as exc:
+                raise EvidenceError("streamed preflight is invalid") from exc
+            if not isinstance(baseline, dict):
+                raise EvidenceError("streamed preflight shape is invalid")
+            evidence, decision = _worker_acquire(
+                str(args.expected_commit or ""), baseline,
+            )
             print("RAYME_PHASE091_EVIDENCE=" + json.dumps(
                 {"evidence": evidence, "decision": decision}, separators=(",", ":"), sort_keys=True,
             ))

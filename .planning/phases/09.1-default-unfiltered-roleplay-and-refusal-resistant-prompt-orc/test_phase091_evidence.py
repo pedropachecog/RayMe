@@ -79,6 +79,53 @@ def test_preflight_is_read_only_and_sanitized():
         assert forbidden not in serialized
 
 
+def test_remote_acquisition_quotes_powershell_and_streams_sanitized_preflight(
+    monkeypatch, tmp_path,
+):
+    runner = load_runner()
+    expected = "d" * 40
+    baseline = {
+        "schema_version": 1,
+        "artifact": "omen-preflight",
+        "phase": "09.1",
+        "generated_at": "2026-08-31T00:00:00Z",
+        "deployed_commit": expected,
+        "health": {"check": "rayme_settings", "status_code": 200, "ok": True},
+        "provider": {"model_id": "observed-model"},
+    }
+    runner.RESULTS_DIR = tmp_path
+    (tmp_path / "omen-preflight.json").write_text(json.dumps(baseline), encoding="utf-8")
+    captured = {}
+
+    def fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        captured["input"] = kwargs.get("input")
+        payload = {"evidence": {"ok": True}, "decision": {"decision_ready": True}}
+        return type("Completed", (), {
+            "stdout": "RAYME_PHASE091_EVIDENCE=" + json.dumps(payload),
+        })()
+
+    monkeypatch.setattr(runner.subprocess, "run", fake_run)
+    evidence, decision = runner._run_remote_acquisition(expected)
+
+    assert evidence == {"ok": True}
+    assert decision == {"decision_ready": True}
+    assert len(captured["argv"]) == 7
+    remote_command = captured["argv"][-1]
+    assert remote_command.startswith('powershell -NoProfile -NonInteractive -Command "')
+    assert "--baseline-stdin" in remote_command
+    assert json.loads(captured["input"]) == baseline
+
+
+def test_worker_rejects_preflight_for_another_release():
+    runner = load_runner()
+    with pytest.raises(runner.EvidenceError, match="preflight identity"):
+        runner._worker_acquire(
+            "d" * 40,
+            {"artifact": "omen-preflight", "deployed_commit": "e" * 40, "provider": {}},
+        )
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
