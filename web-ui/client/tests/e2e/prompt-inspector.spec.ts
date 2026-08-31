@@ -224,7 +224,7 @@ async function installRoutes(page: Page, options: RouteOptions = {}) {
 
 async function openInspector(page: Page) {
   await page.goto(`/chat/${threadId}`);
-  await page.getByLabel('Message').fill('Exact unsent composer draft');
+  await page.getByRole('textbox', { name: 'Message' }).fill('Exact unsent composer draft');
   await page.getByRole('button', { name: 'Inspect Prompt' }).click();
   await expect(page.getByRole('dialog', { name: 'Prompt Inspector' })).toBeVisible();
 }
@@ -272,7 +272,7 @@ test('all six actions send exact preview-only payloads and keep offer ceilings i
     { action: 'call_turn', thread_id: threadId, composer_text: 'Local-only spoken turn' }
   ]);
   expect(mutationRequests).toEqual([]);
-  await expect(page.getByLabel('Message')).toHaveValue('Exact unsent composer draft');
+  await expect(page.locator('textarea[aria-label="Message"]')).toHaveValue('Exact unsent composer draft');
   assertNoBrowserErrors();
 });
 
@@ -292,10 +292,13 @@ test('hostile and long rows stay escaped, complete, contained, stale-aware, and 
   await expect(dialog.getByText(/API_KEY_CANARY|BEARER_CANARY|PRIVATE_EXCEPTION_CANARY/)).toHaveCount(0);
   expect(await page.evaluate(() => (globalThis as { INSPECTOR_XSS?: number }).INSPECTOR_XSS)).toBeUndefined();
 
-  await page.getByLabel('Message').fill('Changed but still unsent');
-  await expect(dialog.getByText('Preview out of date')).toBeVisible();
-  await dialog.getByText('Credential-free request JSON').click();
-  const json = dialog.locator('.request-json');
+  await dialog.getByRole('button', { name: 'Close Prompt Inspector' }).click();
+  await page.getByRole('textbox', { name: 'Message' }).fill('Changed but still unsent');
+  await page.getByRole('button', { name: 'Inspect Prompt' }).click();
+  const reopened = page.getByRole('dialog', { name: 'Prompt Inspector' });
+  await expect(reopened.getByText('Preview out of date')).toBeVisible();
+  await reopened.getByText('Credential-free request JSON').click();
+  const json = reopened.locator('.request-json');
   expect(await json.evaluate((element) => element.scrollWidth >= element.clientWidth)).toBe(true);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   assertNoBrowserErrors();
@@ -319,7 +322,7 @@ test('loading remains closable and abortable, and typed budget failure preserves
   const reopened = page.getByRole('dialog', { name: 'Prompt Inspector' });
   await reopened.getByRole('button', { name: 'Preview Request' }).click();
   await expect(reopened.getByText('This request does not fit the configured context. Raise the context limit or reduce prompt/history content, then try again.')).toBeVisible();
-  await expect(page.getByLabel('Message')).toHaveValue('Exact unsent composer draft');
+  await expect(page.locator('textarea[aria-label="Message"]')).toHaveValue('Exact unsent composer draft');
   await expect(reopened.getByText('PRIVATE_EXCEPTION_CANARY')).toHaveCount(0);
 });
 

@@ -5,6 +5,7 @@
   import { GenerationApiError } from '$lib/api/client';
   import { previewPrompt } from '$lib/api/promptPreview';
   import type {
+    PromptPreviewAction,
     PromptPreviewRequest,
     PromptPreviewResponse,
     PromptPreviewSection,
@@ -27,7 +28,12 @@
   let dialogElement: HTMLElement;
   let closeButton: HTMLButtonElement;
   let resultHeading: HTMLHeadingElement;
-  let action: 'send' = 'send';
+  let variant: 'text' | 'call' = 'text';
+  let action: PromptPreviewAction = 'send';
+  let selectedTargetId = '';
+  let callTranscript = '';
+  let needsTarget = false;
+  let guidance = '';
   let result: PromptPreviewResponse | null = null;
   let resultSignature = '';
   let loading = false;
@@ -37,9 +43,27 @@
   let priorBodyOverflow = '';
   let wasOpen = false;
 
-  $: currentSignature = JSON.stringify({ action, composerDraft, threadId });
+  $: if (targets.length > 0 && !targets.some((target) => target.id === selectedTargetId)) {
+    selectedTargetId = targets[0].id;
+  }
+  $: needsTarget = action === 'regenerate' || action === 'swipe' || action === 'continue';
+  $: guidance = eligibilityGuidance(
+    action,
+    composerDraft,
+    callTranscript,
+    selectedTargetId,
+    targets.length
+  );
+  $: currentSignature = JSON.stringify({
+    variant,
+    action,
+    selectedTargetId,
+    composerDraft,
+    callTranscript,
+    threadId
+  });
   $: stale = Boolean(result && resultSignature !== currentSignature);
-  $: previewDisabled = loading || !composerDraft.trim();
+  $: previewDisabled = loading || Boolean(guidance);
 
   $: {
     if (open && !wasOpen) {
@@ -75,9 +99,63 @@
 
   async function closeDrawer() {
     previewController?.abort();
+    callTranscript = '';
     onClose();
     await tick();
     returnFocus?.focus();
+  }
+
+  function selectVariant(nextVariant: 'text' | 'call') {
+    variant = nextVariant;
+    action = nextVariant === 'text' ? 'send' : 'call_offer';
+  }
+
+  function eligibilityGuidance(
+    selectedAction: PromptPreviewAction,
+    draft: string,
+    transcript: string,
+    targetId: string,
+    targetCount: number
+  ): string {
+    const selectedActionNeedsTarget =
+      selectedAction === 'regenerate' || selectedAction === 'swipe' || selectedAction === 'continue';
+    if (selectedAction === 'send' && !draft.trim()) {
+      return 'Enter a composer draft to inspect Send.';
+    }
+    if (selectedActionNeedsTarget && targetCount === 0) {
+      return 'No assistant turns are available on the selected branch. Choose another action or add an assistant turn first.';
+    }
+    if (selectedActionNeedsTarget && !targetId) {
+      return 'Choose an assistant target turn to inspect this action.';
+    }
+    if (selectedAction === 'call_turn' && !transcript.trim()) {
+      return 'Enter a preview user transcript to inspect Call turn.';
+    }
+    return '';
+  }
+
+  function previewPayload(): PromptPreviewRequest {
+    if (action === 'send') {
+      return { action: 'send', thread_id: threadId, composer_text: composerDraft };
+    }
+    if (action === 'regenerate') {
+      return { action: 'regenerate', thread_id: threadId, target_message_id: selectedTargetId };
+    }
+    if (action === 'swipe') {
+      return { action: 'swipe', thread_id: threadId, target_message_id: selectedTargetId };
+    }
+    if (action === 'continue') {
+      return {
+        action: 'continue',
+        thread_id: threadId,
+        target_message_id: selectedTargetId,
+        composer_text: composerDraft
+      };
+    }
+    if (action === 'call_offer') {
+      return { action: 'call_offer', thread_id: threadId };
+    }
+    return { action: 'call_turn', thread_id: threadId, composer_text: callTranscript };
   }
 
   function closeFromBackdrop(event: MouseEvent) {
@@ -130,11 +208,7 @@
     errorCopy = '';
     budgetFailure = false;
 
-    const payload: PromptPreviewRequest = {
-      action: 'send',
-      thread_id: threadId,
-      composer_text: composerDraft
-    };
+    const payload = previewPayload();
 
     try {
       const nextResult = await previewPrompt(payload, { signal: controller.signal });
@@ -183,6 +257,11 @@
       .filter(Boolean)
       .map((part) => `${part[0]?.toUpperCase() ?? ''}${part.slice(1)}`)
       .join(' ');
+  }
+
+  function textSummary(value: string, limit: number): string {
+    const oneLine = value.replace(/\s+/g, ' ').trim();
+    return oneLine.length <= limit ? oneLine : `${oneLine.slice(0, Math.max(0, limit - 1))}…`;
   }
 
   function requestJson(preview: PromptPreviewResponse): string {
@@ -244,20 +323,62 @@
           <fieldset>
             <legend>Variant</legend>
             <label class="radio-card">
-              <input type="radio" name="prompt-variant" value="text" checked />
+              <input
+                type="radio"
+                name="prompt-variant"
+                value="text"
+                checked={variant === 'text'}
+                onchange={() => selectVariant('text')}
+              />
               <span>Text</span>
+            </label>
+            <label class="radio-card">
+              <input
+                type="radio"
+                name="prompt-variant"
+                value="call"
+                checked={variant === 'call'}
+                onchange={() => selectVariant('call')}
+              />
+              <span>Call</span>
             </label>
           </fieldset>
 
           <label class="field">
             <span>Action</span>
             <select bind:value={action}>
-              <option value="send">Send</option>
+              {#if variant === 'text'}
+                <option value="send">Send</option>
+                <option value="regenerate">Regenerate</option>
+                <option value="swipe">Swipe</option>
+                <option value="continue">Continue</option>
+              {:else}
+                <option value="call_offer">Call offer</option>
+                <option value="call_turn">Call turn</option>
+              {/if}
             </select>
           </label>
 
-          {#if !composerDraft.trim()}
-            <p class="guidance">Enter a composer draft to inspect Send.</p>
+          {#if needsTarget}
+            <label class="field">
+              <span>Target turn</span>
+              <select bind:value={selectedTargetId} disabled={targets.length === 0}>
+                {#each targets as target (target.id)}
+                  <option value={target.id}>Turn {target.sequence} · {textSummary(target.content, 80)}</option>
+                {/each}
+              </select>
+            </label>
+          {/if}
+
+          {#if action === 'call_turn'}
+            <label class="field">
+              <span>Preview user transcript</span>
+              <textarea bind:value={callTranscript} rows="4"></textarea>
+            </label>
+          {/if}
+
+          {#if guidance}
+            <p class="guidance">{guidance}</p>
           {/if}
         </section>
 
@@ -309,28 +430,45 @@
                   <div><dt>Input tokens · Estimate</dt><dd>{result.budget.estimated_input_tokens}</dd></div>
                   <div><dt>History kept / dropped</dt><dd>{result.budget.included_history_count} / {result.budget.dropped_history_count}</dd></div>
                   <div><dt>Example groups kept / dropped</dt><dd>{result.budget.included_example_group_count} / {result.budget.dropped_example_group_count}</dd></div>
+                  <div><dt>Content truncated</dt><dd>{result.budget.content_truncated ? 'Yes' : 'No'}</dd></div>
+                  {#if result.action === 'call_offer'}
+                    <div><dt>AI-backend transport messages</dt><dd>{result.budget.max_messages}</dd></div>
+                    <div><dt>AI-backend transport characters</dt><dd>{result.budget.max_content_length}</dd></div>
+                  {/if}
                 </dl>
+                {#if result.warnings.length}
+                  <ul class="warnings" aria-label="Preview warnings">
+                    {#each result.warnings as warning}
+                      <li>{warning}</li>
+                    {/each}
+                  </ul>
+                {/if}
               </section>
 
               <section class="result-section ordered-section" aria-labelledby="ordered-messages-title">
                 <h4 id="ordered-messages-title">Ordered messages</h4>
-                <div class="ordered-spine">
-                  {#each result.wire_messages as message, index (message.order)}
-                    {@const relatedSections = sectionForMessage(message, result)}
-                    <article class="message-card">
-                      <div class="message-heading">
-                        <span class="message-number">{index + 1}</span>
-                        <strong>{message.role}</strong>
-                      </div>
-                      <dl class="message-metadata">
-                        <div><dt>Section</dt><dd>{message.section_ids.join(', ') || 'None'}</dd></div>
-                        <div><dt>Source</dt><dd>{relatedSections.map((section) => displaySource(section.source)).join(', ') || 'Adapter merge'}</dd></div>
-                        <div><dt>Override</dt><dd>{relatedSections.map((section) => displaySource(section.override_state)).join(', ') || 'Unchanged'}</dd></div>
-                      </dl>
-                      <pre>{message.content}</pre>
-                    </article>
-                  {/each}
-                </div>
+                {#if result.wire_messages.length === 0}
+                  <p>No ordered messages are present in this request.</p>
+                {:else}
+                  <div class="ordered-spine">
+                    {#each result.wire_messages as message, index (message.order)}
+                      {@const relatedSections = sectionForMessage(message, result)}
+                      <article class="message-card">
+                        <div class="message-heading">
+                          <span class="message-number">{index + 1}</span>
+                          <strong>{message.role}</strong>
+                        </div>
+                        <dl class="message-metadata">
+                          <div><dt>Section</dt><dd>{message.section_ids.join(', ') || 'None'}</dd></div>
+                          <div><dt>Source</dt><dd>{relatedSections.map((section) => displaySource(section.source)).join(', ') || 'Adapter merge'}</dd></div>
+                          <div><dt>Override</dt><dd>{relatedSections.map((section) => displaySource(section.override_state)).join(', ') || 'Unchanged'}</dd></div>
+                          <div><dt>Estimate tokens</dt><dd>{relatedSections.reduce((sum, section) => sum + section.estimated_tokens, 0)}</dd></div>
+                        </dl>
+                        <pre>{message.content}</pre>
+                      </article>
+                    {/each}
+                  </div>
+                {/if}
               </section>
 
               <section class="result-section" aria-labelledby="request-fields-title">
@@ -520,13 +658,15 @@
   button,
   select,
   summary,
-  input {
+  input,
+  textarea {
     min-width: 44px;
     min-height: 44px;
   }
 
   button,
-  select {
+  select,
+  textarea {
     border: 0;
     border-radius: var(--radius-md);
     color: var(--color-text);
@@ -557,8 +697,11 @@
   .radio-card { display: inline-flex; min-height: 44px; align-items: center; gap: var(--space-sm); border-radius: var(--radius-md); padding: 0 var(--space-md); background: rgba(20, 31, 56, 0.82); }
   .radio-card input { min-width: 20px; min-height: 20px; }
   .field { display: grid; gap: var(--space-sm); }
-  select { width: 100%; padding: 0 var(--space-md); background: rgba(20, 31, 56, 0.82); }
+  select,
+  textarea { width: 100%; padding: 0 var(--space-md); background: rgba(20, 31, 56, 0.82); }
+  textarea { min-height: 96px; padding-top: var(--space-sm); padding-bottom: var(--space-sm); resize: vertical; }
   .guidance { color: var(--color-text-muted); font-size: var(--font-body); line-height: var(--line-body); }
+  .warnings { margin: 0; padding-left: var(--space-lg); color: var(--color-text-muted); }
 
   .result-region,
   .result-stack { display: grid; gap: var(--space-lg); min-width: 0; }

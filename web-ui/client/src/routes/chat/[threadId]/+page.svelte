@@ -2,7 +2,7 @@
   import { goto } from '$app/navigation';
   import { page } from '$app/state';
   import { createVirtualizer } from '@tanstack/svelte-virtual';
-  import { ArrowDown, ArrowLeft, Phone, RefreshCw, ScanSearch } from 'lucide-svelte';
+  import { ArrowDown, ArrowLeft, MoreHorizontal, Phone, RefreshCw, ScanSearch } from 'lucide-svelte';
   import { onDestroy, tick } from 'svelte';
   import { get } from 'svelte/store';
 
@@ -76,6 +76,7 @@
   } | null>(null);
   let promptInspectorOpen = $state(false);
   let promptInspectorReturnFocus = $state<HTMLElement | null>(null);
+  let headerOverflowOpen = $state(false);
   let activeSendAbort: AbortController | null = null;
   let activeRetryFeedback: ReturnType<typeof createRetryStatusController> | null = null;
 
@@ -334,6 +335,7 @@
   }
 
   function openPromptInspector(trigger: EventTarget | null) {
+    headerOverflowOpen = false;
     promptInspectorReturnFocus = trigger instanceof HTMLElement ? trigger : null;
     promptInspectorOpen = true;
   }
@@ -341,6 +343,18 @@
   function closePromptInspector() {
     promptInspectorOpen = false;
     promptInspectorIntent = null;
+  }
+
+  function handleHeaderOverflowKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      headerOverflowOpen = false;
+    }
+  }
+
+  function reloadFromOverflow() {
+    headerOverflowOpen = false;
+    void refreshThread();
   }
 
   function generationFailureActionLabel(action: GenerationFailureActionIntent): string {
@@ -840,6 +854,27 @@
     <button class="refresh-button" type="button" aria-label="Reload thread" onclick={() => refreshThread()}>
       <RefreshCw size={18} strokeWidth={1.8} aria-hidden="true" />
     </button>
+
+    <div class="header-overflow">
+      <button
+        type="button"
+        aria-label="More thread actions"
+        aria-haspopup="menu"
+        aria-expanded={headerOverflowOpen}
+        onkeydown={handleHeaderOverflowKeydown}
+        onclick={() => (headerOverflowOpen = !headerOverflowOpen)}
+      >
+        <MoreHorizontal size={18} strokeWidth={1.8} aria-hidden="true" />
+      </button>
+      {#if headerOverflowOpen}
+        <div class="header-overflow-menu" role="menu">
+          <button type="button" role="menuitem" onclick={reloadFromOverflow}>
+            <RefreshCw size={18} strokeWidth={1.8} aria-hidden="true" />
+            <span>Reload thread</span>
+          </button>
+        </div>
+      {/if}
+    </div>
   </header>
 
   {#if loadState === 'loading'}
@@ -983,6 +1018,8 @@
   .inspect-button,
   .call-button,
   .refresh-button,
+  .header-overflow > button,
+  .header-overflow-menu button,
   .chat-state button {
     display: inline-flex;
     align-items: center;
@@ -1009,6 +1046,31 @@
 
   .inspect-button[aria-expanded='true'] {
     background: rgba(182, 160, 255, 0.28);
+  }
+
+  .header-overflow {
+    position: relative;
+    display: none;
+  }
+
+  .header-overflow-menu {
+    position: absolute;
+    top: calc(100% + var(--space-xs));
+    right: 0;
+    z-index: 5;
+    min-width: 176px;
+    border-radius: var(--radius-md);
+    padding: var(--space-xs);
+    background: rgba(25, 37, 64, 0.96);
+    box-shadow: var(--shadow-float);
+    backdrop-filter: blur(20px);
+  }
+
+  .header-overflow-menu button {
+    width: 100%;
+    gap: var(--space-sm);
+    padding: 0 var(--space-md);
+    white-space: nowrap;
   }
 
   .portrait {
@@ -1344,6 +1406,21 @@
     .generation-failure {
       width: min(calc(100% - 44px), 680px);
       margin-left: 44px;
+    }
+  }
+
+  @media (max-width: 519px) {
+    .chat-header {
+      grid-template-columns: 44px minmax(0, 1fr) 44px 44px 44px;
+    }
+
+    .portrait,
+    .refresh-button {
+      display: none;
+    }
+
+    .header-overflow {
+      display: block;
     }
   }
 </style>
