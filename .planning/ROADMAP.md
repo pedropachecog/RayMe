@@ -710,7 +710,7 @@ Plans:
 - [ ] 09.1-11-PLAN.md — Deliver Character Editor macro, inheritance, example, and PHI guidance (Wave 4)
 - [ ] 09.1-12-PLAN.md — Preserve typed generation failures and metadata-only retry feedback (Wave 5)
 - [ ] 09.1-13-PLAN.md — Deliver the accessible responsive exact Prompt Inspector (Wave 6)
-- [ ] 09.1-14-PLAN.md — Freeze one SHA, run the full local gate, canonically deploy, and verify evidence (Wave 7)
+- [ ] 09.1-14-PLAN.md — Run one commit-safe exact-SHA local/deploy/evidence transaction, commit its receipt, then block for visual/live approval (Wave 7)
 
 ### Phase 08.1: Live-call streaming invariant incident repair and prevention (INSERTED)
 
