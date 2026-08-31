@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 status: ready_to_verify
-stopped_at: Completed 09.1-07-PLAN.md
-last_updated: "2026-08-31T06:09:25.603Z"
+stopped_at: Completed 09.1-10-PLAN.md
+last_updated: "2026-08-31T06:31:11.575Z"
 last_activity: 2026-08-31
-state_head: e2bc44223a9772e2e84ae78c07d6fbda270b76e9
+state_head: aaa3a9ae60d5f489e8a3c9cf23362786fcfc25f9
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 117
-  completed_plans: 108
+  completed_plans: 109
 milestone_name: milestone
 current_phase_name: Default unfiltered roleplay and refusal-resistant prompt orchestration
-last_activity_desc: "Phase 09.1 Plan 07: unified guarded live-call generation"
+last_activity_desc: "Phase 09.1 Plan 10: responsive Prompt Settings and local typography"
 ---
 
 ## Phase Status
@@ -269,8 +269,8 @@ last_activity_desc: "Phase 09.1 Plan 07: unified guarded live-call generation"
 ## Session Continuity
 
 Last activity: 2026-08-31
-Last session: 2026-08-31T06:09:15.316Z
-Stopped at: Completed 09.1-07-PLAN.md
+Last session: 2026-08-31T06:31:01.088Z
+Stopped at: Completed 09.1-10-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -302,6 +302,7 @@ Resume file: None
 | Phase 09.1 P09 | 12m | 1 tasks | 5 files |
 | Phase 09.1 P06 | 23m05s | 2 tasks | 5 files |
 | Phase 09.1-default-unfiltered-roleplay-and-refusal-resistant-prompt-orc P07 | 15m24s | 2 tasks | 2 files |
+| Phase 09.1-default-unfiltered-roleplay-and-refusal-resistant-prompt-orc P10 | 14m | 1 tasks | 5 files |
 
 ## Decisions
 
@@ -380,3 +381,6 @@ Resume file: None
 - [Phase 09.1]: Call offers and turns resolve one request-owned structured composer/settings snapshot; offers serialize the adapter while turns retain shared fresh-seed retry ownership.
 - [Phase 09.1]: The 48-message and 20,000-character ceilings apply only to final call-offer wire messages; call turns retain configured output-aware context budgeting.
 - [Phase 09.1]: Pre-content whitespace is held until accepted visible text and discarded on empty completion so no empty caption, speech, audio, or persistence escapes.
+- [Phase 09.1]: Pin Manrope SemiBold to immutable upstream revision 6f81ebecdf65e4463b798cc07b16a4f8d5216917 and serve it only from RayMe's local static asset graph. — Typography must remain reproducible, licensed, and free of runtime font CDN dependencies.
+- [Phase 09.1]: Assign Manrope once through app-level Heading and Display family tokens while Prompt & Generation prose, labels, and controls remain Inter-owned. — This preserves the approved brand hierarchy without creating a phase-local typography system.
+- [Phase 09.1]: Keep responsive and visual-state work inside source-owned CSS without changing Plan 09's controlled DTO, validation, or persistence boundary. — Plan 10 owns presentation stability only; prompt data and save semantics were already independently complete.
