@@ -13,6 +13,12 @@ import type {
 import { decodeGenerationFailure, isGenerationFailureCode } from './types';
 
 export function generationFailureFromCallTerminal(
+  event: Extract<CallTurnStreamEvent, { type: 'error' }>
+): GenerationFailure;
+export function generationFailureFromCallTerminal(
+  event: CallTurnStreamEvent
+): GenerationFailure | null;
+export function generationFailureFromCallTerminal(
   event: CallTurnStreamEvent
 ): GenerationFailure | null {
   if (event.type !== 'error') {

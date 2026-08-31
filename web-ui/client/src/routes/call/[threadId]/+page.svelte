@@ -8,6 +8,7 @@
     CallApiError,
     backfillCallReconnectAudio,
     endCall,
+    generationFailureFromCallTerminal,
     interruptCall,
     promoteCallPeer,
     recoverCallEvents,
@@ -16,9 +17,10 @@
     startCall,
     submitCallTurn
   } from '$lib/api/calls';
-  import { loadThread } from '$lib/api/chat';
+  import { generationFailurePresentation, loadThread } from '$lib/api/chat';
   import { getVoice, getVoicePreparationStatus } from '$lib/api/voices';
   import type { CallErrorCode, CallEvent, CallOfferResponse, CallStateName, CallTranscriptTurn, CallTurnAssistantMessage, CallTurnStreamEvent, ThreadDetail, VoicePreparationStatus } from '$lib/api/types';
+  import { isGenerationFailureCode } from '$lib/api/types';
   import {
     keepCallMicrophoneTracksLive,
     normalizeRemoteCallInterruptDrainMs,
@@ -3571,7 +3573,7 @@
       if (failedTurnId && activeAiTurnId && activeAiTurnId !== failedTurnId) {
         return;
       }
-      const message = messageForCallFailure(event.code, event.message);
+      const message = messageForCallFailure(event.code);
       markAiTurnFailed(failedTurnId);
 
       if (event.retry_allowed) {
@@ -3590,15 +3592,14 @@
     }
   }
 
-  function messageForCallFailure(code: CallErrorCode, message?: string | null) {
+  function messageForCallFailure(code: CallErrorCode) {
     const safeQwenMessage = safeQwenCallFailureMessage(code);
     if (safeQwenMessage) {
       return safeQwenMessage;
     }
 
-    const normalized = message?.trim();
-    if (normalized) {
-      return normalized;
+    if (isGenerationFailureCode(code)) {
+      return generationFailurePresentation({ type: 'generation_failure', code }).message;
     }
 
     if (code === 'call_stt_failed') {
@@ -3803,10 +3804,12 @@
       },
       error: (errorEvent) => {
         const failedTurnId = errorEvent.turn_id ?? activeAiTurnId;
-        const message = messageForCallFailure(
-          (errorEvent.code ?? 'call_generation_failed') as CallErrorCode,
-          errorEvent.message
-        );
+        const generationFailure = generationFailureFromCallTerminal(errorEvent);
+        const message = isGenerationFailureCode(errorEvent.code)
+          ? generationFailurePresentation(generationFailure).message
+          : messageForCallFailure(
+              (errorEvent.code ?? 'call_generation_failed') as CallErrorCode
+            );
         const staleAgainstNewerResponse =
           activeAiTurnId !== null && activeAiTurnId !== (errorEvent.turn_id ?? null);
         if (staleAgainstNewerResponse) {
