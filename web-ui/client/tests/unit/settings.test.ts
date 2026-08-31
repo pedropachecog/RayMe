@@ -13,6 +13,7 @@ import endpointPanelSource from '../../src/lib/components/EndpointSettingsPanel.
 import enginePickerSource from '../../src/lib/components/voice/TtsEnginePicker.svelte?raw';
 import voiceAssignmentSource from '../../src/lib/components/voice/VoiceAssignmentSelect.svelte?raw';
 import audioPanelSource from '../../src/lib/components/settings/AudioSettingsPanel.svelte?raw';
+import promptPanelSource from '../../src/lib/components/settings/PromptGenerationSettingsPanel.svelte?raw';
 import vadPanelSource from '../../src/lib/components/settings/VadSettingsPanel.svelte?raw';
 import settingsSource from '../../src/routes/settings/+page.svelte?raw';
 
@@ -29,6 +30,32 @@ const publicSettings = {
   vad_end_silence_ms: 700,
   stt_model: 'distil-large-v3',
   tts_default_engine: 'f5',
+  prompt_generation: {
+    schema_version: 1,
+    prompt_contract_version: 'rayme-prompt-contract-v1',
+    mode: 'roleplay',
+    roleplay: {
+      main: "Write only {{char}}'s next reply.",
+      auxiliary: 'Private fictional guidance <img src=x onerror=alert(1)>',
+      post_history: 'Continue immediately in character.'
+    },
+    assistant: {
+      main: 'You are a helpful assistant.',
+      auxiliary: 'Be useful and concise.',
+      post_history: 'Respond with no unnecessary preamble.'
+    },
+    custom: { main: '', auxiliary: '', post_history: '' },
+    model_profile: 'auto',
+    context_limit: 16384,
+    max_tokens: 512,
+    temperature: 0.8,
+    top_p: 0.95,
+    min_p: 0.05,
+    top_k: 40,
+    repetition_penalty: 1.05,
+    presence_penalty: 0,
+    frequency_penalty: 0
+  },
   ai_backend_status: {
     endpoint_status: 'Connected',
     stt_model: 'distil-large-v3',
@@ -278,5 +305,151 @@ describe('Settings route', () => {
     expect(statusPill).toContain('{status}');
     expect(statusPill).not.toContain('apiKeyValue');
     expect(statusPill).not.toContain('llmApiKey');
+  });
+
+  it('declares the complete typed prompt profile and sends nested numbers without coercion', async () => {
+    for (const contract of [
+      'PromptMode',
+      'PromptSet',
+      'PromptGenerationSettings',
+      'ModelProfile',
+      'prompt_generation',
+      'context_limit',
+      'max_tokens',
+      'repetition_penalty',
+      'frequency_penalty'
+    ]) {
+      expect(typesSource).toContain(contract);
+    }
+
+    const fetchMock = installFetch({ '/api/settings::PATCH': publicSettings });
+    await updateSettings({
+      prompt_generation: {
+        ...publicSettings.prompt_generation,
+        mode: 'custom',
+        custom: { main: '<script>alert(1)</script>', auxiliary: '', post_history: '' },
+        context_limit: 32768,
+        temperature: 1.25,
+        top_k: 77
+      }
+    });
+
+    const request = lastRequest(fetchMock);
+    const payload = JSON.parse(request.init.body as string);
+    expect(payload).not.toHaveProperty('roleplay');
+    expect(payload).not.toHaveProperty('seed');
+    expect(payload.prompt_generation).toMatchObject({
+      mode: 'custom',
+      context_limit: 32768,
+      temperature: 1.25,
+      top_k: 77,
+      custom: { main: '<script>alert(1)</script>', auxiliary: '', post_history: '' }
+    });
+    expect(typeof payload.prompt_generation.context_limit).toBe('number');
+    expect(typeof payload.prompt_generation.temperature).toBe('number');
+    expect(typeof payload.prompt_generation.top_k).toBe('number');
+  });
+
+  it('renders the exact Roleplay-first mode, prompt, profile, seed, and save copy', () => {
+    for (const copy of [
+      'LLM behavior',
+      'Prompt & Generation',
+      'Choose how RayMe composes character requests and tune the bounded generation settings used by text and calls.',
+      'Roleplay',
+      'Default',
+      "Write the selected character's next in-world reply without AI or policy commentary.",
+      'Assistant',
+      'Use a conventional helpful-assistant prompt.',
+      'Custom',
+      'Use your own Main, Auxiliary, and late post-history prompts.',
+      'Main prompt',
+      'Auxiliary prompt',
+      'Post-history instruction',
+      'Built-in preset',
+      'Modified',
+      'Reset Roleplay Prompts',
+      'Reset Assistant Prompts',
+      'Model profile',
+      'Auto (recommended)',
+      'Qwen / llama-server',
+      'Generic OpenAI-compatible',
+      'Disable Qwen thinking',
+      'Used only when Auto resolves to Qwen or Qwen / llama-server is selected.',
+      'Seed: Fresh random value generated for every attempt.',
+      'Settings saved.',
+      'RayMe could not save settings. Your changes are still here. Try again.'
+    ]) {
+      expect(`${settingsSource}\n${promptPanelSource}`).toContain(copy);
+    }
+
+    expect(settingsSource).toContain('<h1 id="settings-title">Settings</h1>');
+    expect(settingsSource).toContain('PromptGenerationSettingsPanel');
+    expect(settingsSource).not.toContain('Endpoint settings saved.');
+    expect(settingsSource).not.toContain('RayMe could not save endpoint settings.');
+    expect(promptPanelSource).not.toMatch(/\bseed\s*=|type="[^\"]*seed|name="seed"/i);
+    expect(promptPanelSource).not.toContain('{@html}');
+    expect(promptPanelSource).not.toContain('innerHTML');
+  });
+
+  it('uses exact numeric defaults, bounds, steps, helper purpose, and validation copy', () => {
+    const controls = [
+      ['Context limit', '16384', '2048', '131072', '1024', 'Estimated total context capacity configured for the running server.', 'Context limit must be between 2,048 and 131,072, in steps of 1,024.'],
+      ['Maximum output tokens', '512', '64', '4096', '64', 'Reserved before prompt/history budgeting.', 'Maximum output tokens must be between 64 and 4,096, in steps of 64.'],
+      ['Temperature', '0.8', '0', '2', '0.05', 'Higher values increase variation.', 'Temperature must be between 0.00 and 2.00, in steps of 0.05.'],
+      ['Top-p', '0.95', '0.01', '1', '0.01', 'Nucleus sampling probability mass.', 'Top-p must be between 0.01 and 1.00, in steps of 0.01.'],
+      ['Min-p', '0.05', '0', '1', '0.01', 'Qwen/llama-server minimum probability filter.', 'Min-p must be between 0.00 and 1.00, in steps of 0.01.'],
+      ['Top-k', '40', '0', '200', '1', 'Candidate-token limit; 0 disables it where supported.', 'Top-k must be between 0 and 200, in steps of 1.'],
+      ['Repetition penalty', '1.05', '0.5', '2', '0.01', 'Discourages repeated phrasing.', 'Repetition penalty must be between 0.50 and 2.00, in steps of 0.01.'],
+      ['Presence penalty', '0', '-2', '2', '0.1', 'Adjusts reuse based on whether a token appeared.', 'Presence penalty must be between -2.00 and 2.00, in steps of 0.10.'],
+      ['Frequency penalty', '0', '-2', '2', '0.1', 'Adjusts reuse based on how often a token appeared.', 'Frequency penalty must be between -2.00 and 2.00, in steps of 0.10.']
+    ];
+
+    for (const [label, defaultValue, min, max, step, helper, error] of controls) {
+      for (const copy of [label, defaultValue, min, max, step, helper, error]) {
+        expect(promptPanelSource).toContain(copy);
+      }
+    }
+    expect(promptPanelSource).toContain('type="number"');
+    expect(promptPanelSource).toContain('aria-invalid');
+    expect(promptPanelSource).toContain('aria-describedby');
+  });
+
+  it('keeps field-local required errors, independent drafts, exact reset scope, and accessible focus', () => {
+    for (const copy of [
+      'Add a Main prompt before saving Roleplay mode.',
+      'Add an Auxiliary prompt before saving Roleplay mode.',
+      'Add a Post-history instruction before saving Roleplay mode.',
+      'Add a Main prompt before saving Assistant mode.',
+      'Add an Auxiliary prompt before saving Assistant mode.',
+      'Add a Post-history instruction before saving Assistant mode.',
+      'Add a Main prompt before saving Custom mode.',
+      'Reset Roleplay prompts?',
+      "This replaces your Roleplay Main, Auxiliary, and post-history text with RayMe's built-in defaults. Generation settings will not change.",
+      'Reset Assistant prompts?',
+      "This replaces your Assistant Main, Auxiliary, and post-history text with RayMe's built-in defaults. Generation settings will not change.",
+      'Reset Prompts',
+      'Keep Changes',
+      'Roleplay prompts reset to built-in defaults.',
+      'Assistant prompts reset to built-in defaults.'
+    ]) {
+      expect(promptPanelSource).toContain(copy);
+    }
+
+    expect(promptPanelSource).toContain('type="radio"');
+    expect(promptPanelSource).toContain('<fieldset');
+    expect(promptPanelSource).toContain('<legend');
+    expect(promptPanelSource).toContain('<ConfirmDialog');
+    expect(promptPanelSource).toContain('.focus()');
+    expect(promptPanelSource).toContain('role="status"');
+    expect(promptPanelSource).toMatch(/roleplay.*assistant.*custom|custom.*assistant.*roleplay/s);
+  });
+
+  it('preserves the existing skeleton and one page-level save transaction', () => {
+    expect(settingsSource).toContain("loadState === 'loading'");
+    expect(settingsSource).toContain('aria-label="Loading settings"');
+    expect(settingsSource).toContain('prompt_generation: promptGeneration');
+    expect(settingsSource.match(/<span>Save Settings<\/span>/g)).toHaveLength(1);
+    expect(settingsSource).toContain("saveState === 'saving' || !promptGenerationValid");
+    expect(settingsSource).not.toContain('Reset all');
   });
 });
