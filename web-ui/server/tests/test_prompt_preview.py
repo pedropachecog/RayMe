@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import threading
 from collections.abc import Iterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -18,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
 from app.domain.prompt_profiles import PromptGenerationSettings
+from app.domain.refusal_activity import RefusalActivityRecord, RefusalActivityStore
 from app.domain.settings_service import SETTINGS_KEY
 from app.main import create_app
 from app.storage.models import AppSetting, Base, Character, Message, Thread
@@ -39,6 +42,7 @@ class PromptPreviewFixture:
     client: TestClient
     app: FastAPI
     sessionmaker: async_sessionmaker[AsyncSession]
+    activity: RefusalActivityStore
 
 
 @pytest.fixture()
@@ -153,15 +157,24 @@ def prompt_preview_fixture(tmp_path: Path) -> Iterator[PromptPreviewFixture]:
     except ModuleNotFoundError:
         preview_module = None
 
+    activity = RefusalActivityStore()
     if preview_module is not None:
         async def override_session() -> Iterator[AsyncSession]:
             async with sessionmaker() as session:
                 yield session
 
         app.dependency_overrides[preview_module.get_prompt_preview_session] = override_session
+        app.dependency_overrides[
+            preview_module.get_prompt_preview_refusal_activity_store
+        ] = lambda: activity
 
     with TestClient(app) as client:
-        yield PromptPreviewFixture(client=client, app=app, sessionmaker=sessionmaker)
+        yield PromptPreviewFixture(
+            client=client,
+            app=app,
+            sessionmaker=sessionmaker,
+            activity=activity,
+        )
 
     asyncio.run(engine.dispose())
 
@@ -377,3 +390,411 @@ def test_prompt_preview_openapi_is_strict_and_credential_free(
         "rejected_prose",
     ):
         assert forbidden_name not in operation_text
+
+
+@pytest.mark.parametrize(
+    ("action", "extra"),
+    [
+        ("send", {"composer_text": COMPOSER_CANARY}),
+        ("regenerate", {"target_message_id": "msg_preview_002"}),
+        ("swipe", {"target_message_id": "msg_preview_002"}),
+        (
+            "continue",
+            {
+                "target_message_id": "msg_preview_002",
+                "composer_text": "assistant prefix café 🫀",
+            },
+        ),
+        ("call_offer", {}),
+        ("call_turn", {"composer_text": "spoken turn 漢字 🫀"}),
+    ],
+)
+def test_every_action_matches_the_shared_composer_and_adapter_exactly(
+    prompt_preview_fixture: PromptPreviewFixture,
+    action: str,
+    extra: dict[str, str],
+) -> None:
+    payload = {"action": action, "thread_id": THREAD_ID, **extra}
+
+    response = prompt_preview_fixture.client.post(
+        "/api/prompt-preview",
+        headers={"Origin": ALLOWED_ORIGIN},
+        json=payload,
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    expected = asyncio.run(
+        _direct_action_projection(
+            prompt_preview_fixture,
+            action=action,
+            target_message_id=extra.get("target_message_id"),
+            composer_text=extra.get("composer_text"),
+        )
+    )
+    assert body["action"] == action
+    assert [
+        (
+            section["section_id"],
+            section["logical_role"],
+            section["content"],
+            section["estimated_tokens"],
+        )
+        for section in body["sections"]
+    ] == expected["sections"]
+    assert [
+        (message["role"], message["content"], tuple(message["section_ids"]))
+        for message in body["wire_messages"]
+    ] == expected["wire_messages"]
+    assert body["effective_request"]["messages"] == expected["request"]["messages"]
+    assert body["effective_request"]["max_tokens"] == expected["request"]["max_tokens"]
+    assert body["effective_request"]["extra_body"] == expected["request"].get("extra_body")
+    assert body["adapter"]["effective"] == expected["effective_adapter"]
+    assert body["budget"]["estimated_input_tokens"] == expected["estimated_input_tokens"]
+    assert body["budget"]["dropped_history_count"] == expected["dropped_history_count"]
+
+
+def test_action_specific_branch_prefill_and_call_limits_are_truthful(
+    prompt_preview_fixture: PromptPreviewFixture,
+) -> None:
+    regenerate = prompt_preview_fixture.client.post(
+        "/api/prompt-preview",
+        json={
+            "action": "regenerate",
+            "thread_id": THREAD_ID,
+            "target_message_id": "msg_preview_002",
+        },
+    ).json()
+    continued = prompt_preview_fixture.client.post(
+        "/api/prompt-preview",
+        json={
+            "action": "continue",
+            "thread_id": THREAD_ID,
+            "target_message_id": "msg_preview_002",
+            "composer_text": "immutable prefix 🫀",
+        },
+    ).json()
+    call_offer = prompt_preview_fixture.client.post(
+        "/api/prompt-preview",
+        json={"action": "call_offer", "thread_id": THREAD_ID},
+    ).json()
+    call_turn = prompt_preview_fixture.client.post(
+        "/api/prompt-preview",
+        json={
+            "action": "call_turn",
+            "thread_id": THREAD_ID,
+            "composer_text": "new live turn",
+        },
+    ).json()
+
+    assert "Prior assistant turn." not in _serialized(regenerate["wire_messages"])
+    assert continued["wire_messages"][-1] == {
+        "order": len(continued["wire_messages"]) - 1,
+        "role": "assistant",
+        "content": "immutable prefix 🫀",
+        "section_ids": ["assistant_prefill"],
+    }
+    assert call_offer["budget"]["max_messages"] == 48
+    assert call_offer["budget"]["max_content_length"] == 20_000
+    assert len(call_offer["wire_messages"]) <= 48
+    assert call_turn["budget"]["max_messages"] is None
+    assert call_turn["budget"]["max_content_length"] is None
+
+
+def test_refusal_activity_zero_one_many_is_ordered_and_metadata_only(
+    prompt_preview_fixture: PromptPreviewFixture,
+) -> None:
+    empty = prompt_preview_fixture.client.post(
+        "/api/prompt-preview", json=_send_payload()
+    ).json()
+    assert empty["recent_refusal_activity"] == []
+
+    records = [
+        RefusalActivityRecord(
+            action="send",
+            attempt=index,
+            reason_code="policy_or_safety" if index == 1 else "safe_prefix",
+            prefix_characters=20 + index,
+            prefix_estimated_tokens=6 + index,
+            retry_count=index - 1,
+            release_ms=None if index == 1 else 12.5,
+            decision_ms=3.5 * index,
+            terminal_outcome="retry" if index == 1 else "accepted",
+            timestamp=f"2026-08-31T00:00:0{index}Z",
+        )
+        for index in (1, 2)
+    ]
+    for record in records:
+        prompt_preview_fixture.activity.append(THREAD_ID, record)
+
+    populated = prompt_preview_fixture.client.post(
+        "/api/prompt-preview", json=_send_payload()
+    ).json()["recent_refusal_activity"]
+    assert populated == [record.to_dict() for record in records]
+    assert [row["timestamp"] for row in populated] == sorted(
+        row["timestamp"] for row in populated
+    )
+    serialized = _serialized(populated).casefold()
+    for forbidden in (
+        "prompt",
+        "history",
+        "content",
+        "generated",
+        "rejected",
+        "seed",
+        PRIVATE_KEY_CANARY.casefold(),
+    ):
+        assert forbidden not in serialized
+
+
+def test_lorebook_stays_persisted_but_never_enters_any_action_preview(
+    prompt_preview_fixture: PromptPreviewFixture,
+) -> None:
+    actions = [
+        _send_payload(),
+        {
+            "action": "regenerate",
+            "thread_id": THREAD_ID,
+            "target_message_id": "msg_preview_002",
+        },
+        {
+            "action": "swipe",
+            "thread_id": THREAD_ID,
+            "target_message_id": "msg_preview_002",
+        },
+        {
+            "action": "continue",
+            "thread_id": THREAD_ID,
+            "target_message_id": "msg_preview_002",
+            "composer_text": "prefix",
+        },
+        {"action": "call_offer", "thread_id": THREAD_ID},
+        {"action": "call_turn", "thread_id": THREAD_ID, "composer_text": "turn"},
+    ]
+
+    for payload in actions:
+        response = prompt_preview_fixture.client.post("/api/prompt-preview", json=payload)
+        assert response.status_code == 200
+        assert REJECTED_PROSE_CANARY not in response.text
+
+    assert asyncio.run(
+        _stored_lorebook(prompt_preview_fixture.sessionmaker)
+    ) == {"secret": REJECTED_PROSE_CANARY}
+
+
+@pytest.mark.parametrize(
+    ("examples", "expected_groups"),
+    [
+        (None, 0),
+        ("<START>\n{{user}}: one\n{{char}}: answer", 1),
+        (
+            "<START>\n{{user}}: one\n{{char}}: answer one\n"
+            "<START>\n{{user}}: two\n{{char}}: answer two",
+            2,
+        ),
+    ],
+)
+def test_zero_one_many_example_groups_and_blank_optional_sections_are_exact(
+    prompt_preview_fixture: PromptPreviewFixture,
+    examples: str | None,
+    expected_groups: int,
+) -> None:
+    asyncio.run(
+        _set_thread_examples_and_optional_sections(
+            prompt_preview_fixture.sessionmaker,
+            examples,
+        )
+    )
+
+    body = prompt_preview_fixture.client.post(
+        "/api/prompt-preview", json=_send_payload()
+    ).json()
+
+    assert body["budget"]["included_example_group_count"] == expected_groups
+    example_ids = [
+        section["atomic_group_id"]
+        for section in body["sections"]
+        if section["section_id"].startswith("example:")
+    ]
+    assert len(set(example_ids)) == expected_groups
+    assert any(
+        section["section_id"] == "late_phi" and section["content"] == "Continue as Mara."
+        for section in body["sections"]
+    )
+
+
+def test_drops_are_counted_and_mandatory_overflow_is_typed(
+    prompt_preview_fixture: PromptPreviewFixture,
+) -> None:
+    asyncio.run(_append_large_preview_history(prompt_preview_fixture.sessionmaker))
+    dropped = prompt_preview_fixture.client.post(
+        "/api/prompt-preview", json=_send_payload()
+    )
+    assert dropped.status_code == 200
+    assert dropped.json()["budget"]["dropped_history_count"] > 0
+
+    asyncio.run(
+        _set_thread_system_prompt(prompt_preview_fixture.sessionmaker, "x" * 20_000)
+    )
+    overflow = prompt_preview_fixture.client.post(
+        "/api/prompt-preview", json=_send_payload()
+    )
+    assert overflow.status_code == 422
+    assert overflow.json()["detail"]["code"] == "prompt_budget_exceeded"
+    assert PRIVATE_KEY_CANARY not in overflow.text
+
+
+def test_barrier_synchronized_previews_do_not_cross_contaminate_or_persist(
+    prompt_preview_fixture: PromptPreviewFixture,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    preview_module = importlib.import_module("app.api.prompt_preview")
+    original = preview_module.build_structured_prompt
+    barrier = threading.Barrier(2)
+
+    async def synchronized(*args: object, **kwargs: object) -> object:
+        await asyncio.to_thread(barrier.wait, 3.0)
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(preview_module, "build_structured_prompt", synchronized)
+    before = asyncio.run(_persistent_counts(prompt_preview_fixture.sessionmaker))
+    drafts = ["concurrent alpha café", "concurrent beta 漢字"]
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(
+                prompt_preview_fixture.client.post,
+                "/api/prompt-preview",
+                json=_send_payload(composer_text=draft),
+            )
+            for draft in drafts
+        ]
+        responses = [future.result(timeout=5.0) for future in futures]
+
+    assert [response.status_code for response in responses] == [200, 200]
+    for own, other, response in zip(drafts, reversed(drafts), responses, strict=True):
+        assert own in response.text
+        assert other not in response.text
+    assert asyncio.run(_persistent_counts(prompt_preview_fixture.sessionmaker)) == before
+
+
+async def _direct_action_projection(
+    fixture: PromptPreviewFixture,
+    *,
+    action: str,
+    target_message_id: str | None,
+    composer_text: str | None,
+) -> dict[str, object]:
+    from app.domain.generation_profiles import build_generation_request
+    from app.domain.message_actions import SqlAlchemyMessageActionRepository
+    from app.domain.prompt_builder import SqlAlchemyPromptRepository, build_structured_prompt
+    from app.domain.settings_service import SettingsService
+
+    async with fixture.sessionmaker() as session:
+        endpoint = await SettingsService(session, fixture.app.state.settings).read()
+        until_message_id = None
+        effective_composer = composer_text
+        repository: object = SqlAlchemyPromptRepository(session)
+        if action in {"regenerate", "swipe", "continue"}:
+            assert target_message_id is not None
+            repository = SqlAlchemyMessageActionRepository(session)
+            context = await repository.get_generation_context(
+                target_message_id,
+                include_target=False,
+            )
+            assert context.thread_id == THREAD_ID
+            until_message_id = context.until_message_id
+            if action == "continue":
+                effective_composer = composer_text or context.selected_content
+                if not effective_composer:
+                    context = await repository.get_generation_context(
+                        target_message_id,
+                        include_target=True,
+                    )
+                    until_message_id = context.until_message_id
+        prompt = await build_structured_prompt(
+            THREAD_ID,
+            settings=endpoint.prompt_generation,
+            repository=repository,  # type: ignore[arg-type]
+            until_message_id=until_message_id,
+            action=action,  # type: ignore[arg-type]
+            composer_text=effective_composer,
+        )
+        request = build_generation_request(
+            model=endpoint.llm_model,
+            messages=prompt.transmitted_message_candidates,
+            settings=endpoint.prompt_generation,
+            seed=0,
+            attempt=1,
+            disable_thinking=endpoint.llm_disable_thinking,
+        )
+        return {
+            "sections": [
+                (
+                    section.section_id,
+                    section.logical_role,
+                    section.content,
+                    section.estimated_tokens,
+                )
+                for section in prompt.sections
+            ],
+            "wire_messages": [
+                (message.role, message.content, message.section_ids)
+                for message in request.messages
+            ],
+            "request": request.to_openai_kwargs(),
+            "effective_adapter": request.effective_adapter,
+            "estimated_input_tokens": prompt.estimated_input_tokens,
+            "dropped_history_count": prompt.dropped_history_count,
+        }
+
+
+async def _stored_lorebook(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> object:
+    async with sessionmaker() as session:
+        thread = await session.get(Thread, THREAD_ID)
+        assert thread is not None
+        return thread.character_snapshot_lorebook_json
+
+
+async def _set_thread_examples_and_optional_sections(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    examples: str | None,
+) -> None:
+    async with sessionmaker() as session:
+        thread = await session.get(Thread, THREAD_ID)
+        assert thread is not None
+        thread.character_snapshot_mes_example = examples
+        thread.character_snapshot_post_history_instructions = ""
+        await session.commit()
+
+
+async def _append_large_preview_history(
+    sessionmaker: async_sessionmaker[AsyncSession],
+) -> None:
+    async with sessionmaker() as session:
+        session.add_all(
+            [
+                Message(
+                    id=f"msg_preview_long_{index:03d}",
+                    thread_id=THREAD_ID,
+                    message_kind="user_text" if index % 2 == 0 else "ai_text",
+                    role="user" if index % 2 == 0 else "assistant",
+                    sequence=index + 2,
+                    content_text=f"long history {index:03d} " + ("漢字🫀" * 150),
+                )
+                for index in range(40)
+            ]
+        )
+        await session.commit()
+
+
+async def _set_thread_system_prompt(
+    sessionmaker: async_sessionmaker[AsyncSession],
+    content: str,
+) -> None:
+    async with sessionmaker() as session:
+        thread = await session.get(Thread, THREAD_ID)
+        assert thread is not None
+        thread.character_snapshot_system_prompt = content
+        await session.commit()
