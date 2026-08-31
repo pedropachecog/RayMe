@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.domain.generation_profiles import GenerationAdapterError
 from app.domain.llm_stream import ChatCompletionSettings
 from app.domain.message_actions import (
     InvalidMessageActionError,
@@ -23,6 +24,8 @@ from app.domain.message_actions import (
     select_message_alternate,
     truncate_stale_after_message,
 )
+from app.domain.prompt_builder import PromptBudgetExceeded
+from app.domain.refusal_guard import LLMGuardError
 from app.domain.settings_service import SettingsService
 from app.domain.thread_service import ThreadNotFoundError
 from app.storage.models import ThreadMessageShape
@@ -90,6 +93,8 @@ async def regenerate_message(
         raise HTTPException(status_code=404, detail="Message not found") from exc
     except InvalidMessageActionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (GenerationAdapterError, PromptBudgetExceeded, LLMGuardError) as exc:
+        raise _generation_http_exception(exc) from exc
     return _message_response(message)
 
 
@@ -120,6 +125,8 @@ async def swipe_message(
         raise HTTPException(status_code=404, detail="Message not found") from exc
     except InvalidMessageActionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (GenerationAdapterError, PromptBudgetExceeded, LLMGuardError) as exc:
+        raise _generation_http_exception(exc) from exc
     return _message_response(message)
 
 
@@ -188,6 +195,8 @@ async def continue_message(
         raise HTTPException(status_code=404, detail="Message not found") from exc
     except InvalidMessageActionError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except (GenerationAdapterError, PromptBudgetExceeded, LLMGuardError) as exc:
+        raise _generation_http_exception(exc) from exc
     return _message_response(message)
 
 
@@ -201,11 +210,22 @@ async def _completion_settings(
         api_key=endpoint_settings.llm_api_key,
         model=endpoint_settings.llm_model,
         disable_thinking=endpoint_settings.llm_disable_thinking,
+        prompt_generation=endpoint_settings.prompt_generation,
     )
 
 
 def _message_response(message: ThreadMessageShape) -> dict[str, Any]:
     return message.to_dict()
+
+
+def _generation_http_exception(
+    exc: GenerationAdapterError | PromptBudgetExceeded | LLMGuardError,
+) -> HTTPException:
+    if isinstance(exc, LLMGuardError):
+        detail: dict[str, object] = {"code": exc.code, "message": exc.message}
+    else:
+        detail = exc.to_public_dict()
+    return HTTPException(status_code=502, detail=detail)
 
 
 __all__ = [

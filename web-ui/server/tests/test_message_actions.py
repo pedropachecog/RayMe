@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterator
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -15,14 +16,19 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from app.api.messages import get_message_action_session, get_message_completion_client
 from app.config import Settings
 from app.domain import message_actions
-from app.domain.llm_stream import ChatCompletionSettings
+from app.domain.llm_stream import (
+    REFUSAL_RETRY_CORRECTION,
+    ChatCompletionSettings,
+)
 from app.domain.message_actions import MessageGenerationContext, SqlAlchemyMessageActionRepository
 from app.domain.prompt_builder import (
+    PromptMessageCandidate,
     SqlAlchemyPromptRepository,
     build_prompt_context,
     build_structured_prompt,
 )
 from app.domain.prompt_profiles import PromptGenerationSettings
+from app.domain.refusal_guard import LLMEmptyOutput, LLMRefusalExhausted
 from app.domain.settings_service import SETTINGS_KEY
 from app.domain.thread_service import ThreadService
 from app.main import create_app
@@ -252,6 +258,43 @@ class ScriptedCompletionClient:
             yield token
 
 
+_WAIT_FOR_CANCELLATION = object()
+
+
+class ActionAttemptClient:
+    def __init__(self, scripts: list[list[str | object]]) -> None:
+        self.scripts = scripts
+        self.requests: list[dict[str, object]] = []
+        self.closed_attempts: list[int] = []
+        self.waiting = asyncio.Event()
+
+    async def stream_chat_completion_tokens(
+        self,
+        settings: ChatCompletionSettings,
+        messages: list[dict[str, object]],
+        *,
+        seed: int,
+        attempt: int,
+    ):
+        self.requests.append(
+            {
+                "settings": settings,
+                "messages": [dict(message) for message in messages],
+                "seed": seed,
+                "attempt": attempt,
+            }
+        )
+        try:
+            for item in self.scripts[attempt - 1]:
+                if item is _WAIT_FOR_CANCELLATION:
+                    self.waiting.set()
+                    await asyncio.Event().wait()
+                else:
+                    yield str(item)
+        finally:
+            self.closed_attempts.append(attempt)
+
+
 @pytest.fixture()
 def message_action_client(
     tmp_path: Path,
@@ -294,11 +337,11 @@ async def test_regenerate_calls_llm_and_replaces_selected_ai_response(
     repository = ScriptedActionRepository()
     calls: list[tuple[str, object]] = []
 
-    async def scripted_build_prompt_context(*args: object, **kwargs: object) -> list[dict[str, str]]:
-        calls.append(("build_prompt_context", kwargs["action"]))
+    async def scripted_build_structured_prompt(*args: object, **kwargs: object) -> object:
+        calls.append(("build_structured_prompt", kwargs["action"]))
         assert kwargs["repository"] is repository
         assert kwargs["until_message_id"] == "user-1"
-        return [{"role": "user", "content": "Prompt from user"}]
+        return _prompt_result(("user", "Prompt from user", ("history:user-1",)))
 
     async def scripted_collect_chat_completion(
         settings: ChatCompletionSettings,
@@ -307,11 +350,17 @@ async def test_regenerate_calls_llm_and_replaces_selected_ai_response(
         calls.append(("collect_chat_completion", settings))
         assert settings == SERVER_SETTINGS
         assert settings.api_key == "server-secret"
-        assert messages == [{"role": "user", "content": "Prompt from user"}]
+        assert _role_content_messages(messages) == [{"role": "user", "content": "Prompt from user"}]
         return "Regenerated server response"
 
-    monkeypatch.setattr(message_actions, "build_prompt_context", scripted_build_prompt_context)
-    monkeypatch.setattr(message_actions, "collect_chat_completion", scripted_collect_chat_completion)
+    monkeypatch.setattr(
+        message_actions,
+        "build_structured_prompt",
+        scripted_build_structured_prompt,
+    )
+    monkeypatch.setattr(
+        message_actions, "collect_chat_completion", scripted_collect_chat_completion
+    )
 
     result = await message_actions.regenerate_ai_turn(
         "ai-1",
@@ -319,7 +368,7 @@ async def test_regenerate_calls_llm_and_replaces_selected_ai_response(
         settings=SERVER_SETTINGS,
     )
 
-    assert calls[0] == ("build_prompt_context", "regenerate")
+    assert calls[0] == ("build_structured_prompt", "regenerate")
     assert calls[1] == ("collect_chat_completion", SERVER_SETTINGS)
     assert [message.content_text for message in repository.visible_ai_turns()] == [
         "Regenerated server response"
@@ -332,10 +381,10 @@ async def test_swipe_calls_llm_persists_alternate_and_excludes_unselected_from_f
 ) -> None:
     repository = ScriptedActionRepository()
 
-    async def scripted_build_prompt_context(*args: object, **kwargs: object) -> list[dict[str, str]]:
+    async def scripted_build_structured_prompt(*args: object, **kwargs: object) -> object:
         assert kwargs["repository"] is repository
         assert kwargs["action"] == "swipe"
-        return [{"role": "assistant", "content": "Selected branch only"}]
+        return _prompt_result(("assistant", "Selected branch only", ("history:ai-selected",)))
 
     async def scripted_collect_chat_completion(
         settings: ChatCompletionSettings,
@@ -347,8 +396,14 @@ async def test_swipe_calls_llm_persists_alternate_and_excludes_unselected_from_f
         assert "Hidden branch" not in prompt_text
         return "Generated swipe alternate"
 
-    monkeypatch.setattr(message_actions, "build_prompt_context", scripted_build_prompt_context)
-    monkeypatch.setattr(message_actions, "collect_chat_completion", scripted_collect_chat_completion)
+    monkeypatch.setattr(
+        message_actions,
+        "build_structured_prompt",
+        scripted_build_structured_prompt,
+    )
+    monkeypatch.setattr(
+        message_actions, "collect_chat_completion", scripted_collect_chat_completion
+    )
 
     result = await message_actions.create_swipe_alternate(
         "ai-1",
@@ -367,27 +422,36 @@ async def test_continue_commits_composer_text_before_selecting_continue_alternat
 ) -> None:
     repository = ScriptedActionRepository()
 
-    async def scripted_build_prompt_context(*args: object, **kwargs: object) -> list[dict[str, str]]:
+    async def scripted_build_structured_prompt(*args: object, **kwargs: object) -> object:
         assert kwargs["repository"] is repository
         assert kwargs["action"] == "continue"
         assert kwargs["until_message_id"] == "user-1"
         assert kwargs["composer_text"] == "finish this sentence"
-        return [
-            {"role": "user", "content": "Prompt from user"},
-            {"role": "assistant", "content": "finish this sentence"},
-        ]
+        return _prompt_result(
+            ("user", "Prompt from user", ("history:user-1",)),
+            ("assistant", "finish this sentence", ("assistant_prefill",)),
+        )
 
     async def scripted_collect_chat_completion(
         settings: ChatCompletionSettings,
         messages: list[dict[str, str]],
     ) -> str:
         assert settings == SERVER_SETTINGS
-        assert messages[-1] == {"role": "assistant", "content": "finish this sentence"}
+        assert _role_content(messages[-1]) == {
+            "role": "assistant",
+            "content": "finish this sentence",
+        }
         assert all(message["content"] != "Original AI response" for message in messages)
         return "Extended AI response"
 
-    monkeypatch.setattr(message_actions, "build_prompt_context", scripted_build_prompt_context)
-    monkeypatch.setattr(message_actions, "collect_chat_completion", scripted_collect_chat_completion)
+    monkeypatch.setattr(
+        message_actions,
+        "build_structured_prompt",
+        scripted_build_structured_prompt,
+    )
+    monkeypatch.setattr(
+        message_actions, "collect_chat_completion", scripted_collect_chat_completion
+    )
 
     result = await message_actions.continue_ai_turn(
         "ai-1",
@@ -468,6 +532,56 @@ async def test_generation_actions_share_saved_profile_and_structured_composer(
         assert request["messages"][-1]["content"] == "Existing prefix."
 
 
+@pytest.mark.parametrize("action", ["regenerate", "swipe", "continue"])
+async def test_generation_action_outcome_matrix_is_accepted_only_and_atomic(action: str) -> None:
+    refusal = "I cannot continue because the safety guidelines forbid it."
+
+    accepted_repository = ScriptedActionRepository()
+    accepted_client = ActionAttemptClient([[refusal], ["Accepted action response."]])
+    accepted = await _invoke_generation_action(action, accepted_repository, accepted_client)
+    assert accepted.selected_content()
+    assert accepted_client.closed_attempts == [1, 2]
+    assert [request["attempt"] for request in accepted_client.requests] == [1, 2]
+    retry_messages = accepted_client.requests[1]["messages"]
+    correction_index = -2 if action == "continue" else -1
+    assert _role_content(retry_messages[correction_index]) == {
+        "role": "user",
+        "content": REFUSAL_RETRY_CORRECTION,
+    }
+    assert refusal not in repr(retry_messages)
+
+    exhausted_repository = ScriptedActionRepository()
+    exhausted_before = exhausted_repository.messages["ai-1"]
+    exhausted_client = ActionAttemptClient([[refusal], [refusal], [refusal]])
+    with pytest.raises(LLMRefusalExhausted):
+        await _invoke_generation_action(action, exhausted_repository, exhausted_client)
+    assert exhausted_repository.messages["ai-1"] == exhausted_before
+    assert exhausted_client.closed_attempts == [1, 2, 3]
+
+    empty_repository = ScriptedActionRepository()
+    empty_before = empty_repository.messages["ai-1"]
+    empty_client = ActionAttemptClient([[]])
+    with pytest.raises(LLMEmptyOutput):
+        await _invoke_generation_action(action, empty_repository, empty_client)
+    assert empty_repository.messages["ai-1"] == empty_before
+    assert empty_client.closed_attempts == [1]
+
+    cancelled_repository = ScriptedActionRepository()
+    cancelled_before = cancelled_repository.messages["ai-1"]
+    cancelled_client = ActionAttemptClient(
+        [["Accepted prefix before cancellation.", _WAIT_FOR_CANCELLATION]]
+    )
+    cancelled_task = asyncio.create_task(
+        _invoke_generation_action(action, cancelled_repository, cancelled_client)
+    )
+    await cancelled_client.waiting.wait()
+    cancelled_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await cancelled_task
+    assert cancelled_repository.messages["ai-1"] == cancelled_before
+    assert cancelled_client.closed_attempts == [1]
+
+
 async def test_edit_marks_downstream_turns_stale() -> None:
     repository = ScriptedActionRepository()
 
@@ -531,6 +645,7 @@ def test_regenerate_route_uses_server_settings_and_replaces_without_appending_ai
         model="server-model",
         api_key="server-secret",
         disable_thinking=True,
+        prompt_generation=PromptGenerationSettings.defaults(),
     )
 
     rows = asyncio.run(_messages_for_thread(sessionmaker, ids["thread"]))
@@ -563,7 +678,47 @@ def test_message_action_routes_forward_qwen_disable_thinking_setting(
         model="unsloth/Qwen3.5-27B",
         api_key="server-secret",
         disable_thinking=disable_thinking,
+        prompt_generation=PromptGenerationSettings.defaults(),
     )
+
+
+@pytest.mark.parametrize(
+    ("path_suffix", "payload"),
+    [
+        ("regenerate", None),
+        ("swipes", None),
+        ("continue", {"composer_text": "Existing prefix."}),
+    ],
+)
+@pytest.mark.parametrize(
+    ("tokens", "expected_code"),
+    [
+        (["I cannot continue because the safety guidelines forbid it."], "llm_refusal_exhausted"),
+        ([], "llm_empty_output"),
+    ],
+)
+def test_message_action_routes_return_typed_failures_without_version_mutation(
+    message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
+    path_suffix: str,
+    payload: dict[str, str] | None,
+    tokens: list[str],
+    expected_code: str,
+) -> None:
+    client, sessionmaker, scripted_client = message_action_client
+    ids = asyncio.run(_create_action_thread(sessionmaker))
+    before = asyncio.run(_message_version_state(sessionmaker, ids["ai"]))
+    scripted_client.tokens = tokens
+
+    response = client.post(
+        f"/api/messages/{ids['ai']}/{path_suffix}",
+        json=payload,
+    )
+
+    assert response.status_code == 502
+    detail = response.json()["detail"]
+    assert detail["code"] == expected_code
+    assert "safety guidelines" not in detail["message"]
+    assert asyncio.run(_message_version_state(sessionmaker, ids["ai"])) == before
 
 
 def test_swipe_route_generates_selected_alternate_and_future_context_excludes_unselected(
@@ -632,10 +787,15 @@ def test_continue_route_commits_exact_prefix_before_generated_suffix(
     assert selected["content_text"].count(prefix) == 1
     assert body["content_text"] == selected["content_text"]
     prompt_messages = scripted_client.requests[0]["messages"]
-    assert prompt_messages[-1] == {"role": "assistant", "content": prefix}
-    assert prompt_messages[-2] == {"role": "user", "content": "Prompt from user"}
+    assert _role_content(prompt_messages[-1]) == {"role": "assistant", "content": prefix}
+    assert _role_content(prompt_messages[-2]) == {
+        "role": "user",
+        "content": "Prompt from user",
+    }
     assert all(message["content"] != "Original AI response" for message in prompt_messages)
-    assert all("Committed assistant prefix" not in message["content"] for message in prompt_messages)
+    assert all(
+        "Committed assistant prefix" not in message["content"] for message in prompt_messages
+    )
 
 
 def test_continue_uses_edited_assistant_text_as_prefix_when_composer_is_empty(
@@ -673,7 +833,7 @@ def test_continue_uses_edited_assistant_text_as_prefix_when_composer_is_empty(
     assert selected["content_text"].count(prefix) == 1
     assert body["content_text"] == expected
     prompt_messages = scripted_client.requests[0]["messages"]
-    assert prompt_messages[-1] == {"role": "assistant", "content": prefix}
+    assert _role_content(prompt_messages[-1]) == {"role": "assistant", "content": prefix}
     assert all(message["content"] != "Original AI response" for message in prompt_messages)
 
 
@@ -703,7 +863,9 @@ def test_edit_route_marks_downstream_stale_and_truncate_keep_behaviors_work(
     truncate_response = client.post(f"/api/messages/{ids['user']}/truncate-stale")
 
     assert truncate_response.status_code == 200
-    assert all(message["id"] != ids["downstream"] for message in truncate_response.json()["messages"])
+    assert all(
+        message["id"] != ids["downstream"] for message in truncate_response.json()["messages"]
+    )
     rows_after_truncate = asyncio.run(_messages_for_thread(sessionmaker, ids["thread"]))
     assert all(row.id != ids["downstream"] for row in rows_after_truncate)
 
@@ -763,9 +925,10 @@ def test_assistant_edit_isolated_from_later_stale_ai_record(
     assert final.content_text == "Final stale assistant response"
     assert final.selected_alternate_id == ids["final_alternate"]
     assert final.stale_after_edit is True
-    assert [(alternate.id, alternate.message_id, alternate.content_text) for alternate in final_alternates] == [
-        (ids["final_alternate"], ids["final"], "Final stale assistant response")
-    ]
+    assert [
+        (alternate.id, alternate.message_id, alternate.content_text)
+        for alternate in final_alternates
+    ] == [(ids["final_alternate"], ids["final"], "Final stale assistant response")]
 
 
 def test_user_edit_then_regenerate_uses_edited_prompt_and_reactivates_response(
@@ -788,7 +951,7 @@ def test_user_edit_then_regenerate_uses_edited_prompt_and_reactivates_response(
     body = regenerate_response.json()
     assert body["content_text"] == "AI response to corrected prompt"
     assert body["stale_after_edit"] is False
-    assert scripted_client.requests[0]["messages"][-1] == {
+    assert _role_content(scripted_client.requests[0]["messages"][-1]) == {
         "role": "user",
         "content": "Corrected user prompt",
     }
@@ -876,7 +1039,7 @@ def test_call_user_edit_regenerates_following_ai_from_corrected_content(
     assert regenerate_response.status_code == 200
     assert regenerate_response.json()["message_kind"] == "ai_speech"
     assert regenerate_response.json()["content_text"] == "AI response to corrected spoken prompt"
-    assert scripted_client.requests[0]["messages"][-1] == {
+    assert _role_content(scripted_client.requests[0]["messages"][-1]) == {
         "role": "user",
         "content": "Corrected spoken user prompt",
     }
@@ -938,8 +1101,11 @@ def test_editing_a_previously_stale_user_reactivates_its_regeneration_context(
     regenerate_response = client.post(f"/api/messages/{ids['final_ai']}/regenerate")
 
     assert regenerate_response.status_code == 200
-    assert regenerate_response.json()["content_text"] == "Independent final response from corrected user"
-    assert scripted_client.requests[0]["messages"][-1] == {
+    assert (
+        regenerate_response.json()["content_text"]
+        == "Independent final response from corrected user"
+    )
+    assert _role_content(scripted_client.requests[0]["messages"][-1]) == {
         "role": "user",
         "content": "Corrected stale user prompt",
     }
@@ -1007,7 +1173,9 @@ async def _create_call_edit_thread(
 ) -> dict[str, str]:
     async with sessionmaker() as session:
         await _insert_character(session, character_id="char_call_actions")
-        thread_id = (await ThreadService(session).create_thread(character_id="char_call_actions"))["thread_id"]
+        thread_id = (await ThreadService(session).create_thread(character_id="char_call_actions"))[
+            "thread_id"
+        ]
         call_id = "call-edit-1"
         messages = [
             Message(
@@ -1073,7 +1241,9 @@ async def _create_assistant_identity_isolation_thread(
 ) -> dict[str, str]:
     async with sessionmaker() as session:
         await _insert_character(session, character_id="char_assistant_isolation")
-        thread_id = (await ThreadService(session).create_thread(character_id="char_assistant_isolation"))["thread_id"]
+        thread_id = (
+            await ThreadService(session).create_thread(character_id="char_assistant_isolation")
+        )["thread_id"]
         session.add_all(
             [
                 Message(
@@ -1142,7 +1312,9 @@ async def _create_assistant_identity_isolation_thread(
 async def _create_stale_regeneration_thread(sessionmaker: async_sessionmaker) -> dict[str, str]:
     async with sessionmaker() as session:
         await _insert_character(session, character_id="char_stale_regeneration")
-        thread_id = (await ThreadService(session).create_thread(character_id="char_stale_regeneration"))["thread_id"]
+        thread_id = (
+            await ThreadService(session).create_thread(character_id="char_stale_regeneration")
+        )["thread_id"]
         session.add_all(
             [
                 Message(
@@ -1315,6 +1487,25 @@ async def _alternates_for_message(
         return list(result.scalars())
 
 
+async def _message_version_state(
+    sessionmaker: async_sessionmaker,
+    message_id: str,
+) -> tuple[str | None, str | None, tuple[tuple[str, str, str], ...]]:
+    async with sessionmaker() as session:
+        message = await session.get(Message, message_id)
+        assert message is not None
+        result = await session.execute(
+            select(MessageAlternate)
+            .where(MessageAlternate.message_id == message_id)
+            .order_by(MessageAlternate.alternate_index)
+        )
+        alternates = tuple(
+            (alternate.id, alternate.content_text, alternate.source_action)
+            for alternate in result.scalars()
+        )
+        return message.content_text, message.selected_alternate_id, alternates
+
+
 async def _prompt_text_through_message(sessionmaker: async_sessionmaker, message_id: str) -> str:
     async with sessionmaker() as session:
         repository = SqlAlchemyMessageActionRepository(session)
@@ -1326,3 +1517,56 @@ async def _prompt_text_through_message(sessionmaker: async_sessionmaker, message
             action="swipe",
         )
         return "\n".join(message["content"] for message in prompt_messages)
+
+
+def _prompt_result(
+    *messages: tuple[str, str, tuple[str, ...]],
+) -> object:
+    return SimpleNamespace(
+        transmitted_message_candidates=tuple(
+            PromptMessageCandidate(
+                role=role,  # type: ignore[arg-type]
+                content=content,
+                section_ids=section_ids,
+            )
+            for role, content, section_ids in messages
+        )
+    )
+
+
+def _role_content(message: dict[str, object]) -> dict[str, object]:
+    return {"role": message["role"], "content": message["content"]}
+
+
+def _role_content_messages(messages: list[dict[str, object]]) -> list[dict[str, object]]:
+    return [_role_content(message) for message in messages]
+
+
+async def _invoke_generation_action(
+    action: str,
+    repository: ScriptedActionRepository,
+    client: object,
+) -> ThreadMessageShape:
+    if action == "regenerate":
+        return await message_actions.regenerate_ai_turn(
+            "ai-1",
+            repository=repository,
+            settings=STRUCTURED_SERVER_SETTINGS,
+            completion_client=client,
+        )
+    if action == "swipe":
+        return await message_actions.create_swipe_alternate(
+            "ai-1",
+            repository=repository,
+            settings=STRUCTURED_SERVER_SETTINGS,
+            completion_client=client,
+        )
+    if action == "continue":
+        return await message_actions.continue_ai_turn(
+            "ai-1",
+            "Existing prefix.",
+            repository=repository,
+            settings=STRUCTURED_SERVER_SETTINGS,
+            completion_client=client,
+        )
+    raise AssertionError(f"unsupported test action: {action}")

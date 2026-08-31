@@ -9,7 +9,8 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.llm_stream import ChatCompletionSettings, collect_chat_completion
-from app.domain.prompt_builder import build_prompt_context
+from app.domain.prompt_builder import PromptBuildResult, build_structured_prompt
+from app.domain.prompt_profiles import PromptGenerationSettings
 from app.domain.thread_service import ThreadNotFoundError, ThreadService, new_alternate_id
 from app.storage.models import (
     Message,
@@ -103,7 +104,9 @@ class SqlAlchemyMessageActionRepository:
         include_target: bool,
     ) -> MessageGenerationContext:
         message = await self._get_message(message_id)
-        until_message_id = message.id if include_target else await self._previous_message_id(message)
+        until_message_id = (
+            message.id if include_target else await self._previous_message_id(message)
+        )
         selected_content = message.content_text or ""
         if message.selected_alternate_id is not None:
             selected = await self.session.get(MessageAlternate, message.selected_alternate_id)
@@ -311,15 +314,16 @@ async def regenerate_ai_turn(
     """Regenerate an AI turn through the server-side LLM path and replace selection."""
 
     context = await _generation_context(message_id, repository, include_target=False)
-    prompt_messages = await build_prompt_context(
+    prompt = await build_structured_prompt(
         context.thread_id,
         repository=repository,
+        settings=_prompt_generation_settings(settings),
         until_message_id=context.until_message_id,
         action=REGENERATE_SOURCE_ACTION,
     )
     content_text = await _collect_generated_text(
         settings,
-        prompt_messages,
+        _generation_messages(prompt),
         completion_client=completion_client,
     )
     return await repository.replace_selected_ai_response(
@@ -339,15 +343,16 @@ async def create_swipe_alternate(
     """Create and select a generated swipe alternate for an existing AI turn."""
 
     context = await _generation_context(message_id, repository, include_target=False)
-    prompt_messages = await build_prompt_context(
+    prompt = await build_structured_prompt(
         context.thread_id,
         repository=repository,
+        settings=_prompt_generation_settings(settings),
         until_message_id=context.until_message_id,
         action=SWIPE_SOURCE_ACTION,
     )
     content_text = await _collect_generated_text(
         settings,
-        prompt_messages,
+        _generation_messages(prompt),
         completion_client=completion_client,
     )
     return await repository.add_selected_alternate(
@@ -413,16 +418,17 @@ async def continue_ai_turn(
     prefix = composer_text or context.selected_content
     if not prefix:
         context = await _generation_context(message_id, repository, include_target=True)
-    prompt_messages = await build_prompt_context(
+    prompt = await build_structured_prompt(
         context.thread_id,
         repository=repository,
+        settings=_prompt_generation_settings(settings),
         until_message_id=context.until_message_id,
         action=CONTINUE_SOURCE_ACTION,
         composer_text=prefix,
     )
     generated_suffix = await _collect_generated_text(
         settings,
-        prompt_messages,
+        _generation_messages(prompt),
         completion_client=completion_client,
     )
     return await repository.add_selected_alternate(
@@ -453,6 +459,21 @@ async def _collect_generated_text(
     if completion_client is None:
         return await collect_chat_completion(settings, prompt_messages)
     return await collect_chat_completion(settings, prompt_messages, client=completion_client)
+
+
+def _prompt_generation_settings(settings: ChatCompletionSettings) -> PromptGenerationSettings:
+    return settings.prompt_generation or PromptGenerationSettings.defaults()
+
+
+def _generation_messages(prompt: PromptBuildResult) -> list[dict[str, object]]:
+    return [
+        {
+            "role": message.role,
+            "content": message.content,
+            "section_ids": message.section_ids,
+        }
+        for message in prompt.transmitted_message_candidates
+    ]
 
 
 def _commit_continue_prefix(prefix: str, generated_suffix: str) -> str:
@@ -519,7 +540,7 @@ __all__ = [
     "REGENERATE_SOURCE_ACTION",
     "SWIPE_SOURCE_ACTION",
     "SqlAlchemyMessageActionRepository",
-    "build_prompt_context",
+    "build_structured_prompt",
     "collect_chat_completion",
     "continue_ai_turn",
     "create_swipe_alternate",
