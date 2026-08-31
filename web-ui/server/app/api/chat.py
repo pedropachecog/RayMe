@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.domain.llm_stream import ChatCompletionSettings, stream_chat_completion
-from app.domain.prompt_builder import SqlAlchemyPromptRepository, build_prompt_context
+from app.domain.prompt_builder import SqlAlchemyPromptRepository, build_structured_prompt
 from app.domain.settings_service import SettingsService
 from app.domain.thread_service import ThreadNotFoundError, ThreadService, new_message_id
 from app.storage.models import Message, MessageAlternateShape, Thread, ThreadMessageShape, utc_now
@@ -70,12 +70,22 @@ async def send_chat_message(
         api_key=endpoint_settings.llm_api_key,
         model=endpoint_settings.llm_model,
         disable_thinking=endpoint_settings.llm_disable_thinking,
+        prompt_generation=endpoint_settings.prompt_generation,
     )
-    prompt_messages = await build_prompt_context(
+    prompt = await build_structured_prompt(
         thread_id,
         repository=SqlAlchemyPromptRepository(session),
+        settings=endpoint_settings.prompt_generation,
         action="send",
     )
+    prompt_messages = [
+        {
+            "role": message.role,
+            "content": message.content,
+            "section_ids": message.section_ids,
+        }
+        for message in prompt.transmitted_message_candidates
+    ]
 
     async def events() -> AsyncIterator[str]:
         async for event in stream_chat_completion(

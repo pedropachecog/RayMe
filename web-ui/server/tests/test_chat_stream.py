@@ -107,8 +107,48 @@ class AttemptScriptClient:
             self.closed_attempts.append(attempt)
 
 
+class HeldOpenRetryClient:
+    def __init__(self, refusal: str, accepted_prefix: str, accepted_tail: str) -> None:
+        self.refusal = refusal
+        self.accepted_prefix = accepted_prefix
+        self.accepted_tail = accepted_tail
+        self.requests: list[dict[str, object]] = []
+        self.closed_attempts: list[int] = []
+        self.release_accepted = asyncio.Event()
+        self.accepted_completed = False
+
+    async def stream_chat_completion_tokens(
+        self,
+        settings: ChatCompletionSettings,
+        messages: list[dict[str, object]],
+        *,
+        seed: int,
+        attempt: int,
+    ):
+        self.requests.append(
+            {
+                "settings": settings,
+                "messages": [dict(message) for message in messages],
+                "seed": seed,
+                "attempt": attempt,
+            }
+        )
+        try:
+            if attempt == 1:
+                yield self.refusal
+                return
+            yield self.accepted_prefix
+            await self.release_accepted.wait()
+            yield self.accepted_tail
+            self.accepted_completed = True
+        finally:
+            self.closed_attempts.append(attempt)
+
+
 @pytest.fixture()
-def chat_client(tmp_path: Path) -> Iterator[tuple[TestClient, async_sessionmaker, ScriptedStreamingClient]]:
+def chat_client(
+    tmp_path: Path,
+) -> Iterator[tuple[TestClient, async_sessionmaker, ScriptedStreamingClient]]:
     engine = create_engine(f"sqlite+aiosqlite:///{tmp_path / 'rayme-test.sqlite3'}")
     sessionmaker = async_sessionmaker(engine, expire_on_commit=False)
 
@@ -321,9 +361,7 @@ async def test_post_release_transport_failure_never_starts_replacement_attempt()
     assert client.closed_attempts == [1]
     assert persisted == []
 
-    collect_client = AttemptScriptClient(
-        [[accepted, RuntimeError("other private disconnect")]]
-    )
+    collect_client = AttemptScriptClient([[accepted, RuntimeError("other private disconnect")]])
     with pytest.raises(RuntimeError, match="other private disconnect"):
         await collect_chat_completion(
             ChatCompletionSettings(
@@ -402,9 +440,7 @@ async def test_concurrent_retry_and_cancellation_keep_request_state_independent(
             )
         ]
 
-    cancel_task = asyncio.create_task(
-        consume_cancelled_stream()
-    )
+    cancel_task = asyncio.create_task(consume_cancelled_stream())
 
     await cancelled_started.wait()
     cancel_task.cancel()
@@ -425,6 +461,51 @@ async def test_concurrent_retry_and_cancellation_keep_request_state_independent(
             "attempt": 1,
         }
     ]
+
+
+async def test_refusal_retry_releases_exact_unicode_before_accepted_stream_completion() -> None:
+    refusal = "I cannot continue because the safety guidelines forbid it."
+    accepted_prefix = "Élodie traced the sigil, then whispered: cafe\u0301."
+    accepted_tail = " 雨 settled softly beyond the glass."
+    client = HeldOpenRetryClient(refusal, accepted_prefix, accepted_tail)
+    persisted: list[str] = []
+
+    async def persist_final(text: str) -> ThreadMessageShape:
+        persisted.append(text)
+        return ThreadMessageShape(
+            id="ai-message",
+            thread_id="thread-1",
+            message_kind="ai_text",
+            role="assistant",
+            sequence=2,
+            content_text=text,
+        )
+
+    events = stream_chat_completion(
+        ChatCompletionSettings(base_url="http://llm.local/v1", model="configured-model"),
+        [{"role": "user", "content": "Continue the scene."}],
+        client=client,
+        persist_final=persist_final,
+        seed_factory=iter((701, 702)).__next__,
+    )
+
+    first = json.loads((await asyncio.wait_for(anext(events), timeout=1.0)).removeprefix("data: "))
+    assert first == {"type": "token", "text": accepted_prefix}
+    assert client.closed_attempts == [1]
+    assert client.accepted_completed is False
+    assert refusal not in json.dumps(client.requests[1]["messages"], ensure_ascii=False)
+    assert client.requests[1]["messages"][-1] == {
+        "role": "user",
+        "content": REFUSAL_RETRY_CORRECTION,
+    }
+
+    client.release_accepted.set()
+    remaining = [json.loads(event.removeprefix("data: ")) async for event in events]
+    assert remaining[0] == {"type": "token", "text": accepted_tail}
+    assert remaining[-1]["type"] == "done"
+    assert persisted == [accepted_prefix + accepted_tail]
+    assert persisted[0].encode("utf-8") == (accepted_prefix + accepted_tail).encode("utf-8")
+    assert client.closed_attempts == [1, 2]
 
 
 def _assert_three_refusal_requests(
@@ -574,6 +655,7 @@ def test_send_endpoint_streams_tokens_persists_final_once_and_emits_done_shape(
         model="server-model",
         api_key="server-secret",
         disable_thinking=True,
+        prompt_generation=PromptGenerationSettings.defaults(),
     )
     prompt_text = "\n".join(message["content"] for message in request["messages"])
     assert "Say hello" in prompt_text
@@ -651,6 +733,7 @@ def test_send_endpoint_forwards_qwen_disable_thinking_setting(
         model="unsloth/Qwen3.5-27B",
         api_key="server-secret",
         disable_thinking=disable_thinking,
+        prompt_generation=PromptGenerationSettings.defaults(),
     )
 
 
@@ -718,9 +801,7 @@ async def _create_thread(sessionmaker: async_sessionmaker) -> str:
             )
         )
         await session.commit()
-        return (await ThreadService(session).create_thread(character_id="char_stream"))[
-            "thread_id"
-        ]
+        return (await ThreadService(session).create_thread(character_id="char_stream"))["thread_id"]
 
 
 async def _write_endpoint_settings(
