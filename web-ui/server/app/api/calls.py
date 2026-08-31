@@ -7,6 +7,7 @@ import json
 import logging
 import time
 from collections.abc import AsyncIterator, Mapping, Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
@@ -31,12 +32,17 @@ from app.domain.call_service import (
     CallSessionNotFoundError,
 )
 from app.domain.llm_stream import ChatCompletionSettings, SSE_DATA_PREFIX, stream_chat_completion
+from app.domain.generation_profiles import GenerationRequest, build_generation_request
 from app.domain.prompt_builder import (
+    CALL_OFFER_MAX_CONTENT_LENGTH,
+    CALL_OFFER_MAX_MESSAGES,
+    PromptBudgetExceeded,
+    PromptBuildResult,
     PromptContextMessage,
     SqlAlchemyPromptRepository,
-    build_call_prompt_context,
+    build_structured_prompt,
 )
-from app.domain.settings_service import SettingsService
+from app.domain.settings_service import EndpointSettings, SettingsService
 from app.domain.thread_service import CharacterUnavailableError, ThreadNotFoundError
 from app.storage.session import SERVER_ROOT, get_session
 
@@ -71,6 +77,36 @@ CALL_TURN_REJOIN_POLL_SECONDS = 0.05
 CALL_LLM_FIRST_EVENT_TIMEOUT_SECONDS = 45.0
 
 CallTurnExistingState = Literal["reserved", "running", "failed", "cancelled"]
+CallGenerationAction = Literal["call_offer", "call_turn"]
+
+
+@dataclass(frozen=True, slots=True)
+class CallGenerationSnapshot:
+    """One request-owned settings and thread snapshot for live call generation."""
+
+    action: CallGenerationAction
+    prompt: PromptBuildResult
+    completion: ChatCompletionSettings
+
+    def logical_messages(self) -> tuple[PromptContextMessage, ...]:
+        return tuple(
+            {
+                "role": message.role,
+                "content": message.content,
+                "section_ids": message.section_ids,
+            }
+            for message in self.prompt.transmitted_message_candidates
+        )
+
+    def first_attempt_request(self) -> GenerationRequest:
+        return build_generation_request(
+            model=self.completion.model,
+            messages=self.prompt.transmitted_message_candidates,
+            settings=self.completion.prompt_generation,
+            seed=0,
+            attempt=1,
+            disable_thinking=self.completion.disable_thinking,
+        )
 
 
 class CallTurnExistingEvent(TypedDict):
@@ -300,16 +336,22 @@ async def create_call_offer(
             call_id,
             voice_blob_dir,
         )
+        generation = await _build_call_generation_snapshot(
+            call["thread_id"],
+            endpoint_settings=endpoint_settings,
+            repository=SqlAlchemyPromptRepository(session),
+            action="call_offer",
+        )
+        offer_prompt = generation.first_attempt_request()
+        _validate_call_offer_wire_request(generation, offer_prompt)
         offer_payload = {
             "session_id": stored_session_id,
             "thread_id": call["thread_id"],
             "voice_id": voice_preparation.backend_voice_id,
             "engine_id": voice_preparation.engine_id,
-            "prompt_messages": await build_call_prompt_context(
-                call["thread_id"],
-                repository=SqlAlchemyPromptRepository(session),
-                max_turns=24,
-            ),
+            "prompt_messages": [
+                message.to_openai_dict() for message in offer_prompt.messages
+            ],
             "offer": payload.offer_payload(),
         }
         response = await _create_offer(backend, endpoint_settings.ai_backend_url, offer_payload)
@@ -333,6 +375,8 @@ async def create_call_offer(
                 reference_payload=voice_preparation.reference_payload,
             )
         return result
+    except PromptBudgetExceeded as exc:
+        raise HTTPException(status_code=422, detail=exc.to_public_dict()) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except CallServiceError as exc:
@@ -581,11 +625,14 @@ async def create_call_turn(
                     }
                 )
                 return
-            prompt_messages = await build_call_prompt_context(
+            endpoint_settings = await SettingsService(session, runtime_settings).read()
+            generation = await _build_call_generation_snapshot(
                 call["thread_id"],
                 repository=SqlAlchemyPromptRepository(session),
-                max_turns=24,
+                endpoint_settings=endpoint_settings,
+                action="call_turn",
             )
+            prompt_messages = generation.logical_messages()
             try:
                 voice_reference = await service.voice_reference_for_call(
                     call_id,
@@ -606,13 +653,7 @@ async def create_call_turn(
                     }
                 )
                 return
-            endpoint_settings = await SettingsService(session, runtime_settings).read()
-            completion_settings = ChatCompletionSettings(
-                base_url=endpoint_settings.llm_base_url,
-                api_key=endpoint_settings.llm_api_key,
-                model=endpoint_settings.llm_model,
-                disable_thinking=endpoint_settings.llm_disable_thinking,
-            )
+            completion_settings = generation.completion
             segmenter = CallTtsSegmenter() if call["engine_id"] == "qwen3_1_7b" else None
             llm_started = time.perf_counter()
             async for raw_event in _stream_call_completion_with_first_event_timeout(
@@ -856,6 +897,54 @@ def _turn_existing_event(
         "state": state,
         "recoverable": recoverable,
     }
+
+
+async def _build_call_generation_snapshot(
+    thread_id: str,
+    *,
+    endpoint_settings: EndpointSettings,
+    repository: SqlAlchemyPromptRepository,
+    action: CallGenerationAction,
+) -> CallGenerationSnapshot:
+    prompt = await build_structured_prompt(
+        thread_id,
+        repository=repository,
+        settings=endpoint_settings.prompt_generation,
+        action=action,
+    )
+    return CallGenerationSnapshot(
+        action=action,
+        prompt=prompt,
+        completion=ChatCompletionSettings(
+            base_url=endpoint_settings.llm_base_url,
+            api_key=endpoint_settings.llm_api_key,
+            model=endpoint_settings.llm_model,
+            disable_thinking=endpoint_settings.llm_disable_thinking,
+            prompt_generation=endpoint_settings.prompt_generation,
+        ),
+    )
+
+
+def _validate_call_offer_wire_request(
+    generation: CallGenerationSnapshot,
+    request: GenerationRequest,
+) -> None:
+    if generation.action != "call_offer":
+        raise ValueError("call-offer transport limits cannot be applied to a call turn")
+    if len(request.messages) > CALL_OFFER_MAX_MESSAGES:
+        limit = "message_count"
+    elif any(
+        len(message.content) > CALL_OFFER_MAX_CONTENT_LENGTH
+        for message in request.messages
+    ):
+        limit = "message_content_length"
+    else:
+        return
+    raise PromptBudgetExceeded(
+        input_budget=generation.prompt.input_budget,
+        estimated_tokens=generation.prompt.estimated_input_tokens,
+        limit=limit,
+    )
 
 
 async def _stream_call_completion_with_first_event_timeout(
