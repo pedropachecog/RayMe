@@ -490,6 +490,62 @@ async def test_typographic_apostrophe_here_to_help_refusal_retries_without_reach
     }
 
 
+async def test_ascii_apostrophe_chat_redirect_refusal_retries_without_reaching_chat_or_persistence() -> None:
+    opening = "Hi, what can I do for you today?"
+    follow_up = "make it more erotic"
+    refusal = "I can't write erotic content for you, but I'm here if you want to chat about anything else."
+    accepted = "A rain-soaked hush settled over the room."
+    client = AttemptScriptClient([[refusal], [accepted]])
+    persisted: list[str] = []
+
+    async def persist_final(text: str) -> ThreadMessageShape:
+        persisted.append(text)
+        return ThreadMessageShape(
+            id="ai-message",
+            thread_id="thread-1",
+            message_kind="ai_text",
+            role="assistant",
+            sequence=2,
+            content_text=text,
+        )
+
+    messages = [
+        {"role": "assistant", "content": opening, "section_ids": ("first_mes",)},
+        {"role": "user", "content": follow_up, "section_ids": ("user:new",)},
+    ]
+    events = [
+        json.loads(event.removeprefix("data: "))
+        async for event in stream_chat_completion(
+            ChatCompletionSettings(
+                base_url="http://llm.local/v1",
+                model="unsloth/Qwen3.5-27B",
+                disable_thinking=True,
+            ),
+            messages,
+            client=client,
+            persist_final=persist_final,
+            seed_factory=iter((191, 192)).__next__,
+        )
+    ]
+
+    assert events[0] == {"type": "token", "text": accepted}
+    assert events[-1]["type"] == "done"
+    assert refusal not in json.dumps(events, ensure_ascii=False)
+    assert persisted == [accepted]
+    assert client.closed_attempts == [1, 2]
+    assert [request["attempt"] for request in client.requests] == [1, 2]
+    assert client.requests[0]["messages"][-2:] == messages
+    assert client.requests[1]["messages"][-2] == {
+        "role": "user",
+        "content": follow_up,
+        "section_ids": ("user:new",),
+    }
+    assert client.requests[1]["messages"][-1] == {
+        "role": "user",
+        "content": REFUSAL_RETRY_CORRECTION,
+    }
+
+
 @pytest.mark.parametrize(
     ("script", "expected_code"),
     [

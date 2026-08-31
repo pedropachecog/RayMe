@@ -50,7 +50,8 @@ _APOLOGY_RE = re.compile(r"(?:^|\s)(?:i(?:'m|\s+am)\s+)?sorry\b|\bapologi[sz](?:
 _REDIRECT_RE = re.compile(
     r"\b(?:instead|however)\b.{0,80}\b(?:can|could)\s+(?:help|offer|provide)\b|"
     r"\b(?:can|could)\s+(?:help|offer|provide)\s+(?:with\s+)?(?:something|another|alternative)\b|"
-    r"\b(?:but\s+)?i(?:'m|\s+am)\s+here\s+to\s+help\b"
+    r"\b(?:but\s+)?i(?:'m|\s+am)\s+here\s+to\s+help\b|"
+    r"\b(?:erotic|sexual)\s+content\b.{0,80}\b(?:but\s+)?i(?:'m|\s+am)\s+here\s+if\s+you\s+want\s+to\s+(?:chat|talk)\s+about\s+(?:anything|something)\s+else\b"
 )
 _WARNING_RE = re.compile(r"\b(?:must|need\s+to|have\s+to)\s+warn\b|\bwarning\b")
 

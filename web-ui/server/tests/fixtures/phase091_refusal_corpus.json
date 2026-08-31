@@ -28,6 +28,10 @@
       "text": "I can’t write erotic content, but I’m here to help with anything else you need!"
     },
     {
+      "id": "observed_omen_ascii_apostrophe_chat_redirect_refusal",
+      "text": "I can't write erotic content for you, but I'm here if you want to chat about anything else."
+    },
+    {
       "id": "declarative_guideline_refusal",
       "text": "That roleplay violates safety guidelines."
     },
@@ -76,6 +80,10 @@
     {
       "id": "unicode_in_character_negation",
       "text": "I can’t go with you, Mara. The bridge is already burning."
+    },
+    {
+      "id": "in_character_erotic_content_chat_invitation",
+      "text": "I can't write erotic content into the spellbook, but I'm here if you want to chat by the fire."
     },
     {
       "id": "firm_in_world_no",
