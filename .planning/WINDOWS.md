@@ -1,15 +1,15 @@
 ---
 schema_version: 1
-open_count: 2
+open_count: 3
 waived_count: 0
 fixed_count: 9
-total_count: 11
-last_updated: 2026-08-01T06:40:34.486Z
+total_count: 12
+last_updated: 2026-08-31T03:18:36.517Z
 ---
 
 # Broken Windows Ledger
 
-> Cross-phase defect register. `/gsd-ship` blocks while `open_count > 0`.
+> Cross-phase defect register. With `workflow.windows_enforce` enabled, `/gsd-ship` blocks while `open_count > 0`.
 > Waive with `gsd-tools windows waive <id> "<reason>"` (reason required).
 > Mark fixed with `gsd-tools windows fixed <id>`.
 
@@ -26,6 +26,7 @@ last_updated: 2026-08-01T06:40:34.486Z
 | 9 | 09 | deviation | web-ui/server/app/domain/ai_backend_client.py |  | Boundary-emitted Qwen turns needed a synthesis-free terminal marker to recover Listening without whole-synthesis fallback. | fixed |  | 2026-08-01T06:39:19.196Z | 2026-08-01T06:39:38.655Z |
 | 10 | 09 | deviation | scripts/deploy-omen.sh |  | Canonical WebRTC required a LocalSubnet-only UDP rule bound to the base Python executable that owns live port 9443. | fixed |  | 2026-08-01T06:39:19.348Z | 2026-08-01T06:39:38.808Z |
 | 11 | 09 | stub | .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-run-omen-evidence.py | 1028 | Finish-acoustic mode emits a deliberately rejected intermediate browser artifact; the real live suite must overwrite it before decision-ready verification. | open |  | 2026-08-01T06:40:34.486Z |  |
+| 12 | 09.1 | deviation | web-ui/server/app/domain/refusal_guard.py |  | Narrowed an over-broad policy secondary signal so benign safe sentences retain early release | open |  | 2026-08-31T03:18:36.517Z |  |
 
 ````json
 [
@@ -159,6 +160,18 @@ last_updated: 2026-08-01T06:40:34.486Z
     "status": "open",
     "reason": "",
     "recorded_at": "2026-08-01T06:40:34.486Z",
+    "resolved_at": null
+  },
+  {
+    "id": 12,
+    "kind": "deviation",
+    "phase": "09.1",
+    "file": "web-ui/server/app/domain/refusal_guard.py",
+    "line": null,
+    "description": "Narrowed an over-broad policy secondary signal so benign safe sentences retain early release",
+    "status": "open",
+    "reason": "",
+    "recorded_at": "2026-08-31T03:18:36.517Z",
     "resolved_at": null
   }
 ]
