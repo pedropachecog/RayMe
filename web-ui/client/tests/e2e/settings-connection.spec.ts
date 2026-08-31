@@ -141,12 +141,9 @@ test('Settings Test Connection saves current form values before probing endpoint
       method: 'PATCH',
       payload: expect.objectContaining({
         web_url: 'https://192.168.1.199:8443',
-        save_ai_audio: true,
-        save_mic_audio: false,
-        vad_threshold: 0.5,
-        vad_end_silence_ms: 700,
-        stt_model: 'distil-large-v3',
-        tts_default_engine: 'f5'
+        ai_backend_url: 'https://192.168.1.199:9443',
+        llm_base_url: PHASE1_LOCAL_LLM_URL,
+        llm_model: PHASE1_LOCAL_LLM_MODEL
       })
     },
     { method: 'POST', path: '/api/settings/test/web' }
@@ -160,8 +157,9 @@ test('Settings Test Connection saves current form values before probing endpoint
       method: 'PATCH',
       payload: expect.objectContaining({
         ai_backend_url: 'https://192.168.1.199:9443',
-        save_ai_audio: true,
-        save_mic_audio: false
+        web_url: 'https://192.168.1.199:8443',
+        llm_base_url: PHASE1_LOCAL_LLM_URL,
+        llm_model: PHASE1_LOCAL_LLM_MODEL
       })
     },
     { method: 'POST', path: '/api/settings/test/ai-backend' }

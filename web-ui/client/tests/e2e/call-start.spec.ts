@@ -237,7 +237,7 @@ test('ends startup and shows sanitized failure when backend offer forwarding fai
   await page.getByRole('button', { name: 'Start call' }).click();
   await expect((await failedOffer).status()).toBe(502);
 
-  await expect(page.getByText('WebRTC offer could not be accepted')).toBeVisible();
+  await expect(page.getByText('RayMe could not connect this call.')).toBeVisible();
   await expect(page.getByRole('alert').getByRole('button', { name: 'Return to Thread' })).toBeVisible();
   await expect(page.getByTestId('voice-visualizer')).toHaveCount(0);
   assertNoBrowserErrors();
@@ -1782,7 +1782,7 @@ test('recovers a failed spoken turn to Listening and ignores its late events', a
   await expect(page.getByText('Hello there.')).toBeVisible();
 
   // Error notice appears in the transcript — not a blocking panel
-  await expect(page.getByText('Speech playback failed: voice audio unavailable.')).toHaveCount(1);
+  await expect(page.getByText('Speech playback failed. Please try again.')).toHaveCount(1);
   await expect(page.getByText('A partial RayMe reply.')).toHaveCount(1);
   await expect(page.locator('.turn.streaming')).toHaveCount(0);
 
@@ -1843,7 +1843,7 @@ test('recovers a failed spoken turn to Listening and ignores its late events', a
   await expect.poll(() => counters.turnCount).toBe(2);
   await expect(page.getByText('The next response completes normally.')).toHaveCount(1);
   await expect(page.locator('.turn.streaming')).toHaveCount(0);
-  await expect(page.getByText('Speech playback failed: voice audio unavailable.')).toHaveCount(1);
+  await expect(page.getByText('Speech playback failed. Please try again.')).toHaveCount(1);
   assertNoBrowserErrors();
 });
 

@@ -301,10 +301,37 @@ test('chat hydrates selected alternates, streams send, and preserves done messag
 }) => {
   const expectNoBrowserErrors = installBrowserErrorGuard(page);
   const threadId = 'e2e-thread';
-  await mockThread(page, threadId);
+  let sendPayload: unknown;
+  const initial = hydratedThread(threadId);
+  const persistedUser = {
+    id: 'sent-user',
+    thread_id: threadId,
+    message_kind: 'user_text',
+    role: 'user',
+    sequence: 2,
+    content_text: 'Can you hear me?',
+    selected_alternate_id: null,
+    alternates: [],
+    stale_after_edit: false,
+    created_at: null,
+    updated_at: null
+  };
+  const persisted = {
+    ...initial,
+    messages: [...initial.messages, persistedUser, doneMessage(threadId)]
+  };
+  let threadReads = 0;
+  await page.route(`**/api/threads/${threadId}`, async (route) => {
+    threadReads += 1;
+    await route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(threadReads === 1 ? initial : persisted)
+    });
+  });
   await page.route(`**/api/chat/${threadId}/send`, async (route) => {
     expect(route.request().method()).toBe('POST');
-    expect(route.request().postDataJSON()).toEqual({ content: 'Can you hear me?' });
+    sendPayload = route.request().postDataJSON();
 
     const message = doneMessage(threadId);
     await route.fulfill({
@@ -324,10 +351,11 @@ test('chat hydrates selected alternates, streams send, and preserves done messag
   await expect(page.getByText('Selected opening from hydration').first()).toBeVisible();
   await expect(page.locator('[data-selected-alternate-id="alt-open-2"]')).toHaveCount(1);
   await expect(page.locator('[data-stale-after-edit="true"]')).toHaveCount(1);
-  await expect(page.getByRole('button', { name: /call/i })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Start call' })).toBeVisible();
 
   await page.getByRole('textbox', { name: 'Message' }).fill('Can you hear me?');
   await page.keyboard.press('Enter');
+  await expect.poll(() => sendPayload).toEqual({ content: 'Can you hear me?' });
 
   const doneBubble = page.locator('[data-message-id="ai-done"]');
   await expect(doneBubble).toBeVisible();
@@ -359,7 +387,7 @@ test('chat stream error keeps the user message and renders exact recovery copy',
 
   await expect(page.getByText('Try the endpoint')).toBeVisible();
   await expect(page.getByText(errorCopy)).toBeVisible();
-  await expect(page.getByRole('alert').getByRole('button', { name: 'Redo' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Try Again' })).toBeVisible();
   await expectNoBrowserErrors();
 });
 
