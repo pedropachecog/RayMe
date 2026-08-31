@@ -304,7 +304,7 @@ Resume file: None
 | Phase 09.1-default-unfiltered-roleplay-and-refusal-resistant-prompt-orc P07 | 15m24s | 2 tasks | 2 files |
 | Phase 09.1-default-unfiltered-roleplay-and-refusal-resistant-prompt-orc P10 | 14m | 1 tasks | 5 files |
 | Phase 09.1 P11 | 10m | 1 tasks | 3 files |
-| Phase 09.1 P08 | 34m20s | 2 tasks | 5 files |
+| Phase 09.1 P08 | 39m38s | 2 tasks | 5 files |
 
 ## Decisions
 
