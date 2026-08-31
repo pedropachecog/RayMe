@@ -5,8 +5,11 @@ import type {
   CallOfferResponse,
   CallStartRequest,
   CallStartResponse,
-  CallTurnRequest
+  CallTurnRequest,
+  GenerationFailure,
+  GenerationFailureCode
 } from './types';
+import { decodeGenerationFailure, isGenerationFailureCode } from './types';
 
 export interface CallReconnectAudioBackfillRequest {
   session_id: string;
@@ -23,14 +26,21 @@ export interface CallReconnectAudioBackfillRequest {
 }
 
 export class CallApiError extends Error {
-  code?: CallErrorCode;
+  code?: CallErrorCode | GenerationFailureCode;
   status: number;
+  generationFailure?: GenerationFailure;
 
-  constructor(message: string, status: number, code?: CallErrorCode) {
+  constructor(
+    message: string,
+    status: number,
+    code?: CallErrorCode | GenerationFailureCode,
+    generationFailure?: GenerationFailure
+  ) {
     super(message);
     this.name = 'CallApiError';
     this.status = status;
     this.code = code;
+    this.generationFailure = generationFailure;
   }
 }
 
@@ -59,9 +69,16 @@ async function parseCallApiResponse<T>(response: Response, fallbackMessage: stri
 
   if (!response.ok) {
     const detail = payload.detail && typeof payload.detail === 'object' ? payload.detail : payload;
-    const code = typeof detail.code === 'string' ? (detail.code as CallErrorCode) : undefined;
-    const message = typeof detail.message === 'string' ? detail.message : fallbackMessage;
-    throw new CallApiError(message, response.status, code);
+    const code = typeof detail.code === 'string' ? detail.code : undefined;
+    const generationFailure = isGenerationFailureCode(code)
+      ? decodeGenerationFailure(detail)
+      : undefined;
+    throw new CallApiError(
+      fallbackMessage,
+      response.status,
+      (code as CallErrorCode | GenerationFailureCode | undefined),
+      generationFailure
+    );
   }
 
   return payload as T;

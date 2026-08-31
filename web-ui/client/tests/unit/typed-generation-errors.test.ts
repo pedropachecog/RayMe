@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { apiFetch, GenerationApiError } from '../../src/lib/api/client';
 import { sendChatMessage } from '../../src/lib/api/chat';
+import { CallApiError, startCall } from '../../src/lib/api/calls';
 import { readChatStream } from '../../src/lib/api/stream';
 import {
   decodeGenerationFailure,
@@ -35,13 +36,13 @@ function expectNoPrivateCanary(value: unknown): void {
   }
 }
 
-function fragmentedResponse(parts: string[]): Response {
+function fragmentedResponse(parts: Array<string | Uint8Array>): Response {
   const encoder = new TextEncoder();
   return new Response(
     new ReadableStream<Uint8Array>({
       start(controller) {
         for (const part of parts) {
-          controller.enqueue(encoder.encode(part));
+          controller.enqueue(typeof part === 'string' ? encoder.encode(part) : part);
         }
         controller.close();
       }
@@ -179,6 +180,38 @@ describe('typed HTTP generation failures', () => {
       sendChatMessage('thread-1', 'Hello', {}, { signal: controller.signal })
     ).rejects.toBe(abortError);
   });
+
+  it('maps call HTTP generation failures into the same union without retaining server prose', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response(
+          JSON.stringify({
+            detail: {
+              code: 'llm_refusal_exhausted',
+              ...PRIVATE_CANARIES
+            }
+          }),
+          { status: 502 }
+        )
+      )
+    );
+
+    try {
+      await startCall({ thread_id: 'thread-1' });
+      throw new Error('expected startCall to fail');
+    } catch (error) {
+      expect(error).toBeInstanceOf(CallApiError);
+      expect(error).toMatchObject({
+        code: 'llm_refusal_exhausted',
+        generationFailure: {
+          type: 'generation_failure',
+          code: 'llm_refusal_exhausted'
+        }
+      });
+      expectNoPrivateCanary(error);
+    }
+  });
 });
 
 describe('fragmented typed chat SSE', () => {
@@ -206,7 +239,7 @@ describe('fragmented typed chat SSE', () => {
     });
     const wire = `data: ${activityEvent}\n\ndata: ${tokenEvent}\n\ndata: ${errorEvent}\n\n`;
     const bytes = new TextEncoder().encode(wire);
-    const fragments = Array.from(bytes, (byte) => new TextDecoder().decode(Uint8Array.of(byte)));
+    const fragments = Array.from(bytes, (byte) => Uint8Array.of(byte));
     const tokens: string[] = [];
     const activities: RefusalActivity[] = [];
     const failures: GenerationFailure[] = [];
@@ -214,7 +247,7 @@ describe('fragmented typed chat SSE', () => {
     await readChatStream(fragmentedResponse(fragments), {
       onToken: (text) => tokens.push(text),
       onActivity: (activity) => activities.push(activity),
-      onError: (failure) => failures.push(failure)
+      onFailure: (failure) => failures.push(failure)
     });
 
     expect(tokens.join('')).toBe(accepted);
@@ -233,7 +266,7 @@ describe('fragmented typed chat SSE', () => {
         `data: {"type":"error","code":"private_code","message":"${PRIVATE_CANARIES.message}"}\n\n`,
         `data: {not-json-${PRIVATE_CANARIES.prompt}}\n\n`
       ]),
-      { onError: (failure) => failures.push(failure) }
+      { onFailure: (failure) => failures.push(failure) }
     );
 
     expect(failures).toEqual([

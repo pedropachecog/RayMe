@@ -1,8 +1,22 @@
+import { decodeGenerationFailure, type GenerationFailure } from './types';
+
 export interface ApiFetchOptions extends RequestInit {
   apiPrefix?: string;
 }
 
 const ABSOLUTE_HTTP_URL = /^https?:\/\//i;
+
+export class GenerationApiError extends Error {
+  readonly status: number;
+  readonly failure: GenerationFailure;
+
+  constructor(status: number, failure: GenerationFailure) {
+    super('RayMe generation request failed.');
+    this.name = 'GenerationApiError';
+    this.status = status;
+    this.failure = failure;
+  }
+}
 
 export function toApiPath(path: string, apiPrefix = '/api'): string {
   if (ABSOLUTE_HTTP_URL.test(path)) {
@@ -38,7 +52,7 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
   });
 
   if (!response.ok) {
-    throw new Error(`RayMe API request failed: ${response.status} ${response.statusText}`.trim());
+    throw await responseGenerationError(response);
   }
 
   if (response.status === 204) {
@@ -46,4 +60,14 @@ export async function apiFetch<T>(path: string, options: ApiFetchOptions = {}): 
   }
 
   return (await response.json()) as T;
+}
+
+export async function responseGenerationError(response: Response): Promise<GenerationApiError> {
+  let payload: unknown = null;
+  try {
+    payload = await response.json();
+  } catch {
+    // Malformed or non-JSON error bodies deliberately collapse to one safe code.
+  }
+  return new GenerationApiError(response.status, decodeGenerationFailure(payload));
 }

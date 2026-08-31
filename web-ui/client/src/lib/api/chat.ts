@@ -1,4 +1,4 @@
-import { apiFetch, toApiPath } from './client';
+import { apiFetch, responseGenerationError, toApiPath } from './client';
 import { readChatStream, type ChatStreamHandlers } from './stream';
 import type {
   MessageAlternate,
@@ -109,16 +109,18 @@ export function continueMessage(messageId: string, composerText: string): Promis
 export async function sendChatMessage(
   threadId: string,
   content: string,
-  handlers: ChatStreamHandlers
+  handlers: ChatStreamHandlers,
+  options: { signal?: AbortSignal } = {}
 ): Promise<void> {
   const response = await fetch(toApiPath(`/chat/${encodeURIComponent(threadId)}/send`), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal: options.signal,
     body: JSON.stringify({ content })
   });
 
   if (!response.ok) {
-    throw new Error(`RayMe chat stream failed: ${response.status} ${response.statusText}`.trim());
+    throw await responseGenerationError(response);
   }
 
   await readChatStream(response, handlers);

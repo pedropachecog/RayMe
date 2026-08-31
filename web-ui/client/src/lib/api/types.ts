@@ -176,6 +176,155 @@ export interface ThreadDetail extends ThreadSummary {
   messages: ThreadMessage[];
 }
 
+export const GENERATION_FAILURE_CODES = [
+  'llm_refusal_exhausted',
+  'prompt_budget_exceeded',
+  'provider_evidence_mismatch',
+  'invalid_model_profile',
+  'invalid_generation_request',
+  'llm_empty_output',
+  'llm_stream_failed',
+  'call_generation_failed',
+  'llm_generation_failed'
+] as const;
+
+export type GenerationFailureCode = (typeof GENERATION_FAILURE_CODES)[number];
+
+export interface GenerationFailure {
+  type: 'generation_failure';
+  code: GenerationFailureCode;
+}
+
+export const REFUSAL_ACTIVITY_ACTIONS = [
+  'send',
+  'regenerate',
+  'swipe',
+  'continue',
+  'call_offer',
+  'call_turn',
+  'preview'
+] as const;
+
+export type RefusalActivityAction = (typeof REFUSAL_ACTIVITY_ACTIONS)[number];
+
+export const REFUSAL_REASON_CODES = [
+  'generic_identity',
+  'policy_or_safety',
+  'apology',
+  'redirect',
+  'warning',
+  'safe_prefix',
+  'upstream_complete'
+] as const;
+
+export type RefusalReasonCode = (typeof REFUSAL_REASON_CODES)[number];
+
+export const REFUSAL_TERMINAL_OUTCOMES = [
+  'retry',
+  'accepted',
+  'exhausted',
+  'empty',
+  'failed',
+  'cancelled'
+] as const;
+
+export type RefusalTerminalOutcome = (typeof REFUSAL_TERMINAL_OUTCOMES)[number];
+
+export interface RefusalActivity {
+  type: 'refusal_activity';
+  action: RefusalActivityAction;
+  attempt: number;
+  reason_code: RefusalReasonCode;
+  prefix_characters: number;
+  prefix_estimated_tokens: number;
+  retry_count: number;
+  release_ms: number | null;
+  decision_ms: number | null;
+  terminal_outcome: RefusalTerminalOutcome;
+  timestamp: string;
+}
+
+const generationFailureCodes = new Set<string>(GENERATION_FAILURE_CODES);
+const refusalActivityActions = new Set<string>(REFUSAL_ACTIVITY_ACTIONS);
+const refusalReasonCodes = new Set<string>(REFUSAL_REASON_CODES);
+const refusalTerminalOutcomes = new Set<string>(REFUSAL_TERMINAL_OUTCOMES);
+const UTC_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
+
+export function isGenerationFailureCode(value: unknown): value is GenerationFailureCode {
+  return typeof value === 'string' && generationFailureCodes.has(value);
+}
+
+export function decodeGenerationFailure(value: unknown): GenerationFailure {
+  const record = asRecord(value);
+  const detail = asRecord(record?.detail) ?? record;
+  const code = detail?.code;
+  return {
+    type: 'generation_failure',
+    code: isGenerationFailureCode(code) ? code : 'llm_generation_failed'
+  };
+}
+
+export function decodeRefusalActivity(value: unknown): RefusalActivity | null {
+  const record = asRecord(value);
+  if (
+    !record ||
+    record.type !== 'refusal_activity' ||
+    !isStringMember(record.action, refusalActivityActions) ||
+    !isIntegerBetween(record.attempt, 1, 3) ||
+    !isStringMember(record.reason_code, refusalReasonCodes) ||
+    !isIntegerBetween(record.prefix_characters, 0, Number.MAX_SAFE_INTEGER) ||
+    !isIntegerBetween(record.prefix_estimated_tokens, 0, Number.MAX_SAFE_INTEGER) ||
+    !isIntegerBetween(record.retry_count, 0, 2) ||
+    !isOptionalDuration(record.release_ms) ||
+    !isOptionalDuration(record.decision_ms) ||
+    !isStringMember(record.terminal_outcome, refusalTerminalOutcomes) ||
+    typeof record.timestamp !== 'string' ||
+    !UTC_TIMESTAMP.test(record.timestamp)
+  ) {
+    return null;
+  }
+
+  return {
+    type: 'refusal_activity',
+    action: record.action as RefusalActivityAction,
+    attempt: record.attempt as number,
+    reason_code: record.reason_code as RefusalReasonCode,
+    prefix_characters: record.prefix_characters as number,
+    prefix_estimated_tokens: record.prefix_estimated_tokens as number,
+    retry_count: record.retry_count as number,
+    release_ms: record.release_ms as number | null,
+    decision_ms: record.decision_ms as number | null,
+    terminal_outcome: record.terminal_outcome as RefusalTerminalOutcome,
+    timestamp: record.timestamp
+  };
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function isStringMember(value: unknown, values: ReadonlySet<string>): value is string {
+  return typeof value === 'string' && values.has(value);
+}
+
+function isIntegerBetween(value: unknown, minimum: number, maximum: number): value is number {
+  return (
+    typeof value === 'number' &&
+    Number.isSafeInteger(value) &&
+    value >= minimum &&
+    value <= maximum
+  );
+}
+
+function isOptionalDuration(value: unknown): value is number | null {
+  return (
+    value === null ||
+    (typeof value === 'number' && Number.isFinite(value) && value >= 0)
+  );
+}
+
 export type CallStateName =
   | 'idle'
   | 'connecting'

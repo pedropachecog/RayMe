@@ -1,15 +1,25 @@
-import type { ThreadMessage } from './types';
+import {
+  decodeGenerationFailure,
+  decodeRefusalActivity,
+  type GenerationFailure,
+  type RefusalActivity,
+  type ThreadMessage
+} from './types';
 
 export interface ChatStreamHandlers {
   onToken?: (text: string) => void;
   onDone?: (message: ThreadMessage) => void;
+  /** @deprecated Use onFailure for typed, display-safe handling. */
   onError?: (message: string) => void;
+  onFailure?: (failure: GenerationFailure) => void;
+  onActivity?: (activity: RefusalActivity) => void;
 }
 
 type ChatStreamEvent =
   | { type: 'token'; text: string }
   | { type: 'done'; message: ThreadMessage }
-  | { type: 'error'; message: string };
+  | { type: 'error'; code?: unknown; message?: unknown }
+  | ({ type: 'refusal_activity' } & Record<string, unknown>);
 
 export async function readChatStream(response: Response, handlers: ChatStreamHandlers): Promise<void> {
   if (!response.body) {
@@ -48,7 +58,11 @@ function dispatchCompleteEvents(buffer: string, handlers: ChatStreamHandlers): s
       continue;
     }
 
-    dispatchEvent(JSON.parse(dataLines.join('\n')) as ChatStreamEvent, handlers);
+    try {
+      dispatchEvent(JSON.parse(dataLines.join('\n')) as ChatStreamEvent, handlers);
+    } catch {
+      dispatchFailure({ type: 'error' }, handlers);
+    }
   }
 
   return remainder;
@@ -56,16 +70,39 @@ function dispatchCompleteEvents(buffer: string, handlers: ChatStreamHandlers): s
 
 function dispatchEvent(event: ChatStreamEvent, handlers: ChatStreamHandlers): void {
   if (event.type === 'token') {
-    handlers.onToken?.(event.text);
+    if (typeof event.text === 'string') {
+      handlers.onToken?.(event.text);
+    }
     return;
   }
 
   if (event.type === 'done') {
-    handlers.onDone?.(event.message);
+    if (event.message && typeof event.message === 'object') {
+      handlers.onDone?.(event.message);
+    }
+    return;
+  }
+
+  if (event.type === 'refusal_activity') {
+    const activity = decodeRefusalActivity(event);
+    if (activity) {
+      handlers.onActivity?.(activity);
+    }
     return;
   }
 
   if (event.type === 'error') {
-    handlers.onError?.(event.message);
+    dispatchFailure(event, handlers);
+  }
+}
+
+function dispatchFailure(event: unknown, handlers: ChatStreamHandlers): void {
+  const failure = decodeGenerationFailure(event);
+  handlers.onFailure?.(failure);
+  // Legacy observers receive only the old field when no typed observer exists.
+  // Production generation surfaces use onFailure and never consume this field.
+  if (!handlers.onFailure && handlers.onError) {
+    const record = event && typeof event === 'object' ? (event as Record<string, unknown>) : null;
+    handlers.onError(typeof record?.message === 'string' ? record.message : 'LLM stream failed');
   }
 }
