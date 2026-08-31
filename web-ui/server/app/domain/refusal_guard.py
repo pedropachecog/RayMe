@@ -22,7 +22,12 @@ _REFUSAL_VERB_RE = re.compile(
     r"\b(?:i(?:'m|\s+am)\s+)?unable\s+to\s+"
     r"(?:continue|assist|help|comply|provide|engage|participate|fulfill|generate|"
     r"create|write|do)\b|"
-    r"\b(?:i\s+)?(?:decline|refuse)\b)"
+    r"\b(?:i\s+)?(?:must|need\s+to|have\s+to)\s+(?:decline|refuse)\b|"
+    r"\b(?:i\s+)?(?:decline|refuse)\s+to\s+"
+    r"(?:continue|assist|help|comply|provide|engage|participate|fulfill|generate|"
+    r"create|write|do)\b|"
+    r"\b(?:i\s+)?(?:decline|refuse)\s+(?:this|that|the)\s+"
+    r"(?:request|conversation|task|prompt)\b)"
 )
 _IDENTITY_RE = re.compile(
     r"\b(?:as\s+an?\s+)?(?:ai|artificial\s+intelligence|language\s+model|"
