@@ -143,8 +143,7 @@ def test_generic_exact_request_goldens_preserve_roles_and_exact_strings(
     )
 
     expected_messages = [
-        {"role": message.role, "content": message.content}
-        for message in _logical_messages()
+        {"role": message.role, "content": message.content} for message in _logical_messages()
     ]
     if attempt > 1:
         expected_messages.insert(-1, {"role": "system", "content": RETRY_CORRECTION})

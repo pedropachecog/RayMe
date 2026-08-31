@@ -13,7 +13,9 @@ from typing import Any, Literal, TypedDict
 import httpx
 from openai import AsyncOpenAI
 
+from app.domain.generation_profiles import RETRY_CORRECTION, build_generation_request
 from app.domain.prompt_builder import PromptContextMessage
+from app.domain.prompt_profiles import PromptGenerationSettings
 from app.domain.refusal_guard import (
     LLMEmptyOutput,
     LLMGuardError,
@@ -28,9 +30,7 @@ DONE_EVENT_TYPE = "done"
 ERROR_EVENT_TYPE = "error"
 CHAT_COMPLETION_SEED_LIMIT = 2**31 - 1
 MAX_SEMANTIC_ATTEMPTS = 3
-REFUSAL_RETRY_CORRECTION = (
-    "The prior draft broke character. Respond only with the in-world reply."
-)
+REFUSAL_RETRY_CORRECTION = RETRY_CORRECTION
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,6 +41,7 @@ class ChatCompletionSettings:
     model: str
     api_key: str | None = None
     disable_thinking: bool = False
+    prompt_generation: PromptGenerationSettings | None = None
 
 
 class TokenEvent(TypedDict):
@@ -107,9 +108,7 @@ async def stream_chat_completion(
     except LLMGuardError as exc:
         yield encode_sse_event(error_event(code=exc.code, message=exc.message))
     except Exception:
-        yield encode_sse_event(
-            error_event(code="llm_stream_failed", message="LLM stream failed")
-        )
+        yield encode_sse_event(error_event(code="llm_stream_failed", message="LLM stream failed"))
 
 
 async def collect_chat_completion(
@@ -147,7 +146,11 @@ async def _stream_text_tokens(
     used_seeds: set[int] = set()
     try:
         for attempt in range(1, MAX_SEMANTIC_ATTEMPTS + 1):
-            attempt_messages = _messages_for_attempt(messages, attempt=attempt)
+            if callable(getattr(completion_client, "stream_chat_completion_tokens", None)):
+                attempt_messages = _messages_for_attempt(messages, attempt=attempt)
+            else:
+                # The typed adapter owns correction role/order for real wire requests.
+                attempt_messages = [dict(message) for message in messages]
             seed = _distinct_seed(draw_seed, used_seeds)
             guard = PrefixRefusalGuard()
             emitted_nonblank = False
@@ -217,16 +220,15 @@ async def _stream_raw_text_tokens(
         return
 
     create = client.chat.completions.create
-    request_kwargs: dict[str, Any] = {
-        "model": settings.model,
-        "messages": _prepare_messages(settings, messages),
-        "seed": seed,
-        "stream": True,
-    }
-    if _should_disable_thinking(settings):
-        request_kwargs["extra_body"] = {
-            "chat_template_kwargs": {"enable_thinking": False},
-        }
+    request = build_generation_request(
+        model=settings.model,
+        messages=messages,
+        settings=settings.prompt_generation,
+        seed=seed,
+        attempt=attempt,
+        disable_thinking=settings.disable_thinking,
+    )
+    request_kwargs = request.to_openai_kwargs()
     stream = await create(**request_kwargs)
     try:
         async for chunk in stream:
