@@ -2,17 +2,17 @@
 gsd_state_version: 1.0
 milestone: v1.0
 status: ready_to_verify
-stopped_at: Completed quick task 260826-rgq
-last_updated: "2026-08-30T22:02:45.711Z"
-last_activity: 2026-08-30
-state_head: 38fb0ba2051cdcdec3576021f93b3552c39bdc05
+stopped_at: Phase 09.1 UI-SPEC approved
+last_updated: "2026-08-31T02:44:30.701Z"
+last_activity: 2026-08-31
+state_head: 7ecf0ddb1aee0afaa8e36511302bc2fcb07b93e1
 progress:
   total_phases: 11
   completed_phases: 3
-  total_plans: 103
+  total_plans: 117
   completed_plans: 99
 milestone_name: milestone
-current_phase_name: Integrate Faster Qwen3-TTS 1.7B into live calls
+current_phase_name: Default unfiltered roleplay and refusal-resistant prompt orchestration
 last_activity_desc: "Quick task 260826-rgq: canonical OMEN startup and Desktop launcher now leave Qwen3-TTS 1.7B resident"
 ---
 
@@ -266,10 +266,10 @@ last_activity_desc: "Quick task 260826-rgq: canonical OMEN startup and Desktop l
 
 ## Session Continuity
 
-Last activity: 2026-08-30
-Last session: 2026-08-26T20:02:30Z
-Stopped at: Completed quick task 260826-rgq; RayMe is running on OMEN with Qwen resident
-Resume file: None
+Last activity: 2026-08-31
+Last session: 2026-08-30T22:59:47.298Z
+Stopped at: Phase 09.1 UI-SPEC approved
+Resume file: .planning/phases/09.1-default-unfiltered-roleplay-and-refusal-resistant-prompt-orc/09.1-UI-SPEC.md
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
 

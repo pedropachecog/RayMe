@@ -696,20 +696,39 @@ still returns the call to listening while rejecting late text and audio.
    commit, health, effective prompt, and live behavior.
 
 Plans:
+**Wave 1**
 
 - [ ] 09.1-01-PLAN.md — Trace refusal-then-accepted live streaming through the lowest shared guarded iterator (Wave 1)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 09.1-02-PLAN.md — Observe OMEN read-only, then freeze sanitized evidence and verifier contracts (Wave 2)
 - [ ] 09.1-03-PLAN.md — Persist the typed prompt profile and Roleplay default independently (Wave 2)
 - [ ] 09.1-04-PLAN.md — Migrate the nullable truthful thread example snapshot independently (Wave 2)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 09.1-05-PLAN.md — Compose exact structured prompts and model-aware Qwen/Generic requests (Wave 3)
+- [ ] 09.1-09-PLAN.md — Deliver the typed Prompt & Generation Settings surface (Wave 3)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 09.1-06-PLAN.md — Unify Send, Regenerate, Swipe, and Continue on guarded generation (Wave 4)
 - [ ] 09.1-07-PLAN.md — Unify Call offers/turns while preserving early playback and Interrupt (Wave 4)
-- [ ] 09.1-08-PLAN.md — Expose the same-origin non-mutating exact prompt preview API (Wave 5)
-- [ ] 09.1-09-PLAN.md — Deliver the typed Prompt & Generation Settings surface (Wave 3)
 - [ ] 09.1-10-PLAN.md — Finish app-local typography and responsive Settings states (Wave 4)
 - [ ] 09.1-11-PLAN.md — Deliver Character Editor macro, inheritance, example, and PHI guidance (Wave 4)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 09.1-08-PLAN.md — Expose the same-origin non-mutating exact prompt preview API (Wave 5)
 - [ ] 09.1-12-PLAN.md — Preserve typed generation failures and metadata-only retry feedback (Wave 5)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
 - [ ] 09.1-13-PLAN.md — Deliver the accessible responsive exact Prompt Inspector (Wave 6)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
 - [ ] 09.1-14-PLAN.md — Run one commit-safe exact-SHA local/deploy/evidence transaction, commit its receipt, then block for visual/live approval (Wave 7)
 
 ### Phase 08.1: Live-call streaming invariant incident repair and prevention (INSERTED)
