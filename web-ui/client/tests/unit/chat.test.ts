@@ -33,6 +33,7 @@ import bubbleSource from '../../src/lib/components/ChatMessageBubble.svelte?raw'
 import composerSource from '../../src/lib/components/Composer.svelte?raw';
 import messageActionMenuSource from '../../src/lib/components/MessageActionMenu.svelte?raw';
 import swipeStepperSource from '../../src/lib/components/SwipeStepper.svelte?raw';
+import callRouteSource from '../../src/routes/call/[threadId]/+page.svelte?raw';
 import routeSource from '../../src/routes/chat/[threadId]/+page.svelte?raw';
 
 const selectedOpening: ThreadMessage = {
@@ -641,6 +642,21 @@ describe('chat route contract', () => {
         message: 'REJECTED_PROSE_CANARY'
       })
     ).toEqual({ type: 'generation_failure', code: 'llm_generation_failed' });
+  });
+
+  it('keeps raw call terminal messages out of visible call failure state', () => {
+    expect(callRouteSource).toContain(
+      'generationFailureFromCallTerminal(errorEvent)'
+    );
+    expect(callRouteSource).toContain(
+      'generationFailurePresentation(generationFailure).message'
+    );
+    expect(callRouteSource).not.toContain('errorEvent.message');
+    expect(callRouteSource).not.toContain(
+      'messageForCallFailure(event.code, event.message)'
+    );
+    expect(callRouteSource).not.toContain('const normalized = message?.trim()');
+    expect(callRouteSource).not.toContain('REJECTED_PROSE_CANARY');
   });
 
   it('owns retry timers and abort cleanup through the route lifecycle', () => {
