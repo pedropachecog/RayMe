@@ -123,18 +123,87 @@ def verify_contracts_only() -> dict[str, int]:
     verify_preflight(preflight)
     return {"deployed_turns":len(seeds),"gate_count":len(GATES),"result_shape_count":len(RESULTS)}
 
+def verify_local_release(*, results_dir: Path, expected_commit: str, now: str | None = None) -> str:
+    if not HEX40.fullmatch(expected_commit):
+        raise EvidenceError("expected intended commit is invalid")
+    payload = _load(results_dir / "local-verification.json")
+    if payload.get("schema_version") != 1 or payload.get("artifact") != "local-verification" or payload.get("phase") != "09.1":
+        raise EvidenceError("local verification schema mismatch")
+    if payload.get("intended_commit") != expected_commit:
+        raise EvidenceError("local verification intended commit mismatch")
+    if payload.get("gates") != {gate: True for gate in sorted(GATES)}:
+        raise EvidenceError("local verification gates incomplete")
+    reference_now = _timestamp(now) if now else datetime.now(timezone.utc)
+    age = (reference_now - _timestamp(payload.get("generated_at"))).total_seconds()
+    if age < 0 or age > 86400:
+        raise EvidenceError("local verification is stale")
+    verify_shared_privacy(payload)
+    return expected_commit
+
+def verify_decision_ready(*, results_dir: Path, expected_commit: str, now: str | None = None) -> str:
+    preflight = _load(results_dir / "omen-preflight.json")
+    provider = verify_preflight(preflight, now=now)
+    evidence = _load(results_dir / "omen-evidence.json")
+    report = _load(results_dir / "decision-report.json")
+    if evidence.get("artifact") != "omen-evidence" or report.get("artifact") != "decision-report":
+        raise EvidenceError("decision artifact schema mismatch")
+    if evidence.get("deployed_commit") != expected_commit or report.get("deployed_commit") != expected_commit:
+        raise EvidenceError("deployed commit mismatch")
+    if evidence.get("provider") != provider or report.get("model_id") != provider.get("model_id"):
+        raise EvidenceError("provider identity mismatch")
+    rows = evidence.get("generation_rows")
+    traces = evidence.get("lifecycle_rows")
+    if not isinstance(rows, list) or len(rows) != 36 or evidence.get("turn_count") != 36:
+        raise EvidenceError("deployed matrix count mismatch")
+    for row in rows:
+        if not isinstance(row, dict) or any(row.get(key) != 0 for key in ("refusal_count","request_diff_count","persisted_rejected_count","false_retry_count")):
+            raise EvidenceError("deployed matrix raw gate failed")
+        if not isinstance(row.get("attempts"), int) or not 1 <= row["attempts"] <= 3:
+            raise EvidenceError("deployed attempt gate failed")
+    if not isinstance(traces, list) or len(traces) != 6:
+        raise EvidenceError("lifecycle trace count mismatch")
+    for trace in traces:
+        immediate, final = trace.get("immediate"), trace.get("final")
+        if not isinstance(immediate, dict) or not isinstance(final, dict):
+            raise EvidenceError("lifecycle timing carrier mismatch")
+        if set(immediate) - {"first_caption_ms","first_speech_ms","interrupt_ms"}:
+            raise EvidenceError("immediate carrier contains final timing")
+        if final.get("late_rejected_count") != 0 or final.get("whole_synthesis_fallback_count") != 0:
+            raise EvidenceError("lifecycle late/fallback gate failed")
+        if not (immediate.get("first_caption_ms", math.inf) < final.get("llm_complete_ms", -1) and immediate.get("first_speech_ms", math.inf) < final.get("llm_complete_ms", -1) and immediate.get("first_speech_ms", math.inf) < final.get("tts_complete_ms", -1)):
+            raise EvidenceError("lifecycle early playback gate failed")
+    recomputed_ready = len(rows) == 36 and len(traces) == 6
+    if report.get("turn_count") != 36 or report.get("lifecycle_trace_count") != 6 or report.get("decision_ready") is not recomputed_ready or report.get("gate_results") != {gate: True for gate in sorted(GATES)}:
+        raise EvidenceError("decision report does not match recomputation")
+    verify_shared_privacy(evidence)
+    verify_shared_privacy(report)
+    return expected_commit
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Verify Phase 09.1 evidence")
     parser.add_argument("--contracts-only", action="store_true")
+    parser.add_argument("--local-release", action="store_true")
+    parser.add_argument("--decision-ready", action="store_true")
+    parser.add_argument("--expected-commit")
+    parser.add_argument("--results-dir", type=Path, default=RESULTS_DIR)
+    parser.add_argument("--now")
     args = parser.parse_args(argv)
-    if not args.contracts_only:
+    if sum((args.contracts_only, args.local_release, args.decision_ready)) != 1:
         parser.error("a verifier mode is required")
     try:
-        counts = verify_contracts_only()
+        if args.contracts_only:
+            counts = verify_contracts_only()
+            detail = f"contracts ({counts['deployed_turns']} deployed turns, {counts['gate_count']} critical gates)"
+        elif args.local_release:
+            verify_local_release(results_dir=args.results_dir, expected_commit=str(args.expected_commit or ""), now=args.now)
+            detail = "local release"
+        else:
+            verify_decision_ready(results_dir=args.results_dir, expected_commit=str(args.expected_commit or ""), now=args.now)
+            detail = "decision ready"
     except EvidenceError as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
         return 1
-    print(f"PASS: contracts ({counts['deployed_turns']} deployed turns, {counts['gate_count']} critical gates)")
+    print(f"PASS: {detail}")
     return 0
 
 if __name__ == "__main__":
