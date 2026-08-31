@@ -13,6 +13,7 @@ from app.api.chat import router as chat_router
 from app.api.characters import router as characters_router
 from app.api.health import router as health_router
 from app.api.messages import router as messages_router
+from app.api.prompt_preview import router as prompt_preview_router
 from app.api.settings import router as settings_router
 from app.api.threads import router as threads_router
 from app.api.voices import router as voices_router
@@ -63,6 +64,7 @@ def create_app(
     app.include_router(chat_router)
     app.include_router(calls_router)
     app.include_router(messages_router)
+    app.include_router(prompt_preview_router)
     app.include_router(voices_router)
 
     if static_client_dir is not None:

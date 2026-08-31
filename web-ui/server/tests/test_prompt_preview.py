@@ -241,7 +241,8 @@ def test_send_preview_is_exact_no_store_and_accepts_same_or_missing_origin(
         range(len(body["wire_messages"]))
     )
     assert body["wire_messages"][-1]["role"] == "user"
-    assert body["wire_messages"][-1]["content"].endswith(COMPOSER_CANARY + " /no_think")
+    assert body["wire_messages"][-1]["content"] == "Card ending for Mara.\n\n/no_think"
+    assert any(message["content"] == COMPOSER_CANARY for message in body["wire_messages"])
     assert body["effective_request"]["messages"] == [
         {"role": message["role"], "content": message["content"]}
         for message in body["wire_messages"]

@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, TypedDict
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -45,6 +45,11 @@ from app.domain.prompt_builder import (
 from app.domain.settings_service import EndpointSettings, SettingsService
 from app.domain.thread_service import CharacterUnavailableError, ThreadNotFoundError
 from app.storage.session import SERVER_ROOT, get_session
+from app.api.origin import (
+    CALL_ORIGIN_NOT_ALLOWED,
+    enforce_same_origin as enforce_same_origin_for_calls,
+    get_runtime_settings as get_call_runtime_settings,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +73,6 @@ DEFAULT_CALL_VOICE_BLOB_DIR = SERVER_ROOT / "data" / "blobs" / "voices"
 
 CALL_BACKEND_NOT_READY = "call_backend_not_ready"
 CALL_BACKEND_CLIENT_MISCONFIGURED = "call_backend_client_misconfigured"
-CALL_ORIGIN_NOT_ALLOWED = "call_origin_not_allowed"
 CALL_SESSION_NOT_FOUND_CODE = "call_session_not_found"
 CALL_GENERATION_FAILED = "call_generation_failed"
 RAYME_EVENTS_CHANNEL = "rayme-events"
@@ -236,10 +240,6 @@ async def get_call_session() -> AsyncIterator[AsyncSession]:
         yield session
 
 
-def get_call_runtime_settings(request: Request) -> Settings:
-    return request.app.state.settings
-
-
 def get_call_backend_client(
     runtime_settings: Settings = Depends(get_call_runtime_settings),
 ) -> AiBackendClient:
@@ -260,29 +260,6 @@ def get_call_completion_client() -> object | None:
 
 def get_call_service(session: AsyncSession = Depends(get_call_session)) -> CallService:
     return CallService(session)
-
-
-async def enforce_same_origin_for_calls(
-    request: Request,
-    runtime_settings: Settings = Depends(get_call_runtime_settings),
-) -> None:
-    origin = request.headers.get("origin")
-    if not origin:
-        return
-
-    allowed_origins = {
-        _origin_from_url(runtime_settings.web_public_url),
-        *(_origin_from_url(origin) for origin in runtime_settings.allowed_origins),
-        _origin_from_url(str(request.base_url)),
-    }
-    if _origin_from_url(origin) not in allowed_origins:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": CALL_ORIGIN_NOT_ALLOWED,
-                "message": "Call controls must come from the RayMe Web UI origin.",
-            },
-        )
 
 
 @router.post(
@@ -1408,15 +1385,6 @@ def _call_error(exc: CallServiceError) -> HTTPException:
 
 def _backend_error(exc: AiBackendClientError) -> HTTPException:
     return HTTPException(status_code=502, detail=exc.to_public_dict())
-
-
-def _origin_from_url(value: str) -> str:
-    stripped = value.strip().rstrip("/")
-    if "://" not in stripped:
-        return stripped
-    scheme, rest = stripped.split("://", 1)
-    authority = rest.split("/", 1)[0]
-    return f"{scheme.lower()}://{authority.lower()}"
 
 
 def _sse(event: Mapping[str, Any]) -> str:
