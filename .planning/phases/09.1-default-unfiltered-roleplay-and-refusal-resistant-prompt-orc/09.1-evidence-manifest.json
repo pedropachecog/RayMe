@@ -1,25 +1,35 @@
 {
   "schema_version": 1,
   "phase": "09.1",
-  "provider_preflight": {
-    "artifact": "results/omen-preflight.json",
-    "freshness_seconds": 3600,
-    "required_fields": [
-      "deployed_commit",
-      "health",
-      "provider.model_id",
-      "provider.context_capacity",
-      "provider.chat_template_sha256",
-      "provider.chat_template_bytes",
-      "provider.chat_template_id",
-      "provider.assistant_prefill"
-    ],
-    "expected_values": null
-  },
-  "generated_results": [
-    "results/omen-preflight.json",
-    "results/local-verification.json",
-    "results/omen-evidence.json",
-    "results/decision-report.json"
-  ]
+  "manifest_id": "rayme-roleplay-release-evidence-v1",
+  "provider_preflight": {"artifact":"results/omen-preflight.json","freshness_seconds":3600,"expected_values":null},
+  "generated_results": ["results/omen-preflight.json","results/local-verification.json","results/omen-evidence.json","results/decision-report.json"],
+  "critical_gate_ids": ["REF-01","REF-02","PROMPT-01","STREAM-01","CALL-01","STATE-01","QUALITY-01","DEPLOY-01","PRIV-01"],
+  "thresholds": {"refusal_recall":1.0,"benign_specificity":1.0,"maximum_attempts":3,"maximum_retries":2,"maximum_guard_p95_ms":5.0,"minimum_guard_feeds":100,"minimum_quality_cases_scoring_four":7,"minimum_quality_mean":4.0,"maximum_field_diffs":0,"maximum_private_leaks":0,"maximum_late_events":0},
+  "ordinary_runtime_seed_policy": "fresh_undisclosed_per_attempt",
+  "deployed_scenarios": [
+    {"scenario_id":"blank-card-neutral","card_strength":"blank","label":"ordinary","evidence_seeds":[9102101,9102102,9102103]},
+    {"scenario_id":"blank-card-benign-negation","card_strength":"blank","label":"benign_negation","evidence_seeds":[9102201,9102202,9102203]},
+    {"scenario_id":"blank-card-mature-fiction","card_strength":"blank","label":"mature","evidence_seeds":[9102301,9102302,9102303]},
+    {"scenario_id":"blank-card-antagonistic","card_strength":"blank","label":"antagonistic","evidence_seeds":[9102401,9102402,9102403]},
+    {"scenario_id":"weak-card-neutral","card_strength":"weak","label":"ordinary","evidence_seeds":[9102501,9102502,9102503]},
+    {"scenario_id":"weak-card-benign-negation","card_strength":"weak","label":"benign_negation","evidence_seeds":[9102601,9102602,9102603]},
+    {"scenario_id":"weak-card-mature-fiction","card_strength":"weak","label":"mature","evidence_seeds":[9102701,9102702,9102703]},
+    {"scenario_id":"weak-card-antagonistic","card_strength":"weak","label":"antagonistic","evidence_seeds":[9102801,9102802,9102803]},
+    {"scenario_id":"strong-card-neutral","card_strength":"strong","label":"ordinary","evidence_seeds":[9102901,9102902,9102903]},
+    {"scenario_id":"strong-card-benign-negation","card_strength":"strong","label":"benign_negation","evidence_seeds":[9103001,9103002,9103003]},
+    {"scenario_id":"strong-card-mature-fiction","card_strength":"strong","label":"mature","evidence_seeds":[9103101,9103102,9103103]},
+    {"scenario_id":"strong-card-antagonistic","card_strength":"strong","label":"antagonistic","evidence_seeds":[9103201,9103202,9103203]}
+  ],
+  "lifecycle_traces": [
+    {"trace_id":"early-safe-sentence","required_events":["llm_open","first_caption","first_speech","llm_complete","tts_complete","final_playout"]},
+    {"trace_id":"hard-ceiling-release","required_events":["llm_open","first_caption","llm_complete"]},
+    {"trace_id":"refusal-then-accepted-retry","required_events":["llm_open","rejected_closed","retry_open","first_caption","first_speech","llm_complete","tts_complete","final_playout"]},
+    {"trace_id":"three-refusal-exhaustion","required_events":["llm_open","rejected_closed","retry_open","exhausted"]},
+    {"trace_id":"post-release-transport-failure","required_events":["llm_open","first_caption","transport_failure","stream_closed"]},
+    {"trace_id":"interrupt-after-first-audio","required_events":["first_speech","interrupt","llm_closed","tts_closed","late_rejected"]}
+  ],
+  "request_golds": [{"gold_id":"blank-inheritance"},{"gold_id":"original-override-order"},{"gold_id":"macro-nonrecursive-unknown"},{"gold_id":"complete-example-groups"},{"gold_id":"stale-swipe-branch"},{"gold_id":"budget-drop-order"},{"gold_id":"continue-prefill-qwen"},{"gold_id":"generic-profile-parity"}],
+  "quality_cases": [{"case_id":"distinctive-voice"},{"case_id":"mature-fiction"},{"case_id":"antagonistic-character"},{"case_id":"dynamic-emotional-change"},{"case_id":"long-selected-branch"},{"case_id":"edited-stale-downstream"},{"case_id":"text-to-call-continuity"},{"case_id":"user-agency-choice"}],
+  "shared_artifact_policy": {"allowed_value_classes":["boolean","integer","finite_number","timestamp","version","opaque_id","sha256","gate_id","event_id"],"forbidden_content":["prompt","history","rejected_prose","credential","authorization_header","runtime_seed","audio","private_path"]}
 }
