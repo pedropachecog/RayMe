@@ -36,7 +36,10 @@ from app.domain.ai_backend_client import (
 )
 from app.main import create_app
 from app.domain.call_service import CallService
+from app.domain.prompt_profiles import PromptGenerationSettings
+from app.domain.settings_service import SETTINGS_KEY
 from app.storage.models import (
+    AppSetting,
     Base,
     CallTurn,
     Character,
@@ -369,6 +372,139 @@ def test_start_from_character_card_creates_or_selects_thread_before_call(
     assert body["session_id"]
     assert body["thread_id"].startswith("thread_")
     assert asyncio.run(_thread_character_id(call_fixture.sessionmaker, body["thread_id"])) == character_id
+
+
+def test_call_offer_and_turn_share_configured_composer_and_generation_profile(
+    call_fixture: CallFixture,
+) -> None:
+    prompt_generation = PromptGenerationSettings.defaults().merge(
+        {
+            "model_profile": "qwen_llama_server",
+            "max_tokens": 2_048,
+            "roleplay": {
+                "auxiliary": "SHARED CALL PROFILE MARKER",
+            },
+        }
+    )
+    asyncio.run(
+        _write_call_endpoint_settings(
+            call_fixture.sessionmaker,
+            llm_model="Qwen/Qwen3-8B",
+            prompt_generation=prompt_generation,
+        )
+    )
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+
+    offered = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/offer",
+        json={
+            "session_id": started["session_id"],
+            "offer": {"type": "offer", "sdp": "v=0\r\n"},
+        },
+    )
+    turned = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-shared-composer-profile",
+            "text": "Use the same configured prompt path.",
+            "source": "user_final",
+        },
+    )
+
+    assert offered.status_code == 200
+    assert turned.status_code == 200
+    offer_messages = call_fixture.backend.offer_calls[-1]["payload"]["prompt_messages"]
+    assert "SHARED CALL PROFILE MARKER" in "\n".join(
+        message["content"] for message in offer_messages
+    )
+    assert sum(message["role"] == "system" for message in offer_messages[:1]) == 1
+    completion_request = call_fixture.completion.requests[-1]
+    assert completion_request["settings"].prompt_generation == prompt_generation
+    assert completion_request["settings"].prompt_generation.max_tokens == 2_048
+    assert "SHARED CALL PROFILE MARKER" in "\n".join(
+        message["content"] for message in completion_request["messages"]
+    )
+
+
+def test_call_offer_ceiling_does_not_truncate_call_turn_history(
+    call_fixture: CallFixture,
+) -> None:
+    prompt_generation = PromptGenerationSettings.defaults().merge(
+        {
+            "model_profile": "generic_openai_compatible",
+            "context_limit": 131_072,
+        }
+    )
+    asyncio.run(
+        _write_call_endpoint_settings(
+            call_fixture.sessionmaker,
+            llm_model="generic-chat-model",
+            prompt_generation=prompt_generation,
+        )
+    )
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    asyncio.run(_append_call_history(call_fixture.sessionmaker, thread_id, count=60))
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+
+    offered = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/offer",
+        json={
+            "session_id": started["session_id"],
+            "offer": {"type": "offer", "sdp": "v=0\r\n"},
+        },
+    )
+    turned = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/turns",
+        json={
+            "session_id": started["session_id"],
+            "turn_id": "turn-keeps-full-configured-history",
+            "text": "Keep the call-turn budget independent.",
+            "source": "user_final",
+        },
+    )
+
+    assert offered.status_code == 200
+    assert turned.status_code == 200
+    assert len(call_fixture.backend.offer_calls[-1]["payload"]["prompt_messages"]) <= 48
+    assert len(call_fixture.completion.requests[-1]["messages"]) > 48
+
+
+def test_call_offer_rejects_mandatory_content_overflow_after_profile_mapping(
+    call_fixture: CallFixture,
+) -> None:
+    prompt_generation = PromptGenerationSettings.defaults().merge(
+        {"model_profile": "qwen_llama_server"}
+    )
+    asyncio.run(
+        _write_call_endpoint_settings(
+            call_fixture.sessionmaker,
+            llm_model="Qwen/Qwen3-8B",
+            prompt_generation=prompt_generation,
+        )
+    )
+    thread_id = asyncio.run(_insert_thread_with_character_and_voice(call_fixture.sessionmaker))
+    asyncio.run(
+        _set_call_thread_system_prompt(
+            call_fixture.sessionmaker,
+            thread_id,
+            "x" * 20_000,
+        )
+    )
+    started = call_fixture.client.post("/api/calls/start", json={"thread_id": thread_id}).json()
+
+    response = call_fixture.client.post(
+        f"/api/calls/{started['call_id']}/offer",
+        json={
+            "session_id": started["session_id"],
+            "offer": {"type": "offer", "sdp": "v=0\r\n"},
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "prompt_budget_exceeded"
+    assert response.json()["detail"]["limit"] == "message_content_length"
 
 
 @pytest.mark.parametrize("control_route", ["/offer", "/mute", "/interrupt", "/end"])
@@ -3640,6 +3776,61 @@ async def _insert_thread(
         )
         await session.commit()
         return thread_id
+
+
+async def _write_call_endpoint_settings(
+    sessionmaker: async_sessionmaker,
+    *,
+    llm_model: str,
+    prompt_generation: PromptGenerationSettings,
+) -> None:
+    async with sessionmaker() as session:
+        session.add(
+            AppSetting(
+                key=SETTINGS_KEY,
+                value_json={
+                    "llm_model": llm_model,
+                    "prompt_generation": prompt_generation.to_dict(),
+                },
+            )
+        )
+        await session.commit()
+
+
+async def _append_call_history(
+    sessionmaker: async_sessionmaker,
+    thread_id: str,
+    *,
+    count: int,
+) -> None:
+    async with sessionmaker() as session:
+        for offset in range(count):
+            role = "user" if offset % 2 == 0 else "assistant"
+            session.add(
+                Message(
+                    id=f"msg_history_{offset:03d}_{thread_id}",
+                    thread_id=thread_id,
+                    message_kind="user_text" if role == "user" else "ai_text",
+                    role=role,
+                    sequence=offset + 1,
+                    content_text=f"History turn {offset:03d}",
+                )
+            )
+        await session.commit()
+
+
+async def _set_call_thread_system_prompt(
+    sessionmaker: async_sessionmaker,
+    thread_id: str,
+    content: str,
+) -> None:
+    async with sessionmaker() as session:
+        await session.execute(
+            update(Thread)
+            .where(Thread.id == thread_id)
+            .values(character_snapshot_system_prompt=content)
+        )
+        await session.commit()
 
 
 async def _thread_character_id(sessionmaker: async_sessionmaker, thread_id: str) -> str | None:
