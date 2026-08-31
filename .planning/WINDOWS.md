@@ -2,9 +2,9 @@
 schema_version: 1
 open_count: 3
 waived_count: 0
-fixed_count: 10
-total_count: 13
-last_updated: 2026-08-31T06:11:41.172Z
+fixed_count: 11
+total_count: 14
+last_updated: 2026-08-31T06:50:56.336Z
 ---
 
 # Broken Windows Ledger
@@ -28,6 +28,7 @@ last_updated: 2026-08-31T06:11:41.172Z
 | 11 | 09 | stub | .planning/phases/09-integrate-faster-qwen3-tts-1-7b-into-live-calls/09-run-omen-evidence.py | 1028 | Finish-acoustic mode emits a deliberately rejected intermediate browser artifact; the real live suite must overwrite it before decision-ready verification. | open |  | 2026-08-01T06:40:34.486Z |  |
 | 12 | 09.1 | deviation | web-ui/server/app/domain/refusal_guard.py |  | Narrowed an over-broad policy secondary signal so benign safe sentences retain early release | open |  | 2026-08-31T03:18:36.517Z |  |
 | 13 | 09.1 | deviation | .planning/STATE.md |  | Legacy STATE header required manual completed-plan and phase-label reconciliation after SDK writes. | fixed |  | 2026-08-31T06:10:40.971Z | 2026-08-31T06:11:41.172Z |
+| 14 | 09.1 | deviation | .planning/STATE.md |  | Reconciled legacy STATE global progress after state.advance-plan could not parse plan counters | fixed |  | 2026-08-31T06:50:37.763Z | 2026-08-31T06:50:56.336Z |
 
 ````json
 [
@@ -186,6 +187,18 @@ last_updated: 2026-08-31T06:11:41.172Z
     "reason": "",
     "recorded_at": "2026-08-31T06:10:40.971Z",
     "resolved_at": "2026-08-31T06:11:41.172Z"
+  },
+  {
+    "id": 14,
+    "kind": "deviation",
+    "phase": "09.1",
+    "file": ".planning/STATE.md",
+    "line": null,
+    "description": "Reconciled legacy STATE global progress after state.advance-plan could not parse plan counters",
+    "status": "fixed",
+    "reason": "",
+    "recorded_at": "2026-08-31T06:50:37.763Z",
+    "resolved_at": "2026-08-31T06:50:56.336Z"
   }
 ]
 ````
