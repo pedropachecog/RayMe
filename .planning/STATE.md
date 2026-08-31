@@ -2,18 +2,18 @@
 gsd_state_version: 1.0
 milestone: v1.0
 status: ready_to_verify
-stopped_at: Completed 09.1-12-PLAN.md
-last_updated: "2026-08-31T08:10:18.662Z"
+stopped_at: Completed 09.1-13-PLAN.md
+last_updated: "2026-08-31T08:53:58.540Z"
 last_activity: 2026-08-31
-state_head: 0ad29abdbe750d58ef7f88d296aa1f3101dd47e0
+state_head: df46eb1c12221b48b6456abc3da47a6432e405aa
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 117
-  completed_plans: 112
+  completed_plans: 113
 milestone_name: milestone
 current_phase_name: Default unfiltered roleplay and refusal-resistant prompt orchestration
-last_activity_desc: "Phase 09.1 Plan 12: Typed generation recovery UI"
+last_activity_desc: "Phase 09.1 Plan 13: Exact credential-free Prompt Inspector UI"
 ---
 
 ## Phase Status
@@ -260,6 +260,7 @@ last_activity_desc: "Phase 09.1 Plan 12: Typed generation recovery UI"
 - Phase 09.1 plan 09.1-01 completed on 2026-08-31: bounded refusal recovery now guards streamed and collected text, preserves early live-call caption/TTS playback, and keeps explicit Interrupt authoritative.
 - Phase 09.1 plan 09.1-02 completed on 2026-08-31: read-only OMEN/provider attestation, a fixed 36-turn evidence matrix, strict privacy schemas, independent verification, and controlled fixture teardown are now frozen.
 - Phase 09.1 plan 09.1-12 completed on 2026-08-31: allowlisted generation outcomes now drive delayed retry feedback and exact actionable failures without exposing rejected text or private upstream data.
+- Phase 09.1 plan 09.1-13 completed on 2026-08-31: the accessible responsive Prompt Inspector now previews all text/call request variants exactly through the non-mutating boundary with escaped credential-free content, retained stale/error states, bounded refusal metadata, and desktop/mobile request-diff evidence.
 
 ### Phase 0 Completion Notes
 
@@ -270,8 +271,8 @@ last_activity_desc: "Phase 09.1 Plan 12: Typed generation recovery UI"
 ## Session Continuity
 
 Last activity: 2026-08-31
-Last session: 2026-08-31T08:10:07.953Z
-Stopped at: Completed 09.1-12-PLAN.md
+Last session: 2026-08-31T08:53:48.035Z
+Stopped at: Completed 09.1-13-PLAN.md
 Resume file: None
 
 **Completed Phase:** 08 (Wire VoxCPM2 streaming chunks into live RayMe call playback) — 6/6 plans complete; outcome `promoted_for_live_call_default` — 2026-05-11T19:17:26.261Z
@@ -307,6 +308,7 @@ Resume file: None
 | Phase 09.1 P11 | 10m | 1 tasks | 3 files |
 | Phase 09.1 P08 | 39m38s | 2 tasks | 5 files |
 | Phase 09.1 P12 | 31m | 2 tasks | 10 files |
+| Phase 09.1 P13 | 33 min | 2 tasks | 6 files |
 
 ## Decisions
 
@@ -397,3 +399,6 @@ Resume file: None
 - [Phase 09.1]: Decode generation failures into a closed client allowlist and discard server prose and unknown metadata before display.
 - [Phase 09.1]: Own one 300ms retry timer per active send and clear it synchronously on accepted content or terminal lifecycle.
 - [Phase 09.1]: Represent pre-release generation failure as an event row with fixed typed recovery actions while preserving accepted Unicode content.
+- [Phase 09.1]: Plan 09.1-13: All six inspector actions use explicit local DTOs through one non-mutating preview boundary; no preview path generates, persists, starts calls, requests microphone access, or allocates a seed.
+- [Phase 09.1]: Plan 09.1-13: Call offer alone displays 48-message/20,000-character transport ceilings; Call turn uses normal output-aware budgeting and a close-cleared local transcript.
+- [Phase 09.1]: Plan 09.1-13: Prompt Inspector retains prior results and marks them stale across every local input while keyboard-only preview moves result focus.
