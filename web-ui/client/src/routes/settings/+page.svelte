@@ -8,11 +8,17 @@
     testWebSettings,
     updateSettings
   } from '$lib/api/settings';
-  import type { AiBackendSettingsStatus, EndpointStatus, SettingsPayload } from '$lib/api/types';
+  import type {
+    AiBackendSettingsStatus,
+    EndpointStatus,
+    PromptGenerationSettings,
+    SettingsPayload
+  } from '$lib/api/types';
   import { getBrowserReadiness, getBrowserReadinessText } from '$lib/browser/environment';
   import EndpointSettingsPanel from '$lib/components/EndpointSettingsPanel.svelte';
   import StatusChip from '$lib/components/StatusChip.svelte';
   import AudioSettingsPanel from '$lib/components/settings/AudioSettingsPanel.svelte';
+  import PromptGenerationSettingsPanel from '$lib/components/settings/PromptGenerationSettingsPanel.svelte';
   import VadSettingsPanel from '$lib/components/settings/VadSettingsPanel.svelte';
 
   let loadState: 'loading' | 'ready' | 'error' = 'loading';
@@ -33,6 +39,9 @@
   let vadEndSilenceMs = 700;
   let sttModel = 'distil-large-v3';
   let ttsDefaultEngine = 'f5';
+  let promptGeneration: PromptGenerationSettings | null = null;
+  let promptGenerationValid = true;
+  let promptPanel: PromptGenerationSettingsPanel;
   let webStatus: EndpointStatus = 'Not configured';
   let aiBackendStatus: EndpointStatus = 'Not configured';
   let llmStatus: EndpointStatus = 'Not configured';
@@ -73,7 +82,7 @@
       loadState = 'ready';
     } catch {
       loadState = 'error';
-      errorMessage = 'RayMe could not load endpoint settings.';
+      errorMessage = 'RayMe could not load settings.';
     }
   }
 
@@ -91,6 +100,7 @@
     vadEndSilenceMs = Math.round(clampNumber(settings.vad_end_silence_ms ?? 700, 100, 3000));
     sttModel = settings.stt_model ?? 'distil-large-v3';
     ttsDefaultEngine = settings.tts_default_engine ?? 'f5';
+    promptGeneration = settings.prompt_generation;
     aiBackendOperationalStatus = normalizeAiBackendStatus(settings.ai_backend_status, aiBackendUrl);
     webStatus = webUrl.trim() ? 'Connected' : 'Not configured';
     aiBackendStatus = aiBackendOperationalStatus.endpoint_status;
@@ -98,6 +108,10 @@
   }
 
   async function saveSettings() {
+    if (!promptGeneration || !promptGenerationValid) {
+      await promptPanel?.focusFirstInvalid();
+      return;
+    }
     await persistCurrentSettings({ showSuccess: true });
   }
 
@@ -121,15 +135,16 @@
         vad_end_silence_ms: Math.round(clampNumber(vadEndSilenceMs, 100, 3000)),
         stt_model: sttModel,
         tts_default_engine: ttsDefaultEngine,
+        prompt_generation: promptGeneration,
         ...(llmApiKey.trim() ? { llm_api_key: llmApiKey.trim() } : {})
       });
       applySettings(nextSettings);
       if (showSuccess) {
-        successMessage = 'Endpoint settings saved.';
+        successMessage = 'Settings saved.';
       }
       return true;
     } catch {
-      errorMessage = 'RayMe could not save endpoint settings.';
+      errorMessage = 'RayMe could not save settings. Your changes are still here. Try again.';
       return false;
     } finally {
       saveState = 'idle';
@@ -142,7 +157,7 @@
     successMessage = '';
 
     try {
-      if (!(await persistCurrentSettings({ showSuccess: false }))) {
+      if (!(await persistEndpointSettingsForTest())) {
         return;
       }
       webStatus = (await testWebSettings()).status;
@@ -159,7 +174,7 @@
     successMessage = '';
 
     try {
-      if (!(await persistCurrentSettings({ showSuccess: false }))) {
+      if (!(await persistEndpointSettingsForTest())) {
         return;
       }
       aiBackendStatus = (await testAiBackendSettings()).status;
@@ -184,7 +199,7 @@
     successMessage = '';
 
     try {
-      if (!(await persistCurrentSettings({ showSuccess: false }))) {
+      if (!(await persistEndpointSettingsForTest())) {
         return;
       }
       llmStatus = (await testLlmSettings()).status;
@@ -192,6 +207,22 @@
       llmStatus = 'Unreachable';
     } finally {
       testingEndpoint = null;
+    }
+  }
+
+  async function persistEndpointSettingsForTest() {
+    try {
+      await updateSettings({
+        web_url: webUrl,
+        ai_backend_url: aiBackendUrl,
+        llm_base_url: llmBaseUrl,
+        llm_model: llmModel,
+        ...(llmApiKey.trim() ? { llm_api_key: llmApiKey.trim() } : {})
+      });
+      return true;
+    } catch {
+      errorMessage = 'RayMe could not save settings. Your changes are still here. Try again.';
+      return false;
     }
   }
 
@@ -237,9 +268,14 @@
   <div class="heading">
     <div>
       <p class="eyebrow">Settings</p>
-      <h1 id="settings-title">Endpoint Settings</h1>
+      <h1 id="settings-title">Settings</h1>
     </div>
-    <button class="primary" type="button" disabled={saveState === 'saving'} on:click={saveSettings}>
+    <button
+      class="primary"
+      type="button"
+      disabled={saveState === 'saving' || !promptGeneration || !promptGenerationValid}
+      on:click={saveSettings}
+    >
       <span>Save Settings</span>
     </button>
   </div>
@@ -308,13 +344,6 @@
           testing={testingEndpoint === 'llm'}
           onTest={testLlmEndpoint}
         />
-        <label class="toggle-row">
-          <input type="checkbox" bind:checked={llmDisableThinking} />
-          <span>
-            <strong>Disable Qwen thinking</strong>
-            <small>Live calls request direct responses from Qwen models.</small>
-          </span>
-        </label>
       </div>
 
       <aside class="readiness-panel" aria-labelledby="mobile-readiness-title">
@@ -353,6 +382,20 @@
             (vadEndSilenceMs = Math.round(clampNumber(value, 100, 3000)))}
         />
       </aside>
+
+      {#if promptGeneration}
+        <div class="prompt-generation-panel">
+          <PromptGenerationSettingsPanel
+            bind:this={promptPanel}
+            value={promptGeneration}
+            {llmDisableThinking}
+            disabled={saveState === 'saving'}
+            onChange={(value) => (promptGeneration = value)}
+            onDisableThinkingChange={(value) => (llmDisableThinking = value)}
+            onValidityChange={(valid) => (promptGenerationValid = valid)}
+          />
+        </div>
+      {/if}
     </div>
   {/if}
 </section>
@@ -452,39 +495,9 @@
     box-shadow: inset 0 0 0 1px rgba(64, 72, 93, 0.14);
   }
 
-  .toggle-row {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: var(--space-sm);
-    align-items: start;
-    border-radius: var(--radius-md);
-    background: rgba(9, 19, 40, 0.78);
-    padding: var(--space-md);
-    box-shadow: inset 0 0 0 1px rgba(64, 72, 93, 0.14);
-  }
-
-  .toggle-row input {
-    width: 20px;
-    height: 20px;
-    margin-top: 2px;
-    accent-color: var(--color-primary);
-  }
-
-  .toggle-row span {
-    display: grid;
-    gap: 2px;
-  }
-
-  .toggle-row strong {
-    color: var(--color-text);
-    font-size: var(--font-label);
-    line-height: var(--line-label);
-  }
-
-  .toggle-row small {
-    color: var(--color-text-muted);
-    font-size: var(--font-label);
-    line-height: var(--line-label);
+  .prompt-generation-panel {
+    grid-column: 1 / -1;
+    min-width: 0;
   }
 
   .settings-skeleton,

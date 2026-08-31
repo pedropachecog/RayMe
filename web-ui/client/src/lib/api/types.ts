@@ -349,6 +349,45 @@ export type CallEvent =
       retry_allowed?: boolean | null;
     };
 
+export type PromptMode = 'roleplay' | 'assistant' | 'custom';
+
+export type ModelProfile = 'auto' | 'qwen_llama_server' | 'generic_openai_compatible';
+
+export interface PromptSet {
+  main: string;
+  auxiliary: string;
+  post_history: string;
+}
+
+export interface PromptGenerationSettings {
+  schema_version: 1;
+  prompt_contract_version: 'rayme-prompt-contract-v1';
+  mode: PromptMode;
+  roleplay: PromptSet;
+  assistant: PromptSet;
+  custom: PromptSet;
+  model_profile: ModelProfile;
+  context_limit: number;
+  max_tokens: number;
+  temperature: number;
+  top_p: number;
+  min_p: number;
+  top_k: number;
+  repetition_penalty: number;
+  presence_penalty: number;
+  frequency_penalty: number;
+}
+
+export type PromptSetUpdatePayload = Partial<PromptSet>;
+
+export type PromptGenerationUpdatePayload = Partial<
+  Omit<PromptGenerationSettings, 'roleplay' | 'assistant' | 'custom'>
+> & {
+  roleplay?: PromptSetUpdatePayload | null;
+  assistant?: PromptSetUpdatePayload | null;
+  custom?: PromptSetUpdatePayload | null;
+};
+
 export interface SettingsPayload {
   web_url: string;
   ai_backend_url: string;
@@ -362,6 +401,7 @@ export interface SettingsPayload {
   vad_end_silence_ms: number;
   stt_model: string;
   tts_default_engine: string;
+  prompt_generation: PromptGenerationSettings;
   ai_backend_status: AiBackendSettingsStatus;
 }
 
@@ -378,6 +418,7 @@ export interface SettingsUpdatePayload {
   vad_end_silence_ms?: number | null;
   stt_model?: string | null;
   tts_default_engine?: string | null;
+  prompt_generation?: PromptGenerationUpdatePayload | null;
 }
 
 export interface EndpointTestResult {

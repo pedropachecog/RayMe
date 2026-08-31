@@ -5,7 +5,7 @@ export function getSettings(): Promise<SettingsPayload> {
   return apiFetch<SettingsPayload>('/settings', { method: 'GET' });
 }
 
-export function updateSettings(payload: SettingsUpdatePayload): Promise<SettingsPayload> {
+export function updateSettings(payload: Readonly<SettingsUpdatePayload>): Promise<SettingsPayload> {
   return apiFetch<SettingsPayload>('/settings', {
     method: 'PATCH',
     body: JSON.stringify(payload)

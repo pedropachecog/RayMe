@@ -172,6 +172,7 @@ describe('Settings route', () => {
     }
 
     expect(settingsApiSource).toContain('SettingsUpdatePayload');
+    expect(settingsApiSource).toContain('Readonly<SettingsUpdatePayload>');
     expect(settingsApiSource).toContain("apiFetch<SettingsPayload>('/settings'");
 
     const fetchMock = installFetch({
@@ -348,6 +349,12 @@ describe('Settings route', () => {
     expect(typeof payload.prompt_generation.context_limit).toBe('number');
     expect(typeof payload.prompt_generation.temperature).toBe('number');
     expect(typeof payload.prompt_generation.top_k).toBe('number');
+
+    await updateSettings({ prompt_generation: { temperature: 1.1 } });
+    const partialRequest = lastRequest(fetchMock);
+    expect(JSON.parse(partialRequest.init.body as string)).toEqual({
+      prompt_generation: { temperature: 1.1 }
+    });
   });
 
   it('renders the exact Roleplay-first mode, prompt, profile, seed, and save copy', () => {
@@ -449,7 +456,8 @@ describe('Settings route', () => {
     expect(settingsSource).toContain('aria-label="Loading settings"');
     expect(settingsSource).toContain('prompt_generation: promptGeneration');
     expect(settingsSource.match(/<span>Save Settings<\/span>/g)).toHaveLength(1);
-    expect(settingsSource).toContain("saveState === 'saving' || !promptGenerationValid");
+    expect(settingsSource).toContain("saveState === 'saving'");
+    expect(settingsSource).toContain('!promptGenerationValid');
     expect(settingsSource).not.toContain('Reset all');
   });
 });
