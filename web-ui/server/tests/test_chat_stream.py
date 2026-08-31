@@ -25,6 +25,7 @@ from app.domain.llm_stream import (
     token_event,
 )
 from app.domain.refusal_guard import LLMEmptyOutput, LLMRefusalExhausted
+from app.domain.prompt_profiles import PromptGenerationSettings
 from app.domain.settings_service import SETTINGS_KEY
 from app.domain.thread_service import ThreadService
 from app.main import create_app
@@ -586,6 +587,46 @@ def test_send_endpoint_streams_tokens_persists_final_once_and_emits_done_shape(
     ]
 
 
+def test_send_endpoint_routes_one_saved_profile_through_structured_composer(
+    chat_client: tuple[TestClient, async_sessionmaker, ScriptedStreamingClient],
+) -> None:
+    client, sessionmaker, scripted_client = chat_client
+    thread_id = asyncio.run(_create_thread(sessionmaker))
+    prompt_generation = PromptGenerationSettings.defaults().merge(
+        {
+            "model_profile": "qwen_llama_server",
+            "temperature": 0.65,
+            "top_k": 72,
+            "max_tokens": 768,
+        }
+    )
+    asyncio.run(
+        _write_endpoint_settings(
+            sessionmaker,
+            llm_model="unsloth/Qwen3.5-27B",
+            llm_disable_thinking=True,
+            prompt_generation=prompt_generation,
+        )
+    )
+
+    response = client.post(f"/api/chat/{thread_id}/send", json={"content": "Stay close."})
+
+    assert response.status_code == 200
+    request = scripted_client.requests[0]
+    completion_settings = request["settings"]
+    assert isinstance(completion_settings, ChatCompletionSettings)
+    assert completion_settings.prompt_generation == prompt_generation
+    logical_messages = request["messages"]
+    assert isinstance(logical_messages, list)
+    assert logical_messages
+    assert all(message.get("section_ids") for message in logical_messages)
+    assert any(
+        "history:" in section_id
+        for message in logical_messages
+        for section_id in message["section_ids"]
+    )
+
+
 @pytest.mark.parametrize("disable_thinking", [True, False])
 def test_send_endpoint_forwards_qwen_disable_thinking_setting(
     chat_client: tuple[TestClient, async_sessionmaker, ScriptedStreamingClient],
@@ -687,6 +728,7 @@ async def _write_endpoint_settings(
     *,
     llm_model: str,
     llm_disable_thinking: bool,
+    prompt_generation: PromptGenerationSettings | None = None,
 ) -> None:
     async with sessionmaker() as session:
         session.add(
@@ -695,6 +737,11 @@ async def _write_endpoint_settings(
                 value_json={
                     "llm_model": llm_model,
                     "llm_disable_thinking": llm_disable_thinking,
+                    **(
+                        {"prompt_generation": prompt_generation.to_dict()}
+                        if prompt_generation is not None
+                        else {}
+                    ),
                 },
             )
         )
