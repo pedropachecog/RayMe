@@ -655,7 +655,6 @@ def test_send_endpoint_streams_tokens_persists_final_once_and_emits_done_shape(
         model="server-model",
         api_key="server-secret",
         disable_thinking=True,
-        prompt_generation=PromptGenerationSettings.defaults(),
     )
     prompt_text = "\n".join(message["content"] for message in request["messages"])
     assert "Say hello" in prompt_text
@@ -733,7 +732,6 @@ def test_send_endpoint_forwards_qwen_disable_thinking_setting(
         model="unsloth/Qwen3.5-27B",
         api_key="server-secret",
         disable_thinking=disable_thinking,
-        prompt_generation=PromptGenerationSettings.defaults(),
     )
 
 

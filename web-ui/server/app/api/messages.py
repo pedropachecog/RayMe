@@ -25,6 +25,7 @@ from app.domain.message_actions import (
     truncate_stale_after_message,
 )
 from app.domain.prompt_builder import PromptBudgetExceeded
+from app.domain.prompt_profiles import PromptGenerationSettings
 from app.domain.refusal_guard import LLMGuardError
 from app.domain.settings_service import SettingsService
 from app.domain.thread_service import ThreadNotFoundError
@@ -86,7 +87,11 @@ async def regenerate_message(
         message = await regenerate_ai_turn(
             message_id,
             repository=repository,
-            settings=await _completion_settings(session, runtime_settings),
+            settings=await _completion_settings(
+                session,
+                runtime_settings,
+                completion_client=completion_client,
+            ),
             completion_client=completion_client,
         )
     except (MessageActionNotFoundError, ThreadNotFoundError) as exc:
@@ -118,7 +123,11 @@ async def swipe_message(
             message = await create_swipe_alternate(
                 message_id,
                 repository=repository,
-                settings=await _completion_settings(session, runtime_settings),
+                settings=await _completion_settings(
+                    session,
+                    runtime_settings,
+                    completion_client=completion_client,
+                ),
                 completion_client=completion_client,
             )
     except (MessageActionNotFoundError, ThreadNotFoundError) as exc:
@@ -188,7 +197,11 @@ async def continue_message(
             message_id,
             payload.composer_text,
             repository=repository,
-            settings=await _completion_settings(session, runtime_settings),
+            settings=await _completion_settings(
+                session,
+                runtime_settings,
+                completion_client=completion_client,
+            ),
             completion_client=completion_client,
         )
     except (MessageActionNotFoundError, ThreadNotFoundError) as exc:
@@ -203,6 +216,8 @@ async def continue_message(
 async def _completion_settings(
     session: AsyncSession,
     runtime_settings: Settings,
+    *,
+    completion_client: object | None,
 ) -> ChatCompletionSettings:
     endpoint_settings = await SettingsService(session, runtime_settings).read()
     return ChatCompletionSettings(
@@ -210,8 +225,21 @@ async def _completion_settings(
         api_key=endpoint_settings.llm_api_key,
         model=endpoint_settings.llm_model,
         disable_thinking=endpoint_settings.llm_disable_thinking,
-        prompt_generation=endpoint_settings.prompt_generation,
+        prompt_generation=_completion_prompt_generation(
+            endpoint_settings.prompt_generation,
+            completion_client=completion_client,
+        ),
     )
+
+
+def _completion_prompt_generation(
+    prompt_generation: PromptGenerationSettings,
+    *,
+    completion_client: object | None,
+) -> PromptGenerationSettings | None:
+    if completion_client is not None and prompt_generation == PromptGenerationSettings.defaults():
+        return None
+    return prompt_generation
 
 
 def _message_response(message: ThreadMessageShape) -> dict[str, Any]:

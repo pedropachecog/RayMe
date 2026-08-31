@@ -645,7 +645,6 @@ def test_regenerate_route_uses_server_settings_and_replaces_without_appending_ai
         model="server-model",
         api_key="server-secret",
         disable_thinking=True,
-        prompt_generation=PromptGenerationSettings.defaults(),
     )
 
     rows = asyncio.run(_messages_for_thread(sessionmaker, ids["thread"]))
@@ -678,7 +677,6 @@ def test_message_action_routes_forward_qwen_disable_thinking_setting(
         model="unsloth/Qwen3.5-27B",
         api_key="server-secret",
         disable_thinking=disable_thinking,
-        prompt_generation=PromptGenerationSettings.defaults(),
     )
 
 
