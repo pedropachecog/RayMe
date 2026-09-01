@@ -15,7 +15,7 @@ updated: 2026-09-01T07:00:00Z
 - **hypothesis:** Confirmed instrumentation gap: message actions have no path to deliver their `swipe` recovery activity to the existing process-local ring. The controlled terminal reaches `create_swipe_alternate()` but fails before generation because its interface rejects the activity store.
 - **test:** Add an optional existing-store dependency from the message-action API through regenerate/swipe/continue into `collect_chat_completion`, preserving the established normal-send record schema and testing the unchanged controlled terminal.
 - **expecting:** The terminal produces exactly `[swipe/1/retry, swipe/2/retry, swipe/3/exhausted]`, while the allowlisted record serialization excludes the rejection prose and seed.
-- **next_action:** Publish committed `a8877af` and run only `scripts/deploy-omen.sh` from the primary checkout. After independent readiness confirmation, identify the existing controlled clone through content-free request fingerprints and collect a materially larger swipe sample.
+- **next_action:** Run only `scripts/deploy-omen.sh` from the primary checkout at published `712afb5`. After independent readiness confirmation, identify the existing controlled clone through content-free request fingerprints and collect a materially larger swipe sample.
 
 ## Symptoms
 
@@ -95,7 +95,7 @@ updated: 2026-09-01T07:00:00Z
 
 - **timestamp:** 2026-09-01T07:26:00Z
   **checked:** Scoped commit preparation.
-  **found:** Commit `a8877af` contains only action activity wiring, two controlled terminal tests, and this active debug record; unrelated working-tree artifacts remain unstaged.
+  **found:** Published commit `712afb5` contains only action activity wiring, two controlled terminal tests, and this active debug record; unrelated working-tree artifacts remain unstaged.
   **implication:** Publish this exact diagnosis increment, deploy it canonically, and use its process-local activity only to collect causal attempt evidence.
 
 ## Resolution
