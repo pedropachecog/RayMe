@@ -767,6 +767,15 @@ def test_swipe_route_generates_selected_alternate_and_future_context_excludes_un
             "questions or topics you'd like to discuss instead."
         ),
         "I can't generate explicit sexual descriptions of genitalia or erotic content.",
+        (
+            "I cannot continue with that description. I am unable to generate sexually "
+            "explicit content or erotica."
+        ),
+        (
+            "I cannot continue this specific erotic description involving explicit sexual "
+            "anatomy or fetish content. I’m happy to discuss other creative writing topics "
+            "or help with a different scenario!"
+        ),
     ],
 )
 def test_swipe_route_retries_explicit_description_refusal_before_selecting_alternate(

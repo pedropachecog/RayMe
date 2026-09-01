@@ -2,7 +2,7 @@
 status: verifying
 trigger: "User reports another refusal failure in the same live OMEN chat thread immediately after canonical deployment of refusal guard commit 28a19f9."
 created: 2026-08-31
-updated: 2026-09-01T04:15:00Z
+updated: 2026-09-01T05:04:00Z
 ---
 
 # Same Thread Refusal Recurrence
@@ -19,9 +19,25 @@ updated: 2026-09-01T04:15:00Z
 
 - **bug_class:** Bohrbug — both fresh `/swipes` actions deterministically persisted and selected refusal alternates after the normal-send guard fix was active.
 - **hypothesis:** The common missing policy structure is not the noun `description` alone; it is the coordinated phrase `explicit sexual descriptions ... or erotic content`. Both swipe refusals contain that structure, while the existing in-world boundary says `explicit sexual description until we reach the next chapter` and must remain accepted.
-- **test:** Confirm mutation-runner availability, review the exact incremental diff, record all fix-acceptance signals, then create a scoped commit containing only the guard, corpus, real swipe regression, and active debug record.
-- **expecting:** No mutation runner is configured; target, precision, adjacent, no-op/deletion, and revert/reconfirm signals are accepted. The scoped commit excludes all unrelated runtime/debug files.
-- **next_action:** Complete guardrail recording and make the scoped release commit.
+- **bug_class:** Bohrbug at the classifier boundary, exposed stochastically by provider wording — exact responses deterministically escape once produced.
+- **hypothesis:** The exact-context replay exposed two additional semantic classes absent from the guard: inverse-order `sexually explicit content`, and an erotic-description refusal followed by a generic first-person creative-topic redirect (`I’m happy to discuss other ... topics/help with a different scenario`). Both have recognized primary refusal verbs, but neither yields a secondary reason, so attempt one is persisted.
+- **test:** Review incremental diff/mutation availability, record acceptance signals, and create a scoped second release commit containing only the two semantic branches, expanded precision corpus/route regression, and active debug record.
+- **expecting:** No mutation runner is configured; all applicable target, precision, adjacent, no-op/deletion, and causal signals pass; unrelated runtime files remain outside the commit.
+- **next_action:** Record the guardrail and commit the exact incremental candidate for clean-worktree verification.
+- **reasoning_checkpoint:**
+  hypothesis: "Exact-context attempts 1 and 2 persist because the guard recognizes their primary refusal verbs but omits two secondary semantic forms: inverse-order `sexually explicit content`, and erotic-topic language followed by a generic first-person redirect to other/different topics or scenarios."
+  confirming_evidence:
+    - "The original and controlled-clone effective production swipe requests are byte-identical, yet both exact generated forms persist in the clone and classify `upstream_complete` at deployed 8ed489d."
+    - "The unchanged real swipe API/storage regression is RED for exactly the two new forms: one request only, refusal alternate persisted/selected, no retry correction."
+    - "Both responses contain already-recognized primary refusal verbs; direct guard tracing localizes the omission to secondary policy/redirect classification rather than action routing or deployment identity."
+  falsification_test: "If adding only these two bounded secondary structures does not make both unchanged route cases retry, or if the in-world/no-primary neighbors become refused, the semantic boundary is wrong or too broad."
+  fix_rationale: "Normalize the inverse adjective order within the existing policy grammar, and recognize the generic redirect only when preceded by an explicit erotic/sexual topic cue. This addresses reusable semantic structures rather than copying complete sentences, while retaining the primary-refusal requirement and precision neighbors."
+  blind_spots: "Provider wording remains open-ended; the strongest available check is a bounded exact-context production sample after deployment. New unseen structures must be diagnosed from live rows rather than guessed in advance."
+  candidate_causes:
+    - "code: `_POLICY_RE` and `_REDIRECT_RE` omit the two observed secondary semantic structures."
+    - "data: exact original-thread context makes Qwen produce these alternate refusal forms stochastically."
+    - "environment/config: source mismatch and action bypass are contradicted by exact deployed identity, byte-identical prompt preview, and the traced shared guard path."
+  and_gate: "yes — persistence requires a provider-produced omitted form plus the corresponding classifier omission; both contribute, with no environment/config cause remaining."
 - **reasoning_checkpoint:**
   hypothesis: "Both real swipe refusals are accepted because the shared guard omits the coordinated policy structure `explicit sexual descriptions ... or erotic content`; their recognized primary refusal verbs therefore receive no secondary reason, guarded collection accepts attempt one, and the swipe repository persists/selects it."
   confirming_evidence:
@@ -204,6 +220,76 @@ updated: 2026-09-01T04:15:00Z
   **checked:** Mutation-runner availability and exact incremental diff.
   **found:** No Stryker, mutmut, or other mutation runner is configured. The product diff adds one bounded coordinated policy alternative; tests add the two actual swipe forms, two precision neighbors, and a real route/storage assertion. The diff is additive, whitespace-clean, and contains no short-circuit, behavior deletion, or weakened assertion.
   **implication:** Mutation analysis is explicitly skipped. All applicable acceptance signals pass: target, precision/adjacent, no-op/deletion, and revert-and-reconfirm.
+
+- **timestamp:** 2026-09-01T04:27:00Z
+  **checked:** Scoped release commit and residual workspace state.
+  **found:** Commit `8ed489d5e9568374d7831b878df0a74117e3d554` contains exactly the coordinated guard branch, frozen corpus updates, real swipe route/storage regression, and active debug record. Only unrelated untracked runtime/planning files remain outside the commit.
+  **implication:** Verify and publish this exact commit from a clean detached worktree before canonical OMEN deployment.
+
+- **timestamp:** 2026-09-01T04:31:00Z
+  **checked:** Clean detached exact-commit release verification at `8ed489d`.
+  **found:** GREEN: 414 direct guard/chat/action/prompt-preview/acceptance tests pass; 3 focused live-call refusal tests pass with 106 deselected; scoped Ruff, whitespace, source-clean, and exact-HEAD checks pass.
+  **implication:** The exact release candidate reproduces all accepted signals independently of primary-workspace runtime state and is ready for publication and canonical deployment.
+
+- **timestamp:** 2026-09-01T04:32:00Z
+  **checked:** Publication of the clean exact release candidate.
+  **found:** `origin/main` advanced from `c016633` to exact commit `8ed489d5e9568374d7831b878df0a74117e3d554`.
+  **implication:** OMEN can fetch the verified candidate. Deploy only through the repository's canonical script and do not include the primary workspace's untracked runtime state.
+
+- **timestamp:** 2026-09-01T04:36:00Z
+  **checked:** Canonical OMEN deployment of exact commit `8ed489d`.
+  **found:** `scripts/deploy-omen.sh` fast-forwarded the clean OMEN checkout, provisioned pinned runtimes, applied migrations, rebuilt the web client, reasserted canonical launchers/tasks, restarted both listeners, and completed with exit status zero. Built-in checks report STT/VAD ready and resident Qwen ready; aggregate health remains degraded only for inactive registered engines.
+  **implication:** The canonical deployment completed, but independent source/process/readiness identity is still required before a production swipe request.
+
+- **timestamp:** 2026-09-01T04:38:00Z
+  **checked:** Independent post-deploy OMEN checkout, task, listener, authenticated readiness, and WebRTC identity.
+  **found:** OMEN is clean at exact `8ed489d`; both scheduled tasks point to canonical launchers, both port owners match canonical scripts, web-to-AI readiness is authenticated and ready, and WebRTC is ready with the exact deployed commit.
+  **implication:** The verified source is active on the real swipe route. A fresh isolated swipe may now be issued without touching the user's thread.
+
+- **timestamp:** 2026-09-01T04:40:00Z
+  **checked:** First fresh isolated swipe-verification invocation.
+  **found:** The deployed thread-create route returned its documented `thread_id` key, while the verification script incorrectly read `id`; the script stopped before fetching the thread or invoking swipe. One isolated titled test thread was created, with only its normal opening greeting.
+  **implication:** This is a verification-client key error, not product evidence. Reuse the newly created isolated thread by read-only title lookup and invoke the swipe exactly once.
+
+- **timestamp:** 2026-09-01T04:43:00Z
+  **checked:** Fresh isolated production swipe through the deployed real action route, followed by read-only live SQLite inspection of the exact message and all linked alternates.
+  **found:** `POST /api/messages/{id}/swipes` returned 200. Exactly one new `source_action=swipe` alternate was persisted and selected; its 38-character response is not classified as a refusal by the deployed guard (`safe_prefix`). No generic refusal text was persisted or selected. The user's original thread and its historical failed alternates were not modified.
+  **implication:** The exact deployed swipe API/repository boundary is healthy on a fresh production record, and the agent-authored route regression proves both actual failed forms retry before persistence. The original conversation itself still requires a post-deploy human redo before this session can be marked resolved.
+
+- **timestamp:** 2026-09-01T04:47:00Z
+  **checked:** Autonomous-verification resumption and active deployment identity.
+  **found:** The product owner had already authorized autonomous work and explicitly rejected being asked to reproduce this failure. OMEN remains clean at exact `8ed489d`.
+  **implication:** Replace the human checkpoint with a controlled exact-context production replay. Do not modify the user's historical message or its two failed alternates.
+
+- **timestamp:** 2026-09-01T04:54:00Z
+  **checked:** Controlled clone of original thread sequences 0–24, original/clone production swipe prompt previews, five real deployed swipes, and read-only clone alternate inspection.
+  **found:** The cloned swipe `effective_request` is byte-identical to the original message's production request (same SHA-256), covering all 25 source messages and five selected-history alternates while leaving the target unselected. All five swipes returned 200. Swipes 3–5 persisted in-character responses, but swipes 1–2 persisted generic refusals: one used `sexually explicit content or erotica`; the other used an erotic-description refusal plus a generic offer to discuss other creative-writing topics or help with a different scenario. Both finish as non-refused under deployed `8ed489d`. The user's original thread was not modified.
+  **implication:** Exact-context verification fails. The prior coordinated-description fix is valid but incomplete; continue diagnosis from these two new deterministic classifier boundaries and do not close the session.
+
+- **timestamp:** 2026-09-01T04:59:00Z
+  **checked:** Agent-authored real swipe API/storage regression with the two new exact-context production forms before product-code changes.
+  **found:** RED exactly as predicted: the prior two coordinated-description cases still pass, while each new form makes only attempt 1 and persists/selects the refusal instead of the scripted in-character attempt 2.
+  **implication:** Both current production escapes are frozen at the real action and persistence boundary. The proposed secondary semantic cues can now be tested without changing the oracle.
+
+- **timestamp:** 2026-09-01T05:04:00Z
+  **checked:** Four-case real swipe API/storage target and complete frozen corpus after the two bounded semantic additions.
+  **found:** GREEN: all four production swipe forms retry and persist/select only scripted attempt 2; all 364 guard corpus/lifecycle checks pass across eight fragmentation schedules, including the new no-primary and in-world willingness precision neighbors.
+  **implication:** Both exact-context escapes are corrected locally without broadening into the tested valid roleplay classes. Run adjacent consumers and causal reversion before release.
+
+- **timestamp:** 2026-09-01T05:07:00Z
+  **checked:** Complete adjacent text-chat/action/prompt-preview/acceptance suites, focused live-call refusal coverage, scoped Ruff, and whitespace validation.
+  **found:** GREEN: 92 adjacent text-chat tests and 3 focused live-call tests pass; Ruff and `git diff --check` pass. Only existing FastAPI deprecation warnings remain.
+  **implication:** The new semantic branches preserve adjacent product and shared live-call contracts. Complete the scoped counterfactual before accepting the release candidate.
+
+- **timestamp:** 2026-09-01T05:10:00Z
+  **checked:** Scoped product-code revert/reapply against all four real swipe route/storage cases.
+  **found:** Removing only the inverse-order policy cue and bounded creative-topic redirect returns exactly the two new cases to RED while the prior two remain GREEN. Reapplying the same two branches restores all four passes.
+  **implication:** The incremental implementation is causal, does not depend on the prior coordinated-description branch, and the regression kills removal of both new semantics.
+
+- **timestamp:** 2026-09-01T05:12:00Z
+  **checked:** Incremental diff scope, whitespace, and mutation-runner availability.
+  **found:** The product diff is six additive/bounded regex lines; regression changes add two exact production forms and three precision neighbors. `git diff --check` passes, no behavior is deleted or short-circuited, and no mutation runner is configured.
+  **implication:** Mutation analysis is explicitly skipped. All applicable fix-acceptance signals pass; stage only the four scoped files.
 
 - **timestamp:** 2026-09-01T02:44:00Z
   **checked:** Agent-authored frozen-corpus regression for the sequence-24 response form before a matcher change.
@@ -893,15 +979,15 @@ updated: 2026-09-01T04:15:00Z
 
 ## Resolution
 
-- **root_cause:** The two fresh original-thread swipe failures required two conditions: the provider used the coordinated policy form `explicit sexual descriptions ... or erotic content`, and `_POLICY_RE` omitted that structure. The shared swipe path did run `PrefixRefusalGuard`, but `_secondary_reason()` returned `None`; guarded collection accepted attempt one and `add_selected_alternate()` persisted and selected each refusal.
+- **root_cause:** The original-thread and exact-context clone failures require provider refusal wording outside the shared guard's secondary semantic grammar. The first deployed increment covered coordinated `explicit sexual descriptions ... or erotic content`; exact-context replay then exposed inverse-order `sexually explicit content` and erotic-topic refusals followed by a generic creative-topic redirect. In each case the primary refusal verb matched, `_secondary_reason()` returned `None`, and swipe attempt one was persisted/selected.
 - **oracle_type:** specified — the chat contract requires generic policy/guideline refusals to retry before any token reaches chat persistence.
-- **fix:** Add a bounded `_POLICY_RE` alternative requiring `explicit sexual/erotic description(s)` followed within the same sentence and 48 characters by `or (explicit )?sexual/erotic content`. Preserve the mandatory primary refusal verb. Freeze both actual swipe forms under eight fragmentation schedules, retain description precision neighbors, and exercise the real `/swipes` API plus alternate persistence/selection boundary.
+- **fix:** Preserve the coordinated-description branch, add inverse-order `sexually explicit content` to the policy grammar, and add a bounded redirect requiring prior erotic/sexual description/content plus first-person willingness to discuss/help with other/different topics/scenarios. Preserve the mandatory primary refusal verb. Freeze all four actual swipe forms under eight fragmentation schedules, retain no-primary and in-world willingness neighbors, and exercise the real `/swipes` API plus alternate persistence/selection boundary.
 - **verification:**
-  target_test: { result: pass, suites_run: ["real swipe API/storage target (2 passed)", "full frozen refusal corpus (324 passed)"] }
+  target_test: { result: pass, suites_run: ["real swipe API/storage target (4 passed)", "full frozen refusal corpus (364 passed)"] }
   mutation_check: { result: skipped, reason_if_skipped: "no Stryker, mutmut, or equivalent mutation runner is configured" }
   no_op_deletion: { result: pass, deletion_justified_by_rca: false }
-  adjacent_tests: { result: pass, suites_run: ["chat/action/prompt-preview/Phase 1 acceptance (90 passed)", "focused live-call refusal subset (3 passed, 106 deselected)", "scoped Ruff", "git diff --check"] }
+  adjacent_tests: { result: pass, suites_run: ["chat/action/prompt-preview/Phase 1 acceptance (92 passed)", "focused live-call refusal subset (3 passed, 106 deselected)", "scoped Ruff", "git diff --check"] }
   revert_and_reconfirm: { result: pass, bug_returned_on_revert: true, fixed_on_reapply: true }
   guardrail_verdict: accepted
-  deployed_e2e: { result: pending, evidence: "requires canonical deploy followed by one fresh controlled swipe and read-only live DB inspection" }
+  deployed_e2e: { result: failed_then_pending, evidence: "exact-context clone at 8ed489d had byte-identical prompt but persisted two new refusal forms; second incremental fix requires canonical deploy and repeated exact-context swipes" }
 - **files_changed:** [web-ui/server/app/domain/refusal_guard.py, web-ui/server/tests/fixtures/phase091_refusal_corpus.json, web-ui/server/tests/test_message_actions.py]

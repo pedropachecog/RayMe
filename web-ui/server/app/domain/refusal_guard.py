@@ -49,6 +49,7 @@ _DIRECT_IDENTITY_DISCLAIMER_RE = re.compile(
 _POLICY_RE = re.compile(
     r"\b(?:policy|policies|guideline|guidelines|safety|"
     r"content\s+restriction|content\s+restrictions|not\s+allowed|violat(?:e|es|ing)|"
+    r"sexually\s+explicit\s+content|"
     r"explicit\s+(?:(?:sexual\s+)?or\s+erotic|sexual|erotic)\s+content|"
     r"explicit\s+(?:sexual|erotic)\s+descriptions?\b[^.!?]{0,48}\b"
     r"or\s+(?:explicit\s+)?(?:sexual|erotic)\s+content)\b"
@@ -61,7 +62,10 @@ _REDIRECT_RE = re.compile(
     r"\bthat\s+explicit\s+(?:sexual|erotic)\s+description\b.{0,80}\b"
     r"if\s+you(?:'d|\s+would)\s+like,\s+(?:we|i)\s+can\s+pivot\s+to\s+"
     r"(?:a\s+)?different\s+creative\s+direction\b|"
-    r"\b(?:erotic|sexual)\s+content\b.{0,80}\b(?:but\s+)?i(?:'m|\s+am)\s+here\s+if\s+you\s+want\s+to\s+(?:chat|talk)\s+about\s+(?:anything|something)\s+else\b"
+    r"\b(?:erotic|sexual)\s+content\b.{0,80}\b(?:but\s+)?i(?:'m|\s+am)\s+here\s+if\s+you\s+want\s+to\s+(?:chat|talk)\s+about\s+(?:anything|something)\s+else\b|"
+    r"\b(?:erotic|sexual)\s+(?:description|content)\b.{0,120}\b"
+    r"i(?:'m|\s+am)\s+(?:happy|glad)\s+to\s+(?:discuss|help)\b.{0,80}\b"
+    r"(?:other|different)\b.{0,48}\b(?:topics?|scenarios?)\b"
 )
 _WARNING_RE = re.compile(r"\b(?:must|need\s+to|have\s+to)\s+warn\b|\bwarning\b")
 

@@ -56,6 +56,14 @@
       "text": "I can't generate explicit sexual descriptions of genitalia or erotic content."
     },
     {
+      "id": "observed_exact_context_swipe_sexually_explicit_content_refusal",
+      "text": "I cannot continue with that description. I am unable to generate sexually explicit content or erotica."
+    },
+    {
+      "id": "observed_exact_context_swipe_creative_topic_redirect_refusal",
+      "text": "I cannot continue this specific erotic description involving explicit sexual anatomy or fetish content. I’m happy to discuss other creative writing topics or help with a different scenario!"
+    },
+    {
       "id": "declarative_guideline_refusal",
       "text": "That roleplay violates safety guidelines."
     },
@@ -116,6 +124,18 @@
     {
       "id": "nonrefusal_explicit_description_reference",
       "text": "The archivist catalogued explicit sexual descriptions in the sealed collection."
+    },
+    {
+      "id": "nonrefusal_sexually_explicit_content_reference",
+      "text": "The archivist catalogued sexually explicit content in the sealed collection."
+    },
+    {
+      "id": "in_world_happy_to_discuss_other_topics",
+      "text": "I cannot continue the ritual until dawn, but I’m happy to discuss other battle plans by the fire."
+    },
+    {
+      "id": "in_world_erotic_description_happy_to_discuss_plans",
+      "text": "I cannot continue the erotic description until the courier arrives; I’m happy to discuss other battle plans by the fire."
     },
     {
       "id": "in_world_explicit_description_next_chapter",
