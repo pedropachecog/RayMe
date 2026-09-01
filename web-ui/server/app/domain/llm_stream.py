@@ -6,8 +6,10 @@ import asyncio
 import inspect
 import json
 import secrets
+from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Literal, TypedDict
 
 import httpx
@@ -21,7 +23,9 @@ from app.domain.refusal_guard import (
     LLMGuardError,
     LLMRefusalExhausted,
     PrefixRefusalGuard,
+    RefusalDecision,
 )
+from app.domain.refusal_activity import RefusalAction, RefusalActivityRecord
 from app.storage.models import ThreadMessageShape
 
 SSE_DATA_PREFIX = "data: "
@@ -62,6 +66,7 @@ class ErrorEvent(TypedDict):
 
 PersistFinalMessage = Callable[[str], Awaitable[ThreadMessageShape]]
 SeedFactory = Callable[[], int]
+RefusalActivitySink = Callable[[RefusalActivityRecord], None]
 
 
 def encode_sse_event(event: Mapping[str, Any]) -> str:
@@ -81,6 +86,10 @@ def error_event(*, code: str, message: str) -> ErrorEvent:
     return {"type": ERROR_EVENT_TYPE, "code": code, "message": message}
 
 
+def refusal_activity_event(record: RefusalActivityRecord) -> dict[str, object]:
+    return {"type": "refusal_activity", **record.to_dict()}
+
+
 async def stream_chat_completion(
     settings: ChatCompletionSettings,
     messages: Sequence[PromptContextMessage],
@@ -88,26 +97,57 @@ async def stream_chat_completion(
     client: object | None = None,
     persist_final: PersistFinalMessage | None = None,
     seed_factory: SeedFactory | None = None,
+    activity_action: RefusalAction = "send",
+    activity_sink: RefusalActivitySink | None = None,
 ) -> AsyncIterator[str]:
     """Yield SSE token events and a final done event with a full ThreadMessageShape."""
 
     collected: list[str] = []
+    activity_events: deque[RefusalActivityRecord] = deque()
+
+    def report_activity(record: RefusalActivityRecord) -> None:
+        activity_events.append(record)
+        if activity_sink is None:
+            return
+        try:
+            activity_sink(record)
+        except Exception:
+            # Observability is explicitly best-effort and must not change chat behavior.
+            return
+
+    def drain_activity_events() -> tuple[str, ...]:
+        drained = tuple(
+            encode_sse_event(refusal_activity_event(record)) for record in activity_events
+        )
+        activity_events.clear()
+        return drained
+
     try:
         async for token in _stream_text_tokens(
             settings,
             messages,
             client=client,
             seed_factory=seed_factory,
+            activity_action=activity_action,
+            activity_sink=report_activity if activity_sink is not None else None,
         ):
+            for activity_event in drain_activity_events():
+                yield activity_event
             collected.append(token)
             yield encode_sse_event(token_event(token))
 
+        for activity_event in drain_activity_events():
+            yield activity_event
         if persist_final is not None:
             message = await persist_final("".join(collected))
             yield encode_sse_event(done_event(message))
     except LLMGuardError as exc:
+        for activity_event in drain_activity_events():
+            yield activity_event
         yield encode_sse_event(error_event(code=exc.code, message=exc.message))
     except Exception:
+        for activity_event in drain_activity_events():
+            yield activity_event
         yield encode_sse_event(error_event(code="llm_stream_failed", message="LLM stream failed"))
 
 
@@ -139,6 +179,8 @@ async def _stream_text_tokens(
     *,
     client: object | None,
     seed_factory: SeedFactory | None = None,
+    activity_action: RefusalAction = "send",
+    activity_sink: RefusalActivitySink | None = None,
 ) -> AsyncIterator[str]:
     completion_client = client or _openai_client(settings)
     owns_client = client is None
@@ -155,6 +197,7 @@ async def _stream_text_tokens(
             guard = PrefixRefusalGuard()
             emitted_nonblank = False
             refused = False
+            final_decision: RefusalDecision | None = None
             raw_tokens = _stream_raw_text_tokens(
                 settings,
                 attempt_messages,
@@ -165,6 +208,7 @@ async def _stream_text_tokens(
             try:
                 async for token in raw_tokens:
                     decision = guard.feed(token)
+                    final_decision = decision
                     if decision.refused:
                         refused = True
                         break
@@ -174,6 +218,7 @@ async def _stream_text_tokens(
 
                 if not refused:
                     final = guard.finish()
+                    final_decision = final
                     refused = final.refused
                     for accepted in final.released_text:
                         emitted_nonblank = emitted_nonblank or bool(accepted.strip())
@@ -184,14 +229,71 @@ async def _stream_text_tokens(
                 await raw_tokens.aclose()
 
             if refused:
+                _report_refusal_activity(
+                    activity_sink,
+                    action=activity_action,
+                    attempt=attempt,
+                    guard=guard,
+                    decision=final_decision,
+                    terminal_outcome="retry" if attempt < MAX_SEMANTIC_ATTEMPTS else "exhausted",
+                )
                 continue
             if not emitted_nonblank:
+                _report_refusal_activity(
+                    activity_sink,
+                    action=activity_action,
+                    attempt=attempt,
+                    guard=guard,
+                    decision=final_decision,
+                    terminal_outcome="empty",
+                )
                 raise LLMEmptyOutput()
+            if attempt > 1:
+                _report_refusal_activity(
+                    activity_sink,
+                    action=activity_action,
+                    attempt=attempt,
+                    guard=guard,
+                    decision=final_decision,
+                    terminal_outcome="accepted",
+                )
             return
         raise LLMRefusalExhausted()
     finally:
         if owns_client:
             await _close_async_resource(completion_client)
+
+
+def _report_refusal_activity(
+    activity_sink: RefusalActivitySink | None,
+    *,
+    action: RefusalAction,
+    attempt: int,
+    guard: PrefixRefusalGuard,
+    decision: RefusalDecision | None,
+    terminal_outcome: str,
+) -> None:
+    if activity_sink is None:
+        return
+    reason_code = guard.reason_code or "upstream_complete"
+    activity_sink(
+        RefusalActivityRecord(
+            action=action,
+            attempt=attempt,
+            reason_code=reason_code,  # type: ignore[arg-type]
+            prefix_characters=guard.prefix_characters,
+            prefix_estimated_tokens=guard.prefix_estimated_tokens,
+            retry_count=attempt - 1,
+            release_ms=(
+                decision.decision_ms if terminal_outcome == "accepted" and decision else None
+            ),
+            decision_ms=decision.decision_ms if decision else guard.decision_ms,
+            terminal_outcome=terminal_outcome,  # type: ignore[arg-type]
+            timestamp=datetime.now(timezone.utc)
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z"),
+        )
+    )
 
 
 async def _stream_raw_text_tokens(

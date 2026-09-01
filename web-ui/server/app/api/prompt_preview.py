@@ -27,7 +27,10 @@ from app.domain.prompt_builder import (
     SqlAlchemyPromptRepository,
     build_structured_prompt,
 )
-from app.domain.refusal_activity import RefusalActivityStore
+from app.domain.refusal_activity import (
+    RefusalActivityStore,
+    get_process_local_refusal_activity_store,
+)
 from app.domain.refusal_guard import (
     REFUSAL_ESTIMATOR_VERSION,
     REFUSAL_PREFIX_MAX_CHARACTERS,
@@ -42,7 +45,6 @@ PROMPT_PREVIEW_REQUEST_SHAPE_VERSION = "rayme-generation-request-v1"
 PROMPT_PREVIEW_INVALID = "invalid_prompt_preview_request"
 PROMPT_PREVIEW_NOT_FOUND = "prompt_preview_thread_not_found"
 _NO_STORE = {"Cache-Control": "no-store"}
-_REFUSAL_ACTIVITY = RefusalActivityStore()
 
 
 class SanitizedValidationRoute(APIRoute):
@@ -293,7 +295,7 @@ async def get_prompt_preview_session() -> AsyncIterator[AsyncSession]:
 
 
 def get_prompt_preview_refusal_activity_store() -> RefusalActivityStore:
-    return _REFUSAL_ACTIVITY
+    return get_process_local_refusal_activity_store()
 
 
 @router.post(

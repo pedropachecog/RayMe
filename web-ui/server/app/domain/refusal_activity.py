@@ -93,9 +93,7 @@ class RefusalActivityRecord:
             ("decision_ms", self.decision_ms),
         ):
             if value is not None and (
-                isinstance(value, bool)
-                or not isinstance(value, (int, float))
-                or value < 0
+                isinstance(value, bool) or not isinstance(value, (int, float)) or value < 0
             ):
                 raise ValueError(f"{field_name} must be a non-negative number or null")
         if not isinstance(self.timestamp, str) or not self.timestamp.endswith("Z"):
@@ -145,10 +143,20 @@ class RefusalActivityStore:
         return [record.to_dict() for record in self.list_recent(thread_id)]
 
 
+_PROCESS_LOCAL_REFUSAL_ACTIVITY = RefusalActivityStore()
+
+
+def get_process_local_refusal_activity_store() -> RefusalActivityStore:
+    """Return the bounded activity ring shared by Web routes in this process."""
+
+    return _PROCESS_LOCAL_REFUSAL_ACTIVITY
+
+
 __all__ = [
     "RefusalAction",
     "RefusalActivityRecord",
     "RefusalActivityStore",
     "RefusalReasonCode",
     "RefusalTerminalOutcome",
+    "get_process_local_refusal_activity_store",
 ]

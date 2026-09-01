@@ -12,7 +12,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.api.chat import get_chat_completion_client, get_chat_session
+from app.api.chat import (
+    get_chat_completion_client,
+    get_chat_refusal_activity_store,
+    get_chat_session,
+)
+from app.api.prompt_preview import get_prompt_preview_refusal_activity_store
 from app.config import Settings
 from app.domain.llm_stream import (
     CHAT_COMPLETION_SEED_LIMIT,
@@ -25,6 +30,7 @@ from app.domain.llm_stream import (
     token_event,
 )
 from app.domain.refusal_guard import LLMEmptyOutput, LLMRefusalExhausted
+from app.domain.refusal_activity import RefusalActivityStore
 from app.domain.prompt_profiles import PromptGenerationSettings
 from app.domain.settings_service import SETTINGS_KEY
 from app.domain.thread_service import ThreadService
@@ -44,14 +50,25 @@ class ScriptedStreamingClient:
     def __init__(self, *, fail_after_tokens: bool = False) -> None:
         self.tokens = ["Hel", "lo"]
         self.fail_after_tokens = fail_after_tokens
+        self.scripts: list[list[str | BaseException]] | None = None
         self.requests: list[dict[str, object]] = []
 
     async def stream_chat_completion_tokens(
         self,
         settings: ChatCompletionSettings,
         messages: list[dict[str, str]],
+        *,
+        seed: int,
+        attempt: int,
     ):
+        del seed
         self.requests.append({"settings": settings, "messages": list(messages)})
+        if self.scripts is not None:
+            for item in self.scripts[attempt - 1]:
+                if isinstance(item, BaseException):
+                    raise item
+                yield item
+            return
         for token in self.tokens:
             yield token
         if self.fail_after_tokens:
@@ -279,6 +296,61 @@ async def test_stream_and_collect_share_three_attempt_refusal_exhaustion() -> No
     _assert_three_refusal_requests(collect_client, refusal, (201, 202, 203))
 
 
+async def test_refusal_exhaustion_emits_only_content_free_attempt_activity() -> None:
+    settings = ChatCompletionSettings(
+        base_url="http://llm.local/v1",
+        model="configured-model",
+    )
+    prompt_canary = "private user prompt must never enter activity"
+    refusal_canary = "I cannot help with private rejected prose because policy forbids it."
+    stream_client = AttemptScriptClient([[refusal_canary], [refusal_canary], [refusal_canary]])
+
+    events = [
+        json.loads(event.removeprefix("data: "))
+        async for event in stream_chat_completion(
+            settings,
+            [{"role": "user", "content": prompt_canary}],
+            client=stream_client,
+            seed_factory=iter((101, 102, 103)).__next__,
+            activity_action="send",
+            activity_sink=lambda _record: None,
+        )
+    ]
+
+    activity = [event for event in events if event["type"] == "refusal_activity"]
+    assert [event["attempt"] for event in activity] == [1, 2, 3]
+    assert [event["terminal_outcome"] for event in activity] == ["retry", "retry", "exhausted"]
+    assert all(event["action"] == "send" for event in activity)
+    assert all(event["reason_code"] == "policy_or_safety" for event in activity)
+    assert all(event["retry_count"] == event["attempt"] - 1 for event in activity)
+    assert all(
+        set(event)
+        == {
+            "type",
+            "action",
+            "attempt",
+            "reason_code",
+            "prefix_characters",
+            "prefix_estimated_tokens",
+            "retry_count",
+            "release_ms",
+            "decision_ms",
+            "terminal_outcome",
+            "timestamp",
+        }
+        for event in activity
+    )
+    serialized = json.dumps(events, ensure_ascii=False, sort_keys=True)
+    assert prompt_canary not in serialized
+    assert refusal_canary not in serialized
+    assert '"seed"' not in serialized
+    assert events[-1] == {
+        "type": "error",
+        "code": "llm_refusal_exhausted",
+        "message": "AI generation refused after bounded recovery attempts",
+    }
+
+
 async def test_declarative_guideline_refusal_retries_without_reaching_chat_or_persistence() -> None:
     refusal = "That roleplay violates safety guidelines."
     accepted = "The lantern swung across the quiet cabin."
@@ -323,7 +395,9 @@ async def test_declarative_guideline_refusal_retries_without_reaching_chat_or_pe
     }
 
 
-async def test_sentence_boundary_identity_refusal_retries_without_reaching_chat_or_persistence() -> None:
+async def test_sentence_boundary_identity_refusal_retries_without_reaching_chat_or_persistence() -> (
+    None
+):
     refusal_prefix = "I cannot fulfill that request. "
     refusal_tail = (
         "I am an AI assistant designed to be helpful and harmless, so I do not generate "
@@ -372,7 +446,9 @@ async def test_sentence_boundary_identity_refusal_retries_without_reaching_chat_
     }
 
 
-async def test_post_swipe_typographic_apostrophe_refusal_retries_without_reaching_chat_or_persistence() -> None:
+async def test_post_swipe_typographic_apostrophe_refusal_retries_without_reaching_chat_or_persistence() -> (
+    None
+):
     selected_swipe = "The selected in-character alternate continues the scene."
     follow_up = "make it longer"
     refusal_prefix = "I can’t write explicit sexual content like that. "
@@ -434,7 +510,9 @@ async def test_post_swipe_typographic_apostrophe_refusal_retries_without_reachin
     }
 
 
-async def test_typographic_apostrophe_here_to_help_refusal_retries_without_reaching_chat_or_persistence() -> None:
+async def test_typographic_apostrophe_here_to_help_refusal_retries_without_reaching_chat_or_persistence() -> (
+    None
+):
     opening = "Hi, what can I do for you today?"
     follow_up = "make it more erotic"
     refusal = "I can’t write erotic content, but I’m here to help with anything else you need!"
@@ -490,7 +568,9 @@ async def test_typographic_apostrophe_here_to_help_refusal_retries_without_reach
     }
 
 
-async def test_ascii_apostrophe_chat_redirect_refusal_retries_without_reaching_chat_or_persistence() -> None:
+async def test_ascii_apostrophe_chat_redirect_refusal_retries_without_reaching_chat_or_persistence() -> (
+    None
+):
     opening = "Hi, what can I do for you today?"
     follow_up = "make it more erotic"
     refusal = "I can't write erotic content for you, but I'm here if you want to chat about anything else."
@@ -546,7 +626,9 @@ async def test_ascii_apostrophe_chat_redirect_refusal_retries_without_reaching_c
     }
 
 
-async def test_coordinated_explicit_or_erotic_refusal_retries_without_reaching_chat_or_persistence() -> None:
+async def test_coordinated_explicit_or_erotic_refusal_retries_without_reaching_chat_or_persistence() -> (
+    None
+):
     opening = "Hi, what can I do for you today?"
     follow_up = "make it more erotic"
     refusal_prefix = "I don't write explicit or erotic content, so I can't fulfill that request. "
@@ -662,7 +744,9 @@ async def test_identity_disclaimer_refusal_retries_without_reaching_chat_or_pers
     }
 
 
-async def test_programmed_assistant_disclaimer_retries_without_reaching_chat_or_persistence() -> None:
+async def test_programmed_assistant_disclaimer_retries_without_reaching_chat_or_persistence() -> (
+    None
+):
     refusal_prefix = "I am strictly programmed to be a helpful assistant, not an erotic one. "
     refusal_tail = "Please ask me something else."
     refusal = refusal_prefix + refusal_tail
@@ -672,13 +756,34 @@ async def test_programmed_assistant_disclaimer_retries_without_reaching_chat_or_
 
     async def persist_final(text: str) -> ThreadMessageShape:
         persisted.append(text)
-        return ThreadMessageShape(id="ai-message", thread_id="thread-1", message_kind="ai_text", role="assistant", sequence=2, content_text=text)
+        return ThreadMessageShape(
+            id="ai-message",
+            thread_id="thread-1",
+            message_kind="ai_text",
+            role="assistant",
+            sequence=2,
+            content_text=text,
+        )
 
-    events = [json.loads(event.removeprefix("data: ")) async for event in stream_chat_completion(
-        ChatCompletionSettings(base_url="http://llm.local/v1", model="unsloth/Qwen3.5-27B", disable_thinking=True),
-        [{"role": "assistant", "content": "Hi, what can I do for you today?", "section_ids": ("first_mes",)}, {"role": "user", "content": "make it more erotic", "section_ids": ("user:new",)}],
-        client=client, persist_final=persist_final, seed_factory=iter((221, 222)).__next__,
-    )]
+    events = [
+        json.loads(event.removeprefix("data: "))
+        async for event in stream_chat_completion(
+            ChatCompletionSettings(
+                base_url="http://llm.local/v1", model="unsloth/Qwen3.5-27B", disable_thinking=True
+            ),
+            [
+                {
+                    "role": "assistant",
+                    "content": "Hi, what can I do for you today?",
+                    "section_ids": ("first_mes",),
+                },
+                {"role": "user", "content": "make it more erotic", "section_ids": ("user:new",)},
+            ],
+            client=client,
+            persist_final=persist_final,
+            seed_factory=iter((221, 222)).__next__,
+        )
+    ]
 
     assert events[0] == {"type": "token", "text": accepted}
     assert events[-1]["type"] == "done"
@@ -1162,6 +1267,54 @@ def test_send_endpoint_keeps_user_message_but_no_partial_ai_on_upstream_failure(
         ("ai_text", "assistant", "Opening from card."),
         ("user_text", "user", "Keep this user turn"),
     ]
+
+
+def test_send_endpoint_records_content_free_activity_for_exhausted_retries(
+    chat_client: tuple[TestClient, async_sessionmaker, ScriptedStreamingClient],
+) -> None:
+    client, sessionmaker, scripted_client = chat_client
+    refusal_activity = RefusalActivityStore()
+    client.app.dependency_overrides[get_chat_refusal_activity_store] = lambda: refusal_activity
+    prompt_canary = "normal-chat-private-prompt"
+    refusal_canary = "I cannot help with normal-chat-private-refusal because policy forbids it."
+    scripted_client.scripts = [[refusal_canary], [refusal_canary], [refusal_canary]]
+    thread_id = asyncio.run(_create_thread(sessionmaker))
+
+    response = client.post(f"/api/chat/{thread_id}/send", json={"content": prompt_canary})
+
+    assert response.status_code == 200
+    events = _sse_events(response.text)
+    activity_events = [event for event in events if event["type"] == "refusal_activity"]
+    assert [event["attempt"] for event in activity_events] == [1, 2, 3]
+    assert [event["terminal_outcome"] for event in activity_events] == [
+        "retry",
+        "retry",
+        "exhausted",
+    ]
+    assert events[-1] == {
+        "type": "error",
+        "code": "llm_refusal_exhausted",
+        "message": "AI generation refused after bounded recovery attempts",
+    }
+    stored = refusal_activity.serialize_recent(thread_id)
+    assert stored == [
+        {key: value for key, value in event.items() if key != "type"} for event in activity_events
+    ]
+    serialized = json.dumps(
+        {"events": events, "stored": stored}, ensure_ascii=False, sort_keys=True
+    )
+    assert prompt_canary not in serialized
+    assert refusal_canary not in serialized
+    assert '"seed"' not in serialized
+    rows = asyncio.run(_messages_for_thread(sessionmaker, thread_id))
+    assert [(row.message_kind, row.role) for row in rows] == [
+        ("ai_text", "assistant"),
+        ("user_text", "user"),
+    ]
+
+
+def test_chat_and_prompt_inspector_share_the_process_local_activity_ring() -> None:
+    assert get_chat_refusal_activity_store() is get_prompt_preview_refusal_activity_store()
 
 
 def test_send_endpoint_rejects_browser_llm_setting_overrides(

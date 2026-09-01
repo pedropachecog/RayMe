@@ -1,8 +1,8 @@
 ---
-status: verifying
+status: investigating
 trigger: "User reports another refusal failure in the same live OMEN chat thread immediately after canonical deployment of refusal guard commit 28a19f9."
 created: 2026-08-31
-updated: 2026-09-01T00:32:35Z
+updated: 2026-09-01T01:47:00Z
 ---
 
 # Same Thread Refusal Recurrence
@@ -18,11 +18,11 @@ updated: 2026-09-01T00:32:35Z
 ## Current Focus
 
 - **bug_class:** Bohrbug — the newest persisted text supplies an exact deterministic detector input to test.
-- **hypothesis:** The deployed `9d9fb59` repair covers one exact identity disclaimer but is too surface-specific: the newest live record has the same first-person assistant identity plus content-negating structure, phrased as `I am strictly programmed ... assistant, not an erotic one`. It lacks a primary refusal verb and the fixed exact phrase, so `finish()` releases it as `upstream_complete`.
+- **hypothesis:** The normal chat retry owner has no attempt-observability integration: a content-free activity ring and SSE/client contract exist, but `stream_chat_completion()` neither records nor emits each guarded attempt. Therefore the terminal `llm_refusal_exhausted` cannot distinguish a rejected provider attempt from request-adapter/template behavior in production.
 - **known_pattern_candidate:** `last-chat-refusal-recovery` — a sentence boundary caused an irreversible early release before the identity/policy cue arrived. This remains a candidate only; the newest row must match its mechanism.
-- **test:** Commit the inspected four-file repair, then test and publish only that exact commit from a clean detached worktree.
-- **expecting:** The release candidate excludes all unrelated working-tree state and has the same accepted guardrail evidence.
-- **next_action:** create the scoped repair commit
+- **test:** Inspect and commit only the content-free activity integration, its regressions, and this active debug record; then verify the exact commit from a clean detached worktree before canonical deployment.
+- **expecting:** The staged candidate changes no guard pattern or retry bound, contains no prompt/completion/credential/seed persistence, and reproduces the green direct, client, and live-call checks from an exact clean checkout.
+- **next_action:** Stage the five instrumentation files plus this debug record explicitly, review the staged diff, and create a scoped commit.
 - **reasoning_checkpoint:**
   hypothesis: "The sixth live refusal persists because the direct identity matcher only recognizes the earlier `I’m just/only ... not for that/this kind of content` surface form; the structural `I am ... assistant, not an erotic one` response has no refusal verb, so `_refusal_reason()` returns `None` and `finish()` releases it as `upstream_complete`."
   confirming_evidence:
@@ -83,6 +83,36 @@ updated: 2026-09-01T00:32:35Z
 - **tdd_checkpoint:**
 
 ## Evidence
+
+- **timestamp:** 2026-09-01T01:23:00Z
+  **checked:** The normal chat retry owner, the existing process-local refusal-activity ring, typed SSE/client decoding, and prompt-inspector projection.
+  **found:** `stream_chat_completion()` completed its three guarded attempts without writing the existing `RefusalActivityStore` or emitting the already-supported `refusal_activity` SSE frame. The store and inspector already restrict records to allowlisted action, attempt, guard reason, prefix counts/timing, retry count, terminal outcome, and timestamp; none retains prompt/completion text, seeds, credentials, endpoints, audio, or raw exceptions.
+  **implication:** The previous terminal error cannot distinguish retry exhaustion from a failed request path. Wire this pre-existing content-free seam before examining the live provider behavior; do not change classifier rules or retry count.
+
+- **timestamp:** 2026-09-01T01:24:00Z
+  **checked:** Agent-authored controlled three-refusal stream regression before observability wiring.
+  **found:** RED as predicted: `stream_chat_completion()` rejected the new `activity_action` argument (`TypeError`), proving the normal stream had no activity hook at all.
+  **implication:** The absence of attempt telemetry is a direct integration gap. The regression is independent of production text and does not rely on user-supplied executable evidence.
+
+- **timestamp:** 2026-09-01T01:30:00Z
+  **checked:** Controlled exhaustion and normal `/api/chat/{thread}/send` regressions after wiring the process-local activity seam.
+  **found:** GREEN: 2 targeted tests pass. Both emit exactly three allowlisted activity records in attempt order with terminal outcomes `[retry, retry, exhausted]`, retain the prior `llm_refusal_exhausted` error, and persist no assistant message. Explicit prompt, refusal, and seed canaries are absent from both SSE and process-local store projections.
+  **implication:** Attempt observability is now available without changing matching or retry behavior. Deploy this instrumentation only, then use a fresh isolated OMEN thread to establish the causal category of each real attempt.
+
+- **timestamp:** 2026-09-01T01:33:00Z
+  **checked:** Adjacent chat-stream, action, prompt-preview, and Phase 1 acceptance consumers after initial activity wiring.
+  **found:** One existing upstream-failure contract failed because initial wiring emitted a `failed` refusal-activity row before the unchanged `llm_stream_failed` event. That failure had no guard classification and was not a retry/recovery outcome; all 369 other direct tests passed.
+  **implication:** The broader failure/cancellation telemetry branch is outside the stated normal guarded-retry scope and changes an established stream contract. Restrict activity records to guard-classified retry, exhaustion, accepted-after-retry, and empty outcomes.
+
+- **timestamp:** 2026-09-01T01:38:00Z
+  **checked:** Direct guard, normal chat stream, message action, prompt-preview, and Phase 1 acceptance suites after narrowing activity to guarded outcomes.
+  **found:** GREEN: 370 passed. The original upstream-failure contract is restored, the controlled terminal path remains observable and content-free, and static checks plus whitespace validation are clean.
+  **implication:** The activity integration is constrained to the requested normal guarded-retry path. Confirm the shared UI/inspector store and live-call consumer before committing an instrumentation-only candidate.
+
+- **timestamp:** 2026-09-01T01:46:00Z
+  **checked:** Shared-store regression, typed client activity consumers, and focused live-call refusal coverage.
+  **found:** GREEN: 371 direct server checks, 3 focused live-call checks, and 54 typed client checks. Chat and prompt inspector resolve the same process-local ring; the client already translates `retry` activity into the visible retry state and clears it at acceptance/exhaustion. No call path opts into the new chat activity sink.
+  **implication:** The instrumentation preserves the live-call invariants and gives the normal text-chat user visible retry state plus safe inspector metadata. It is ready to be committed and deployed as a diagnosis-only increment before selecting a behavioral repair.
 
 - **timestamp:** 2026-08-31T18:45:00Z
   **checked:** Required session records, live-call invariants, canonical OMEN deployment contract, project-local skills, and configured debugger skills.
@@ -557,6 +587,81 @@ updated: 2026-09-01T00:32:35Z
   **found:** `git diff --check` and scoped Ruff are GREEN. The diff replaces only the surface-specific identity pattern with a bounded structural one (3 changed lines), adds one exact corpus entry, and adds its stream regression (32 insertions, 3 deletions across three files); it contains no behavior-deleting early return, blanket suppression, or weakened assertion. No configured mutation runner exists. With only `refusal_guard.py` reverted, the unchanged sixth-form corpus and stream targets were RED (9 failures); reapplying the matcher restored GREEN (17 passed).
   **implication:** Fix-acceptance signals are accepted: target test PASS, mutation check SKIPPED (no runner), no-op/deletion PASS, adjacent consumers PASS, and revert-and-reconfirm PASS. Stage only the scoped repair plus this debug record.
 
+- **timestamp:** 2026-09-01T00:33:20Z
+  **checked:** Scoped staged repair and commit result.
+  **found:** Commit `81a5eb89aa45f916997784fd498fe7db0ccb8635` contains exactly the structural matcher, exact corpus entry, shared-stream regression, and this debug record. The primary workspace retains only unrelated untracked runtime/planning state outside the commit.
+  **implication:** Verify and publish only this exact commit from a clean detached worktree; do not deploy from the primary workspace.
+
+- **timestamp:** 2026-09-01T00:33:45Z
+  **checked:** Exact-commit release worktree.
+  **found:** A detached worktree was created at `81a5eb89aa45f916997784fd498fe7db0ccb8635` with no source modifications.
+  **implication:** Its test results and source state apply to the precise release candidate rather than the dirty primary workspace.
+
+- **timestamp:** 2026-09-01T00:34:15Z
+  **checked:** Exact-commit direct guard/chat/action/acceptance suites at detached `81a5eb8`.
+  **found:** GREEN: 343 passed in 8.62 seconds.
+  **implication:** The exact release candidate preserves all directly coupled chat contracts. Run focused live-call refusal coverage and source-clean checks before publishing.
+
+- **timestamp:** 2026-09-01T00:34:40Z
+  **checked:** Exact-commit focused live-call refusal retry/exhaustion suite and source integrity at detached `81a5eb8`.
+  **found:** GREEN: 3 passed with 106 unrelated tests deselected in 3.16 seconds. `git diff --check` and `git status --short` are clean; HEAD is exactly `81a5eb89aa45f916997784fd498fe7db0ccb8635`.
+  **implication:** The candidate satisfies the shared live-call recovery contract and is clean for exact publication and canonical OMEN deployment.
+
+- **timestamp:** 2026-09-01T00:35:15Z
+  **checked:** Publication of the exact detached structural-identity release candidate.
+  **found:** The clean detached worktree advanced `origin/main` from `9d9fb59` to `81a5eb8`.
+  **implication:** OMEN can now fetch the verified correction. Deploy only with the repository's canonical script, which will assert the expected SHA remotely.
+
+- **timestamp:** 2026-09-01T00:35:50Z
+  **checked:** Canonical deployment invocation from the clean detached release worktree.
+  **found:** `scripts/deploy-omen.sh` exited before remote contact because the isolated worktree does not contain the intentionally untracked persisted Phase 0 SSH key at `.local/phase0-ssh/rayme_omen_phase0_ed25519`.
+  **implication:** This is a local credential-availability boundary, not a source, test, or OMEN failure. Do not copy or recreate credentials; invoke the same canonical script from the primary checkout at the identical published commit, where the established credential is available.
+
+- **timestamp:** 2026-09-01T00:36:40Z
+  **checked:** Canonical deployment invocation from the primary checkout at the published SHA.
+  **found:** The script fetched and fast-forwarded OMEN from `9d9fb59` to `81a5eb8`, reported the expected commit, stopped the canonical listeners, and entered pinned Qwen runtime provisioning. The command handle yielded before final deployment completion.
+  **implication:** Do not infer acceptance from partial deploy output. Independently inspect OMEN's active checkout, canonical process/task identities, and readiness before sending a fresh verification request.
+
+- **timestamp:** 2026-09-01T00:37:30Z
+  **checked:** First independent post-deploy OMEN identity/readiness query.
+  **found:** OMEN is clean at `81a5eb89aa45f916997784fd498fe7db0ccb8635` and both scheduled tasks point to their canonical `.cmd` launchers, but neither 8443 nor 9443 is listening and all HTTPS readiness requests are unreachable.
+  **implication:** The checkout identity is correct but the deployment is not ready yet. This is not acceptance evidence and no fresh verification request may be sent; inspect whether runtime provisioning remains active and retry only read-only health checks.
+
+- **timestamp:** 2026-09-01T00:38:25Z
+  **checked:** Local deployment-process state after the first readiness query.
+  **found:** The primary `scripts/deploy-omen.sh` and its remote SSH child were still running during runtime provisioning, then exited within the bounded 30-second wait.
+  **implication:** The first unavailable-listener observation was made mid-deployment. Re-query the remote service now; only a ready canonical state permits the isolated verification chat.
+
+- **timestamp:** 2026-09-01T00:39:30Z
+  **checked:** Independent post-deploy OMEN service identity and readiness.
+  **found:** OMEN is clean at `81a5eb89aa45f916997784fd498fe7db0ccb8635`; both scheduled tasks use required canonical `.cmd` launchers, and ports 9443/8443 are served by the canonical AI/web commands. Web-to-AI readiness is authenticated and ready; STT/VAD, resident `qwen3_1_7b`, and WebRTC live-call readiness are all ready and report the exact deployed SHA. The aggregate AI health label is `degraded` only because inactive registered engines remain unavailable; required chat/live-call gates are ready.
+  **implication:** The exact correction is active in the healthy normal path. It is safe to create an isolated verification thread and send the prior failure-class prompt without touching the user's thread.
+
+- **timestamp:** 2026-09-01T00:40:10Z
+  **checked:** Deployed thread-create route contract.
+  **found:** The normal API requires only a valid `character_id`, with optional title and greeting index; creation initializes a fresh conversation rather than modifying an existing thread.
+  **implication:** Obtain the character identity from a prior isolated test record read-only, then create one new isolated thread and send only the prior failure-class prompt.
+
+- **timestamp:** 2026-09-01T00:40:45Z
+  **checked:** Prior isolated verification-thread character lookup in OMEN SQLite read-only mode.
+  **found:** The prior isolated thread maps to character `char_f4363a946de74b26ab22601d51c8dcc7`.
+  **implication:** A new thread for this same character will reproduce the failure class while keeping the user's reported thread untouched.
+
+- **timestamp:** 2026-09-01T00:41:20Z
+  **checked:** Fresh isolated verification-thread creation through the deployed normal API.
+  **found:** The API created `thread_e2d8f63f90854babb7d99dd22510097d` for the prior verification character.
+  **implication:** Send only the prior failure-class prompt in this new thread, then inspect the streamed and persisted assistant record without reading or modifying the user's thread.
+
+- **timestamp:** 2026-09-01T00:42:20Z
+  **checked:** Fresh normal `/api/chat/{thread_id}/send` stream for the prior failure-class prompt after structural deployment.
+  **found:** The route returned one typed terminal SSE error, `llm_refusal_exhausted`, with no assistant token or done event. It did not expose a generic refusal sentence.
+  **implication:** Inspect live SQLite before interpreting the result: the guard may have safely excluded every rejected attempt, but the required product verification is only satisfied if no refusal persisted and any assistant record is recovered in-character output.
+
+- **timestamp:** 2026-09-01T00:43:30Z
+  **checked:** Fresh isolated live SQLite rows and linked alternates for `thread_e2d8f63f90854babb7d99dd22510097d` in read-only mode.
+  **found:** The only assistant row is the initial greeting at sequence 0, with its initial-greeting alternate; the submitted user prompt is sequence 1. No post-request `ai_text` row, alternate, or generic refusal text persisted. The terminal `llm_refusal_exhausted` follows only after all three guarded attempts reject, but the normal chat path exposes no content-free per-attempt reason metadata.
+  **implication:** The structural guard successfully kept generic refusals out of persistence, but this fresh live record did not produce the required recovered in-character assistant output. The deployment is canonical and source verification is green, yet end-to-end recovery remains unverified; return to investigation rather than declaring the incident resolved.
+
 ## Eliminated
 
 - **hypothesis:** Sequence 20 was a stale selected alternate or a different message action/path that persisted after correct guard recovery.
@@ -581,4 +686,5 @@ updated: 2026-09-01T00:32:35Z
   adjacent_tests: { result: pass, suites_run: ["guard/chat/action/Phase 1 acceptance (343 passed)", "focused live-call refusal subset (3 passed, 106 deselected)", "scoped Ruff"] }
   revert_and_reconfirm: { result: pass, bug_returned_on_revert: true, fixed_on_reapply: true }
   guardrail_verdict: accepted
+  deployed_e2e: { result: incomplete, reason: "fresh normal request safely persisted no generic refusal but exhausted all three retries and produced no recovered in-character assistant message" }
 - **files_changed:** [web-ui/server/app/domain/refusal_guard.py, web-ui/server/tests/fixtures/phase091_refusal_corpus.json, web-ui/server/tests/test_chat_stream.py]

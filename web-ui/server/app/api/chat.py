@@ -15,6 +15,10 @@ from app.config import Settings
 from app.domain.llm_stream import ChatCompletionSettings, stream_chat_completion
 from app.domain.prompt_builder import SqlAlchemyPromptRepository, build_structured_prompt
 from app.domain.prompt_profiles import PromptGenerationSettings
+from app.domain.refusal_activity import (
+    RefusalActivityStore,
+    get_process_local_refusal_activity_store,
+)
 from app.domain.settings_service import SettingsService
 from app.domain.thread_service import ThreadNotFoundError, ThreadService, new_message_id
 from app.storage.models import Message, MessageAlternateShape, Thread, ThreadMessageShape, utc_now
@@ -51,6 +55,10 @@ def get_chat_completion_client() -> object | None:
     return None
 
 
+def get_chat_refusal_activity_store() -> RefusalActivityStore:
+    return get_process_local_refusal_activity_store()
+
+
 @router.post("/{thread_id}/send")
 async def send_chat_message(
     thread_id: str,
@@ -58,6 +66,7 @@ async def send_chat_message(
     session: AsyncSession = Depends(get_chat_session),
     runtime_settings: Settings = Depends(get_chat_runtime_settings),
     completion_client: object | None = Depends(get_chat_completion_client),
+    refusal_activity: RefusalActivityStore = Depends(get_chat_refusal_activity_store),
 ) -> StreamingResponse:
     repository = ChatRepository(session)
     try:
@@ -97,6 +106,8 @@ async def send_chat_message(
             prompt_messages,
             client=completion_client,
             persist_final=lambda text: repository.append_ai_message(thread_id, text),
+            activity_action="send",
+            activity_sink=lambda record: refusal_activity.append(thread_id, record),
         ):
             yield event
 
@@ -218,6 +229,7 @@ __all__ = [
     "ChatRepository",
     "ChatSendRequest",
     "get_chat_completion_client",
+    "get_chat_refusal_activity_store",
     "get_chat_runtime_settings",
     "get_chat_session",
     "router",
