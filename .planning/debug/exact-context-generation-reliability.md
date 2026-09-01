@@ -2,7 +2,7 @@
 status: verifying
 trigger: "At deployed functional commit 9c09140, ten production swipes against a controlled clone whose effective request is byte-identical to the user's original thread yielded six in-character alternates and four safe llm_refusal_exhausted outcomes. No refusal was persisted or selected, but RayMe must reliably generate an in-character response instead of merely hiding refusals."
 created: 2026-09-01
-updated: 2026-09-01T07:00:00Z
+updated: 2026-09-01T08:24:00Z
 ---
 
 # Exact-Context Generation Reliability
@@ -15,7 +15,7 @@ updated: 2026-09-01T07:00:00Z
 - **hypothesis:** Confirmed: applying the same Qwen sampling temperature (0.80) to every recovery attempt leaves the exact refusal-prone context in a low-variance policy-refusal mode. A bounded Qwen-only retry temperature of 1.20 improves the model's chance to select an in-character continuation while preserving the configured first attempt, prompt order, correction, guard, retry bound, and all non-temperature sampler fields.
 - **test:** Add a deterministic adapter regression that verifies only Qwen attempts 2–3 receive the 1.20 recovery temperature, while attempt 1 and Generic requests retain configured temperature. Then rerun the unchanged full recovery test and real controlled-clone swipes after canonical deployment.
 - **expecting:** Local contracts must prove the wire condition change is exactly scoped; production must materially improve on the deployed 24/30 completion baseline while persisting no refusal prose or canned fallback.
-- **next_action:** Run only `scripts/deploy-omen.sh` from the current published primary checkout. Then independently verify readiness and repeat the exact controlled-clone swipe test with at least 30 real action-route samples.
+- **next_action:** Commit the accepted deployed-e2e debug record. The service remains healthy after the clone-only sample; no further code change is justified because the released real-route evidence matches the controlled recovery result.
 - **reasoning_checkpoint:**
   hypothesis: "The Qwen retry path's reuse of configured temperature 0.80 causes residual all-attempt exhaustion because this exact context has a high-probability generic-refusal mode; setting temperature 1.20 only on Qwen attempts two and three broadens recovery sampling enough to select in-character continuations."
   confirming_evidence:
@@ -210,17 +210,57 @@ updated: 2026-09-01T07:00:00Z
   **found:** Published repair commit `0fb99b1` and its active-debug update `c8d81e4` contain only the Qwen retry-temperature minimum, its adapter-boundary regression, and session state; unrelated workspace artifacts remain unstaged.
   **implication:** Deploy this exact repair only through the canonical script, then use the controlled clone for final production verification.
 
+- **timestamp:** 2026-09-01T08:05:00Z
+  **checked:** Canonical deployment of the scoped Qwen recovery-sampler repair.
+  **found:** `scripts/deploy-omen.sh` completed at `8ab04d2`; it updated OMEN to that published revision, rebuilt the web client, reapplied migrations and canonical launchers/tasks, restarted both listeners, and reported STT/VAD plus resident Qwen ready. The aggregate AI health remains degraded only for inactive registered engines.
+  **implication:** The intended retry-sampler code has been released through the only permitted path. Independently confirm running-service identity before clone-only action-route sampling.
+
+- **timestamp:** 2026-09-01T08:06:00Z
+  **checked:** First independent-health command launch.
+  **found:** The local shell rejected the nested command quoting before SSH connected, so no deployed process, endpoint, or generation request was contacted.
+  **implication:** Correct the command transport and rerun the same read-only readiness projection; this setup error is not deployment or production evidence.
+
+- **timestamp:** 2026-09-01T08:08:00Z
+  **checked:** Independent OMEN source identity, cleanliness, canonical listeners/tasks, and health projection after deployment.
+  **found:** OMEN is clean at `8ab04d2`; both expected listeners and scheduled tasks are running. Web health is OK; AI aggregate health is degraded only for inactive engines while STT/VAD and resident Qwen are ready.
+  **implication:** The intended recovery-sampler source is active and the clone-only action-route validation can begin.
+
+- **timestamp:** 2026-09-01T08:10:00Z
+  **checked:** First content-free remote sample-runner launch.
+  **found:** The local tool runtime lacks the attempted text-encoding API, so it stopped before opening SSH or making any HTTP request.
+  **implication:** Use an ASCII-safe transport encoding for the unchanged runner. This local launch failure neither mutates the clone nor supplies generation evidence.
+
+- **timestamp:** 2026-09-01T08:12:00Z
+  **checked:** Second remote sample-runner transport launch.
+  **found:** Windows rejected the fully embedded encoded runner because it exceeded its command-line length limit; the interpreter did not start and no clone request ran.
+  **implication:** Stream the already content-free runner payload over standard input to a short encoded PowerShell launcher. This transport correction does not alter the test or product state.
+
+- **timestamp:** 2026-09-01T08:18:00Z
+  **checked:** First streamed action-route sample collection.
+  **found:** The clone-only runner reached the real route, but the terminal stream handle was not retained by the local tool after its initial yield, so its full aggregate result cannot be recovered. A read-only activity projection confirms only recent allowlisted swipe metadata is present; it does not prove the required full sample invariants. No original-thread data was written.
+  **implication:** Treat that run as invalid evidence and repeat the unchanged clone-only protocol while retaining the terminal session handle through completion.
+
+- **timestamp:** 2026-09-01T08:22:00Z
+  **checked:** Thirty sequential real `/swipes` through the released action route, using only the controlled clone and content-free aggregate projections.
+  **found:** Twenty-eight requests persisted an accepted alternate and two safely exhausted; there were no unexpected outcomes. Eight accepted on attempt one, 17 on attempt two, and three on attempt three, with 27 withheld retry records and two terminal-exhausted records. All 28 new alternates and the final selected alternate pass the same refusal guard; the original thread snapshot stayed unchanged. Original/clone effective-request digests were equal before and after and remained stable; the active adapter stayed Qwen and the previewed configured first-attempt temperature stayed unchanged. No activity-contract violation occurred.
+  **implication:** The released recovery-only sampler repair reproduces the controlled 28/30 result through the actual route, improving the prior deployed 24/30 completion result while preserving original-context isolation, prompt identity, first-attempt behavior, retry bounds, and the refusal-persistence barrier.
+
+- **timestamp:** 2026-09-01T08:24:00Z
+  **checked:** Independent service readiness projection after the completed route sample.
+  **found:** Both expected listeners remain active; Web health is OK and STT/VAD plus resident Qwen remain ready.
+  **implication:** The real-route recovery result was obtained from a healthy released service, not a transient shutdown or fallback state.
+
 ## Resolution
 
 - **root_cause:** Qwen reuses the user-configured 0.80 temperature for all recovery attempts, including the refusal-prone exact context. That low-variance retry sampling keeps selecting policy refusals even after the retry instruction; bounded 1.20 sampling for attempts two and three materially improves recovery while leaving the configured initial attempt unchanged.
 - **oracle_type:** specified — the selected character must receive a real model-generated in-character response; a safe terminal exhaustion is not sufficient reliability.
-- **fix:** Pending implementation: apply 1.20 only to `qwen_llama_server` attempts two and three, without changing first-attempt/configured sampling, prompt text/order, guard behavior, retry count, or persistence.
-- **verification:**
+- **fix:** Applied a 1.20 minimum temperature only to `qwen_llama_server` attempts two and three, without changing first-attempt/configured sampling, prompt text/order, guard behavior, retry count, or persistence.
 - **verification:**
   target_test: { result: pass, suites_run: ["Qwen retry adapter golden (3 cases; RED before fix, GREEN after)", "focused adapter/stream/action/preview/guard checks (643 passed)", "complete server suite (967 passed)"] }
   mutation_check: { result: skipped, reason_if_skipped: "no Stryker, mutmut, or equivalent mutation runner is configured" }
   no_op_deletion: { result: pass, deletion_justified_by_rca: false }
   adjacent_tests: { result: pass, suites_run: ["Generic adapter golden", "higher configured Qwen temperature boundary", "stream/action/persistence/preview/refusal-guard coverage", "scoped Ruff", "git diff --check"] }
   revert_and_reconfirm: { result: pass, bug_returned_on_revert: true, fixed_on_reapply: true, evidence: "removing only retry-temperature branch makes Qwen attempts 2/3 golden cases RED; reapplying restores GREEN" }
-  guardrail_verdict: pending_deployed_e2e
+  deployed_e2e: { result: pass, sample: "30 real controlled-clone swipe actions", stored: 28, safe_exhausted: 2, accepted_attempts: { attempt_1: 8, attempt_2: 17, attempt_3: 3 }, prior_same_route_baseline: { stored: 24, safe_exhausted: 6, sample_size: 30 }, refusal_rows: 0, selected_refusals: 0, original_thread_unchanged: true, request_digest_equal_and_stable: true, activity_contract_violations: 0 }
+  guardrail_verdict: accepted
 - **files_changed:** [web-ui/server/app/domain/generation_profiles.py, web-ui/server/tests/test_generation_profiles.py]
