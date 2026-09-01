@@ -8,6 +8,7 @@ from dataclasses import FrozenInstanceError
 import pytest
 
 from app.domain.generation_profiles import (
+    QWEN_RECOVERY_TEMPERATURE,
     RETRY_CORRECTION,
     GenerationAdapterError,
     ProviderEvidence,
@@ -108,7 +109,7 @@ def test_qwen_exact_request_goldens_keep_late_instructions_user_consumed(
         "seed": 100 + attempt,
         "stream": True,
         "max_tokens": 1024,
-        "temperature": 0.65,
+        "temperature": 0.65 if attempt == 1 else 1.20,
         "top_p": 0.91,
         "presence_penalty": 0.2,
         "frequency_penalty": -0.1,
@@ -168,6 +169,21 @@ def test_generic_exact_request_goldens_preserve_roles_and_exact_strings(
     assert request.messages[-1].role == "assistant"
     assert request.messages[-1].content == PREFILL
     assert _recursive_absent(request.to_openai_kwargs(), REJECTED_PROSE)
+
+
+def test_qwen_recovery_keeps_a_higher_user_configured_temperature() -> None:
+    settings = PromptGenerationSettings(model_profile="qwen_llama_server", temperature=1.35)
+
+    request = build_generation_request(
+        model="unsloth/Qwen3.8-27B",
+        messages=_logical_messages(),
+        settings=settings,
+        seed=303,
+        attempt=2,
+    )
+
+    assert request.to_openai_kwargs()["temperature"] == 1.35
+    assert QWEN_RECOVERY_TEMPERATURE == 1.20
 
 
 def test_provider_evidence_is_required_to_be_unambiguous_and_matching() -> None:

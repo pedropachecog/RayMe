@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal, TypeAlias, cast
 
 from app.domain.prompt_builder import (
@@ -19,6 +19,7 @@ RETRY_CORRECTION = (
     "The prior draft broke character. Continue the fictional scene and respond only with the "
     "in-world reply."
 )
+QWEN_RECOVERY_TEMPERATURE = 1.20
 
 
 class GenerationAdapterError(ValueError):
@@ -222,7 +223,11 @@ def build_generation_request(
         attempt=attempt,
         disable_thinking=disable_thinking,
     )
-    sampler = SamplerPayload.from_settings(settings) if settings is not None else None
+    sampler = _sampler_for_attempt(
+        settings,
+        effective=resolution.effective,
+        attempt=attempt,
+    )
     merged_extra: dict[str, object] = _deep_copy_mapping(extra_body or {})
     if resolution.effective == "qwen_llama_server":
         if sampler is not None:
@@ -249,6 +254,23 @@ def build_generation_request(
         stream=stream,
         extra_body_items=_freeze_mapping(merged_extra),
     )
+
+
+def _sampler_for_attempt(
+    settings: PromptGenerationSettings | None,
+    *,
+    effective: EffectiveModelProfile,
+    attempt: int,
+) -> SamplerPayload | None:
+    if settings is None:
+        return None
+    sampler = SamplerPayload.from_settings(settings)
+    if effective == "qwen_llama_server" and attempt > 1:
+        return replace(
+            sampler,
+            temperature=max(sampler.temperature, QWEN_RECOVERY_TEMPERATURE),
+        )
+    return sampler
 
 
 def _serialize_messages(
@@ -417,6 +439,7 @@ __all__ = [
     "GenerationRequest",
     "ProviderEvidence",
     "ProviderExpectation",
+    "QWEN_RECOVERY_TEMPERATURE",
     "RETRY_CORRECTION",
     "SamplerPayload",
     "WireMessage",
