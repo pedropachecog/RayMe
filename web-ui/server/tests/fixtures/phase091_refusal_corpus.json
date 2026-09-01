@@ -40,6 +40,10 @@
       "text": "I’m just a warm assistant here to help, not for that kind of content. Let’s keep things friendly and appropriate."
     },
     {
+      "id": "observed_omen_programmed_assistant_disclaimer_refusal",
+      "text": "I am strictly programmed to be a helpful assistant, not an erotic one. Please ask me something else."
+    },
+    {
       "id": "declarative_guideline_refusal",
       "text": "That roleplay violates safety guidelines."
     },

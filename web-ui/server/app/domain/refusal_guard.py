@@ -42,9 +42,9 @@ _IDENTITY_RE = re.compile(
     r"assistant|chatbot)\b"
 )
 _DIRECT_IDENTITY_DISCLAIMER_RE = re.compile(
-    r"(?:^|(?<=[.!?])\s*)i(?:'m|\s+am)\s+(?:just|only)\s+(?:an?\s+)?"
-    r"(?:warm\s+)?assistant\b.{0,80}\bnot\s+for\s+(?:that|this)\s+"
-    r"(?:kind|type)\s+of\s+content\b"
+    r"(?:^|(?<=[.!?])\s*)i(?:'m|\s+am)\b.{0,80}\bassistant\b.{0,80}\b"
+    r"not\s+(?:for\s+(?:that|this)\s+(?:kind|type)\s+of\s+content|"
+    r"(?:an?\s+)?(?:erotic|sexual)\s+one)\b"
 )
 _POLICY_RE = re.compile(
     r"\b(?:policy|policies|guideline|guidelines|safety|"
