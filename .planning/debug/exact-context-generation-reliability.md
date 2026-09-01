@@ -15,7 +15,7 @@ updated: 2026-09-01T07:00:00Z
 - **hypothesis:** Confirmed: applying the same Qwen sampling temperature (0.80) to every recovery attempt leaves the exact refusal-prone context in a low-variance policy-refusal mode. A bounded Qwen-only retry temperature of 1.20 improves the model's chance to select an in-character continuation while preserving the configured first attempt, prompt order, correction, guard, retry bound, and all non-temperature sampler fields.
 - **test:** Add a deterministic adapter regression that verifies only Qwen attempts 2–3 receive the 1.20 recovery temperature, while attempt 1 and Generic requests retain configured temperature. Then rerun the unchanged full recovery test and real controlled-clone swipes after canonical deployment.
 - **expecting:** Local contracts must prove the wire condition change is exactly scoped; production must materially improve on the deployed 24/30 completion baseline while persisting no refusal prose or canned fallback.
-- **next_action:** Run only `scripts/deploy-omen.sh` from the primary checkout at published `0fb99b1`. Then independently verify readiness and repeat the exact controlled-clone swipe test with at least 30 real action-route samples.
+- **next_action:** Run only `scripts/deploy-omen.sh` from the current published primary checkout. Then independently verify readiness and repeat the exact controlled-clone swipe test with at least 30 real action-route samples.
 - **reasoning_checkpoint:**
   hypothesis: "The Qwen retry path's reuse of configured temperature 0.80 causes residual all-attempt exhaustion because this exact context has a high-probability generic-refusal mode; setting temperature 1.20 only on Qwen attempts two and three broadens recovery sampling enough to select in-character continuations."
   confirming_evidence:
@@ -207,7 +207,7 @@ updated: 2026-09-01T07:00:00Z
 
 - **timestamp:** 2026-09-01T07:58:00Z
   **checked:** Scoped publication.
-  **found:** Published commit `0fb99b1` contains only the Qwen retry-temperature minimum, its adapter-boundary regression, and this active debug record; unrelated workspace artifacts remain unstaged.
+  **found:** Published repair commit `0fb99b1` and its active-debug update `c8d81e4` contain only the Qwen retry-temperature minimum, its adapter-boundary regression, and session state; unrelated workspace artifacts remain unstaged.
   **implication:** Deploy this exact repair only through the canonical script, then use the controlled clone for final production verification.
 
 ## Resolution
