@@ -26,6 +26,10 @@ from app.domain.message_actions import (
 )
 from app.domain.prompt_builder import PromptBudgetExceeded
 from app.domain.prompt_profiles import PromptGenerationSettings
+from app.domain.refusal_activity import (
+    RefusalActivityStore,
+    get_process_local_refusal_activity_store,
+)
 from app.domain.refusal_guard import LLMGuardError
 from app.domain.settings_service import SettingsService
 from app.domain.thread_service import ThreadNotFoundError
@@ -75,12 +79,17 @@ def get_message_completion_client() -> object | None:
     return None
 
 
+def get_message_refusal_activity_store() -> RefusalActivityStore:
+    return get_process_local_refusal_activity_store()
+
+
 @router.post("/{message_id}/regenerate")
 async def regenerate_message(
     message_id: str,
     session: AsyncSession = Depends(get_message_action_session),
     runtime_settings: Settings = Depends(get_message_action_runtime_settings),
     completion_client: object | None = Depends(get_message_completion_client),
+    refusal_activity: RefusalActivityStore = Depends(get_message_refusal_activity_store),
 ) -> dict[str, Any]:
     repository = SqlAlchemyMessageActionRepository(session)
     try:
@@ -93,6 +102,7 @@ async def regenerate_message(
                 completion_client=completion_client,
             ),
             completion_client=completion_client,
+            refusal_activity=refusal_activity,
         )
     except (MessageActionNotFoundError, ThreadNotFoundError) as exc:
         raise HTTPException(status_code=404, detail="Message not found") from exc
@@ -110,6 +120,7 @@ async def swipe_message(
     session: AsyncSession = Depends(get_message_action_session),
     runtime_settings: Settings = Depends(get_message_action_runtime_settings),
     completion_client: object | None = Depends(get_message_completion_client),
+    refusal_activity: RefusalActivityStore = Depends(get_message_refusal_activity_store),
 ) -> dict[str, Any]:
     repository = SqlAlchemyMessageActionRepository(session)
     try:
@@ -129,6 +140,7 @@ async def swipe_message(
                     completion_client=completion_client,
                 ),
                 completion_client=completion_client,
+                refusal_activity=refusal_activity,
             )
     except (MessageActionNotFoundError, ThreadNotFoundError) as exc:
         raise HTTPException(status_code=404, detail="Message not found") from exc
@@ -190,6 +202,7 @@ async def continue_message(
     session: AsyncSession = Depends(get_message_action_session),
     runtime_settings: Settings = Depends(get_message_action_runtime_settings),
     completion_client: object | None = Depends(get_message_completion_client),
+    refusal_activity: RefusalActivityStore = Depends(get_message_refusal_activity_store),
 ) -> dict[str, Any]:
     repository = SqlAlchemyMessageActionRepository(session)
     try:
@@ -203,6 +216,7 @@ async def continue_message(
                 completion_client=completion_client,
             ),
             completion_client=completion_client,
+            refusal_activity=refusal_activity,
         )
     except (MessageActionNotFoundError, ThreadNotFoundError) as exc:
         raise HTTPException(status_code=404, detail="Message not found") from exc

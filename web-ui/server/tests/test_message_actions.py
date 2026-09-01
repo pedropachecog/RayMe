@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
@@ -13,7 +14,11 @@ from pytest import MonkeyPatch
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from app.api.messages import get_message_action_session, get_message_completion_client
+from app.api.messages import (
+    get_message_action_session,
+    get_message_completion_client,
+    get_message_refusal_activity_store,
+)
 from app.config import Settings
 from app.domain import message_actions
 from app.domain.llm_stream import (
@@ -29,6 +34,7 @@ from app.domain.prompt_builder import (
 )
 from app.domain.prompt_profiles import PromptGenerationSettings
 from app.domain.refusal_guard import LLMEmptyOutput, LLMRefusalExhausted
+from app.domain.refusal_activity import RefusalActivityStore
 from app.domain.settings_service import SETTINGS_KEY
 from app.domain.thread_service import ThreadService
 from app.main import create_app
@@ -592,6 +598,57 @@ async def test_generation_action_outcome_matrix_is_accepted_only_and_atomic(acti
         await cancelled_task
     assert cancelled_repository.messages["ai-1"] == cancelled_before
     assert cancelled_client.closed_attempts == [1]
+
+
+async def test_swipe_terminal_exhaustion_records_content_free_attempt_activity() -> None:
+    repository = ScriptedActionRepository()
+    refusal_canary = "I cannot help with that request because private policy forbids it."
+    client = ActionAttemptClient([[refusal_canary], [refusal_canary], [refusal_canary]])
+    activity = RefusalActivityStore()
+
+    with pytest.raises(LLMRefusalExhausted):
+        await message_actions.create_swipe_alternate(
+            "ai-1",
+            repository=repository,
+            settings=STRUCTURED_SERVER_SETTINGS,
+            completion_client=client,
+            refusal_activity=activity,
+        )
+
+    records = activity.serialize_recent("thread-1")
+    assert [(record["action"], record["attempt"], record["terminal_outcome"]) for record in records] == [
+        ("swipe", 1, "retry"),
+        ("swipe", 2, "retry"),
+        ("swipe", 3, "exhausted"),
+    ]
+    serialized = json.dumps(records, ensure_ascii=False, sort_keys=True)
+    assert refusal_canary not in serialized
+    assert '"seed"' not in serialized
+
+
+def test_swipe_route_records_content_free_attempt_activity(
+    message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
+) -> None:
+    client, sessionmaker, scripted_client = message_action_client
+    refusal_canary = "I cannot help with that request because private policy forbids it."
+    activity = RefusalActivityStore()
+    client.app.dependency_overrides[get_message_refusal_activity_store] = lambda: activity
+    scripted_client.scripts = [[refusal_canary], [refusal_canary], [refusal_canary]]
+    ids = asyncio.run(_create_action_thread(sessionmaker))
+
+    response = client.post(f"/api/messages/{ids['ai']}/swipes")
+
+    assert response.status_code == 502
+    assert response.json()["detail"]["code"] == "llm_refusal_exhausted"
+    records = activity.serialize_recent(ids["thread"])
+    assert [(record["action"], record["attempt"], record["terminal_outcome"]) for record in records] == [
+        ("swipe", 1, "retry"),
+        ("swipe", 2, "retry"),
+        ("swipe", 3, "exhausted"),
+    ]
+    serialized = json.dumps(records, ensure_ascii=False, sort_keys=True)
+    assert refusal_canary not in serialized
+    assert '"seed"' not in serialized
 
 
 async def test_edit_marks_downstream_turns_stale() -> None:

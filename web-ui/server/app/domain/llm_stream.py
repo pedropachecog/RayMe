@@ -157,6 +157,8 @@ async def collect_chat_completion(
     *,
     client: object | None = None,
     seed_factory: SeedFactory | None = None,
+    activity_action: RefusalAction = "send",
+    activity_sink: RefusalActivitySink | None = None,
 ) -> str:
     """Collect a complete assistant response using only server-side settings."""
 
@@ -168,6 +170,8 @@ async def collect_chat_completion(
                 messages,
                 client=client,
                 seed_factory=seed_factory,
+                activity_action=activity_action,
+                activity_sink=activity_sink,
             )
         ]
     )

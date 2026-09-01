@@ -8,9 +8,14 @@ from typing import Protocol
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.llm_stream import ChatCompletionSettings, collect_chat_completion
+from app.domain.llm_stream import (
+    ChatCompletionSettings,
+    RefusalActivitySink,
+    collect_chat_completion,
+)
 from app.domain.prompt_builder import PromptBuildResult, build_structured_prompt
 from app.domain.prompt_profiles import PromptGenerationSettings
+from app.domain.refusal_activity import RefusalAction, RefusalActivityStore
 from app.domain.thread_service import ThreadNotFoundError, ThreadService, new_alternate_id
 from app.storage.models import (
     Message,
@@ -310,6 +315,7 @@ async def regenerate_ai_turn(
     repository: MessageActionRepository,
     settings: ChatCompletionSettings,
     completion_client: object | None = None,
+    refusal_activity: RefusalActivityStore | None = None,
 ) -> ThreadMessageShape:
     """Regenerate an AI turn through the server-side LLM path and replace selection."""
 
@@ -325,6 +331,8 @@ async def regenerate_ai_turn(
         settings,
         _generation_messages(prompt),
         completion_client=completion_client,
+        activity_action="regenerate",
+        activity_sink=_activity_sink(refusal_activity, context.thread_id),
     )
     return await repository.replace_selected_ai_response(
         message_id,
@@ -339,6 +347,7 @@ async def create_swipe_alternate(
     repository: MessageActionRepository,
     settings: ChatCompletionSettings,
     completion_client: object | None = None,
+    refusal_activity: RefusalActivityStore | None = None,
 ) -> ThreadMessageShape:
     """Create and select a generated swipe alternate for an existing AI turn."""
 
@@ -354,6 +363,8 @@ async def create_swipe_alternate(
         settings,
         _generation_messages(prompt),
         completion_client=completion_client,
+        activity_action="swipe",
+        activity_sink=_activity_sink(refusal_activity, context.thread_id),
     )
     return await repository.add_selected_alternate(
         message_id,
@@ -411,6 +422,7 @@ async def continue_ai_turn(
     repository: MessageActionRepository,
     settings: ChatCompletionSettings,
     completion_client: object | None = None,
+    refusal_activity: RefusalActivityStore | None = None,
 ) -> ThreadMessageShape:
     """Extend the previous AI turn through the server-side LLM path."""
 
@@ -430,6 +442,8 @@ async def continue_ai_turn(
         settings,
         _generation_messages(prompt),
         completion_client=completion_client,
+        activity_action="continue",
+        activity_sink=_activity_sink(refusal_activity, context.thread_id),
     )
     return await repository.add_selected_alternate(
         message_id,
@@ -455,10 +469,36 @@ async def _collect_generated_text(
     prompt_messages: object,
     *,
     completion_client: object | None,
+    activity_action: RefusalAction,
+    activity_sink: RefusalActivitySink | None,
 ) -> str:
+    activity_kwargs: dict[str, object] = {}
+    if activity_sink is not None:
+        activity_kwargs = {
+            "activity_action": activity_action,
+            "activity_sink": activity_sink,
+        }
     if completion_client is None:
-        return await collect_chat_completion(settings, prompt_messages)
-    return await collect_chat_completion(settings, prompt_messages, client=completion_client)
+        return await collect_chat_completion(
+            settings,
+            prompt_messages,
+            **activity_kwargs,
+        )
+    return await collect_chat_completion(
+        settings,
+        prompt_messages,
+        client=completion_client,
+        **activity_kwargs,
+    )
+
+
+def _activity_sink(
+    store: RefusalActivityStore | None,
+    thread_id: str,
+) -> RefusalActivitySink | None:
+    if store is None:
+        return None
+    return lambda record: store.append(thread_id, record)
 
 
 def _prompt_generation_settings(settings: ChatCompletionSettings) -> PromptGenerationSettings:
