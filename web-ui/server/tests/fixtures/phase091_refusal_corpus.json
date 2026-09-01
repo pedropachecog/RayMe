@@ -48,6 +48,14 @@
       "text": "I can’t continue with that explicit sexual description. If you’d like, we can pivot to a different creative direction for this giant character that keeps things vivid but non-explicit."
     },
     {
+      "id": "observed_omen_swipe_explicit_descriptions_redirect_refusal",
+      "text": "I cannot continue with explicit sexual descriptions or erotic content involving genitalia. Please let me know if you have other non-explicit questions or topics you'd like to discuss instead."
+    },
+    {
+      "id": "observed_omen_swipe_explicit_descriptions_refusal",
+      "text": "I can't generate explicit sexual descriptions of genitalia or erotic content."
+    },
+    {
       "id": "declarative_guideline_refusal",
       "text": "That roleplay violates safety guidelines."
     },
@@ -104,6 +112,10 @@
     {
       "id": "nonrefusal_coordinated_explicit_or_erotic_reference",
       "text": "The historian catalogued explicit or erotic content without looking away."
+    },
+    {
+      "id": "nonrefusal_explicit_description_reference",
+      "text": "The archivist catalogued explicit sexual descriptions in the sealed collection."
     },
     {
       "id": "in_world_explicit_description_next_chapter",

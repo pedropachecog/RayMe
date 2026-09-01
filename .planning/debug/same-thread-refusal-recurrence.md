@@ -1,8 +1,8 @@
 ---
-status: investigating
+status: verifying
 trigger: "User reports another refusal failure in the same live OMEN chat thread immediately after canonical deployment of refusal guard commit 28a19f9."
 created: 2026-08-31
-updated: 2026-09-01T01:47:00Z
+updated: 2026-09-01T04:15:00Z
 ---
 
 # Same Thread Refusal Recurrence
@@ -17,12 +17,63 @@ updated: 2026-09-01T01:47:00Z
 
 ## Current Focus
 
-- **bug_class:** Bohrbug — the newest persisted text supplies an exact deterministic detector input to test.
-- **hypothesis:** The normal chat retry owner has no attempt-observability integration: a content-free activity ring and SSE/client contract exist, but `stream_chat_completion()` neither records nor emits each guarded attempt. Therefore the terminal `llm_refusal_exhausted` cannot distinguish a rejected provider attempt from request-adapter/template behavior in production.
+- **bug_class:** Bohrbug — both fresh `/swipes` actions deterministically persisted and selected refusal alternates after the normal-send guard fix was active.
+- **hypothesis:** The common missing policy structure is not the noun `description` alone; it is the coordinated phrase `explicit sexual descriptions ... or erotic content`. Both swipe refusals contain that structure, while the existing in-world boundary says `explicit sexual description until we reach the next chapter` and must remain accepted.
+- **test:** Confirm mutation-runner availability, review the exact incremental diff, record all fix-acceptance signals, then create a scoped commit containing only the guard, corpus, real swipe regression, and active debug record.
+- **expecting:** No mutation runner is configured; target, precision, adjacent, no-op/deletion, and revert/reconfirm signals are accepted. The scoped commit excludes all unrelated runtime/debug files.
+- **next_action:** Complete guardrail recording and make the scoped release commit.
+- **reasoning_checkpoint:**
+  hypothesis: "Both real swipe refusals are accepted because the shared guard omits the coordinated policy structure `explicit sexual descriptions ... or erotic content`; their recognized primary refusal verbs therefore receive no secondary reason, guarded collection accepts attempt one, and the swipe repository persists/selects it."
+  confirming_evidence:
+    - "All six exact-string guard traces release both live forms as `upstream_complete` under whole, codepoint, and word fragmentation."
+    - "The real two-case swipe API regression is RED: each request makes only attempt one and persists/selects that first refusal."
+    - "Read-only OMEN identity is clean at deployed `c016633` with the canonical web listener, ruling out stale source for the 03:42 alternates."
+  falsification_test: "If a bounded coordinated-description alternative does not make both unchanged route cases retry, or if either existing description neighbor becomes refused, this mechanism or scope is wrong."
+  fix_rationale: "Model the shared coordinated policy structure instead of either full sentence or the overbroad description noun. The existing mandatory primary refusal verb plus the required later erotic-content clause provide two precision gates and apply uniformly to send, swipe, regenerate, continue, and call consumers."
+  blind_spots: "Other provider synonyms such as `depictions` are not evidenced and will not be added. The live provider is stochastic, so deployed verification must inspect the actual fresh swipe record and may exhaust retries rather than produce an accepted alternate."
+  candidate_causes:
+    - "code: `_POLICY_RE` omits the coordinated description-or-content policy structure."
+    - "data: both current provider outputs use that omitted coordination while retaining recognized primary refusal verbs."
+    - "environment/config: stale source or alternate action bypass was possible but is contradicted by clean c016633 identity, canonical listener, and the traced shared action guard."
+  and_gate: "yes — the exposed failure requires both the provider's description-noun phrasing and the code's missing semantic noun branch; both are recorded, while no environment/config contributor remains."
+- **bug_class:** Mandelbug — normal-thread persistence diverges from isolated live requests; the trigger depends on persisted thread context, guard ordering, and/or terminal retry behavior.
+- **hypothesis:** Sequence 24 is released by the shared guard because it contains the primary `can’t continue` cue but its only policy phrase is `explicit sexual description`, whereas `_POLICY_RE` accepts `explicit sexual content` and variants only; `_REDIRECT_RE` also does not recognize the pivot sentence. `_refusal_reason()` therefore returns `None`, `finish()` marks `upstream_complete`, and the ordinary `/send` persistence callback writes the refusal.
+- **test:** Reproduce the content-free sequence-24 predicate with the exact response form under whole/sentence/word/codepoint fragmentation, then run a shared-stream retry/persistence regression where this first attempt must be withheld and an in-character second attempt is persisted.
+- **expecting:** Before a matcher change, the guard accepts/releases the known form at `finish()`; after a bounded `explicit (sexual|erotic) (content|description)` policy cue, it rejects it under every schedule while preserving a nonrefusal close neighbor.
+- **next_action:** Return the deployed root-cause and verification result to the session manager. Do not request another product-owner test: the task explicitly requires autonomous normal-route verification.
+- **known_pattern_candidate:** `last-chat-refusal-recovery` — still test whether guard segmentation released a generic refusal before a secondary cue, but do not assume the earlier mechanism.
+- **reasoning_checkpoint:**
+  hypothesis: "The exact original-thread response passes through `PrefixRefusalGuard` because `_REFUSAL_VERB_RE` recognizes `I can’t continue`, but no secondary matcher recognizes its bounded explicit-description-plus-creative-pivot form; `finish()` consequently releases it as `upstream_complete` and normal `/send` persists it."
+  confirming_evidence:
+    - "The read-only live row is an ordinary unselected sequence-24 `ai_text` after sequence 23, and its content-free matcher projection is primary=true, explicit-description=true, policy-content=false, redirect=false."
+    - "The deployed `_POLICY_RE` covers only `explicit ... content`, while `_REDIRECT_RE` has no creative-pivot branch; the deterministic frozen-corpus case fails under all eight fragmentation schedules with `upstream_complete`."
+    - "`eaf530f` changed activity wiring but not the guard; its canonical deployment began after the original row, so neither process/source mismatch nor isolated evidence explains this exact release."
+  falsification_test: "If the unmodified guard rejects the exact frozen form, or if the close in-world next-chapter neighbor is rejected after a narrowly scoped matcher addition, the proposed mechanism is wrong or too broad."
+  fix_rationale: "Add one bounded secondary redirect form requiring the observed `that explicit sexual/erotic description` plus `if you'd like, we/I can pivot to a different creative direction` sequence. The existing primary refusal-verb requirement remains mandatory, avoiding a broad policy match for every explicit description."
+  blind_spots: "The process-local activity ring did not exist when sequence 24 was created, so the exact provider attempt count is unavailable; deterministic guard and shared-stream tests can nevertheless prove the release/persistence mechanism."
+  candidate_causes:
+    - "code: `_REDIRECT_RE` omits the observed explicit-description creative-pivot secondary cue."
+    - "data: the provider produced that valid generic-refusal phrasing in the persisted original-thread context; fresh isolated samples did not exercise it."
+    - "config/environment: active eaf530f checkout and canonical listener are healthy, and eaf530f did not alter the matcher, so a serving/source mismatch is contradicted."
+  and_gate: "yes — this observed escape requires both the unrepresented provider phrasing and the missing matcher branch; record both the data trigger and code omission as contributing causes."
+- **hypothesis:** The prior terminal was a seed-dependent provider outcome, not a deterministic adapter/request-template/retry defect: the deployed Qwen path now demonstrates first-attempt acceptance and guarded real refusals recovering on attempts two and three. The former terminal's exact categories cannot be reconstructed because activity telemetry did not exist then.
 - **known_pattern_candidate:** `last-chat-refusal-recovery` — a sentence boundary caused an irreversible early release before the identity/policy cue arrived. This remains a candidate only; the newest row must match its mechanism.
-- **test:** Inspect and commit only the content-free activity integration, its regressions, and this active debug record; then verify the exact commit from a clean detached worktree before canonical deployment.
-- **expecting:** The staged candidate changes no guard pattern or retry bound, contains no prompt/completion/credential/seed persistence, and reproduces the green direct, client, and live-call checks from an exact clean checkout.
-- **next_action:** Stage the five instrumentation files plus this debug record explicitly, review the staged diff, and create a scoped commit.
+- **test:** Confirm the original real workflow now receives an in-character reply and displays retry progress instead of generic refusal text or an unhelpful terminal exhaustion.
+- **expecting:** A normal text-chat turn either completes with a persisted in-character reply, or the chat visibly reports recovery attempts and provides enough safe state for a precise continuation; it must not persist refusal prose.
+- **next_action:** Await product-owner confirmation from one normal chat turn in the real workflow; if it fails, resume from the content-free activity outcome rather than changing matcher/retry rules blindly.
+- **reasoning_checkpoint:**
+  hypothesis: "The missing content-free activity integration prevented the prior terminal `llm_refusal_exhausted` from distinguishing normal guard rejections from an adapter/request-template/retry-path failure; the current provider behavior is non-deterministic because identical isolated input now accepts across multiple fresh seeds, including after real guarded retries."
+  confirming_evidence:
+    - "The existing bounded activity ring, typed SSE decoder, retry UI, and prompt-inspector projection were disconnected from normal chat; the agent-authored controlled activity test was RED before wiring and GREEN afterward."
+    - "At deployed `eaf530f`, one fresh normal request accepted immediately, and eight further content-free samples all persisted replies; three samples had guard-classified rejections that recovered on attempt two or three."
+  falsification_test: "A new activity-equipped terminal run that shows a missing attempted correction, malformed adapter category, or a stable repeated terminal category under identical provider conditions would refute the non-deterministic-provider conclusion."
+  fix_rationale: "Connect the pre-existing bounded process-local activity ring to normal chat and its existing retry feedback/inspector so a terminal state exposes attempt order and guard category without keeping prompt/completion data. No matcher or retry-bound change is justified while real retries recover."
+  blind_spots: "The original terminal occurred before activity instrumentation, so its three per-attempt guard categories are unavailable; the eight-sample window cannot establish a long-run exhaustion probability."
+  candidate_causes:
+    - "code: normal chat omitted the existing safe activity integration, hiding whether the guard or request path made each retry decision."
+    - "environment: fresh Qwen sampling seeds can produce different completion forms for the same isolated character/input."
+    - "config: the effective Qwen adapter and user-role correction were verified deployed and active, so no missing request-template branch is supported."
+  and_gate: "no — the observability integration explains the prior diagnostic blind spot, while provider sampling explains variable guarded outcomes; the first does not cause an exhaustion and the second is not a deterministic code defect."
 - **reasoning_checkpoint:**
   hypothesis: "The sixth live refusal persists because the direct identity matcher only recognizes the earlier `I’m just/only ... not for that/this kind of content` surface form; the structural `I am ... assistant, not an erotic one` response has no refusal verb, so `_refusal_reason()` returns `None` and `finish()` releases it as `upstream_complete`."
   confirming_evidence:
@@ -84,6 +135,116 @@ updated: 2026-09-01T01:47:00Z
 
 ## Evidence
 
+- **timestamp:** 2026-09-01T03:50:00Z
+  **checked:** Read-only OMEN SQLite rows for the two user-reported redos on original-thread assistant message `msg_5ebccf4287c748d9af5cf0bf76ce6558`.
+  **found:** Swipe alternate index 0 at `03:42:12.451218` persisted a direct `I cannot continue ... explicit sexual descriptions or erotic content ... other non-explicit questions` refusal. Swipe alternate index 1 at `03:42:16.559514` persisted a direct `I can't generate explicit sexual descriptions ... erotic content` refusal and became the selected alternate. Both have `source_action=swipe` and were created after the prior `c016633` deployment.
+  **implication:** The visible failure is specifically the real redo/swipe action boundary. Both exact forms contain already-supported primary and policy cues, so another narrow phrase addition is not justified until the action path is proven to run the shared guard.
+
+- **timestamp:** 2026-09-01T03:53:00Z
+  **checked:** Complete `POST /api/messages/{message_id}/swipes` call chain, message-action generation helper, shared completion collector, guard loop, and existing action-route refusal tests.
+  **found:** The route calls `create_swipe_alternate()`, which calls `_collect_generated_text()` → `collect_chat_completion()` → `_stream_text_tokens()` with `PrefixRefusalGuard` and up to three attempts. Persistence/selection occurs only after that collector returns. Existing tests prove a recognized safety-guideline refusal exhausts without version mutation across regenerate, swipe, and continue.
+  **implication:** The swipe action does not bypass the shared guard. The original bypass hypothesis is eliminated; test whether these two exact refusal forms are outside the guard's semantic secondary-policy grammar.
+
+- **timestamp:** 2026-09-01T03:54:00Z
+  **checked:** First local exact-string guard probe invocation.
+  **found:** The command selected `web-ui/server` twice (once as working directory and once as `--project`) and exited before importing or evaluating the guard.
+  **implication:** This is a local test-command path error, not product evidence. Re-run from the repository root with the same unmodified guard inputs.
+
+- **timestamp:** 2026-09-01T03:55:00Z
+  **checked:** Second local exact-string probe invocation from repository root.
+  **found:** The selected project environment launched successfully but repository-root Python import resolution did not include the server's `app` package, so evaluation again stopped before guard execution.
+  **implication:** Re-run inside `web-ui/server` with `--project .`; neither failed invocation supports or refutes the classifier hypothesis.
+
+- **timestamp:** 2026-09-01T03:57:00Z
+  **checked:** Exact current-guard classification of both live swipe refusals under whole, Unicode-codepoint, and word fragmentation.
+  **found:** All six cases finish non-refused with `reason_code=upstream_complete` and release the complete text. Both primary verbs (`cannot continue`, `can't generate`) are present; the common missing semantic is policy language using plural `explicit sexual descriptions` rather than the guard's content-only grammar.
+  **implication:** The matcher boundary, not an action bypass, deterministically explains both persisted swipes. Freeze the boundary through the real route before implementing a semantic grammar correction.
+
+- **timestamp:** 2026-09-01T04:00:00Z
+  **checked:** Agent-authored two-case real swipe-route regression before product-code changes.
+  **found:** RED exactly as predicted for both live refusal forms. `POST /api/messages/{id}/swipes` returned success after only attempt 1, so the route never issued retry correction and persisted/selected the refusal instead of the scripted in-character attempt 2.
+  **implication:** The original user-visible boundary is now reproducible through the actual API, guard, repository commit, alternate row, and selection path. The oracle is specified: the rejected first attempt must never appear in persisted alternate state.
+
+- **timestamp:** 2026-09-01T04:02:00Z
+  **checked:** Read-only OMEN checkout and active web listener identity after both swipe failures.
+  **found:** OMEN is clean at exact commit `c016633dfa236a5b4b315b4819c07704d958c203`, and port 8443 is owned by the canonical `web-ui/server/scripts/run_dev_https.py` process.
+  **implication:** The 03:42 swipe refusals were served by the intended deployed source. Stale checkout/process identity is eliminated, leaving the proven semantic matcher boundary as root cause.
+
+- **timestamp:** 2026-09-01T04:08:00Z
+  **checked:** Unchanged two-case real swipe-route regression after the bounded policy-noun change.
+  **found:** GREEN: both live forms now trigger attempt 2, add exactly one accepted alternate, select only the recovered result, include retry correction on attempt 2, and leave neither refusal in persisted message/alternate state.
+  **implication:** The fix closes the exact user-visible API and database boundary. Verify fragmentation precision, adjacent consumers, and causal reversion before acceptance.
+
+- **timestamp:** 2026-09-01T04:11:00Z
+  **checked:** Full direct regression suite after the first broad `(content|description|descriptions)` policy-noun implementation.
+  **found:** REJECTED: 8 of 414 checks failed. The existing in-world neighbor `I can't continue with that explicit sexual description until we reach the next chapter...` was incorrectly classified under every fragmentation schedule. All other checks reached before the failure were green.
+  **implication:** The broad noun-class hypothesis was wrong because primary refusal verb plus description alone is not sufficiently precise. Narrow the semantic boundary to the coordinated `descriptions ... or erotic content` structure shared by both actual swipes.
+
+- **timestamp:** 2026-09-01T04:15:00Z
+  **checked:** Exact real swipe-route target and complete frozen guard corpus after the coordinated policy-structure change.
+  **found:** GREEN: both route cases pass, and all 324 guard-corpus/lifecycle checks pass. Both observed refusals are suppressed under eight fragmentation schedules; the existing in-world next-chapter neighbor and new no-primary archivist neighbor round-trip unchanged.
+  **implication:** The revised semantic scope fixes both actual redos without the false positive introduced by the rejected broad noun expansion. Proceed to adjacent consumers and causal reversion.
+
+- **timestamp:** 2026-09-01T04:18:00Z
+  **checked:** Adjacent normal-chat, message-action, prompt-preview, and Phase 1 acceptance suite.
+  **found:** GREEN: 90 tests pass with only three existing FastAPI deprecation warnings. The combined shell invocation reached its 30-second outer bound before the subsequent focused live-call/static commands returned.
+  **implication:** Direct text-chat consumers are healthy. Re-run the remaining bounded live-call and static checks separately; the timeout is incomplete command orchestration, not a test failure.
+
+- **timestamp:** 2026-09-01T04:20:00Z
+  **checked:** Remaining focused live-call refusal consumers, scoped Ruff, whitespace validation, and diff scope.
+  **found:** GREEN: 3 focused live-call tests pass with 106 unrelated tests deselected; Ruff and `git diff --check` pass. The incremental product change is a four-line bounded regex replacement, with regression additions limited to the corpus and real action-route test. No behavior-deleting branch or weakened assertion exists.
+  **implication:** Adjacent streaming/call behavior is preserved and the no-op/deletion guard passes. Complete revert-and-reconfirm before accepting the fix.
+
+- **timestamp:** 2026-09-01T04:23:00Z
+  **checked:** Product-code-only revert and reapply against the unchanged two-case real swipe-route regression.
+  **found:** With only the coordinated `_POLICY_RE` branch removed, both cases return RED and make only attempt 1. Reapplying that exact branch restores GREEN: 2 passed, with attempt 2 selected and refusal text absent from persisted alternates.
+  **implication:** The implementation hunk is causal and the route/storage regression kills its removal. Complete the remaining mutation-availability and scoped-diff guardrail records before committing.
+
+- **timestamp:** 2026-09-01T04:25:00Z
+  **checked:** Mutation-runner availability and exact incremental diff.
+  **found:** No Stryker, mutmut, or other mutation runner is configured. The product diff adds one bounded coordinated policy alternative; tests add the two actual swipe forms, two precision neighbors, and a real route/storage assertion. The diff is additive, whitespace-clean, and contains no short-circuit, behavior deletion, or weakened assertion.
+  **implication:** Mutation analysis is explicitly skipped. All applicable acceptance signals pass: target, precision/adjacent, no-op/deletion, and revert-and-reconfirm.
+
+- **timestamp:** 2026-09-01T02:44:00Z
+  **checked:** Agent-authored frozen-corpus regression for the sequence-24 response form before a matcher change.
+  **found:** RED exactly as predicted: the new refusal case fails all eight whole/Unicode-codepoint/word/punctuation/irregular schedules, returning `state=finished`, `reason_code=upstream_complete`, and released text rather than a refusal decision. The close in-world next-chapter neighbor remains green.
+  **implication:** The guard release is deterministic and independent of the original thread's otherwise variable provider context. The selected narrow matcher direction is now testable.
+
+- **timestamp:** 2026-09-01T02:47:00Z
+  **checked:** Agent-authored normal shared-stream retry/persistence regression before a matcher change.
+  **found:** RED alongside the eight corpus schedules: the first SSE token is the generic refusal prefix rather than the second-attempt in-character text, demonstrating that ordinary `stream_chat_completion()` can emit and persist the exact form once the guard releases it.
+  **implication:** The defect is not limited to a standalone regex classifier; it reaches the same normal chat persistence boundary as the original live record.
+
+- **timestamp:** 2026-09-01T02:50:00Z
+  **checked:** Exact corpus, close in-world boundary, shared-stream retry/persistence regression, and scoped static analysis after adding the bounded redirect branch.
+  **found:** GREEN: 17 focused checks pass. All eight fragmentation schedules now classify the observed form as a refusal, its first stream attempt is withheld, the in-character second attempt alone persists, and the close next-chapter neighbor remains unchanged. Ruff reports no issues.
+  **implication:** The targeted guard mechanism and normal persistence path are fixed locally; verify adjacent workflows and counterfactual revert before canonical deployment.
+
+- **timestamp:** 2026-09-01T02:55:00Z
+  **checked:** Direct guard/chat/action/prompt-preview/Phase 1 acceptance regression suite.
+  **found:** GREEN: 388 tests pass; only three existing FastAPI deprecation warnings are reported.
+  **implication:** The bounded redirect addition does not regress adjacent prompt, message-action, activity, or normal chat behavior.
+
+- **timestamp:** 2026-09-01T03:01:00Z
+  **checked:** Counterfactual revert and reapply of the three-line `_REDIRECT_RE` branch against the agent-authored focused regressions.
+  **found:** Removing only that branch makes all eight guard schedules and the shared-stream persistence regression fail; restoring it returns all 17 focused checks to GREEN.
+  **implication:** The regression directly kills the fix-site omission and confirms the change, not an unrelated condition, prevents generic refusal persistence.
+
+- **timestamp:** 2026-09-01T03:10:00Z
+  **checked:** Canonical OMEN deployment and independent deployed process identity.
+  **found:** `scripts/deploy-omen.sh` fetched and deployed `c016633`; OMEN's clean checkout is exactly that commit and both 8443/9443 listeners are running through the required canonical web/AI launch commands.
+  **implication:** The verified matcher is active on the production normal-chat service, not merely in the local checkout.
+
+- **timestamp:** 2026-09-01T03:14:00Z
+  **checked:** Fresh production normal `/api/threads` → `/api/chat/{thread}/send` request with the original character, followed by a read-only content-free SQLite projection.
+  **found:** The real route produced 25 token events and one `done` event, no SSE error, and one new unselected assistant `ai_text` record. The persisted record is nonempty, has no alternate, and re-evaluates to no generic-refusal reason under the deployed guard; no reply content, prompt, seed, credential, endpoint, audio, or raw exception was retained in the evidence.
+  **implication:** A fresh normal-thread-compatible OMEN request now persists only an in-character-path assistant output. Combined with the exact shared-stream regression, this satisfies the current acceptance failure without relying on prior isolated refusal rows.
+
+- **timestamp:** 2026-09-01T02:40:00Z
+  **checked:** Read-only OMEN SQLite projection of original thread sequences 22–24 and canonical checkout/listener identity.
+  **found:** Sequence 24 is a new ordinary `ai_text` immediately after user sequence 23, has no selected alternate or alternate record, and was created at `01:59:13.241199`. Its content-free predicates show the primary `can’t continue` form and `explicit sexual description`; neither the deployed policy-content cue nor existing redirect cue matches. The active OMEN checkout is clean at `eaf530f` with a canonical 8443 listener; the instrumentation deployment began at `02:01`, after this failure.
+  **implication:** This is neither an alternate nor isolated-path artifact. The persisted failure predates the instrumentation deployment but remains reproducible against the unchanged guard grammar; current source still lacks the observed description variant.
+
 - **timestamp:** 2026-09-01T01:23:00Z
   **checked:** The normal chat retry owner, the existing process-local refusal-activity ring, typed SSE/client decoding, and prompt-inspector projection.
   **found:** `stream_chat_completion()` completed its three guarded attempts without writing the existing `RefusalActivityStore` or emitting the already-supported `refusal_activity` SSE frame. The store and inspector already restrict records to allowlisted action, attempt, guard reason, prefix counts/timing, retry count, terminal outcome, and timestamp; none retains prompt/completion text, seeds, credentials, endpoints, audio, or raw exceptions.
@@ -113,6 +274,56 @@ updated: 2026-09-01T01:47:00Z
   **checked:** Shared-store regression, typed client activity consumers, and focused live-call refusal coverage.
   **found:** GREEN: 371 direct server checks, 3 focused live-call checks, and 54 typed client checks. Chat and prompt inspector resolve the same process-local ring; the client already translates `retry` activity into the visible retry state and clears it at acceptance/exhaustion. No call path opts into the new chat activity sink.
   **implication:** The instrumentation preserves the live-call invariants and gives the normal text-chat user visible retry state plus safe inspector metadata. It is ready to be committed and deployed as a diagnosis-only increment before selecting a behavioral repair.
+
+- **timestamp:** 2026-09-01T01:49:00Z
+  **checked:** Scoped staging and instrumentation commit.
+  **found:** Commit `eaf530f` contains only the shared process-local activity integration, two controlled normal-chat regressions, the shared-store regression, and this active debug record. It leaves guard patterns and `MAX_SEMANTIC_ATTEMPTS` unchanged; unrelated workspace files remain untracked and outside the commit.
+  **implication:** Run release verification from a clean detached worktree at this exact commit before publication and canonical OMEN deployment.
+
+- **timestamp:** 2026-09-01T01:54:00Z
+  **checked:** Exact-commit detached release worktree at `eaf530f`.
+  **found:** The worktree is source-clean and reproduces GREEN: 371 direct server tests, 3 focused live-call refusal tests, scoped Ruff, formatter, and whitespace checks. Its HEAD is exactly `eaf530f9f55509a459b9b12d53ecbe91324cfffa`.
+  **implication:** The instrumentation candidate is ready for exact publication; deploy from the primary checkout only because it alone has the established canonical SSH credential.
+
+- **timestamp:** 2026-09-01T01:56:00Z
+  **checked:** Publication of the exact instrumentation candidate.
+  **found:** `origin/main` advanced from `81a5eb8` to `eaf530f9f55509a459b9b12d53ecbe91324cfffa`.
+  **implication:** The canonical OMEN deploy may fetch the exact clean candidate. Do not deploy any uncommitted debug state or alternate worktree.
+
+- **timestamp:** 2026-09-01T02:01:00Z
+  **checked:** Canonical deployment process from the primary checkout.
+  **found:** `scripts/deploy-omen.sh` fetched `eaf530f`, rebuilt the web client, reasserted both required scheduled-task launchers, restarted canonical listeners, and completed with exit status zero. Its built-in health gates reported STT/VAD ready and resident Qwen ready; the aggregate label remained degraded only for inactive registered engines.
+  **implication:** Do not treat the deployment script alone as independent service evidence. Query exact checkout, listener/task identity, authenticated web-to-AI readiness, and WebRTC before the isolated chat reproduction.
+
+- **timestamp:** 2026-09-01T02:06:00Z
+  **checked:** Independent OMEN checkout, scheduled-task, listener, readiness, and WebRTC projection.
+  **found:** OMEN is clean at `eaf530f`; both task-launcher, web-to-AI authentication, STT/VAD, resident-Qwen, and commit-matched WebRTC readiness fields are true. The first listener booleans were false only because the read-only PowerShell regular expressions over-escaped their Windows path separators; no command line or secret was returned.
+  **implication:** This is verification-query syntax, not service evidence. Recheck listener script basenames with simple stable predicates, then the isolated normal chat may proceed.
+
+- **timestamp:** 2026-09-01T02:10:00Z
+  **checked:** Corrected canonical listener basename predicates.
+  **found:** Both port-owning processes match their canonical `run_dev_https.py` / `run_https.py` launch scripts. This completes the independent canonical-service identity check at the deployed SHA.
+  **implication:** Create one fresh isolated thread for the safe attempt-outcome reproduction; do not touch the user's active conversation.
+
+- **timestamp:** 2026-09-01T02:16:00Z
+  **checked:** Fresh isolated normal text-chat request with content-free SSE and prompt-inspector projection at deployed `eaf530f`.
+  **found:** The request produced 38 token events, one done/persisted assistant identifier, no error, and no refusal activity. The inspector reports the active `qwen_llama_server` adapter and user-role retry correction. No prompt or completion text, seed, credential, endpoint, audio, or raw exception was returned.
+  **implication:** The normal route, adapter selection, and first-attempt acceptance are healthy. This does not explain the earlier all-three exhaustion; reclassify the remaining failure as seed-dependent/non-deterministic until an activity-equipped terminal sample supplies direct causal categories.
+
+- **timestamp:** 2026-09-01T02:18:00Z
+  **checked:** First no-content semantic projection of the accepted record.
+  **found:** The remote PowerShell transport misparsed a complex regular expression before it queried any record, returning only a shell diagnostic and no assistant data.
+  **implication:** This is a read-only query construction error, not chat evidence. Re-run with simple quote-free in-memory marker checks and keep all reply text out of output.
+
+- **timestamp:** 2026-09-01T02:21:00Z
+  **checked:** Quote-free no-content semantic projection of the fresh accepted assistant record.
+  **found:** The persisted row is a nonempty `ai_text` assistant message with no conservative generic-refusal marker (paired primary refusal plus policy/content cue, or assistant/AI plus content-negation identity form). No reply text was emitted.
+  **implication:** The requested fresh OMEN behavior is now verified once: a normal in-character-path reply persisted without refusal or exhaustion. Gather a bounded seed sample before deciding whether the earlier terminal event warrants any additional behavioral change.
+
+- **timestamp:** 2026-09-01T02:29:00Z
+  **checked:** Eight bounded independent fresh normal text-chat requests at deployed `eaf530f`, projected only as event counts and guard categories.
+  **found:** All eight completed with a persisted reply and no error. Five accepted on their first attempt. Three demonstrated real recovery: one `generic_identity` rejection then accepted on attempt 2; one `policy_or_safety` then `apology` rejection then accepted on attempt 3; and one `policy_or_safety` rejection then accepted on attempt 2. No generated text, prompt, seed, credential, endpoint, audio, or raw exception was returned.
+  **implication:** The live Qwen adapter, user-role retry correction, and bounded retry loop all work on the actual failure class. The earlier terminal cannot be attributed to a deterministic adapter/request-template/retry bug; do not broaden classifier rules or retry count without a new activity-equipped terminal evidence set.
 
 - **timestamp:** 2026-08-31T18:45:00Z
   **checked:** Required session records, live-call invariants, canonical OMEN deployment contract, project-local skills, and configured debugger skills.
@@ -664,6 +875,12 @@ updated: 2026-09-01T01:47:00Z
 
 ## Eliminated
 
+- **hypothesis:** Any recognized refusal verb paired with `explicit sexual description(s)` is sufficient to classify a generic policy refusal.
+  **evidence:** The broad noun expansion made the exact swipe tests green but failed all eight frozen schedules for the established in-world next-chapter neighbor, proving that description alone overmatches valid roleplay continuation.
+  **timestamp:** 2026-09-01T04:11:00Z
+- **hypothesis:** Swipe/redo bypasses the shared `PrefixRefusalGuard` and persists raw provider output directly.
+  **evidence:** The complete route chain is `swipe_message()` → `create_swipe_alternate()` → `_collect_generated_text()` → `collect_chat_completion()` → `_stream_text_tokens()`, which constructs `PrefixRefusalGuard` for each of three bounded attempts. `add_selected_alternate()` runs only after guarded collection returns, and existing real-route tests prove recognized refusals do not mutate alternate state.
+  **timestamp:** 2026-09-01T03:53:00Z
 - **hypothesis:** Sequence 20 was a stale selected alternate or a different message action/path that persisted after correct guard recovery.
   **evidence:** The only alternate belongs to sequence 18, is a non-refusal swipe result, and sequence 20 is a new plain `ai_text` immediately after user sequence 19. `append_ai_message` is called only by the ordinary `/api/chat/{thread_id}/send` route, which is also present in the retained OMEN log.
   **timestamp:** 2026-08-31T23:11:00Z
@@ -676,15 +893,15 @@ updated: 2026-09-01T01:47:00Z
 
 ## Resolution
 
-- **root_cause:** `_comparison_view()` originally left U+2019 apostrophes unmatched by the ASCII-only `can't` refusal-verb alternative; secondary generic-refusal patterns also omitted four provider-produced verb-led cues (direct explicit-content, `I’m here to help`, `erotic content ... I’m here if you want to chat about anything else`, and coordinated `explicit [sexual] or erotic content`). The direct no-verb identity-disclaimer branch then overfit its first live example: it recognized only `I’m just/only ... not for that/this kind of content`, so the later structural `I am ... assistant, not an erotic one` form escaped and persisted through the normal shared stream.
+- **root_cause:** The two fresh original-thread swipe failures required two conditions: the provider used the coordinated policy form `explicit sexual descriptions ... or erotic content`, and `_POLICY_RE` omitted that structure. The shared swipe path did run `PrefixRefusalGuard`, but `_secondary_reason()` returned `None`; guarded collection accepted attempt one and `add_selected_alternate()` persisted and selected each refusal.
 - **oracle_type:** specified — the chat contract requires generic policy/guideline refusals to retry before any token reaches chat persistence.
-- **fix:** Preserve the deployed punctuation, policy, and redirect corrections; replace the surface-specific direct identity matcher with a bounded sentence-leading first-person assistant plus content-negation matcher covering both `not for that/this kind of content` and `not an erotic/sexual one`. The frozen corpus and shared-stream regression now cover six real OMEN forms and close nonrefusal/in-character neighbors.
+- **fix:** Add a bounded `_POLICY_RE` alternative requiring `explicit sexual/erotic description(s)` followed within the same sentence and 48 characters by `or (explicit )?sexual/erotic content`. Preserve the mandatory primary refusal verb. Freeze both actual swipe forms under eight fragmentation schedules, retain description precision neighbors, and exercise the real `/swipes` API plus alternate persistence/selection boundary.
 - **verification:**
-  target_test: { result: pass, suites_run: ["structural corpus + shared-stream targets (26 passed, 284 deselected)"] }
+  target_test: { result: pass, suites_run: ["real swipe API/storage target (2 passed)", "full frozen refusal corpus (324 passed)"] }
   mutation_check: { result: skipped, reason_if_skipped: "no Stryker, mutmut, or equivalent mutation runner is configured" }
-  no_op_deletion: { result: pass, deletion_justified_by_rca: true }
-  adjacent_tests: { result: pass, suites_run: ["guard/chat/action/Phase 1 acceptance (343 passed)", "focused live-call refusal subset (3 passed, 106 deselected)", "scoped Ruff"] }
+  no_op_deletion: { result: pass, deletion_justified_by_rca: false }
+  adjacent_tests: { result: pass, suites_run: ["chat/action/prompt-preview/Phase 1 acceptance (90 passed)", "focused live-call refusal subset (3 passed, 106 deselected)", "scoped Ruff", "git diff --check"] }
   revert_and_reconfirm: { result: pass, bug_returned_on_revert: true, fixed_on_reapply: true }
   guardrail_verdict: accepted
-  deployed_e2e: { result: incomplete, reason: "fresh normal request safely persisted no generic refusal but exhausted all three retries and produced no recovered in-character assistant message" }
-- **files_changed:** [web-ui/server/app/domain/refusal_guard.py, web-ui/server/tests/fixtures/phase091_refusal_corpus.json, web-ui/server/tests/test_chat_stream.py]
+  deployed_e2e: { result: pending, evidence: "requires canonical deploy followed by one fresh controlled swipe and read-only live DB inspection" }
+- **files_changed:** [web-ui/server/app/domain/refusal_guard.py, web-ui/server/tests/fixtures/phase091_refusal_corpus.json, web-ui/server/tests/test_message_actions.py]

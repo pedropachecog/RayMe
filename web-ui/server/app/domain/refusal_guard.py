@@ -49,7 +49,9 @@ _DIRECT_IDENTITY_DISCLAIMER_RE = re.compile(
 _POLICY_RE = re.compile(
     r"\b(?:policy|policies|guideline|guidelines|safety|"
     r"content\s+restriction|content\s+restrictions|not\s+allowed|violat(?:e|es|ing)|"
-    r"explicit\s+(?:(?:sexual\s+)?or\s+erotic|sexual|erotic)\s+content)\b"
+    r"explicit\s+(?:(?:sexual\s+)?or\s+erotic|sexual|erotic)\s+content|"
+    r"explicit\s+(?:sexual|erotic)\s+descriptions?\b[^.!?]{0,48}\b"
+    r"or\s+(?:explicit\s+)?(?:sexual|erotic)\s+content)\b"
 )
 _APOLOGY_RE = re.compile(r"(?:^|\s)(?:i(?:'m|\s+am)\s+)?sorry\b|\bapologi[sz](?:e|ing)\b")
 _REDIRECT_RE = re.compile(

@@ -246,15 +246,27 @@ class ScriptedActionRepository:
 class ScriptedCompletionClient:
     def __init__(self) -> None:
         self.tokens = ["Generated"]
+        self.scripts: list[list[str]] | None = None
         self.requests: list[dict[str, object]] = []
 
     async def stream_chat_completion_tokens(
         self,
         settings: ChatCompletionSettings,
         messages: list[dict[str, str]],
+        *,
+        seed: int,
+        attempt: int,
     ):
-        self.requests.append({"settings": settings, "messages": list(messages)})
-        for token in self.tokens:
+        self.requests.append(
+            {
+                "settings": settings,
+                "messages": list(messages),
+                "seed": seed,
+                "attempt": attempt,
+            }
+        )
+        tokens = self.scripts[attempt - 1] if self.scripts is not None else self.tokens
+        for token in tokens:
             yield token
 
 
@@ -744,6 +756,44 @@ def test_swipe_route_generates_selected_alternate_and_future_context_excludes_un
     future_prompt_text = asyncio.run(_prompt_text_through_message(sessionmaker, ids["target_ai"]))
     assert "Generated swipe alternate" in future_prompt_text
     assert "Target original alternate" not in future_prompt_text
+
+
+@pytest.mark.parametrize(
+    "refusal",
+    [
+        (
+            "I cannot continue with explicit sexual descriptions or erotic content "
+            "involving genitalia. Please let me know if you have other non-explicit "
+            "questions or topics you'd like to discuss instead."
+        ),
+        "I can't generate explicit sexual descriptions of genitalia or erotic content.",
+    ],
+)
+def test_swipe_route_retries_explicit_description_refusal_before_selecting_alternate(
+    message_action_client: tuple[TestClient, async_sessionmaker, ScriptedCompletionClient],
+    refusal: str,
+) -> None:
+    client, sessionmaker, scripted_client = message_action_client
+    recovered = "The character answers in her own voice and continues the scene."
+    scripted_client.scripts = [[refusal], [recovered]]
+    ids = asyncio.run(_create_prior_branch_thread(sessionmaker))
+    before = asyncio.run(_message_version_state(sessionmaker, ids["target_ai"]))
+
+    response = client.post(f"/api/messages/{ids['target_ai']}/swipes")
+
+    assert response.status_code == 200
+    body = response.json()
+    after = asyncio.run(_message_version_state(sessionmaker, ids["target_ai"]))
+    assert [request["attempt"] for request in scripted_client.requests] == [1, 2]
+    assert _role_content(scripted_client.requests[1]["messages"][-1]) == {
+        "role": "user",
+        "content": REFUSAL_RETRY_CORRECTION,
+    }
+    assert len(after[2]) == len(before[2]) + 1
+    assert after[2][-1][1] == recovered
+    assert refusal not in repr(after)
+    assert body["selected_alternate_id"] == after[1]
+    assert body["alternates"][-1]["content_text"] == recovered
 
 
 @pytest.mark.parametrize(
