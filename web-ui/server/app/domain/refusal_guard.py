@@ -57,9 +57,23 @@ _DIRECT_REQUEST_REFUSAL_STEM = (
 )
 _DIRECT_REQUEST_REFUSAL_RE = re.compile(
     _DIRECT_REQUEST_REFUSAL_STEM
-    + r"(?=\s*[.!?]|\s+to\s+(?:generate|provide|write|create)\b)"
+    + r"(?=\s*[.!?]|\s+to\s+(?:(?:generate|provide|write|create)\b|"
+    r"describe\b.{0,48}\b(?:explicit|sexual|erotic)\b))"
 )
 _DIRECT_REQUEST_REFUSAL_AT_END_RE = re.compile(_DIRECT_REQUEST_REFUSAL_STEM + r"\s*$")
+_DIRECT_DESCRIPTION_REFUSAL_STEM = (
+    r"(?:^|(?<=[.!?])\s*)i\s+"
+    r"(?:(?:cannot|can\s+not|can't|won't|will\s+not|must\s+not)\s+continue|"
+    r"(?:am|'m)\s+unable\s+to\s+continue)\b(?:\s+with)?\s+"
+    r"(?:that|this|the)\s+(?:specific\s+)?"
+    r"(?:explicit(?:\s+(?:sexual|erotic))?|sexual|erotic)\s+description\b"
+)
+_DIRECT_DESCRIPTION_REFUSAL_RE = re.compile(
+    _DIRECT_DESCRIPTION_REFUSAL_STEM + r"(?=\s*[.!?])"
+)
+_DIRECT_DESCRIPTION_REFUSAL_AT_END_RE = re.compile(
+    _DIRECT_DESCRIPTION_REFUSAL_STEM + r"\s*$"
+)
 _POLICY_RE = re.compile(
     r"\b(?:policy|policies|guideline|guidelines|safety|"
     r"content\s+restriction|content\s+restrictions|not\s+allowed|violat(?:e|es|ing)|"
@@ -277,6 +291,11 @@ def _refusal_reason(text: str, *, upstream_complete: bool = False) -> str | None
     normalized = _comparison_view(text)
     if _DIRECT_REQUEST_REFUSAL_RE.search(normalized) is not None or (
         upstream_complete and _DIRECT_REQUEST_REFUSAL_AT_END_RE.search(normalized) is not None
+    ):
+        return "policy_or_safety"
+    if _DIRECT_DESCRIPTION_REFUSAL_RE.search(normalized) is not None or (
+        upstream_complete
+        and _DIRECT_DESCRIPTION_REFUSAL_AT_END_RE.search(normalized) is not None
     ):
         return "policy_or_safety"
     if _DIRECT_IDENTITY_DISCLAIMER_RE.search(normalized) is not None:

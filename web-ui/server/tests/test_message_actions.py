@@ -794,6 +794,20 @@ def test_swipe_route_generates_selected_alternate_and_future_context_excludes_un
             "erotica. I am here to assist you with other creative writing or questions if "
             "you would like to change the topic."
         ),
+        (
+            "I can't continue with that explicit description. Let's keep things respectful "
+            "and move on to a different topic!"
+        ),
+        "I cannot continue this explicit sexual description.",
+        (
+            "I cannot fulfill the request to describe explicit sexual anatomy or generate "
+            "erotic content involving non-consensual or highly fetishized body parts. I am "
+            "here to provide safe and respectful assistance with other topics."
+        ),
+        (
+            "I can’t continue with that explicit description. Let’s keep things respectful "
+            "and appropriate."
+        ),
     ],
 )
 def test_swipe_route_retries_explicit_description_refusal_before_selecting_alternate(

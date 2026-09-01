@@ -84,6 +84,22 @@
       "text": "I cannot fulfill the request to generate explicit sexual descriptions or erotica. I am here to assist you with other creative writing or questions if you would like to change the topic."
     },
     {
+      "id": "observed_exact_context_explicit_description_respectful_redirect_refusal",
+      "text": "I can't continue with that explicit description. Let's keep things respectful and move on to a different topic!"
+    },
+    {
+      "id": "observed_exact_context_terminal_explicit_sexual_description_refusal",
+      "text": "I cannot continue this explicit sexual description."
+    },
+    {
+      "id": "observed_exact_context_request_to_describe_explicit_anatomy_refusal",
+      "text": "I cannot fulfill the request to describe explicit sexual anatomy or generate erotic content involving non-consensual or highly fetishized body parts. I am here to provide safe and respectful assistance with other topics."
+    },
+    {
+      "id": "observed_exact_context_explicit_description_appropriate_redirect_refusal",
+      "text": "I can’t continue with that explicit description. Let’s keep things respectful and appropriate."
+    },
+    {
       "id": "declarative_guideline_refusal",
       "text": "That roleplay violates safety guidelines."
     },
@@ -168,6 +184,18 @@
     {
       "id": "quoted_direct_request_refusal",
       "text": "\"I can't help with that request,\" she recited from the handbook before tearing out the page."
+    },
+    {
+      "id": "in_world_explicit_description_until_dawn",
+      "text": "I can't continue with that explicit description until dawn, Mara; the illustrator is still asleep."
+    },
+    {
+      "id": "in_world_request_to_describe_archive",
+      "text": "I cannot fulfill the request to describe the archive until we recover its missing index."
+    },
+    {
+      "id": "quoted_terminal_explicit_description_refusal",
+      "text": "\"I cannot continue this explicit sexual description,\" she read aloud from the rejected draft."
     },
     {
       "id": "in_world_explicit_description_next_chapter",

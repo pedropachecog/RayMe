@@ -2,7 +2,7 @@
 status: verifying
 trigger: "User reports another refusal failure in the same live OMEN chat thread immediately after canonical deployment of refusal guard commit 28a19f9."
 created: 2026-08-31
-updated: 2026-09-01T06:02:00Z
+updated: 2026-09-01T06:24:00Z
 ---
 
 # Same Thread Refusal Recurrence
@@ -20,10 +20,24 @@ updated: 2026-09-01T06:02:00Z
 - **bug_class:** Bohrbug — both fresh `/swipes` actions deterministically persisted and selected refusal alternates after the normal-send guard fix was active.
 - **hypothesis:** The common missing policy structure is not the noun `description` alone; it is the coordinated phrase `explicit sexual descriptions ... or erotic content`. Both swipe refusals contain that structure, while the existing in-world boundary says `explicit sexual description until we reach the next chapter` and must remain accepted.
 - **bug_class:** Bohrbug at the classifier boundary, exposed stochastically by provider wording — exact responses deterministically escape once produced.
-- **hypothesis:** The recurring class is structural: sentence-leading first-person refusal verbs directly targeting `that/this/the [specific] request` are generic refusals even when the provider omits identity, policy, apology, and redirect cues. The current two-cue model therefore releases terse `I can’t help with that request.` forms and longer direct-request variants.
-- **test:** Amend the clean-verification evidence into the scoped candidate, publish the resulting exact commit, then deploy through `scripts/deploy-omen.sh` only.
-- **expecting:** `origin/main` advances only by the verified structural correction and OMEN reports the exact expected SHA after canonical deployment.
-- **next_action:** Amend this evidence into the candidate, push exact HEAD, and invoke the canonical deployment script.
+- **hypothesis:** The four newest escapes are a neighboring structural class: sentence-leading first-person refusal verbs directly target `that/this explicit [sexual] description` and terminate the sentence, or target `the request to describe` followed by explicit sexual/erotic subject matter. Existing policy grammar intentionally requires description-plus-erotic-content coordination, so these direct-object terminal forms finish as accepted output.
+- **test:** Create a scoped commit containing only the newest bounded classifier, specified corpus/API regressions, and this debug record; publish and deploy canonically.
+- **expecting:** No unrelated runtime/planning state enters the commit, and OMEN advances cleanly to the exact release SHA.
+- **next_action:** Stage the four scoped files, commit, push, and invoke `scripts/deploy-omen.sh`.
+- **reasoning_checkpoint:**
+  hypothesis: "The four new rows persist because the classifier lacks a terminal direct-description refusal structure and does not treat `request to describe` as direct refusal even when explicit sexual/erotic subject matter immediately follows. Their primary verbs match, but no secondary cue does, so finish releases them."
+  confirming_evidence:
+    - "Four exact rows from the byte-identical production clone were persisted at clean deployed 3895784 and independently finish as `upstream_complete`."
+    - "The unchanged real swipe API/storage test is RED for exactly those four forms and GREEN for the prior nine, proving one attempt is persisted/selected instead of correction attempt two."
+    - "The full response grammar differs from accepted in-world neighbors at a testable boundary: generic forms terminate after `explicit [sexual] description`, while neighbors continue with `until ...`; the request-to-describe form adds explicit sexual/erotic subject matter while the archive neighbor does not."
+  falsification_test: "If the bounded terminal-description and explicit-subject request-to-describe branches do not make all four unchanged route cases retry, or any until-dawn/next-chapter/archive/quoted neighbor becomes refused under fragmentation, the boundary is wrong."
+  fix_rationale: "Classify the complete structural refusal only after punctuation or true upstream completion, and require explicit sexual/erotic subject matter for `request to describe`. This addresses the mechanism without making `explicit description` a global policy keyword."
+  blind_spots: "Provider wording remains open-ended and exact-context post-deploy sampling must continue. Unseen direct objects are not generalized without production evidence."
+  candidate_causes:
+    - "code: no terminal direct-description refusal classifier and no bounded explicit-subject request-to-describe continuation."
+    - "data: the exact original context generates these concise variants stochastically."
+    - "environment/config: clean exact deployment, byte-identical previews, and real route/DB tracing contradict drift or bypass."
+  and_gate: "yes — persistence requires both provider production of this omitted structure and the code omission; environment/config is not contributing."
 - **reasoning_checkpoint:**
   hypothesis: "The seven newest exact-context refusals persist because the guard requires a secondary cue after recognizing a primary refusal verb, but direct request refusal is itself a complete structural cue. Sentence-leading `I cannot/can't <refusal verb> ... that/the [specific] request` forms therefore release when no policy identity/apology vocabulary follows."
   confirming_evidence:
@@ -1039,6 +1053,31 @@ updated: 2026-09-01T06:02:00Z
   **checked:** Clean detached exact-commit verification for candidate `5099379`.
   **found:** GREEN: 525 direct guard/chat/action/prompt-preview/acceptance tests passed; 3 focused live-call refusal tests passed with 106 deselected; scoped Ruff, whitespace, clean-worktree, and exact-HEAD checks passed.
   **implication:** The precise committed product change satisfies all local release gates. Amend only this debug evidence, publish the resulting exact commit, and deploy canonically.
+- **timestamp:** 2026-09-01T06:04:00Z
+  **checked:** Scoped release publication.
+  **found:** `origin/main` advanced from `ec11254` to exact commit `3895784`, containing only the structural guard correction, its corpus/API regressions, and the active debug record.
+  **implication:** OMEN can now fetch the exact verified source. Deploy only through the canonical repository script.
+- **timestamp:** 2026-09-01T06:09:00Z
+  **checked:** Canonical deployment and independent OMEN identity/readiness after release `3895784`.
+  **found:** `scripts/deploy-omen.sh` completed successfully at exact `3895784d52d265e0289d4e9c85d01585063b27d2`. Independent read-only checks show a clean checkout, both canonical scheduled tasks running through `start-ai-backend.cmd` and `start-web-ui.cmd`, listeners on 9443/8443, authenticated web-to-AI readiness, and WebRTC reporting the exact deployed commit.
+  **implication:** The intended correction is active on the real production swipe path. Proceed with the controlled exact-context replay; do not modify the user's original message or historical alternates.
+
+- **timestamp:** 2026-09-01T06:13:00Z
+  **checked:** Ten fresh real production swipes against the controlled clone after deployed `3895784`, with pre/post read-only SQLite snapshots and independent broad refusal review.
+  **found:** Original and clone swipe previews remain byte-identical at SHA-256 `6d7051437a2b3142fd5147e97ea351facfa7c1321321f5c924692d4fc3f09a21`. Three requests safely exhausted with no row; seven created rows. Three rows are in-character, but four are generic refusals: two `I can't continue with that explicit description` variants, one terminal `I cannot continue this explicit sexual description`, and one `I cannot fulfill the request to describe explicit sexual anatomy or generate erotic content...`. All four classify `upstream_complete`, were persisted, and the last became selected. The original user message, its two historical alternates, and selected alternate are unchanged.
+  **implication:** Exact-context verification fails at deployed `3895784`. The direct-request fix is causal for its prior class but incomplete for terminal direct-description refusals and the bounded request-to-describe form. Continue investigation; do not resolve or ask the user to retest.
+- **timestamp:** 2026-09-01T06:17:00Z
+  **checked:** Four newest exact production rows in the unchanged real swipe API/storage regression before product changes.
+  **found:** RED exactly as predicted: the prior nine cases remain GREEN, while all four new forms make only attempt one and persist/select the refusal instead of scripted in-character attempt two. Three new boundary classes—until-dawn continuation, non-explicit archive request-to-describe, and quoted terminal wording—are frozen in the corpus.
+  **implication:** The defect is reproduced at the actual action/persistence boundary and isolated from prior semantic branches. The structural hypothesis meets the fix checkpoint; implement the minimal bounded classifier.
+- **timestamp:** 2026-09-01T06:21:00Z
+  **checked:** Thirteen-case real swipe API/storage target and complete refusal fragmentation corpus after the bounded terminal-description implementation.
+  **found:** GREEN: all 13 production forms retry and persist/select only attempt two; all 484 corpus/lifecycle checks pass. The until-dawn, next-chapter, non-explicit archive request, and quoted neighbors remain accepted under every fragmentation schedule.
+  **implication:** The minimal structural branches correct all four newest persisted forms without broadening the previously disproven `explicit description` keyword approach. Run adjacent consumers and release gates.
+- **timestamp:** 2026-09-01T06:24:00Z
+  **checked:** Adjacent chat/action/prompt-preview/acceptance consumers, focused live-call refusal recovery, Ruff, and diff integrity after the newest bounded correction.
+  **found:** GREEN: 101 adjacent tests passed; 3 focused live-call refusal tests passed with 106 deselected; scoped Ruff and `git diff --check` passed. Only three pre-existing FastAPI deprecation warnings remain.
+  **implication:** Target, precision, adjacent, static, and shared live-call signals are accepted. Commit and deploy the scoped correction, then repeat exact-context production swipes.
 
 ## Eliminated
 
@@ -1060,15 +1099,15 @@ updated: 2026-09-01T06:02:00Z
 
 ## Resolution
 
-- **root_cause:** Exact original-context production swipes frequently return sentence-leading first-person refusals directly targeting `that/the [specific] request`. The shared guard recognized the refusal verb but required a separate identity/policy/apology/redirect cue, so terse direct-request forms finished as accepted output and the real swipe route persisted/selected them. The failure requires both the provider's direct-request wording and the missing structural classifier branch.
+- **root_cause:** Exact original-context production swipes use multiple direct-object refusal structures that the shared two-cue guard did not model: direct requests, terminal `that/this explicit [sexual] description`, and `request to describe` followed by explicit sexual/erotic subject matter. Recognized primary verbs therefore finished as accepted output, allowing the real swipe route to persist/select refusals. The failure requires both stochastic provider production of these omitted structures and the corresponding classifier omissions.
 - **oracle_type:** specified — the chat contract requires generic policy/guideline refusals to retry before any token reaches chat persistence.
-- **fix:** Add a bounded sentence-leading direct-request refusal structure. During streaming, classify only after refusal punctuation or a request-to-generate continuation; at actual upstream completion, also classify a terse response ending at `request`. Extend the existing generic creative redirect boundary to the observed direct-request forms. Freeze all nine production swipe forms and retain until-dawn, comma-vocative, and quoted precision neighbors under every fragmentation schedule.
+- **fix:** Add bounded sentence-leading direct-request and terminal direct-description structures. During streaming, require disambiguating punctuation or an explicit-content request continuation; apply end-of-response alternatives only at actual upstream completion. Require explicit sexual/erotic subject matter for `request to describe`. Freeze all 13 production swipe forms while retaining until-dawn, next-chapter, archive-request, comma-vocative, and quoted precision neighbors under every fragmentation schedule.
 - **verification:**
-  target_test: { result: pass, suites_run: ["real swipe API/storage target (9 passed)", "full frozen refusal corpus (428 passed)"] }
+  target_test: { result: pass, suites_run: ["real swipe API/storage target (13 passed)", "full frozen refusal corpus (484 passed)"] }
   mutation_check: { result: skipped, reason_if_skipped: "no Stryker, mutmut, or equivalent mutation runner is configured" }
   no_op_deletion: { result: pass, deletion_justified_by_rca: false }
-  adjacent_tests: { result: pass, suites_run: ["chat/action/prompt-preview/Phase 1 acceptance (97 passed)", "focused live-call refusal subset (3 passed, 106 deselected)", "scoped Ruff", "git diff --check"] }
-  revert_and_reconfirm: { result: pass, bug_returned_on_revert: true, fixed_on_reapply: true, evidence: "all five new real swipe cases were RED before the structural classifier and all nine were GREEN afterward" }
+  adjacent_tests: { result: pass, suites_run: ["chat/action/prompt-preview/Phase 1 acceptance (101 passed)", "focused live-call refusal subset (3 passed, 106 deselected)", "scoped Ruff", "git diff --check"] }
+  revert_and_reconfirm: { result: pass, bug_returned_on_revert: true, fixed_on_reapply: true, evidence: "the four latest exact production forms were RED before the bounded branch and all 13 were GREEN afterward" }
   guardrail_verdict: accepted
-  deployed_e2e: { result: pending, evidence: "requires canonical deployment and repeated real production swipes against the byte-identical original-context clone" }
+  deployed_e2e: { result: failed_then_pending, evidence: "3895784 exact-context sample persisted four new terminal-description/request-to-describe refusals; newest bounded correction requires canonical deployment and repeat sampling" }
 - **files_changed:** [web-ui/server/app/domain/refusal_guard.py, web-ui/server/tests/fixtures/phase091_refusal_corpus.json, web-ui/server/tests/test_message_actions.py]
