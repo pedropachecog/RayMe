@@ -41,6 +41,11 @@ _IDENTITY_RE = re.compile(
     r"\b(?:as\s+an?\s+)?(?:ai|artificial\s+intelligence|language\s+model|"
     r"assistant|chatbot)\b"
 )
+_DIRECT_IDENTITY_DISCLAIMER_RE = re.compile(
+    r"(?:^|(?<=[.!?])\s*)i(?:'m|\s+am)\s+(?:just|only)\s+(?:an?\s+)?"
+    r"(?:warm\s+)?assistant\b.{0,80}\bnot\s+for\s+(?:that|this)\s+"
+    r"(?:kind|type)\s+of\s+content\b"
+)
 _POLICY_RE = re.compile(
     r"\b(?:policy|policies|guideline|guidelines|safety|"
     r"content\s+restriction|content\s+restrictions|not\s+allowed|violat(?:e|es|ing)|"
@@ -245,6 +250,8 @@ def _comparison_view(text: str) -> str:
 
 def _refusal_reason(text: str) -> str | None:
     normalized = _comparison_view(text)
+    if _DIRECT_IDENTITY_DISCLAIMER_RE.search(normalized) is not None:
+        return "generic_identity"
     if _REFUSAL_VERB_RE.search(normalized) is not None:
         return _secondary_reason(normalized)
     if _DECLARATIVE_META_POLICY_REFUSAL_RE.search(normalized) is not None:

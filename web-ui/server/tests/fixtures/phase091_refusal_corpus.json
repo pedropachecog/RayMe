@@ -36,6 +36,10 @@
       "text": "I don't write explicit or erotic content, so I can't fulfill that request. Is there something else I can help you with?"
     },
     {
+      "id": "observed_omen_identity_disclaimer_refusal",
+      "text": "I’m just a warm assistant here to help, not for that kind of content. Let’s keep things friendly and appropriate."
+    },
+    {
       "id": "declarative_guideline_refusal",
       "text": "That roleplay violates safety guidelines."
     },
@@ -92,6 +96,10 @@
     {
       "id": "nonrefusal_coordinated_explicit_or_erotic_reference",
       "text": "The historian catalogued explicit or erotic content without looking away."
+    },
+    {
+      "id": "quoted_identity_disclaimer_opening",
+      "text": "The notice read, ‘I’m just a warm assistant here to help,’ but Mara tore it down before the play began."
     },
     {
       "id": "firm_in_world_no",
