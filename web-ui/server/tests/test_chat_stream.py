@@ -686,6 +686,68 @@ async def test_coordinated_explicit_or_erotic_refusal_retries_without_reaching_c
     }
 
 
+async def test_explicit_description_pivot_refusal_retries_without_reaching_chat_or_persistence() -> (
+    None
+):
+    refusal_prefix = "I can’t continue with that explicit sexual description. "
+    refusal_tail = (
+        "If you’d like, we can pivot to a different creative direction for this giant character "
+        "that keeps things vivid but non-explicit."
+    )
+    refusal = refusal_prefix + refusal_tail
+    accepted = "The giant lowered her voice, and the courtyard went quiet."
+    client = AttemptScriptClient([[refusal_prefix, refusal_tail], [accepted]])
+    persisted: list[str] = []
+
+    async def persist_final(text: str) -> ThreadMessageShape:
+        persisted.append(text)
+        return ThreadMessageShape(
+            id="ai-message",
+            thread_id="thread-1",
+            message_kind="ai_text",
+            role="assistant",
+            sequence=2,
+            content_text=text,
+        )
+
+    events = [
+        json.loads(event.removeprefix("data: "))
+        async for event in stream_chat_completion(
+            ChatCompletionSettings(
+                base_url="http://llm.local/v1",
+                model="unsloth/Qwen3.5-27B",
+                disable_thinking=True,
+            ),
+            [
+                {
+                    "role": "assistant",
+                    "content": "The giant watched from the tower.",
+                    "section_ids": ("first_mes",),
+                },
+                {
+                    "role": "user",
+                    "content": "make it more erotic",
+                    "section_ids": ("user:new",),
+                },
+            ],
+            client=client,
+            persist_final=persist_final,
+            seed_factory=iter((221, 222)).__next__,
+        )
+    ]
+
+    assert events[0] == {"type": "token", "text": accepted}
+    assert events[-1]["type"] == "done"
+    assert refusal not in json.dumps(events, ensure_ascii=False)
+    assert persisted == [accepted]
+    assert client.closed_attempts == [1, 2]
+    assert [request["attempt"] for request in client.requests] == [1, 2]
+    assert client.requests[1]["messages"][-1] == {
+        "role": "user",
+        "content": REFUSAL_RETRY_CORRECTION,
+    }
+
+
 async def test_identity_disclaimer_refusal_retries_without_reaching_chat_or_persistence() -> None:
     opening = "Hi, what can I do for you today?"
     follow_up = "make it more erotic"
