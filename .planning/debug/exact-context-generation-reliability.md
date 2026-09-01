@@ -2,7 +2,7 @@
 status: verifying
 trigger: "At deployed functional commit 9c09140, ten production swipes against a controlled clone whose effective request is byte-identical to the user's original thread yielded six in-character alternates and four safe llm_refusal_exhausted outcomes. No refusal was persisted or selected, but RayMe must reliably generate an in-character response instead of merely hiding refusals."
 created: 2026-09-01
-updated: 2026-09-01T08:24:00Z
+updated: 2026-09-01T08:26:00Z
 ---
 
 # Exact-Context Generation Reliability
@@ -15,7 +15,7 @@ updated: 2026-09-01T08:24:00Z
 - **hypothesis:** Confirmed: applying the same Qwen sampling temperature (0.80) to every recovery attempt leaves the exact refusal-prone context in a low-variance policy-refusal mode. A bounded Qwen-only retry temperature of 1.20 improves the model's chance to select an in-character continuation while preserving the configured first attempt, prompt order, correction, guard, retry bound, and all non-temperature sampler fields.
 - **test:** Add a deterministic adapter regression that verifies only Qwen attempts 2–3 receive the 1.20 recovery temperature, while attempt 1 and Generic requests retain configured temperature. Then rerun the unchanged full recovery test and real controlled-clone swipes after canonical deployment.
 - **expecting:** Local contracts must prove the wire condition change is exactly scoped; production must materially improve on the deployed 24/30 completion baseline while persisting no refusal prose or canned fallback.
-- **next_action:** Commit the accepted deployed-e2e debug record. The service remains healthy after the clone-only sample; no further code change is justified because the released real-route evidence matches the controlled recovery result.
+- **next_action:** Autonomous production acceptance is complete. Return the evidenced terminal result; leave the original conversation untouched and do not broaden retry, classifier, or fallback behavior.
 - **reasoning_checkpoint:**
   hypothesis: "The Qwen retry path's reuse of configured temperature 0.80 causes residual all-attempt exhaustion because this exact context has a high-probability generic-refusal mode; setting temperature 1.20 only on Qwen attempts two and three broadens recovery sampling enough to select in-character continuations."
   confirming_evidence:
