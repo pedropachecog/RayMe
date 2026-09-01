@@ -546,6 +546,64 @@ async def test_ascii_apostrophe_chat_redirect_refusal_retries_without_reaching_c
     }
 
 
+async def test_coordinated_explicit_or_erotic_refusal_retries_without_reaching_chat_or_persistence() -> None:
+    opening = "Hi, what can I do for you today?"
+    follow_up = "make it more erotic"
+    refusal_prefix = "I don't write explicit or erotic content, so I can't fulfill that request. "
+    refusal_tail = "Is there something else I can help you with?"
+    refusal = refusal_prefix + refusal_tail
+    accepted = "The quiet room held its breath around them."
+    client = AttemptScriptClient([[refusal_prefix, refusal_tail], [accepted]])
+    persisted: list[str] = []
+
+    async def persist_final(text: str) -> ThreadMessageShape:
+        persisted.append(text)
+        return ThreadMessageShape(
+            id="ai-message",
+            thread_id="thread-1",
+            message_kind="ai_text",
+            role="assistant",
+            sequence=2,
+            content_text=text,
+        )
+
+    messages = [
+        {"role": "assistant", "content": opening, "section_ids": ("first_mes",)},
+        {"role": "user", "content": follow_up, "section_ids": ("user:new",)},
+    ]
+    events = [
+        json.loads(event.removeprefix("data: "))
+        async for event in stream_chat_completion(
+            ChatCompletionSettings(
+                base_url="http://llm.local/v1",
+                model="unsloth/Qwen3.5-27B",
+                disable_thinking=True,
+            ),
+            messages,
+            client=client,
+            persist_final=persist_final,
+            seed_factory=iter((201, 202)).__next__,
+        )
+    ]
+
+    assert events[0] == {"type": "token", "text": accepted}
+    assert events[-1]["type"] == "done"
+    assert refusal not in json.dumps(events, ensure_ascii=False)
+    assert persisted == [accepted]
+    assert client.closed_attempts == [1, 2]
+    assert [request["attempt"] for request in client.requests] == [1, 2]
+    assert client.requests[0]["messages"][-2:] == messages
+    assert client.requests[1]["messages"][-2] == {
+        "role": "user",
+        "content": follow_up,
+        "section_ids": ("user:new",),
+    }
+    assert client.requests[1]["messages"][-1] == {
+        "role": "user",
+        "content": REFUSAL_RETRY_CORRECTION,
+    }
+
+
 @pytest.mark.parametrize(
     ("script", "expected_code"),
     [

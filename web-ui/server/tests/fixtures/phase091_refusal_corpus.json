@@ -32,6 +32,10 @@
       "text": "I can't write erotic content for you, but I'm here if you want to chat about anything else."
     },
     {
+      "id": "observed_omen_coordinated_explicit_or_erotic_refusal",
+      "text": "I don't write explicit or erotic content, so I can't fulfill that request. Is there something else I can help you with?"
+    },
+    {
       "id": "declarative_guideline_refusal",
       "text": "That roleplay violates safety guidelines."
     },
@@ -84,6 +88,10 @@
     {
       "id": "in_character_erotic_content_chat_invitation",
       "text": "I can't write erotic content into the spellbook, but I'm here if you want to chat by the fire."
+    },
+    {
+      "id": "nonrefusal_coordinated_explicit_or_erotic_reference",
+      "text": "The historian catalogued explicit or erotic content without looking away."
     },
     {
       "id": "firm_in_world_no",
