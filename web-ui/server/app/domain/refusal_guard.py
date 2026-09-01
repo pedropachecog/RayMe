@@ -63,10 +63,14 @@ _DIRECT_REQUEST_REFUSAL_RE = re.compile(
 _DIRECT_REQUEST_REFUSAL_AT_END_RE = re.compile(_DIRECT_REQUEST_REFUSAL_STEM + r"\s*$")
 _DIRECT_DESCRIPTION_REFUSAL_STEM = (
     r"(?:^|(?<=[.!?])\s*)i\s+"
-    r"(?:(?:cannot|can\s+not|can't|won't|will\s+not|must\s+not)\s+continue|"
-    r"(?:am|'m)\s+unable\s+to\s+continue)\b(?:\s+with)?\s+"
+    r"(?:(?:cannot|can\s+not|can't|won't|will\s+not|must\s+not)\s+"
+    r"(?:continue|assist|help|comply|provide|engage|participate|fulfill|generate|"
+    r"create|write|do)|(?:am|'m)\s+unable\s+to\s+"
+    r"(?:continue|assist|help|comply|provide|engage|participate|fulfill|generate|"
+    r"create|write|do))\b(?:\s+with)?\s+"
     r"(?:that|this|the)\s+(?:specific\s+)?"
-    r"(?:explicit(?:\s+(?:sexual|erotic))?|sexual|erotic)\s+description\b"
+    r"(?:(?:explicit(?:\s+(?:sexual|erotic))?|sexual|erotic)\s+)?"
+    r"(?:description|content)\b"
 )
 _DIRECT_DESCRIPTION_REFUSAL_RE = re.compile(
     _DIRECT_DESCRIPTION_REFUSAL_STEM + r"(?=\s*[.!?])"

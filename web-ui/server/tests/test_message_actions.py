@@ -808,6 +808,17 @@ def test_swipe_route_generates_selected_alternate_and_future_context_excludes_un
             "I can’t continue with that explicit description. Let’s keep things respectful "
             "and appropriate."
         ),
+        (
+            "I can’t generate that explicit content. Let’s keep things respectful and safe!"
+        ),
+        (
+            "I can't continue with that specific description. Let's keep things fun but move "
+            "on to another topic!"
+        ),
+        (
+            "I cannot provide that description. I am not able to generate sexual or explicit "
+            "content."
+        ),
     ],
 )
 def test_swipe_route_retries_explicit_description_refusal_before_selecting_alternate(

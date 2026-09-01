@@ -100,6 +100,18 @@
       "text": "I can’t continue with that explicit description. Let’s keep things respectful and appropriate."
     },
     {
+      "id": "observed_exact_context_generate_explicit_content_refusal",
+      "text": "I can’t generate that explicit content. Let’s keep things respectful and safe!"
+    },
+    {
+      "id": "observed_exact_context_specific_description_refusal",
+      "text": "I can't continue with that specific description. Let's keep things fun but move on to another topic!"
+    },
+    {
+      "id": "observed_exact_context_provide_description_refusal",
+      "text": "I cannot provide that description. I am not able to generate sexual or explicit content."
+    },
+    {
       "id": "declarative_guideline_refusal",
       "text": "That roleplay violates safety guidelines."
     },
@@ -188,6 +200,14 @@
     {
       "id": "in_world_explicit_description_until_dawn",
       "text": "I can't continue with that explicit description until dawn, Mara; the illustrator is still asleep."
+    },
+    {
+      "id": "in_world_specific_description_until_review",
+      "text": "I can't continue with that specific description until the editor returns the annotated draft."
+    },
+    {
+      "id": "in_world_explicit_content_until_release",
+      "text": "I can't provide that explicit content until the embargo lifts at midnight."
     },
     {
       "id": "in_world_request_to_describe_archive",

@@ -2,7 +2,7 @@
 status: verifying
 trigger: "User reports another refusal failure in the same live OMEN chat thread immediately after canonical deployment of refusal guard commit 28a19f9."
 created: 2026-08-31
-updated: 2026-09-01T06:24:00Z
+updated: 2026-09-01T06:42:00Z
 ---
 
 # Same Thread Refusal Recurrence
@@ -20,10 +20,10 @@ updated: 2026-09-01T06:24:00Z
 - **bug_class:** Bohrbug — both fresh `/swipes` actions deterministically persisted and selected refusal alternates after the normal-send guard fix was active.
 - **hypothesis:** The common missing policy structure is not the noun `description` alone; it is the coordinated phrase `explicit sexual descriptions ... or erotic content`. Both swipe refusals contain that structure, while the existing in-world boundary says `explicit sexual description until we reach the next chapter` and must remain accepted.
 - **bug_class:** Bohrbug at the classifier boundary, exposed stochastically by provider wording — exact responses deterministically escape once produced.
-- **hypothesis:** The four newest escapes are a neighboring structural class: sentence-leading first-person refusal verbs directly target `that/this explicit [sexual] description` and terminate the sentence, or target `the request to describe` followed by explicit sexual/erotic subject matter. Existing policy grammar intentionally requires description-plus-erotic-content coordination, so these direct-object terminal forms finish as accepted output.
-- **test:** Create a scoped commit containing only the newest bounded classifier, specified corpus/API regressions, and this debug record; publish and deploy canonically.
-- **expecting:** No unrelated runtime/planning state enters the commit, and OMEN advances cleanly to the exact release SHA.
-- **next_action:** Stage the four scoped files, commit, push, and invoke `scripts/deploy-omen.sh`.
+- **hypothesis:** The remaining class is the common structural superclass: a sentence-leading first-person refusal verb directly targets `that/this/the [specific] [explicit/sexual/erotic] description/content` and terminates the sentence. Restricting the prior branch to `continue` plus explicit description left `generate that explicit content`, `continue with that specific description`, and `provide that description` outside it.
+- **test:** Commit, publish, and canonically deploy the verified structural superclass, then repeat exact-context swipes.
+- **expecting:** OMEN advances cleanly and no fresh refusal row is created or selected.
+- **next_action:** Create the scoped commit and deploy it through `scripts/deploy-omen.sh`.
 - **reasoning_checkpoint:**
   hypothesis: "The four new rows persist because the classifier lacks a terminal direct-description refusal structure and does not treat `request to describe` as direct refusal even when explicit sexual/erotic subject matter immediately follows. Their primary verbs match, but no secondary cue does, so finish releases them."
   confirming_evidence:
@@ -1078,6 +1078,14 @@ updated: 2026-09-01T06:24:00Z
   **checked:** Adjacent chat/action/prompt-preview/acceptance consumers, focused live-call refusal recovery, Ruff, and diff integrity after the newest bounded correction.
   **found:** GREEN: 101 adjacent tests passed; 3 focused live-call refusal tests passed with 106 deselected; scoped Ruff and `git diff --check` passed. Only three pre-existing FastAPI deprecation warnings remain.
   **implication:** Target, precision, adjacent, static, and shared live-call signals are accepted. Commit and deploy the scoped correction, then repeat exact-context production swipes.
+- **timestamp:** 2026-09-01T06:38:00Z
+  **checked:** Ten more exact-context production swipes after canonical deployment of clean `8980c28`.
+  **found:** Previews remain byte-identical at `6d7051437a2b3142fd5147e97ea351facfa7c1321321f5c924692d4fc3f09a21`. Four requests safely exhausted and six created rows. Three rows are in-character; three generic refusals persisted: `I can't generate that explicit content`, `I can't continue with that specific description`, and `I cannot provide that description` followed by inability to generate sexual/explicit content. The final selected row is in-character and the original user message remains unchanged, but refusal persistence still violates the contract.
+  **implication:** Exact-context verification fails again. The narrower direct-description implementation exposed its structural superclass. Broaden the already bounded terminal direct-object grammar rather than add redirect phrases.
+- **timestamp:** 2026-09-01T06:42:00Z
+  **checked:** Structural-superclass target, full fragmentation corpus, adjacent prompt/chat acceptance, focused live-call refusal coverage, Ruff, and whitespace.
+  **found:** GREEN: 16 real swipe cases, 524 corpus cases, 56 adjacent tests, and 3 focused live-call tests passed; Ruff and `git diff --check` passed. New until-continuation and quoted neighbors remain accepted.
+  **implication:** The broader direct-object structure is precise under current boundaries and ready for scoped release plus exact-context production verification.
 
 ## Eliminated
 
