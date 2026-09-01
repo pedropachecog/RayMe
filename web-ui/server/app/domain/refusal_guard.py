@@ -46,6 +46,20 @@ _DIRECT_IDENTITY_DISCLAIMER_RE = re.compile(
     r"not\s+(?:for\s+(?:that|this)\s+(?:kind|type)\s+of\s+content|"
     r"(?:an?\s+)?(?:erotic|sexual)\s+one)\b"
 )
+_DIRECT_REQUEST_REFUSAL_STEM = (
+    r"(?:^|(?<=[.!?])\s*)i\s+"
+    r"(?:(?:cannot|can\s+not|can't|won't|will\s+not|must\s+not)\s+"
+    r"(?:continue|assist|help|comply|provide|engage|participate|fulfill|generate|"
+    r"create|write|do)|(?:am|'m)\s+unable\s+to\s+"
+    r"(?:continue|assist|help|comply|provide|engage|participate|fulfill|generate|"
+    r"create|write|do))\b(?:\s+with)?\s+(?:that|this|the)\s+"
+    r"(?:specific\s+)?request\b"
+)
+_DIRECT_REQUEST_REFUSAL_RE = re.compile(
+    _DIRECT_REQUEST_REFUSAL_STEM
+    + r"(?=\s*[.!?]|\s+to\s+(?:generate|provide|write|create)\b)"
+)
+_DIRECT_REQUEST_REFUSAL_AT_END_RE = re.compile(_DIRECT_REQUEST_REFUSAL_STEM + r"\s*$")
 _POLICY_RE = re.compile(
     r"\b(?:policy|policies|guideline|guidelines|safety|"
     r"content\s+restriction|content\s+restrictions|not\s+allowed|violat(?:e|es|ing)|"
@@ -63,8 +77,10 @@ _REDIRECT_RE = re.compile(
     r"if\s+you(?:'d|\s+would)\s+like,\s+(?:we|i)\s+can\s+pivot\s+to\s+"
     r"(?:a\s+)?different\s+creative\s+direction\b|"
     r"\b(?:erotic|sexual)\s+content\b.{0,80}\b(?:but\s+)?i(?:'m|\s+am)\s+here\s+if\s+you\s+want\s+to\s+(?:chat|talk)\s+about\s+(?:anything|something)\s+else\b|"
-    r"\b(?:erotic|sexual)\s+(?:description|content)\b.{0,120}\b"
-    r"i(?:'m|\s+am)\s+(?:happy|glad)\s+to\s+(?:discuss|help)\b.{0,80}\b"
+    r"\b(?:(?:erotic|sexual)\s+(?:description|content)|"
+    r"(?:that|this|the)\s+(?:specific\s+)?request)\b.{0,120}\b"
+    r"i(?:'m|\s+am)\s+(?:happy|glad)\s+to\s+(?:keep\s+)?"
+    r"(?:chat(?:ting)?|talk(?:ing)?|discuss|help)\b.{0,80}\b"
     r"(?:other|different)\b.{0,48}\b(?:topics?|scenarios?)\b"
 )
 _WARNING_RE = re.compile(r"\b(?:must|need\s+to|have\s+to)\s+warn\b|\bwarning\b")
@@ -201,7 +217,7 @@ class PrefixRefusalGuard:
             self._state = "finished"
             return self._decision()
 
-        reason = _refusal_reason(self._prefix)
+        reason = _refusal_reason(self._prefix, upstream_complete=True)
         if reason is not None:
             self._state = "finished"
             self._reason_code = reason
@@ -257,8 +273,12 @@ def _comparison_view(text: str) -> str:
     return _WHITESPACE_RE.sub(" ", normalized).strip()
 
 
-def _refusal_reason(text: str) -> str | None:
+def _refusal_reason(text: str, *, upstream_complete: bool = False) -> str | None:
     normalized = _comparison_view(text)
+    if _DIRECT_REQUEST_REFUSAL_RE.search(normalized) is not None or (
+        upstream_complete and _DIRECT_REQUEST_REFUSAL_AT_END_RE.search(normalized) is not None
+    ):
+        return "policy_or_safety"
     if _DIRECT_IDENTITY_DISCLAIMER_RE.search(normalized) is not None:
         return "generic_identity"
     if _REFUSAL_VERB_RE.search(normalized) is not None:

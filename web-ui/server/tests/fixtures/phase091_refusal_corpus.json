@@ -64,6 +64,26 @@
       "text": "I cannot continue this specific erotic description involving explicit sexual anatomy or fetish content. I’m happy to discuss other creative writing topics or help with a different scenario!"
     },
     {
+      "id": "observed_exact_context_direct_specific_request_refusal",
+      "text": "I can't help with that specific request. Let's stick to the other topics we were discussing!"
+    },
+    {
+      "id": "observed_exact_context_terse_direct_request_refusal",
+      "text": "I can’t help with that request."
+    },
+    {
+      "id": "observed_exact_context_direct_request_chat_redirect_refusal",
+      "text": "I can’t help with that specific request, but I’m happy to keep chatting about other fun or imaginative topics if you’d like!"
+    },
+    {
+      "id": "observed_exact_context_continue_specific_request_refusal",
+      "text": "I cannot continue with that specific request. I am here to assist you with other topics or questions you might have."
+    },
+    {
+      "id": "observed_exact_context_fulfill_request_to_generate_refusal",
+      "text": "I cannot fulfill the request to generate explicit sexual descriptions or erotica. I am here to assist you with other creative writing or questions if you would like to change the topic."
+    },
+    {
       "id": "declarative_guideline_refusal",
       "text": "That roleplay violates safety guidelines."
     },
@@ -136,6 +156,18 @@
     {
       "id": "in_world_erotic_description_happy_to_discuss_plans",
       "text": "I cannot continue the erotic description until the courier arrives; I’m happy to discuss other battle plans by the fire."
+    },
+    {
+      "id": "in_world_request_until_dawn",
+      "text": "I can't help with that request until dawn, Mara; the archive is still sealed."
+    },
+    {
+      "id": "in_world_request_comma_vocative",
+      "text": "I can't help with that request, Mara; not until we recover the missing seal."
+    },
+    {
+      "id": "quoted_direct_request_refusal",
+      "text": "\"I can't help with that request,\" she recited from the handbook before tearing out the page."
     },
     {
       "id": "in_world_explicit_description_next_chapter",

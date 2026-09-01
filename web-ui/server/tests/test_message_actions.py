@@ -776,6 +776,24 @@ def test_swipe_route_generates_selected_alternate_and_future_context_excludes_un
             "anatomy or fetish content. I’m happy to discuss other creative writing topics "
             "or help with a different scenario!"
         ),
+        (
+            "I can't help with that specific request. Let's stick to the other topics we "
+            "were discussing!"
+        ),
+        "I can’t help with that request.",
+        (
+            "I can’t help with that specific request, but I’m happy to keep chatting about "
+            "other fun or imaginative topics if you’d like!"
+        ),
+        (
+            "I cannot continue with that specific request. I am here to assist you with "
+            "other topics or questions you might have."
+        ),
+        (
+            "I cannot fulfill the request to generate explicit sexual descriptions or "
+            "erotica. I am here to assist you with other creative writing or questions if "
+            "you would like to change the topic."
+        ),
     ],
 )
 def test_swipe_route_retries_explicit_description_refusal_before_selecting_alternate(

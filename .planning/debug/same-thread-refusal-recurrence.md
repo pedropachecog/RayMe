@@ -2,7 +2,7 @@
 status: verifying
 trigger: "User reports another refusal failure in the same live OMEN chat thread immediately after canonical deployment of refusal guard commit 28a19f9."
 created: 2026-08-31
-updated: 2026-09-01T05:04:00Z
+updated: 2026-09-01T06:02:00Z
 ---
 
 # Same Thread Refusal Recurrence
@@ -20,10 +20,24 @@ updated: 2026-09-01T05:04:00Z
 - **bug_class:** Bohrbug — both fresh `/swipes` actions deterministically persisted and selected refusal alternates after the normal-send guard fix was active.
 - **hypothesis:** The common missing policy structure is not the noun `description` alone; it is the coordinated phrase `explicit sexual descriptions ... or erotic content`. Both swipe refusals contain that structure, while the existing in-world boundary says `explicit sexual description until we reach the next chapter` and must remain accepted.
 - **bug_class:** Bohrbug at the classifier boundary, exposed stochastically by provider wording — exact responses deterministically escape once produced.
-- **hypothesis:** The exact-context replay exposed two additional semantic classes absent from the guard: inverse-order `sexually explicit content`, and an erotic-description refusal followed by a generic first-person creative-topic redirect (`I’m happy to discuss other ... topics/help with a different scenario`). Both have recognized primary refusal verbs, but neither yields a secondary reason, so attempt one is persisted.
-- **test:** Review incremental diff/mutation availability, record acceptance signals, and create a scoped second release commit containing only the two semantic branches, expanded precision corpus/route regression, and active debug record.
-- **expecting:** No mutation runner is configured; all applicable target, precision, adjacent, no-op/deletion, and causal signals pass; unrelated runtime files remain outside the commit.
-- **next_action:** Record the guardrail and commit the exact incremental candidate for clean-worktree verification.
+- **hypothesis:** The recurring class is structural: sentence-leading first-person refusal verbs directly targeting `that/this/the [specific] request` are generic refusals even when the provider omits identity, policy, apology, and redirect cues. The current two-cue model therefore releases terse `I can’t help with that request.` forms and longer direct-request variants.
+- **test:** Amend the clean-verification evidence into the scoped candidate, publish the resulting exact commit, then deploy through `scripts/deploy-omen.sh` only.
+- **expecting:** `origin/main` advances only by the verified structural correction and OMEN reports the exact expected SHA after canonical deployment.
+- **next_action:** Amend this evidence into the candidate, push exact HEAD, and invoke the canonical deployment script.
+- **reasoning_checkpoint:**
+  hypothesis: "The seven newest exact-context refusals persist because the guard requires a secondary cue after recognizing a primary refusal verb, but direct request refusal is itself a complete structural cue. Sentence-leading `I cannot/can't <refusal verb> ... that/the [specific] request` forms therefore release when no policy identity/apology vocabulary follows."
+  confirming_evidence:
+    - "Seven of ten byte-identical exact-context production swipes at clean deployed ec11254 persisted direct-request refusals; all seven classify `upstream_complete`."
+    - "Five unique forms are RED in the unchanged real swipe route/storage regression, while the prior four semantic forms remain GREEN."
+    - "Every new form is sentence-leading, first-person, contains a recognized refusal verb, and directly targets `that/the [specific] request`; no action, prompt, persistence, or deployment divergence exists."
+  falsification_test: "If the bounded direct-request classifier plus direct-request generic redirect does not make all five unchanged route cases retry, or if until-dawn/quoted/comma-vocative neighbors become refused, the structural boundary is wrong or too broad."
+  fix_rationale: "Promote direct request refusal from an accidental combination of optional vocabulary into an explicit bounded structure. Immediate sentence termination/request-to-generation distinguishes generic refusal from in-character postponement; comma redirects still require a generic other/different-topic offer."
+  blind_spots: "Other direct objects such as `prompt` or `task` are not evidenced and remain unchanged. Exact-context post-deploy sampling is required because provider output is stochastic."
+  candidate_causes:
+    - "code: the two-cue classifier lacks a direct-request structural refusal branch."
+    - "data: the original context now reliably produces terse direct-request refusals without policy vocabulary."
+    - "environment/config: exact prompt equivalence, canonical deployed identity, and shared route tracing eliminate environment/config drift."
+  and_gate: "yes — the failure requires direct-request provider output plus the missing structural classifier; both contribute."
 - **reasoning_checkpoint:**
   hypothesis: "Exact-context attempts 1 and 2 persist because the guard recognizes their primary refusal verbs but omits two secondary semantic forms: inverse-order `sexually explicit content`, and erotic-topic language followed by a generic first-person redirect to other/different topics or scenarios."
   confirming_evidence:
@@ -290,6 +304,56 @@ updated: 2026-09-01T05:04:00Z
   **checked:** Incremental diff scope, whitespace, and mutation-runner availability.
   **found:** The product diff is six additive/bounded regex lines; regression changes add two exact production forms and three precision neighbors. `git diff --check` passes, no behavior is deleted or short-circuited, and no mutation runner is configured.
   **implication:** Mutation analysis is explicitly skipped. All applicable fix-acceptance signals pass; stage only the four scoped files.
+
+- **timestamp:** 2026-09-01T05:13:00Z
+  **checked:** Scoped second release commit.
+  **found:** Commit `ec11254` contains exactly the two bounded semantic branches, two exact-context refusal fixtures, three precision neighbors, expanded real swipe regression, and active debug record. Unrelated runtime/planning files remain outside the commit.
+  **implication:** Verify and publish this exact incremental commit from a clean detached worktree.
+
+- **timestamp:** 2026-09-01T05:16:00Z
+  **checked:** Clean detached exact-commit verification at `ec11254`.
+  **found:** GREEN: 456 direct guard/chat/action/prompt-preview/acceptance tests pass; 3 focused live-call refusal tests pass with 106 deselected; scoped Ruff, whitespace, source-clean, and exact-HEAD checks pass.
+  **implication:** The exact candidate is independently verified and ready for publication and canonical deployment.
+
+- **timestamp:** 2026-09-01T05:17:00Z
+  **checked:** Publication of the clean exact second candidate.
+  **found:** `origin/main` advanced from `8ed489d` to exact `ec112541831361265a31943429c6e3e768011060`.
+  **implication:** Deploy the verified commit through the canonical script only.
+
+- **timestamp:** 2026-09-01T05:21:00Z
+  **checked:** Canonical OMEN deployment of exact `ec11254`.
+  **found:** `scripts/deploy-omen.sh` fast-forwarded the clean checkout, provisioned pinned runtimes, applied migrations, rebuilt the client, reasserted canonical launchers/tasks, restarted both listeners, and completed successfully with STT/VAD and resident Qwen ready.
+  **implication:** Independently confirm exact active identity and readiness before sampling the original-context clone.
+
+- **timestamp:** 2026-09-01T05:23:00Z
+  **checked:** Independent post-deploy identity/readiness for `ec11254`.
+  **found:** OMEN is clean at exact `ec11254`; canonical tasks/listeners, authenticated web readiness, and commit-matched WebRTC readiness all pass.
+  **implication:** Subsequent exact-context outcomes are generated by the intended source and real swipe path.
+
+- **timestamp:** 2026-09-01T05:26:00Z
+  **checked:** Ten additional real production swipes against the byte-identical original-context clone at deployed `ec11254`, followed by read-only inspection of only the ten new alternates.
+  **found:** All requests returned 200 and created one alternate each. Three were in-character. Seven were generic refusals, representing five unique forms, all built around a sentence-leading first-person refusal directly targeting `that/the [specific] request`; every one escaped as `upstream_complete`. The final selected alternate happened to be in-character, but the seven refusal alternates were still persisted and visible as redo history. The user's original thread remained untouched.
+  **implication:** Exact-context verification fails again. The phrase-specific secondary-cue strategy is insufficient for terse refusals. Introduce a bounded structural direct-request refusal classifier instead of adding five more policy phrases.
+
+- **timestamp:** 2026-09-01T05:31:00Z
+  **checked:** Agent-authored real swipe route/storage regression with five unique direct-request forms before structural product-code changes.
+  **found:** RED exactly as predicted: the prior four refusal forms remain GREEN, while all five direct-request cases make only attempt 1 and persist/select refusal text.
+  **implication:** The structural production class is frozen at the actual action/persistence boundary. Implement the bounded direct-request rule and precision neighbors without altering the oracle.
+
+- **timestamp:** 2026-09-01T05:35:00Z
+  **checked:** Nine-case route target and complete fragmented corpus after the first structural direct-request implementation.
+  **found:** The nine refusal cases pass, but four benign fragmentation cases fail. When a stream chunk ends exactly after the word `request`, the regex's end-of-string alternative classifies before later `until dawn` or comma-vocative tokens arrive.
+  **implication:** The structural category is correct, but terminal detection must distinguish current-buffer end from actual upstream completion. Defer `$` classification to `finish()`; during `feed()` require observed punctuation or request-to-generation continuation.
+
+- **timestamp:** 2026-09-01T05:39:00Z
+  **checked:** Nine-case real swipe route/storage target and complete fragmented corpus after feed-vs-finish direct-request disambiguation.
+  **found:** GREEN: all 9 production forms retry and persist/select only attempt 2; all 428 corpus/lifecycle checks pass. True direct-request refusals are withheld, while request-until-dawn, comma-vocative, quoted, and all prior in-world neighbors round-trip unchanged under every fragmentation schedule.
+  **implication:** The structural fix now handles both semantic correctness and incremental-stream boundary timing. Verify adjacent consumers and causal removal before release.
+
+- **timestamp:** 2026-09-01T05:42:00Z
+  **checked:** Complete adjacent text-chat/action/prompt-preview/acceptance suite, focused live-call refusal coverage, Ruff, and whitespace validation.
+  **found:** GREEN: 97 adjacent tests and 3 focused live-call tests pass; Ruff and `git diff --check` pass, with only existing FastAPI deprecation warnings.
+  **implication:** The structural classifier preserves adjacent and shared live-call behavior. Complete causal removal/reapply before accepting the candidate.
 
 - **timestamp:** 2026-09-01T02:44:00Z
   **checked:** Agent-authored frozen-corpus regression for the sequence-24 response form before a matcher change.
@@ -959,6 +1023,23 @@ updated: 2026-09-01T05:04:00Z
   **found:** The only assistant row is the initial greeting at sequence 0, with its initial-greeting alternate; the submitted user prompt is sequence 1. No post-request `ai_text` row, alternate, or generic refusal text persisted. The terminal `llm_refusal_exhausted` follows only after all three guarded attempts reject, but the normal chat path exposes no content-free per-attempt reason metadata.
   **implication:** The structural guard successfully kept generic refusals out of persistence, but this fresh live record did not produce the required recovered in-character assistant output. The deployment is canonical and source verification is green, yet end-to-end recovery remains unverified; return to investigation rather than declaring the incident resolved.
 
+- **timestamp:** 2026-09-01T05:53:00Z
+  **checked:** Reapplied structural direct-request classifier under the full fragmentation corpus and unchanged real swipe API/storage target.
+  **found:** The first reapplication exposed an implementation inversion: `feed()` passed `upstream_complete=True` while `finish()` did not. Four benign fragmented in-world request cases were falsely refused even though all nine swipe refusal forms retried.
+  **implication:** The classifier concept is valid but terminal matching must be restricted to actual upstream completion; correct the two call sites before release.
+- **timestamp:** 2026-09-01T05:54:00Z
+  **checked:** Corrected feed/finish call sites with the same unchanged target and boundary suites.
+  **found:** GREEN: nine real swipe API/storage cases passed and all 428 refusal-corpus fragmentation cases passed, including the until-dawn, comma-vocative, and quoted neighbors. `git diff --check` is clean.
+  **implication:** The streaming boundary is now precise: punctuated/request-to-generation refusals are caught during feed, terminal terse refusals are caught only at finish, and partial in-character prefixes remain held until disambiguated.
+- **timestamp:** 2026-09-01T05:57:00Z
+  **checked:** Adjacent chat/action/prompt-preview/acceptance consumers, focused live-call refusal recovery, Ruff, and diff integrity after the corrected terminal wiring.
+  **found:** GREEN: 97 adjacent tests passed; 3 focused live-call refusal tests passed with 106 deselected; scoped Ruff and `git diff --check` passed. Only three pre-existing FastAPI deprecation warnings remain.
+  **implication:** All applicable acceptance signals pass. The five new route cases were RED before the structural classifier and GREEN afterward; the full precision corpus additionally caught and forced correction of the feed/finish inversion. Prepare the scoped release commit.
+- **timestamp:** 2026-09-01T06:02:00Z
+  **checked:** Clean detached exact-commit verification for candidate `5099379`.
+  **found:** GREEN: 525 direct guard/chat/action/prompt-preview/acceptance tests passed; 3 focused live-call refusal tests passed with 106 deselected; scoped Ruff, whitespace, clean-worktree, and exact-HEAD checks passed.
+  **implication:** The precise committed product change satisfies all local release gates. Amend only this debug evidence, publish the resulting exact commit, and deploy canonically.
+
 ## Eliminated
 
 - **hypothesis:** Any recognized refusal verb paired with `explicit sexual description(s)` is sufficient to classify a generic policy refusal.
@@ -979,15 +1060,15 @@ updated: 2026-09-01T05:04:00Z
 
 ## Resolution
 
-- **root_cause:** The original-thread and exact-context clone failures require provider refusal wording outside the shared guard's secondary semantic grammar. The first deployed increment covered coordinated `explicit sexual descriptions ... or erotic content`; exact-context replay then exposed inverse-order `sexually explicit content` and erotic-topic refusals followed by a generic creative-topic redirect. In each case the primary refusal verb matched, `_secondary_reason()` returned `None`, and swipe attempt one was persisted/selected.
+- **root_cause:** Exact original-context production swipes frequently return sentence-leading first-person refusals directly targeting `that/the [specific] request`. The shared guard recognized the refusal verb but required a separate identity/policy/apology/redirect cue, so terse direct-request forms finished as accepted output and the real swipe route persisted/selected them. The failure requires both the provider's direct-request wording and the missing structural classifier branch.
 - **oracle_type:** specified — the chat contract requires generic policy/guideline refusals to retry before any token reaches chat persistence.
-- **fix:** Preserve the coordinated-description branch, add inverse-order `sexually explicit content` to the policy grammar, and add a bounded redirect requiring prior erotic/sexual description/content plus first-person willingness to discuss/help with other/different topics/scenarios. Preserve the mandatory primary refusal verb. Freeze all four actual swipe forms under eight fragmentation schedules, retain no-primary and in-world willingness neighbors, and exercise the real `/swipes` API plus alternate persistence/selection boundary.
+- **fix:** Add a bounded sentence-leading direct-request refusal structure. During streaming, classify only after refusal punctuation or a request-to-generate continuation; at actual upstream completion, also classify a terse response ending at `request`. Extend the existing generic creative redirect boundary to the observed direct-request forms. Freeze all nine production swipe forms and retain until-dawn, comma-vocative, and quoted precision neighbors under every fragmentation schedule.
 - **verification:**
-  target_test: { result: pass, suites_run: ["real swipe API/storage target (4 passed)", "full frozen refusal corpus (364 passed)"] }
+  target_test: { result: pass, suites_run: ["real swipe API/storage target (9 passed)", "full frozen refusal corpus (428 passed)"] }
   mutation_check: { result: skipped, reason_if_skipped: "no Stryker, mutmut, or equivalent mutation runner is configured" }
   no_op_deletion: { result: pass, deletion_justified_by_rca: false }
-  adjacent_tests: { result: pass, suites_run: ["chat/action/prompt-preview/Phase 1 acceptance (92 passed)", "focused live-call refusal subset (3 passed, 106 deselected)", "scoped Ruff", "git diff --check"] }
-  revert_and_reconfirm: { result: pass, bug_returned_on_revert: true, fixed_on_reapply: true }
+  adjacent_tests: { result: pass, suites_run: ["chat/action/prompt-preview/Phase 1 acceptance (97 passed)", "focused live-call refusal subset (3 passed, 106 deselected)", "scoped Ruff", "git diff --check"] }
+  revert_and_reconfirm: { result: pass, bug_returned_on_revert: true, fixed_on_reapply: true, evidence: "all five new real swipe cases were RED before the structural classifier and all nine were GREEN afterward" }
   guardrail_verdict: accepted
-  deployed_e2e: { result: failed_then_pending, evidence: "exact-context clone at 8ed489d had byte-identical prompt but persisted two new refusal forms; second incremental fix requires canonical deploy and repeated exact-context swipes" }
+  deployed_e2e: { result: pending, evidence: "requires canonical deployment and repeated real production swipes against the byte-identical original-context clone" }
 - **files_changed:** [web-ui/server/app/domain/refusal_guard.py, web-ui/server/tests/fixtures/phase091_refusal_corpus.json, web-ui/server/tests/test_message_actions.py]
