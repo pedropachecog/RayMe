@@ -4,6 +4,16 @@ Resolved debug sessions. Used by `gsd-debugger` to surface known-pattern hypothe
 
 ---
 
+## same-thread-refusal-recurrence — Swipe retries persisted generic refusals outside the guard's semantic grammar
+- **Date:** 2026-09-01
+- **Error patterns:** I can't help with that request, explicit description, explicit content, refusal persisted, swipe alternate selected, upstream_complete
+- **Root cause(s):** Exact-context provider outputs used sentence-leading first-person refusal verbs aimed directly at request/description/content objects, but the shared guard required separate identity/policy/apology/redirect vocabulary. Omitted direct-object structures therefore finished as accepted text and the swipe route persisted and selected them.
+- **Fix:** Added bounded direct-request and terminal direct-object refusal structures with punctuation versus true-upstream-completion disambiguation, plus explicit-subject request-to-describe handling. Preserved in-world until-continuations and quoted dialogue.
+- **Files changed:** web-ui/server/app/domain/refusal_guard.py, web-ui/server/tests/fixtures/phase091_refusal_corpus.json, web-ui/server/tests/test_message_actions.py
+- **Why not caught:** Earlier tests represented individual policy phrases but did not exercise the real swipe API/storage boundary with terse direct-object refusals or incremental fragments ending temporarily at `request`, `description`, or `content`.
+- **Recurrence guard:** `web-ui/server/tests/test_message_actions.py::test_swipe_route_retries_explicit_description_refusal_before_selecting_alternate` covers 16 real refusal forms and persistence/selection; `web-ui/server/tests/test_refusal_guard.py` runs 524 lifecycle/fragmentation checks with direct-object continuation and quotation neighbors; final production replay used ten byte-identical exact-context swipes with zero refusal rows persisted.
+---
+
 ## last-chat-refusal-recovery — Sentence-boundary refusal escaped before its identity cue arrived
 - **Date:** 2026-08-31
 - **Error patterns:** cannot fulfill that request, AI assistant, helpful and harmless, sentence-boundary streaming, generic refusal persisted
